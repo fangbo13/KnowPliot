@@ -1,0 +1,202 @@
+=== SC-07_session_list.txt ===
+Date: 2026-06-18T20:33:34.646523
+Description: Session list
+============================================================
+
+GET /api/v1/chat/sessions/
+Status: 200
+Sessions:
+[
+  {
+    "id": "47cfe02c-0be8-4360-8f6e-21660f2fb7d0",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Screenshot Test",
+    "is_active": true,
+    "created_at": "2026-06-18T20:33:10.270277+08:00",
+    "updated_at": "2026-06-18T20:33:10.270290+08:00"
+  },
+  {
+    "id": "db3e53ce-c628-4a79-9164-9b3729f799d8",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "How do I set up my company email and laptop?",
+    "is_active": true,
+    "created_at": "2026-06-18T20:30:06.183723+08:00",
+    "updated_at": "2026-06-18T20:30:06.183738+08:00"
+  },
+  {
+    "id": "64165685-d5d5-407f-a1f9-aefa596aaaef",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Verify Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:14:32.185896+08:00",
+    "updated_at": "2026-06-18T15:14:32.185914+08:00"
+  },
+  {
+    "id": "73fceca2-8574-489b-9401-f619e390094f",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Token Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:13:19.896047+08:00",
+    "updated_at": "2026-06-18T15:13:19.896065+08:00"
+  },
+  {
+    "id": "834dd346-820f-480e-b142-f2ca79d78d4a",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "SSL Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:11:48.164493+08:00",
+    "updated_at": "2026-06-18T15:11:48.164513+08:00"
+  },
+  {
+    "id": "fc34cba8-2285-4df3-ba49-282bd7b9aaac",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "SSL Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:09:40.685417+08:00",
+    "updated_at": "2026-06-18T15:09:40.685438+08:00"
+  },
+  {
+    "id": "89d2cb6d-9ce1-4760-9191-5dbb81d98607",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:08:03.999128+08:00",
+    "updated_at": "2026-06-18T15:08:03.999153+08:00"
+  },
+  {
+    "id": "66feb4de-9a4c-4477-979f-58b7b8b936c8",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:06:54.146541+08:00",
+    "updated_at": "2026-06-18T15:06:54.146564+08:00"
+  },
+  {
+    "id": "9e0e07c5-0652-4ee9-b174-bdee907fb86f",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Error Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:05:03.119775+08:00",
+    "updated_at": "2026-06-18T15:05:03.119809+08:00"
+  },
+  {
+    "id": "bd001792-7025-4264-acbc-bde06f6cc0b0",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Error Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:04:21.204569+08:00",
+    "updated_at": "2026-06-18T15:04:21.204596+08:00"
+  },
+  {
+    "id": "b233bd0b-9c80-42b2-9bc3-489bd559f6c9",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Error Test",
+    "is_active": true,
+    "created_at": "2026-06-18T15:02:48.250241+08:00",
+    "updated_at": "2026-06-18T15:02:48.250259+08:00"
+  },
+  {
+    "id": "76c4ada1-3318-43f0-8a6d-87f0b184ce6f",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Validation Test",
+    "is_active": true,
+    "created_at": "2026-06-18T14:37:30.131462+08:00",
+    "updated_at": "2026-06-18T14:37:30.131503+08:00"
+  },
+  {
+    "id": "1ffaa7ef-de3f-486e-ba36-9e7283285b33",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Injection Verify",
+    "is_active": true,
+    "created_at": "2026-06-18T14:03:46.866777+08:00",
+    "updated_at": "2026-06-18T14:03:46.866813+08:00"
+  },
+  {
+    "id": "30260b52-b985-428e-bfb8-11011174c66c",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Verification Test",
+    "is_active": true,
+    "created_at": "2026-06-18T13:59:12.108701+08:00",
+    "updated_at": "2026-06-18T13:59:12.108733+08:00"
+  },
+  {
+    "id": "2e7dfda7-457f-4959-9c81-44c7ae3b4b61",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+    "is_active": true,
+    "created_at": "2026-06-18T03:48:34.814528+08:00",
+    "updated_at": "2026-06-18T03:48:34.814545+08:00"
+  },
+  {
+    "id": "2474b0bf-93d8-44e5-8e44-de35d287e4cf",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Session C",
+    "is_active": true,
+    "created_at": "2026-06-18T03:45:35.699776+08:00",
+    "updated_at": "2026-06-18T03:45:35.699803+08:00"
+  },
+  {
+    "id": "0baca6e9-883f-47e2-a386-1243b52d93cf",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Session B",
+    "is_active": true,
+    "created_at": "2026-06-18T03:45:35.074410+08:00",
+    "updated_at": "2026-06-18T03:45:35.074467+08:00"
+  },
+  {
+    "id": "13048820-231a-406a-a2dc-28b8c1f8dbf9",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Session A",
+    "is_active": true,
+    "created_at": "2026-06-18T03:45:34.475128+08:00",
+    "updated_at": "2026-06-18T03:45:34.475149+08:00"
+  },
+  {
+    "id": "b3b9d123-4b53-4703-9b7f-cdc2f34c2e5c",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Chinese Test",
+    "is_active": true,
+    "created_at": "2026-06-18T03:45:08.492536+08:00",
+    "updated_at": "2026-06-18T03:45:08.492554+08:00"
+  },
+  {
+    "id": "3d9a97ff-4f15-4433-ad5b-380209b8eee5",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Admin Session 2",
+    "is_active": true,
+    "created_at": "2026-06-18T03:42:42.261182+08:00",
+    "updated_at": "2026-06-18T03:42:42.261200+08:00"
+  },
+  {
+    "id": "f661fb62-9339-443c-aefb-9810e28092d5",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Injection Test",
+    "is_active": true,
+    "created_at": "2026-06-18T03:42:03.626950+08:00",
+    "updated_at": "2026-06-18T03:42:03.626977+08:00"
+  },
+  {
+    "id": "7afe58be-60fd-4be1-8958-5b77c85d1225",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Test Session",
+    "is_active": true,
+    "created_at": "2026-06-18T03:35:02.996352+08:00",
+    "updated_at": "2026-06-18T03:35:02.996384+08:00"
+  },
+  {
+    "id": "2800e419-c288-4152-96e2-ecaba5ea7934",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "QA Test Session",
+    "is_active": true,
+    "created_at": "2026-06-18T03:16:42.924688+08:00",
+    "updated_at": "2026-06-18T03:16:42.924709+08:00"
+  },
+  {
+    "id": "e793072d-d939-4df1-99f5-a72d24b120b0",
+    "user": "5e9e79e5-a47b-4c99-994e-96d7f4ad6b8a",
+    "title": "Test session",
+    "is_active": true,
+    "created_at": "2026-06-18T02:52:00.866389+08:00",
+    "updated_at": "2026-06-18T02:52:00.866426+08:00"
+  }
+]

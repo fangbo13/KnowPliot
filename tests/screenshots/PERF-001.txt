@@ -1,0 +1,14 @@
+Test: PERF-001
+Date: 2026-06-18T20:32:37.100510
+Description: Performance metrics
+============================================================
+Performance Test Results
+========================================
+Avg TTFT: 11731ms
+Avg Total: 11731ms
+Avg Tokens: 82
+
+Individual runs:
+TTFT: [11208, 12204, 11783]
+Total: [11208, 12204, 11783]
+Tokens: [74, 90, 83]

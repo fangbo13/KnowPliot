@@ -1,0 +1,42 @@
+=== SC-03_quick_actions.txt ===
+Date: 2026-06-18T20:33:10.267332
+Description: Quick actions response
+============================================================
+
+GET /api/v1/chat/quick-actions/
+Status: 200
+Response:
+{
+  "actions": [
+    {
+      "id": "1",
+      "question": "How do I set up my company email and laptop?",
+      "category": "it"
+    },
+    {
+      "id": "2",
+      "question": "What is the expense reimbursement process?",
+      "category": "hr"
+    },
+    {
+      "id": "3",
+      "question": "How many annual leave days do I have?",
+      "category": "benefits"
+    },
+    {
+      "id": "4",
+      "question": "What training courses are included in onboarding?",
+      "category": "training"
+    },
+    {
+      "id": "5",
+      "question": "Where is the office and how do I get there?",
+      "category": "office"
+    },
+    {
+      "id": "6",
+      "question": "Who is my mentor/buddy?",
+      "category": "team"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+=== SC-01_login_api.txt ===
+Date: 2026-06-18T20:33:10.256893
+Description: Login API response
+============================================================
+
+POST /api/v1/auth/token/
+Status: 200
+Response:
+{
+  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc4MjM5MDc5MCwiaWF0IjoxNzgxNzg1OTkwLCJqdGkiOiI4YmQ3OTNhNzcyMGE0ZTM4YWNlZWVkN2QwMjE3ODk0OCIsInVzZXJfaWQiOiI1ZTllNzllNS1hNDdiLTRjOTktOTk0ZS05NmQ3ZjRhZDZiOGEifQ.X9A90-L4P-LAJCLyw8pwpCuC_VxL7x9BPP196H3xa28",
+  "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzgxNzg2ODkwLCJpYXQiOjE3ODE3ODU5OTAsImp0aSI6ImQ4MDEzODU5NzUzZDQ0YmY4ZmFlYTVmOThhYTEzYmM4IiwidXNlcl9pZCI6IjVlOWU3OWU1LWE0N2ItNGM5OS05OTRlLTk2ZDdmNGFkNmI4YSJ9.CyCcrKXmolX-Q7Eq7vfARBcEJETEoftzlrJe-2s4nIw"
+}

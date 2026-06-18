@@ -1,0 +1,37 @@
+Test: STREAM-001_英文入职问题
+Date: 2026-06-18T20:30:47.811144
+Description: Streaming response - 英文入职问题
+============================================================
+Question: How do I set up my company email and laptop?
+TTFT: 41629ms
+Total: 41629ms
+Tokens: 108
+Citations: 8
+
+Response:
+Here’s how to set up your **company email** and **laptop**, based on EY’s official onboarding guides:
+
+---
+
+### ✅ **Company Email Setup**  
+*(Source: [文档 1] p.1; [文档 2] 第一章)*  
+Your email address format is: **`firstname.lastname@ey.com`**  
+Steps:
+1. Go to **[https://outlook.office.com](https://outlook.office.com)**
+2. Enter your EY email address  
+3. Use the **temporary password** provided by IT on your first day  
+4. You’ll be prompted to **change your password**:  
+   - Must be **at least 12 characters**, with uppercase, lowercase, number, and special character  
+5. Set up **Multi-Factor Authentication (MFA)** using your mobile phone  
+   - Download the **Microsoft Authenticator App** ([文档 2])  
+   - Ensure your phone has network connectivity ([文档 2])
+
+> ⚠️ If your temporary password has expired, contact IT Helpdesk to reset it ([文档 2]).
+
+---
+
+### 💻 **Laptop Configuration**  
+*(Source: [文档 3] p.2; [文档 6] 第二章)*  
+Your laptop is **pre-configured** with:
+- Windows 11 Enterprise  
+- Mic

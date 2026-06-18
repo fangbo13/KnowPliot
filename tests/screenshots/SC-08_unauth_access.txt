@@ -1,0 +1,8 @@
+=== SC-08_unauth_access.txt ===
+Date: 2026-06-18T20:33:34.670528
+Description: Unauthenticated access attempt
+============================================================
+
+GET /api/v1/auth/me/ (no token)
+Status: 401
+Response: {"error":"Authentication credentials were not provided.","detail":{"detail":"Authentication credentials were not provided."}}

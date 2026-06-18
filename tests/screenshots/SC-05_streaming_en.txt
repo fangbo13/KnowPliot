@@ -1,0 +1,6 @@
+=== SC-05_streaming_en.txt ===
+Date: 2026-06-18T20:33:34.606184
+Description: Streaming error
+============================================================
+
+Error: 'gbk' codec can't encode character '\u2705' in position 53: illegal multibyte sequence

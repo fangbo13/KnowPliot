@@ -1,0 +1,95 @@
+=== SC-05b_streaming_zh.txt ===
+Date: 2026-06-18T20:33:34.605430
+Description: Streaming chat response - 报销流程是什么？
+============================================================
+
+Question: 报销流程是什么？
+Time: 9453ms
+Tokens: 52
+Citations: 8
+
+Response:
+EY 的报销流程如下（依据 [文档 1] 第三章：费用报销）：
+
+### ✅ **报销流程（5 步）**  
+1. **登录系统**：访问 **People Portal → Expenses**  
+2. **创建申请**：点击“新建报销申请”  
+3. **上传发票**：上传清晰、完整的发票照片（需**清晰可见金额和开票日期**）  
+4. **填写信息**：选择费用类别（如交通、餐饮、住宿等），并填写简要说明  
+5. **提交审批**：确认无误后提交，等待直属经理审批  
+
+---
+
+### ⏰ **重要时间节点**  
+- **报销截止日**：每月 **15 日** 和 **月底最后工作日**（逾期无法提交当月报销）  
+- **到账时间**：审批通过后 **5 个工作日内**发放至招商银行工资卡（[文档 2] FAQ；[文档 3] 1.1）  
+
+如需进一步帮助，可参考 People Portal 内嵌指引，或联系 Finance Shared Services。
+
+Citations:
+[
+  {
+    "document_id": "fb4b37a7-e789-485b-adc8-39248e9f30f3",
+    "document_title": "EY HR 政策与员工福利手册",
+    "page_number": null,
+    "score": 0.492,
+    "quoted_text": "2.3 其他假期\n\n- 婚假：10 天\n- 产假：158 天（含产前检查假）\n- 陪产假：15 天\n- 丧假：3 天（直系亲属）\n- 生日假：生日当天半天假\n\n第三章：费用报销\n\n3.1 报销流程\n\n1. 登录 People Portal → Expenses\n2. 创建新的报销申请\n3. 上传发票照片（需清晰可见金额和日期）\n4. 填写费用类别和说明\n5. 提交审批\n\n3.2 报销标准\n\n- 市",
+    "chunk_id": "55a53ecb-a349-4041-9549-4c6b8720985b"
+  },
+  {
+    "document_id": "b75fb0f2-4dec-45b1-9b20-dfd5130cffa1",
+    "document_title": "EY 中国办公室信息与入职指南",
+    "page_number": null,
+    "score": 0.485,
+    "quoted_text": "4.3 第一周关键事项\n\n- 完成所有 IT 系统激活\n- 完成强制性合规培训（6.5 小时）\n- 与 Buddy 见面，了解团队\n- 提交五险一金个人信息\n- 了解办公环境和周边设施\n\n第五章：常见问题 FAQ\n\nQ: 工资卡需要指定银行吗？ A: 是的，公司指定招商银行为工资发放银行。请在入职后尽快办理招商银行卡并将卡号提交给 HR。\n\nQ: 午餐怎么解决？ A: 公司有员工食堂（B1 层），",
+    "chunk_id": "93b2fb7f-0587-4f18-9a34-ec5e1d54dc3b"
+  },
+  {
+    "document_id": "fb4b37a7-e789-485b-adc8-39248e9f30f3",
+    "document_title": "EY HR 政策与员工福利手册",
+    "page_number": null,
+    "score": 0.388,
+    "quoted_text": "EY HR 政策与员工福利手册\n\n第一章：薪酬与福利\n\n1.1 薪资发放\n\n- 发薪日：每月最后一个工作日\n- 薪资单通过 People Portal 查看\n- 年终奖根据公司业绩和个人绩效评定，通常在次年 3 月发放\n\n1.2 五险一金\n\n- 养老保险：个人缴纳 8%，公司缴纳 16%\n- 医疗保险：个人缴纳 2%，公司缴纳 10%\n- 失业保险：个人缴纳 0.5%，公司缴纳 1%\n- 工伤保险",
+    "chunk_id": "94cef3f0-97f3-4475-aedd-ded0e8b98197"
+  },
+  {
+    "document_id": "c8d3d43a-647b-4bd6-bf56-70b9840114af",
+    "document_title": "EY 新员工入职 Checklist",
+    "page_number": null,
+    "score": 0.382,
+    "quoted_text": "EY 新员工入职 Checklist — 第一周必备\n\n第 1 天：入职日\n\n□ 收到欢迎邮件，确认入职日期和报到地点 □ 携带身份证原件、学历证书原件、银行卡 □ 到达指定办公室，在前台签到 □ 领取员工工牌和笔记本电脑 □ 参加 HR 入职宣讲会（通常上午 9:30-11:30）\n\n- 公司历史和业务介绍\n- 组织架构和团队介绍\n- HR 政策讲解\n- IT 系统设置指导 □ 与直属经理和团队",
+    "chunk_id": "8e577c86-44e7-488b-8848-867e9db17a1b"
+  },
+  {
+    "document_id": "c7d677af-cdcf-4249-9f2e-0cb7815a3989",
+    "document_title": "EY 新员工入职手册 - IT 系统设置指南",
+    "page_number": null,
+    "score": 0.377,
+    "quoted_text": "系统权限根据您的角色和业务线自动分配。如需额外权限，请通过 IT Service Portal 提交申请。\n\n第五章：IT 支持\n\nIT 问题联系方式：\n\n- IT Helpdesk 电话：+86 21 2203 0000（中国区）\n- IT Helpdesk 邮箱：ithelp@ey.com\n- IT 服务门户：https://itsupport.ey.com\n\n入职第一天常见 IT 问题：\n\n",
+    "chunk_id": "06b0601a-7c52-4da7-96fd-7f29b68778a5"
+  },
+  {
+    "document_id": "0a0aa606-c7d9-462f-8f5a-103f38fe5e74",
+    "document_title": "EY Training and Career Development Guide",
+    "page_number": null,
+    "score": 0.371,
+    "quoted_text": "3.2 Study Support\n\n- Study leave: Up to 10 days per exam attempt\n- Study materials: Reimbursed up to RMB 3,000 per certification\n- Study groups: Internal study groups organized by service line\n- Mento",
+    "chunk_id": "f7b71446-95f9-42bb-beeb-5ac2f951ff37"
+  },
+  {
+    "document_id": "b75fb0f2-4dec-45b1-9b20-dfd5130cffa1",
+    "document_title": "EY 中国办公室信息与入职指南",
+    "page_number": null,
+    "score": 0.365,
+    "quoted_text": "第三章：着装要求\n\n3.1 商务着装\n\n- 与客户会面时：正式商务着装（西装、衬衫、皮鞋）\n- 日常办公：商务休闲（有领衬衫、休闲裤、整洁的鞋子）\n- 周五：可着商务休闲（允许不穿西装外套）\n- 禁止穿着：短裤、拖鞋、运动服、破洞牛仔裤\n\n3.2 远程会议着装\n\n- 视频会议：上身需着商务或商务休闲装\n- 确保背景整洁或使用虚拟背景\n\n第四章：新员工入职报到流程\n\n4.1 报到当天\n\n1. 到达办",
+    "chunk_id": "419ba569-5ed6-4b2b-b7f5-b001c292f84b"
+  },
+  {
+    "document_id": "fb4b37a7-e789-485b-adc8-39248e9f30f3",
+    "document_title": "EY HR 政策与员工福利手册",
+    "page_number": null,
+    "score": 0.364,
+    "quoted_text": "4.2 加班\n\n- 工作日加班：1.5 倍工资或调休\n- 周末加班：2 倍工资或调休\n- 法定节假日加班：3 倍工资\n- 加班需提前获得直属经理批准\n\n4.3 远程办公\n\n- 每周可申请 2 天远程办公\n- 需提前与直属经理沟通\n- 远程办公期间需保持在线状态（Teams 状态为 Available）\n\n第五章：职业发展\n\n5.1 晋升通道\n\n- Staff → Senior → Manager ",
+    "chunk_id": "3f98345d-589e-4c00-a028-6cd869c4bc93"
+  }
+]
