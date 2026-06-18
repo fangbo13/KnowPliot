@@ -1,0 +1,11 @@
+{
+  "app_name": "EY Onboarding AI",
+  "nav_chat": "Chat",
+  "nav_history": "History",
+  "nav_knowledge": "Knowledge Base",
+  "nav_profile": "Profile",
+  "login": "Login",
+  "logout": "Logout",
+  "welcome": "Welcome, {{name}}",
+  "language": "Language"
+}

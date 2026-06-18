@@ -1,0 +1,15 @@
+{
+  "title": "知识库",
+  "upload": "上传文档",
+  "documents": "文档列表",
+  "categories": "分类",
+  "status_active": "已激活",
+  "status_processing": "处理中",
+  "status_failed": "失败",
+  "status_draft": "草稿",
+  "reindex": "重新索引",
+  "delete": "删除",
+  "upload_success": "文档上传成功",
+  "upload_error": "文档上传失败",
+  "file_types": "支持 PDF、Word 文档"
+}

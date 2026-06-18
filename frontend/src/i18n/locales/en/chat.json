@@ -1,0 +1,12 @@
+{
+  "title": "Onboarding Assistant",
+  "welcome_message": "Hi! I'm your EY Onboarding Assistant. How can I help you today?",
+  "placeholder": "Type your question here...",
+  "send": "Send",
+  "thinking": "Thinking...",
+  "sources": "Sources",
+  "feedback_question": "Was this helpful?",
+  "quick_actions_title": "Common Questions",
+  "no_session": "Start a new conversation",
+  "session_title_new": "New Conversation"
+}

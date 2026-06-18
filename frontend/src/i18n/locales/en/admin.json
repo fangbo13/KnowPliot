@@ -1,0 +1,15 @@
+{
+  "title": "Knowledge Base",
+  "upload": "Upload Document",
+  "documents": "Documents",
+  "categories": "Categories",
+  "status_active": "Active",
+  "status_processing": "Processing",
+  "status_failed": "Failed",
+  "status_draft": "Draft",
+  "reindex": "Reindex",
+  "delete": "Delete",
+  "upload_success": "Document uploaded successfully",
+  "upload_error": "Failed to upload document",
+  "file_types": "PDF, Word documents supported"
+}

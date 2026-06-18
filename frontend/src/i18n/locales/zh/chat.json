@@ -1,0 +1,12 @@
+{
+  "title": "入职助手",
+  "welcome_message": "你好！我是安永入职助手。今天我能帮你什么？",
+  "placeholder": "在此输入你的问题...",
+  "send": "发送",
+  "thinking": "思考中...",
+  "sources": "来源",
+  "feedback_question": "这个回答有帮助吗？",
+  "quick_actions_title": "常见问题",
+  "no_session": "开始新的对话",
+  "session_title_new": "新对话"
+}

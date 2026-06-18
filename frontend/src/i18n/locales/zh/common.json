@@ -1,0 +1,11 @@
+{
+  "app_name": "安永入职 AI",
+  "nav_chat": "对话",
+  "nav_history": "历史",
+  "nav_knowledge": "知识库",
+  "nav_profile": "个人设置",
+  "login": "登录",
+  "logout": "退出",
+  "welcome": "欢迎，{{name}}",
+  "language": "语言"
+}
