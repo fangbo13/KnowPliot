@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Input, Button, Spin, Space } from 'antd';
+import { Input, Button, Space } from 'antd';
 import { SendOutlined } from '@ant-design/icons';
 import { useChatStore } from '../store/chatStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
@@ -19,10 +19,17 @@ export default function ChatPageContainer() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef(null);
 
-  // Auto-scroll to bottom
+  // Auto-scroll: instant during streaming, smooth for completed messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamContent]);
+    const container = messagesEndRef.current?.parentElement;
+    if (!container) return;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    if (isNearBottom || !isStreaming) {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isStreaming ? 'instant' : 'smooth',
+      });
+    }
+  }, [messages, streamContent, isStreaming]);
 
   const handleSend = () => {
     if (!inputValue.trim() || isStreaming) return;
@@ -46,9 +53,11 @@ export default function ChatPageContainer() {
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      height: 'calc(100vh - 120px)',
+      flex: 1,
+      minHeight: 0,
       maxWidth: 900,
       margin: '0 auto',
+      width: '100%',
     }}>
       {/* Messages area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0' }}>
@@ -70,21 +79,41 @@ export default function ChatPageContainer() {
           />
         )}
 
-        {/* Thinking indicator */}
+        {/* Thinking indicator - animated dots */}
         {isStreaming && !streamContent && (
-          <div style={{ padding: '12px 24px' }}>
-            <Spin size="small" />
-            <span style={{ marginLeft: 8, color: '#999' }}>Thinking...</span>
+          <div style={{
+            padding: '16px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            animation: 'fadeIn 0.3s ease',
+          }}>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              {[0, 1, 2].map(i => (
+                <div key={i} style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--ey-yellow)',
+                  animation: `dotBounce 1.4s ease-in-out ${i * 0.16}s infinite`,
+                }} />
+              ))}
+            </div>
+            <span style={{ color: 'var(--color-text-tertiary)', fontSize: 13, fontWeight: 500 }}>
+              Thinking...
+            </span>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area */}
+      {/* Input area - floating bar style */}
       <div style={{
-        padding: '16px 0',
-        borderTop: '1px solid #f0f0f0',
+        padding: '16px 24px 24px',
+        background: 'var(--color-bg-container)',
+        borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
+        boxShadow: '0 -2px 10px rgba(0,0,0,0.03)',
       }}>
         <Space.Compact style={{ width: '100%' }}>
           <Input
@@ -95,6 +124,7 @@ export default function ChatPageContainer() {
             placeholder="Type your question here..."
             disabled={isStreaming}
             size="large"
+            maxLength={4000}
           />
           <Button
             type="primary"
@@ -102,8 +132,9 @@ export default function ChatPageContainer() {
             onClick={handleSend}
             disabled={!inputValue.trim() || isStreaming}
             size="large"
+            style={{ minWidth: 56, padding: '0 20px', fontWeight: 600 }}
           >
-            Send
+            {inputValue.trim() ? '' : 'Send'}
           </Button>
         </Space.Compact>
       </div>

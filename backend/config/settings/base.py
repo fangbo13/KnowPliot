@@ -40,6 +40,7 @@ THIRD_PARTY_APPS = [
     "django_celery_results",
     "django_celery_beat",
     "pgvector",
+    "rest_framework_simplejwt.token_blacklist",
 ]
 
 LOCAL_APPS = [
@@ -142,6 +143,12 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "user": "30/minute",
+    },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
 }
 
@@ -152,7 +159,7 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.environ.get("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "15"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get("JWT_REFRESH_TOKEN_LIFETIME_DAYS", "7"))),
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": False,
+    "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
@@ -197,6 +204,9 @@ LITELLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # File Upload
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
+
+# SSL Verification (for LLM API calls)
+SSL_VERIFY = os.environ.get("SSL_VERIFY", "true").lower() == "true"
 
 # Logging
 LOGGING = {

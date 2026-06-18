@@ -1,0 +1,19 @@
+{
+  "screenshots": [
+    {
+      "name": "登录页默认状态，预填demo凭据",
+      "path": "C:\\Github\\Onborading-AI\\tests\\screenshots\\01_login_page.png",
+      "description": "登录页默认状态，预填demo凭据"
+    },
+    {
+      "name": "测试异常: Page.input_value: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"i",
+      "path": "C:\\Github\\Onborading-AI\\tests\\screenshots\\02_error.png",
+      "description": "测试异常: Page.input_value: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"i"
+    }
+  ],
+  "performance": {
+    "login_page_load": 1.464
+  },
+  "findings": [],
+  "scores": {}
+}

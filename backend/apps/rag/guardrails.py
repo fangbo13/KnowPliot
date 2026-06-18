@@ -11,14 +11,29 @@ class GuardrailsService:
     """Prompt injection detection and output filtering."""
 
     INJECTION_PATTERNS = [
-        r"(?i)ignore\s+(previous|all)\s+(instructions|rules)",
-        r"(?i)system\s*:\s*",
+        # Broadened: "ignore" ... "instructions/rules/directives" with arbitrary words between
+        r"(?i)ignore\b.*?\b(instructions?|rules?|directives?|guidelines?|constraints?)",
+        # Broadened: "forget/disregard" ... "previous/prior"
+        r"(?i)(?:forget|disregard)\b.*?\b(previous|prior|above|earlier)",
+        # System prompt injection — match "system:" only at start of line to avoid false positives
+        # on legitimate questions like "How do I set up my system email?"
+        r"(?im)^system\s*:",
         r"(?i)<\|im_start\|>",
+        r"(?i)<\|im_end\|>",
+        # Role-playing attacks
         r"(?i)dan\s+mode",
         r"(?i)jailbreak",
         r"(?i)you are now",
-        r"(?i)forget\s+(all|everything|your)\s+(previous|prior)",
-        r"(?i)disregard\s+(all|the)\s+(previous|prior|above)",
+        r"(?i)act as (a |an )",
+        r"(?i)pretend (to |you |that )",
+        # Developer/override claims
+        r"(?i)(?:new (instructions?|rules?|directives?)\s*:)",
+        r"(?i)(?:override|bypass|disable)\b.*?\b(safety|security|rules?|constraints?|guardrails?|filters?)",
+        # Instruction terminator patterns
+        r"(?i)(?:end of (instructions?|system|prompt))",
+        r"(?i)(?:---\s*(?:new|user|admin|developer)\s+(?:instructions?|command|prompt))",
+        # Hypothetical framing
+        r"(?i)(?:hypothetically|in a hypothetical|imagine|suppose)\b.*?\b(ignore|bypass|override|no longer)",
     ]
 
     def check_input(self, query: str) -> bool:
@@ -69,7 +84,7 @@ class LiteLLMChatService:
             "max_tokens": 2000,
         }
 
-        with httpx.Client(verify=False, timeout=120) as client:
+        with httpx.Client(verify=settings.SSL_VERIFY, timeout=120) as client:
             with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",

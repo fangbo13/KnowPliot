@@ -1,0 +1,68 @@
+- generic [ref=e71]:
+  - complementary [ref=e72]:
+    - generic [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e76]: EY
+        - heading "Onboarding" [level=2] [ref=e77]
+      - menu [ref=e78]:
+        - menuitem "message Chat" [ref=e79] [cursor=pointer]:
+          - img "message" [ref=e80]:
+            - img [ref=e81]
+          - generic [ref=e83]: Chat
+        - menuitem "history History" [ref=e84] [cursor=pointer]:
+          - img "history" [ref=e85]:
+            - img [ref=e86]
+          - generic [ref=e88]: History
+        - menuitem "book Knowledge Base" [ref=e89] [cursor=pointer]:
+          - img "book" [ref=e90]:
+            - img [ref=e91]
+          - generic [ref=e93]: Knowledge Base
+        - menuitem "user Profile" [ref=e94] [cursor=pointer]:
+          - img "user" [ref=e95]:
+            - img [ref=e96]
+          - generic [ref=e98]: Profile
+  - generic [ref=e99]:
+    - banner [ref=e100]:
+      - generic [ref=e101] [cursor=pointer]:
+        - img "user" [ref=e104]:
+          - img [ref=e105]
+        - generic [ref=e107]: admin@ey.com
+    - main [ref=e108]:
+      - generic [ref=e110]:
+        - generic [ref=e111]:
+          - generic [ref=e113]: EY
+          - heading "Onboarding Assistant" [level=3] [ref=e114]
+          - text: Hi! I'm your EY Onboarding Assistant. Ask me anything about your onboarding process, company policies, benefits, and more.
+        - generic [ref=e115]:
+          - generic [ref=e118]: Common Questions
+          - generic [ref=e120]:
+            - button "laptop IT Setup How do I set up my company email and laptop?" [ref=e122] [cursor=pointer]:
+              - img "laptop" [ref=e124]:
+                - img [ref=e125]
+              - generic [ref=e127]: IT Setup
+              - generic [ref=e128]: How do I set up my company email and laptop?
+            - button "dollar Reimbursement What is the expense reimbursement process?" [ref=e130] [cursor=pointer]:
+              - img "dollar" [ref=e132]:
+                - img [ref=e133]
+              - generic [ref=e135]: Reimbursement
+              - generic [ref=e136]: What is the expense reimbursement process?
+            - button "calendar Annual Leave How many annual leave days do I have?" [ref=e138] [cursor=pointer]:
+              - img "calendar" [ref=e140]:
+                - img [ref=e141]
+              - generic [ref=e143]: Annual Leave
+              - generic [ref=e144]: How many annual leave days do I have?
+            - button "book Training What training courses are included in onboarding?" [ref=e146] [cursor=pointer]:
+              - img "book" [ref=e148]:
+                - img [ref=e149]
+              - generic [ref=e151]: Training
+              - generic [ref=e152]: What training courses are included in onboarding?
+            - button "environment Office Location Where is the office and how do I get there?" [ref=e154] [cursor=pointer]:
+              - img "environment" [ref=e156]:
+                - img [ref=e157]
+              - generic [ref=e159]: Office Location
+              - generic [ref=e160]: Where is the office and how do I get there?
+            - button "team My Buddy Who is my mentor/buddy?" [ref=e162] [cursor=pointer]:
+              - img "team" [ref=e164]:
+                - img [ref=e165]
+              - generic [ref=e167]: My Buddy
+              - generic [ref=e168]: Who is my mentor/buddy?

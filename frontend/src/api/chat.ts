@@ -4,7 +4,10 @@ import type { ChatSession } from '../store/chatStore';
 export const chatApi = {
   async getSessions(): Promise<ChatSession[]> {
     const { data } = await apiClient.get('/chat/sessions/');
-    return data.results || data;
+    // Pagination disabled on backend; expect a plain array
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.results)) return data.results;
+    throw new Error('Unexpected sessions response format');
   },
 
   async createSession(body: { title: string }): Promise<ChatSession> {
@@ -23,7 +26,10 @@ export const chatApi = {
 
   async getMessages(sessionId: string): Promise<any[]> {
     const { data } = await apiClient.get(`/chat/sessions/${sessionId}/messages/`);
-    return data.results || data;
+    // Pagination disabled on backend; expect a plain array
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.results)) return data.results;
+    throw new Error('Unexpected messages response format');
   },
 
   async submitFeedback(messageId: string, data: {

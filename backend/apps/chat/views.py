@@ -1,9 +1,11 @@
 """Chat views."""
 
 import json
+import logging
 import time
 
 from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -16,12 +18,33 @@ from .serializers import (
     MessageSerializer,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _estimate_token_count(text: str) -> int:
+    """Estimate token count for the assistant response.
+
+    Uses tiktoken if available (for OpenAI-compatible models),
+    otherwise falls back to a character-based estimate.
+    """
+    try:
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except ImportError:
+        # Fallback: rough estimate (~4 chars per token for English)
+        return max(1, len(text) // 4)
+    except Exception:
+        # Fallback for any tiktoken error
+        return max(1, len(text) // 4)
+
 
 class ChatSessionListCreateView(generics.ListCreateAPIView):
     """List and create chat sessions."""
 
     serializer_class = ChatSessionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # Sessions list is small per user
 
     def get_queryset(self):
         return ChatSession.objects.filter(
@@ -47,10 +70,13 @@ class ChatSessionMessagesView(generics.ListAPIView):
 
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # Messages per session is small
 
     def get_queryset(self):
         return Message.objects.filter(
-            session_id=self.kwargs["session_id"]
+            session_id=self.kwargs["session_id"],
+            session__user=self.request.user,
+            session__is_active=True,
         ).order_by("created_at")
 
 
@@ -73,8 +99,8 @@ def _save_citations(assistant_message, citations_data):
                 page_number=cit.get("page_number"),
                 quoted_text=cit.get("quoted_text", ""),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Citation save failed for message %s: %s", assistant_message.id, e)
 
 
 @api_view(["POST"])
@@ -88,11 +114,22 @@ def send_message(request, session_id):
     user = request.user
     language = getattr(user, "language_preference", "en")
 
-    # Get or create session
-    session, created = ChatSession.objects.get_or_create(
-        id=session_id,
-        defaults={"user": user, "title": content[:50]},
-    )
+    # Get or create session with ownership verification
+    try:
+        session = ChatSession.objects.get(id=session_id, user=user)
+        created = False
+    except ChatSession.DoesNotExist:
+        # Check if session exists under another user
+        if ChatSession.objects.filter(id=session_id).exists():
+            return Response(
+                {"error": "Session not found or access denied"},
+                status=403,
+            )
+        # Session doesn't exist at all; create it
+        session = ChatSession.objects.create(
+            id=session_id, user=user, title=content[:50]
+        )
+        created = True
 
     # Update title if new or empty
     if created or not session.title:
@@ -119,6 +156,7 @@ def send_message(request, session_id):
         start_time = time.time()
         response_tokens = []
         citations_data = []
+        client_disconnected = False
 
         try:
             for event in pipeline.retrieve_and_generate(
@@ -127,6 +165,9 @@ def send_message(request, session_id):
                 conversation_history=history,
                 language=language,
             ):
+                # H-04: Check if client disconnected
+                # Django's StreamingHttpResponse will raise GeneratorExit
+                # when the client closes the connection
                 event_type = event.get("event")
                 data = event.get("data", {})
 
@@ -141,19 +182,33 @@ def send_message(request, session_id):
                     yield "event: token\n"
                     yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
 
+        except GeneratorExit:
+            # H-04: Client disconnected during streaming
+            client_disconnected = True
+            logger.info("Client disconnected during stream for session %s", session_id)
+            return
         except Exception as e:
             yield "event: error\n"
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
             return
 
+        # H-04: Don't save message if client disconnected before streaming completed
+        if client_disconnected:
+            logger.info("Skipping message save — client disconnected for session %s", session_id)
+            return
+
         # Save assistant message
         elapsed_ms = int((time.time() - start_time) * 1000)
         assistant_content = "".join(response_tokens)
+
+        # H-03: Use tiktoken for accurate token count
+        token_count = _estimate_token_count(assistant_content)
+
         assistant_message = Message.objects.create(
             session=session,
             role="assistant",
             content=assistant_content,
-            token_count=len(response_tokens),
+            token_count=token_count,
             model_used=pipeline.model_name,
             response_time_ms=elapsed_ms,
             retrieval_count=len(citations_data),
@@ -177,7 +232,7 @@ def send_message(request, session_id):
 @permission_classes([permissions.IsAuthenticated])
 def submit_feedback(request, message_id):
     """Submit feedback on a message."""
-    message = Message.objects.get(id=message_id, session__user=request.user)
+    message = get_object_or_404(Message, id=message_id, session__user=request.user)
     serializer = FeedbackSerializer(
         data={**request.data, "message": str(message.id)}
     )

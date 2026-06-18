@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Upload, message, Typography } from 'antd';
+import { Card, Table, Tag, Button, Space, Upload, message, Typography, Modal, Empty } from 'antd';
 import { ReloadOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { documentApi } from '../../api/documents';
+import { getAuthToken } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -33,6 +34,9 @@ const statusLabels: Record<string, string> = {
   uploading: 'Uploading',
   expired: 'Expired',
 };
+
+const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.csv', '.xlsx', '.pptx'];
+const MAX_FILE_SIZE_MB = 50;
 
 export default function KnowledgeBasePage() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -74,6 +78,32 @@ export default function KnowledgeBasePage() {
     }
   };
 
+  const confirmDelete = (id: string, title: string) => {
+    Modal.confirm({
+      title: 'Delete Document',
+      content: `Are you sure you want to delete "${title}"? This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: () => handleDelete(id),
+    });
+  };
+
+  const beforeUpload = (file: File) => {
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    const isValidType = ALLOWED_EXTENSIONS.includes(ext);
+    if (!isValidType) {
+      message.error('Only PDF, Word, Text, CSV, Excel, and PowerPoint files are allowed.');
+      return Upload.LIST_IGNORE;
+    }
+    const isLt50M = file.size / 1024 / 1024 < MAX_FILE_SIZE_MB;
+    if (!isLt50M) {
+      message.error(`File must be smaller than ${MAX_FILE_SIZE_MB}MB.`);
+      return Upload.LIST_IGNORE;
+    }
+    return true;
+  };
+
   const columns: ColumnsType<Document> = [
     { title: 'Title', dataIndex: 'title', key: 'title', ellipsis: true },
     { title: 'Category', dataIndex: 'category_name', key: 'category', width: 120 },
@@ -107,7 +137,7 @@ export default function KnowledgeBasePage() {
             size="small"
             danger
             icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.id)}
+            onClick={() => confirmDelete(record.id, record.title)}
           />
         </Space>
       ),
@@ -122,8 +152,10 @@ export default function KnowledgeBasePage() {
           <Upload
             action="/api/v1/documents/"
             headers={{
-              Authorization: `Bearer ${localStorage.getItem('ey-auth') ? JSON.parse(localStorage.getItem('ey-auth')!).token : ''}`,
+              Authorization: `Bearer ${getAuthToken()}`,
             }}
+            accept={ALLOWED_EXTENSIONS.join(',')}
+            beforeUpload={beforeUpload}
             onChange={(info) => {
               if (info.file.status === 'done') {
                 message.success('Document uploaded');
@@ -147,6 +179,15 @@ export default function KnowledgeBasePage() {
         loading={loading}
         rowKey="id"
         pagination={{ pageSize: 10 }}
+        scroll={{ x: 'max-content' }}
+        locale={{
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="No documents yet. Upload your first document to get started."
+            />
+          ),
+        }}
       />
     </Card>
   );

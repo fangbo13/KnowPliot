@@ -19,38 +19,54 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
         justifyContent: isUser ? 'flex-end' : 'flex-start',
         padding: '8px 24px',
         marginBottom: 8,
+        animation: `fadeInUp 0.3s ease-out ${isUser ? '0s' : '0.05s'} both`,
       }}
     >
       <div
         style={{
           maxWidth: '75%',
-          padding: isUser ? '10px 16px' : '0',
+          padding: isUser ? '0' : '0',
         }}
       >
         {/* Message bubble */}
         <Card
+          className={!isUser ? 'msg-bubble-assistant' : undefined}
           style={{
-            background: isUser ? '#E00033' : 'white',
+            background: isUser ? 'var(--user-msg-bg, #262626)' : 'var(--color-bg-container, white)',
             color: isUser ? 'white' : undefined,
-            border: isUser ? 'none' : '1px solid #f0f0f0',
+            border: isUser ? 'none' : '1px solid var(--color-border-secondary, #f0f0f0)',
+            borderLeft: isUser ? '4px solid var(--user-msg-accent, #FFE500)' : undefined,
             borderRadius: 12,
-            boxShadow: 'none',
+            boxShadow: isUser ? 'none' : 'var(--shadow-sm, none)',
           }}
-          bodyStyle={{ padding: isUser ? '0' : '12px 16px' }}
+          bodyStyle={{
+            padding: isUser ? '12px 16px' : '12px 16px',
+          }}
         >
           {isUser ? (
-            <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
+            <span style={{
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'break-word',
+              wordBreak: 'break-word',
+            }}>{message.content}</span>
           ) : (
-            <div>
+            <div className="markdown-content" style={{
+              color: 'var(--color-text, inherit)',
+              overflowWrap: 'break-word',
+              wordBreak: 'break-word',
+            }}>
               <ReactMarkdown>{message.content}</ReactMarkdown>
               {isStreaming && (
                 <span style={{
                   display: 'inline-block',
-                  width: 8,
-                  height: 16,
-                  background: '#999',
-                  marginLeft: 2,
-                  animation: 'blink 1s infinite',
+                  width: 2,
+                  height: 18,
+                  background: 'var(--ey-yellow)',
+                  marginLeft: 4,
+                  verticalAlign: 'text-bottom',
+                  animation: 'blink 0.8s ease-in-out infinite',
+                  borderRadius: 1,
+                  boxShadow: '0 0 4px rgba(255, 229, 0, 0.4)',
                 }} />
               )}
             </div>
@@ -67,12 +83,15 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
                   key={i}
                   size="small"
                   style={{
-                    background: '#fafafa',
+                    background: 'var(--color-bg-elevated, #fafafa)',
                     fontSize: 12,
                     maxWidth: 250,
+                    overflow: 'hidden',
                   }}
                 >
-                  <Text strong>{cit.document_title}</Text>
+                  <Text strong ellipsis style={{ maxWidth: '100%', display: 'block' }}>
+                    {cit.document_title}
+                  </Text>
                   {cit.page_number && <Text> · p.{cit.page_number}</Text>}
                   <br />
                   <Text type="secondary" style={{ fontSize: 11 }}>

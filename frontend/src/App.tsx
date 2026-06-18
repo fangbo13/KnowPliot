@@ -6,7 +6,12 @@ import ProfilePage from './pages/ProfilePage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthProvider';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { Form, Input, Button, Typography, Alert, Layout, Space } from 'antd';
+import { MailOutlined, LockOutlined, LoginOutlined } from '@ant-design/icons';
+
+const { Title, Text, Paragraph } = Typography;
+const { Content } = Layout;
 
 function App() {
   const { isAuthenticated } = useAuth();
@@ -37,20 +42,25 @@ function App() {
 
 function LoginPage() {
   const { login } = useAuth();
-  const [email, setEmail] = useState('admin@ey.com');
-  const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isNarrow, setIsNarrow] = useState(window.innerWidth < 800);
 
-  const handleLogin = async () => {
+  // Responsive: hide brand panel on narrow screens
+  useEffect(() => {
+    const handler = () => setIsNarrow(window.innerWidth < 800);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
+  const handleLogin = async (values: { email: string; password: string }) => {
     setLoading(true);
     setError('');
     try {
-      // Authenticate with backend
       const response = await fetch('/api/v1/auth/token/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: values.email, password: values.password }),
       });
 
       if (!response.ok) {
@@ -59,7 +69,6 @@ function LoginPage() {
 
       const tokenData = await response.json();
 
-      // Get user profile
       const profileResponse = await fetch('/api/v1/auth/me/', {
         headers: { Authorization: `Bearer ${tokenData.access}` },
       });
@@ -91,110 +100,202 @@ function LoginPage() {
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      background: 'linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%)',
+    <Layout style={{
+      minHeight: '100vh',
+      background: 'var(--color-bg-body)',
     }}>
-      <div style={{
-        padding: 48,
-        background: 'white',
-        borderRadius: 12,
-        boxShadow: '0 4px 24px rgba(0,0,0,0.1)',
-        width: 400,
-        textAlign: 'center',
+      <Content style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px',
       }}>
-        <h1 style={{ color: '#E00033', margin: 0, fontSize: 48, fontWeight: 700 }}>EY</h1>
-        <h2 style={{ marginBottom: 8, fontWeight: 400, color: '#333' }}>Onboarding AI</h2>
-        <p style={{ color: '#999', marginBottom: 32, fontSize: 14 }}>
-          Your intelligent onboarding assistant
-        </p>
+        <div style={{
+          display: 'flex',
+          flexDirection: isNarrow ? 'column' : 'row',
+          width: '100%',
+          maxWidth: 900,
+          minHeight: isNarrow ? 'auto' : 520,
+          borderRadius: 16,
+          overflow: 'hidden',
+          boxShadow: 'var(--shadow-xl)',
+          background: 'var(--color-bg-container)',
+          animation: 'fadeInUp 0.4s ease-out',
+        }}>
+          {/* Left: Brand Panel (hidden on narrow screens) */}
+          {!isNarrow && (
+            <div style={{
+              flex: '0 0 380px',
+              background: 'linear-gradient(135deg, #262626 0%, #1a1a1a 50%, #262626 100%)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 48,
+              position: 'relative',
+            }}>
+              {/* Yellow accent stripe - top */}
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: 4,
+                background: '#FFE500',
+              }} />
 
-        <div style={{ textAlign: 'left', marginBottom: 24 }}>
-          <label style={{ display: 'block', marginBottom: 4, fontSize: 14, color: '#666' }}>
-            Email
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              border: '1px solid #d9d9d9',
-              borderRadius: 6,
-              fontSize: 14,
-              boxSizing: 'border-box',
-              outline: 'none',
-            }}
-            placeholder="your.email@ey.com"
-          />
-        </div>
+              {/* Yellow accent stripe - left edge */}
+              <div style={{
+                position: 'absolute',
+                top: '10%',
+                left: 0,
+                width: 3,
+                height: '80%',
+                background: 'linear-gradient(to bottom, transparent, #FFE500, transparent)',
+                borderRadius: 2,
+              }} />
 
-        <div style={{ textAlign: 'left', marginBottom: 24 }}>
-          <label style={{ display: 'block', marginBottom: 4, fontSize: 14, color: '#666' }}>
-            Password
-          </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              border: '1px solid #d9d9d9',
-              borderRadius: 6,
-              fontSize: 14,
-              boxSizing: 'border-box',
-              outline: 'none',
-            }}
-            placeholder="Enter your password"
-          />
-        </div>
+              {/* EY Logo */}
+              <div style={{
+                width: 100,
+                height: 100,
+                borderRadius: 20,
+                background: '#FFE500',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 32,
+                boxShadow: '0 8px 32px rgba(255, 229, 0, 0.3)',
+              }}>
+                <span style={{
+                  fontSize: 48,
+                  fontWeight: 800,
+                  color: '#262626',
+                  letterSpacing: -2,
+                }}>EY</span>
+              </div>
 
-        {error && (
+              <Title level={2} style={{ color: 'white', margin: 0, fontWeight: 600 }}>
+                Onboarding AI
+              </Title>
+              <Paragraph style={{
+                color: 'rgba(255,255,255,0.6)',
+                textAlign: 'center',
+                marginTop: 12,
+                fontSize: 14,
+                maxWidth: 280,
+              }}>
+                Your intelligent onboarding assistant. Ask me anything about policies, benefits, and more.
+              </Paragraph>
+
+              {/* Feature list */}
+              <Space direction="vertical" size={12} style={{ marginTop: 40 }}>
+                {['Smart Q&A powered by AI', 'Knowledge base integration', 'Personalized assistance'].map((item) => (
+                  <Space key={item} style={{ color: 'rgba(255,255,255,0.7)' }}>
+                    <div style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      background: '#FFE500',
+                      flexShrink: 0,
+                    }} />
+                    <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{item}</Text>
+                  </Space>
+                ))}
+              </Space>
+            </div>
+          )}
+
+          {/* Right: Login Form */}
           <div style={{
-            background: '#fff2f0',
-            border: '1px solid #ffccc7',
-            borderRadius: 6,
-            padding: '8px 12px',
-            marginBottom: 16,
-            color: '#cf1322',
-            fontSize: 13,
-            textAlign: 'left',
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            padding: isNarrow ? '40px 24px' : '48px 40px',
+            minWidth: isNarrow ? 'auto' : 340,
           }}>
-            {error}
+            <Title level={3} style={{ marginTop: 0, fontWeight: 600 }}>
+              Welcome Back
+            </Title>
+            <Text type="secondary" style={{ marginBottom: 32, display: 'block' }}>
+              Sign in to your account to continue
+            </Text>
+
+            {error && (
+              <Alert
+                message="Login Error"
+                description={error}
+                type="error"
+                showIcon
+                closable
+                style={{ marginBottom: 24 }}
+                onClose={() => setError('')}
+              />
+            )}
+
+            <Form
+              layout="vertical"
+              size="large"
+              initialValues={{ email: 'admin@ey.com', password: 'admin123' }}
+              onFinish={handleLogin}
+              requiredMark={false}
+            >
+              <Form.Item
+                name="email"
+                rules={[
+                  { required: true, message: 'Please enter your email' },
+                  { type: 'email', message: 'Please enter a valid email' },
+                ]}
+              >
+                <Input
+                  prefix={<MailOutlined />}
+                  placeholder="your.email@ey.com"
+                  autoComplete="email"
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="password"
+                rules={[{ required: true, message: 'Please enter your password' }]}
+              >
+                <Input.Password
+                  prefix={<LockOutlined />}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                />
+              </Form.Item>
+
+              <Form.Item style={{ marginTop: 8 }}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  icon={<LoginOutlined />}
+                  loading={loading}
+                  block
+                  className="login-submit"
+                  style={{ height: 44, fontWeight: 600 }}
+                >
+                  Sign In
+                </Button>
+              </Form.Item>
+            </Form>
+
+            <Text
+              type="secondary"
+              style={{
+                display: 'block',
+                textAlign: 'center',
+                marginTop: 16,
+                fontSize: 12,
+              }}
+            >
+              Demo: admin@ey.com / admin123
+            </Text>
           </div>
-        )}
-
-        <button
-          onClick={handleLogin}
-          disabled={loading}
-          style={{
-            width: '100%',
-            padding: '12px 0',
-            background: loading ? '#ccc' : '#E00033',
-            color: 'white',
-            border: 'none',
-            borderRadius: 6,
-            cursor: loading ? 'not-allowed' : 'pointer',
-            fontSize: 16,
-            fontWeight: 500,
-            transition: 'background 0.2s',
-          }}
-        >
-          {loading ? 'Logging in...' : 'Login'}
-        </button>
-
-        <p style={{ marginTop: 16, fontSize: 12, color: '#999' }}>
-          Demo: admin@ey.com / admin123
-        </p>
-      </div>
-    </div>
+        </div>
+      </Content>
+    </Layout>
   );
 }
 

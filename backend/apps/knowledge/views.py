@@ -8,6 +8,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from apps.core.permissions import IsHROrAdmin
+from apps.audit.views import create_audit_log
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
 from .serializers import (
     DocumentCategorySerializer,
@@ -40,6 +41,14 @@ class DocumentListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         doc = serializer.save(uploaded_by=self.request.user)
+        create_audit_log(
+            user=self.request.user,
+            action="document_upload",
+            target_type="Document",
+            target_id=str(doc.id),
+            details={"title": doc.title, "file_type": doc.file_type},
+            request=self.request,
+        )
         # Trigger async ingestion
         from apps.rag.services import ingest_document
         ingest_document.delay(str(doc.id))
@@ -53,6 +62,18 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Document.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        create_audit_log(
+            user=request.user,
+            action="document_delete",
+            target_type="Document",
+            target_id=str(instance.id),
+            details={"title": instance.title},
+            request=request,
+        )
+        return super().destroy(request, *args, **kwargs)
 
 
 class DocumentReindexView(generics.GenericAPIView):
@@ -68,6 +89,15 @@ class DocumentReindexView(generics.GenericAPIView):
         document = self.get_object()
         document.status = "processing"
         document.save()
+
+        create_audit_log(
+            user=request.user,
+            action="document_reindex",
+            target_type="Document",
+            target_id=str(document.id),
+            details={"title": document.title},
+            request=request,
+        )
 
         from apps.rag.services import ingest_document
         ingest_document.delay(str(document.id))
@@ -96,6 +126,17 @@ class CategoryListView(generics.ListCreateAPIView):
     def get_queryset(self):
         return DocumentCategory.objects.all()
 
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        create_audit_log(
+            user=self.request.user,
+            action="category_create",
+            target_type="DocumentCategory",
+            target_id=str(instance.id),
+            details={"name": instance.name},
+            request=self.request,
+        )
+
 
 class AnswerTemplateListView(generics.ListCreateAPIView):
     """List and create answer templates."""
@@ -107,7 +148,15 @@ class AnswerTemplateListView(generics.ListCreateAPIView):
         return AnswerTemplate.objects.filter(is_active=True)
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        instance = serializer.save(created_by=self.request.user)
+        create_audit_log(
+            user=self.request.user,
+            action="template_create",
+            target_type="AnswerTemplate",
+            target_id=str(instance.id),
+            details={"question_pattern": instance.question_pattern},
+            request=self.request,
+        )
 
 
 class AnswerTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -118,3 +167,15 @@ class AnswerTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return AnswerTemplate.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        create_audit_log(
+            user=request.user,
+            action="template_delete",
+            target_type="AnswerTemplate",
+            target_id=str(instance.id),
+            details={"question_pattern": instance.question_pattern},
+            request=request,
+        )
+        return super().destroy(request, *args, **kwargs)

@@ -35,4 +35,21 @@ apiClient.interceptors.response.use(
   }
 );
 
+/**
+ * Get the current auth token from localStorage.
+ * Use this for non-axios requests (e.g., fetch, SSE, Upload components).
+ */
+export function getAuthToken(): string {
+  try {
+    const saved = localStorage.getItem('ey-auth');
+    if (saved) {
+      const { token } = JSON.parse(saved);
+      return token || '';
+    }
+  } catch {
+    // ignore
+  }
+  return '';
+}
+
 export default apiClient;

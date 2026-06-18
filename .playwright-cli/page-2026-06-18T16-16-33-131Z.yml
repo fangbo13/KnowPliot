@@ -1,0 +1,196 @@
+- generic [ref=e71]:
+  - complementary [ref=e72]:
+    - generic [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e76]: EY
+        - heading "Onboarding" [level=2] [ref=e77]
+      - menu [ref=e78]:
+        - menuitem "message Chat" [ref=e79] [cursor=pointer]:
+          - img "message" [ref=e80]:
+            - img [ref=e81]
+          - generic [ref=e83]: Chat
+        - menuitem "history History" [ref=e84] [cursor=pointer]:
+          - img "history" [ref=e85]:
+            - img [ref=e86]
+          - generic [ref=e88]: History
+        - menuitem "book Knowledge Base" [active] [ref=e89] [cursor=pointer]:
+          - img "book" [ref=e90]:
+            - img [ref=e91]
+          - generic [ref=e93]: Knowledge Base
+        - menuitem "user Profile" [ref=e94] [cursor=pointer]:
+          - img "user" [ref=e95]:
+            - img [ref=e96]
+          - generic [ref=e98]: Profile
+  - generic [ref=e99]:
+    - banner [ref=e100]:
+      - generic [ref=e101] [cursor=pointer]:
+        - img "user" [ref=e104]:
+          - img [ref=e105]
+        - generic [ref=e107]: admin@ey.com
+    - main [ref=e108]:
+      - generic [ref=e283]:
+        - generic [ref=e284]:
+          - heading "Knowledge Base" [level=4] [ref=e285]
+          - generic [ref=e286]:
+            - button "upload Upload" [ref=e291] [cursor=pointer]:
+              - img "upload" [ref=e293]:
+                - img [ref=e294]
+              - generic [ref=e296]: Upload
+            - button "reload Refresh" [ref=e298] [cursor=pointer]:
+              - img "reload" [ref=e300]:
+                - img [ref=e301]
+              - generic [ref=e303]: Refresh
+        - generic [ref=e306]:
+          - table [ref=e310]:
+            - rowgroup [ref=e319]:
+              - row "Title Category Type Chunks Status Created Actions" [ref=e320]:
+                - columnheader "Title" [ref=e321]
+                - columnheader "Category" [ref=e322]
+                - columnheader "Type" [ref=e323]
+                - columnheader "Chunks" [ref=e324]
+                - columnheader "Status" [ref=e325]
+                - columnheader "Created" [ref=e326]
+                - columnheader "Actions" [ref=e327]
+            - rowgroup [ref=e328]:
+              - row "Audit Test Doc txt 0 Draft 2026-06-18T14:05:16.629400+08:00 reload delete" [ref=e329]:
+                - cell "Audit Test Doc" [ref=e330]
+                - cell [ref=e331]
+                - cell "txt" [ref=e332]
+                - cell "0" [ref=e333]
+                - cell "Draft" [ref=e334]:
+                  - generic [ref=e335]: Draft
+                - cell "2026-06-18T14:05:16.629400+08:00" [ref=e336]
+                - cell "reload delete" [ref=e337]:
+                  - generic [ref=e338]:
+                    - button "reload" [ref=e340] [cursor=pointer]:
+                      - img "reload" [ref=e342]:
+                        - img [ref=e343]
+                    - button "delete" [ref=e346] [cursor=pointer]:
+                      - img "delete" [ref=e348]:
+                        - img [ref=e349]
+              - row "EY 中国办公室信息与入职指南 Office Info txt 5 Processing 2026-06-18T02:48:57.481229+08:00 reload delete" [ref=e351]:
+                - cell "EY 中国办公室信息与入职指南" [ref=e352]
+                - cell "Office Info" [ref=e353]
+                - cell "txt" [ref=e354]
+                - cell "5" [ref=e355]
+                - cell "Processing" [ref=e356]:
+                  - generic [ref=e357]: Processing
+                - cell "2026-06-18T02:48:57.481229+08:00" [ref=e358]
+                - cell "reload delete" [ref=e359]:
+                  - generic [ref=e360]:
+                    - button "reload" [disabled] [ref=e362]:
+                      - generic:
+                        - img "reload":
+                          - img
+                    - button "delete" [ref=e364] [cursor=pointer]:
+                      - img "delete" [ref=e366]:
+                        - img [ref=e367]
+              - row "EY Training and Career Development Guide Training txt 17 Processing 2026-06-18T02:48:56.968345+08:00 reload delete" [ref=e369]:
+                - cell "EY Training and Career Development Guide" [ref=e370]
+                - cell "Training" [ref=e371]
+                - cell "txt" [ref=e372]
+                - cell "17" [ref=e373]
+                - cell "Processing" [ref=e374]:
+                  - generic [ref=e375]: Processing
+                - cell "2026-06-18T02:48:56.968345+08:00" [ref=e376]
+                - cell "reload delete" [ref=e377]:
+                  - generic [ref=e378]:
+                    - button "reload" [disabled] [ref=e380]:
+                      - generic:
+                        - img "reload":
+                          - img
+                    - button "delete" [ref=e382] [cursor=pointer]:
+                      - img "delete" [ref=e384]:
+                        - img [ref=e385]
+              - row "EY 新员工入职 Checklist HR Policies txt 3 Processing 2026-06-18T02:48:56.429826+08:00 reload delete" [ref=e387]:
+                - cell "EY 新员工入职 Checklist" [ref=e388]
+                - cell "HR Policies" [ref=e389]
+                - cell "txt" [ref=e390]
+                - cell "3" [ref=e391]
+                - cell "Processing" [ref=e392]:
+                  - generic [ref=e393]: Processing
+                - cell "2026-06-18T02:48:56.429826+08:00" [ref=e394]
+                - cell "reload delete" [ref=e395]:
+                  - generic [ref=e396]:
+                    - button "reload" [disabled] [ref=e398]:
+                      - generic:
+                        - img "reload":
+                          - img
+                    - button "delete" [ref=e400] [cursor=pointer]:
+                      - img "delete" [ref=e402]:
+                        - img [ref=e403]
+              - row "EY Compliance and Code of Conduct Compliance txt 13 Active 2026-06-18T02:48:55.665728+08:00 reload delete" [ref=e405]:
+                - cell "EY Compliance and Code of Conduct" [ref=e406]
+                - cell "Compliance" [ref=e407]
+                - cell "txt" [ref=e408]
+                - cell "13" [ref=e409]
+                - cell "Active" [ref=e410]:
+                  - generic [ref=e411]: Active
+                - cell "2026-06-18T02:48:55.665728+08:00" [ref=e412]
+                - cell "reload delete" [ref=e413]:
+                  - generic [ref=e414]:
+                    - button "reload" [ref=e416] [cursor=pointer]:
+                      - img "reload" [ref=e418]:
+                        - img [ref=e419]
+                    - button "delete" [ref=e422] [cursor=pointer]:
+                      - img "delete" [ref=e424]:
+                        - img [ref=e425]
+              - row "EY HR 政策与员工福利手册 HR Policies txt 4 Active 2026-06-18T02:48:55.081773+08:00 reload delete" [ref=e427]:
+                - cell "EY HR 政策与员工福利手册" [ref=e428]
+                - cell "HR Policies" [ref=e429]
+                - cell "txt" [ref=e430]
+                - cell "4" [ref=e431]
+                - cell "Active" [ref=e432]:
+                  - generic [ref=e433]: Active
+                - cell "2026-06-18T02:48:55.081773+08:00" [ref=e434]
+                - cell "reload delete" [ref=e435]:
+                  - generic [ref=e436]:
+                    - button "reload" [ref=e438] [cursor=pointer]:
+                      - img "reload" [ref=e440]:
+                        - img [ref=e441]
+                    - button "delete" [ref=e444] [cursor=pointer]:
+                      - img "delete" [ref=e446]:
+                        - img [ref=e447]
+              - row "EY 新员工入职手册 - IT 系统设置指南 IT Setup txt 6 Active 2026-06-18T02:48:38.216247+08:00 reload delete" [ref=e449]:
+                - cell "EY 新员工入职手册 - IT 系统设置指南" [ref=e450]
+                - cell "IT Setup" [ref=e451]
+                - cell "txt" [ref=e452]
+                - cell "6" [ref=e453]
+                - cell "Active" [ref=e454]:
+                  - generic [ref=e455]: Active
+                - cell "2026-06-18T02:48:38.216247+08:00" [ref=e456]
+                - cell "reload delete" [ref=e457]:
+                  - generic [ref=e458]:
+                    - button "reload" [ref=e460] [cursor=pointer]:
+                      - img "reload" [ref=e462]:
+                        - img [ref=e463]
+                    - button "delete" [ref=e466] [cursor=pointer]:
+                      - img "delete" [ref=e468]:
+                        - img [ref=e469]
+              - row "EY New Employee Onboarding Guide - IT Setup txt 4 Active 2026-06-18T02:31:45.346585+08:00 reload delete" [ref=e471]:
+                - cell "EY New Employee Onboarding Guide - IT Setup" [ref=e472]
+                - cell [ref=e473]
+                - cell "txt" [ref=e474]
+                - cell "4" [ref=e475]
+                - cell "Active" [ref=e476]:
+                  - generic [ref=e477]: Active
+                - cell "2026-06-18T02:31:45.346585+08:00" [ref=e478]
+                - cell "reload delete" [ref=e479]:
+                  - generic [ref=e480]:
+                    - button "reload" [ref=e482] [cursor=pointer]:
+                      - img "reload" [ref=e484]:
+                        - img [ref=e485]
+                    - button "delete" [ref=e488] [cursor=pointer]:
+                      - img "delete" [ref=e490]:
+                        - img [ref=e491]
+          - list [ref=e493]:
+            - listitem "Previous Page" [ref=e494]:
+              - button "left" [disabled] [ref=e495]:
+                - img "left" [ref=e496]:
+                  - img [ref=e497]
+            - listitem "1" [ref=e499] [cursor=pointer]:
+              - generic [ref=e500]: "1"
+            - listitem "Next Page" [ref=e501]:
+              - button "right" [disabled] [ref=e502]:
+                - img "right" [ref=e503]:
+                  - img [ref=e504]

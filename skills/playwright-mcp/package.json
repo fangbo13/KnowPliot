@@ -1,0 +1,11 @@
+{
+  "name": "playwright-mcp-skill",
+  "version": "1.0.0",
+  "description": "Playwright MCP skill wrapper",
+  "scripts": {
+    "setup": "npm install -g @playwright/mcp && playwright-mcp install chromium"
+  },
+  "dependencies": {
+    "@playwright/mcp": "^0.0.76"
+  }
+}

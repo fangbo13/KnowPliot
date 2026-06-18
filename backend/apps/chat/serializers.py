@@ -42,7 +42,14 @@ class MessageSerializer(serializers.ModelSerializer):
 
 class ChatMessageRequestSerializer(serializers.Serializer):
     """Serializer for sending a chat message."""
-    content = serializers.CharField(max_length=4000)
+    content = serializers.CharField(max_length=4000, min_length=1)
+
+    def validate_content(self, value):
+        """Strip whitespace and reject empty/whitespace-only messages."""
+        stripped = value.strip()
+        if not stripped:
+            raise serializers.ValidationError("Message cannot be empty or whitespace-only.")
+        return stripped
 
 
 class FeedbackSerializer(serializers.ModelSerializer):

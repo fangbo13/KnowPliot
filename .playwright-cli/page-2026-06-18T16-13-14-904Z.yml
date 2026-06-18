@@ -1,0 +1,29 @@
+- main [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e9]: EY
+      - heading "Onboarding AI" [level=2] [ref=e10]
+      - generic [ref=e11]: Your intelligent onboarding assistant. Ask me anything about policies, benefits, and more.
+      - generic [ref=e12]:
+        - generic [ref=e17]: Smart Q&A powered by AI
+        - generic [ref=e22]: Knowledge base integration
+        - generic [ref=e27]: Personalized assistance
+    - generic [ref=e28]:
+      - heading "Welcome Back" [level=3] [ref=e29]
+      - generic [ref=e30]: Sign in to your account to continue
+      - generic [ref=e31]:
+        - generic [ref=e37]:
+          - img "mail" [ref=e39]:
+            - img [ref=e40]
+          - textbox "your.email@ey.com" [ref=e42]: admin@ey.com
+        - generic [ref=e48]:
+          - img "lock" [ref=e50]:
+            - img [ref=e51]
+          - textbox "Enter your password" [active] [ref=e53]: admin123
+          - img "eye-invisible" [ref=e55] [cursor=pointer]:
+            - img [ref=e56]
+        - button "login Sign In" [ref=e64] [cursor=pointer]:
+          - img "login" [ref=e66]:
+            - img [ref=e67]
+          - generic [ref=e69]: Sign In
+      - generic [ref=e70]: "Demo: admin@ey.com / admin123"

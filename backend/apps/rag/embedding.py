@@ -31,7 +31,7 @@ class EmbeddingService:
 
         for attempt in range(retries):
             try:
-                with httpx.Client(verify=False, timeout=120) as client:
+                with httpx.Client(verify=settings.SSL_VERIFY, timeout=120) as client:
                     response = client.post(
                         f"{self.base_url}/embeddings",
                         headers=self.headers,

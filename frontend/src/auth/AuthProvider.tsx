@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import apiClient from '../api/client';
 
 interface User {
   id: string;
@@ -44,7 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('ey-auth', JSON.stringify(newState));
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await apiClient.post('/auth/logout/');
+    } catch {
+      // Best-effort: clear local state even if API call fails
+    }
     setState({ isAuthenticated: false, user: null, token: null });
     localStorage.removeItem('ey-auth');
   }, []);
