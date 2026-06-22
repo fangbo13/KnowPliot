@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package.json ./
 
-RUN npm config set registry https://registry.npmmirror.com && npm config set strict-ssl false && npm install
+RUN npm config set registry https://registry.npmmirror.com && npm config set strict-ssl false && PUPPETEER_SKIP_DOWNLOAD=true npm install
 
 COPY . .
 
