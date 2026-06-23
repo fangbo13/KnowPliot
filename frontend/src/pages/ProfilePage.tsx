@@ -1,11 +1,13 @@
 ﻿import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
-import { Card, Form, Input, Select, Button, message, Segmented } from 'antd';
-import { SunOutlined, MoonOutlined, DesktopOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Select, Button, message, Segmented, Typography } from 'antd';
+import { SunOutlined, MoonOutlined, DesktopOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
 import apiClient from '../api/client';
 import i18n from '../i18n';
+
+const { Text } = Typography;
 
 export default function ProfilePage() {
   const { t } = useTranslation('common');
@@ -59,7 +61,16 @@ export default function ProfilePage() {
           onFinish={handleFinish}
         >
           <Form.Item label={t('email')} name="email">
-            <Input disabled />
+            <Input
+              disabled
+              prefix={<LockOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
+              style={{ background: 'var(--color-bg-elevated)', cursor: 'not-allowed' }}
+            />
+            <div style={{ marginTop: 4 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('email_readonly_hint')}
+              </Text>
+            </div>
           </Form.Item>
 
           <Form.Item label={t('language_pref')} name="language_preference">

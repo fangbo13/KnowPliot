@@ -94,5 +94,6 @@
   "onboarding_profile_desc": "管理你的语言和主题偏好",
   "onboarding_start": "开始使用",
   "copy_message": "复制消息",
-  "copied": "已复制"
+  "copied": "已复制",
+  "email_readonly_hint": "邮箱地址由系统分配，不可修改"
 }

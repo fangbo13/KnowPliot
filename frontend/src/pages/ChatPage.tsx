@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Input, Button, Space, Spin, Alert, type InputRef } from 'antd';
-import { SendOutlined, ReloadOutlined } from '@ant-design/icons';
+import { SendOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { useChatStore } from '../store/chatStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import MessageBubble from '../components/chat/MessageBubble';
@@ -33,6 +33,7 @@ export default function ChatPageContainer() {
     setSendError,
     sendMessage,
     loadMessages,
+    resetSession,
   } = useChatStore();
 
   const [inputValue, setInputValue] = useState('');
@@ -86,6 +87,11 @@ export default function ChatPageContainer() {
       setSendError(null);
       sendMessage(lastUserMsg.content);
     }
+  };
+
+  const handleNewChat = () => {
+    resetSession();
+    inputRef.current?.focus();
   };
 
   if (!activeSessionId && messages.length === 0) {
@@ -220,6 +226,31 @@ export default function ChatPageContainer() {
           padding: '0 24px',
           pointerEvents: 'auto',
         }}>
+          {/* New Chat button */}
+          {activeSessionId && (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              marginBottom: 8,
+              pointerEvents: 'auto',
+            }}>
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={handleNewChat}
+                style={{
+                  color: 'var(--color-text-secondary)',
+                  fontSize: 12,
+                  padding: '4px 12px',
+                  height: 'auto',
+                }}
+              >
+                {t('new_chat')}
+              </Button>
+            </div>
+          )}
+
           <div style={{
             background: 'var(--color-bg-container)',
             border: '1px solid var(--color-border)',

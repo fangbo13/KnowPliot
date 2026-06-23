@@ -37,6 +37,7 @@ interface ChatState {
 
   // Actions
   setActiveSession: (id: string) => void;
+  resetSession: () => void;
   addMessage: (message: Message) => void;
   updateStreamContent: (content: string) => void;
   setStreaming: (isStreaming: boolean) => void;
@@ -59,6 +60,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   sendError: null,
 
   setActiveSession: (id) => set({ activeSessionId: id, messages: [], sendError: null }),
+
+  resetSession: () => set({ activeSessionId: null, messages: [], streamContent: '', citations: [], isStreaming: false, sendError: null }),
 
   addMessage: (message) => set((state) => ({
     messages: [...state.messages, message],

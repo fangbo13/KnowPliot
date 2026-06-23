@@ -28,6 +28,10 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => {
+    // On tablet widths, default to collapsed for better content space
+    if (typeof window !== 'undefined' && window.innerWidth >= 768 && window.innerWidth <= 1024) {
+      return true;
+    }
     const saved = localStorage.getItem('ey-sidebar-collapsed');
     return saved === 'true';
   });
@@ -37,6 +41,7 @@ export default function AppLayout() {
 
   // Mobile responsive state
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [isTablet, setIsTablet] = useState(() => window.innerWidth >= 768 && window.innerWidth <= 1024);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   // Onboarding tour state
@@ -45,10 +50,18 @@ export default function AppLayout() {
   });
 
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
+    const handler = () => {
+      const w = window.innerWidth;
+      setIsMobile(w < 768);
+      setIsTablet(w >= 768 && w <= 1024);
+      // Auto-collapse sidebar when entering tablet range
+      if (w >= 768 && w <= 1024 && !isTablet) {
+        setCollapsed(true);
+      }
+    };
     window.addEventListener('resize', handler);
     return () => window.removeEventListener('resize', handler);
-  }, []);
+  }, [isMobile, isTablet]);
 
   // Normalize root path to /chat for menu highlight
   const selectedKey = location.pathname === '/' ? '/chat' : location.pathname;

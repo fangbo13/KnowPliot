@@ -95,5 +95,6 @@
   "onboarding_profile_desc": "Manage your language and theme preferences",
   "onboarding_start": "Get Started",
   "copy_message": "Copy message",
-  "copied": "Copied"
+  "copied": "Copied",
+  "email_readonly_hint": "Email is system-assigned and cannot be changed"
 }

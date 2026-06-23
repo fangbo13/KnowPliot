@@ -11,5 +11,6 @@
   "session_title_new": "New Conversation",
   "loading_messages": "Loading messages...",
   "error_title": "Error",
-  "error_retry": "Retry"
+  "error_retry": "Retry",
+  "new_chat": "New Chat"
 }
