@@ -25,30 +25,6 @@ export interface ChatSession {
   updatedAt: string;
 }
 
-interface ChatState {
-  sessions: ChatSession[];
-  activeSessionId: string | null;
-  messages: Message[];
-  isStreaming: boolean;
-  streamContent: string;
-  citations: Citation[];
-  isLoadingMessages: boolean;
-  sendError: string | null;
-
-  // Actions
-  setActiveSession: (id: string) => void;
-  resetSession: () => void;
-  addMessage: (message: Message) => void;
-  updateStreamContent: (content: string) => void;
-  setStreaming: (isStreaming: boolean) => void;
-  setStreamCitations: (citations: Citation[]) => void;
-  setSendError: (error: string | null) => void;
-  loadSessions: () => Promise<void>;
-  loadMessages: (sessionId: string) => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
-  finishStreamingMessage: (messageId: string, sessionId: string) => void;
-}
-
 // Words/phrases that don't make good titles
 const MEANINGLESS_WORDS = new Set([
   'test', 'test test', 'hello', 'hi', 'hey', '你好', '你好吗', '嗨',
@@ -99,6 +75,30 @@ function generateSmartTitle(content: string): string {
   if (title.length < 2) return '新对话';
 
   return title;
+}
+
+interface ChatState {
+  sessions: ChatSession[];
+  activeSessionId: string | null;
+  messages: Message[];
+  isStreaming: boolean;
+  streamContent: string;
+  citations: Citation[];
+  isLoadingMessages: boolean;
+  sendError: string | null;
+
+  // Actions
+  setActiveSession: (id: string) => void;
+  resetSession: () => void;
+  addMessage: (message: Message) => void;
+  updateStreamContent: (content: string) => void;
+  setStreaming: (isStreaming: boolean) => void;
+  setStreamCitations: (citations: Citation[]) => void;
+  setSendError: (error: string | null) => void;
+  loadSessions: () => Promise<void>;
+  loadMessages: (sessionId: string) => Promise<void>;
+  sendMessage: (content: string) => Promise<void>;
+  finishStreamingMessage: (messageId: string, sessionId: string) => void;
 }
 
 export const useChatStore = create<ChatState>()((set, get) => ({
