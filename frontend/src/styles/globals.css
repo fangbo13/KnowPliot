@@ -25,7 +25,7 @@
   --color-primary: var(--accent);
   --color-text: var(--foreground);
   --color-text-secondary: var(--muted-foreground);
-  --color-text-tertiary: #8C8C8C;
+  --color-text-tertiary: #595959;
   --color-bg-body: var(--background);
   --color-bg-container: var(--card);
   --color-bg-elevated: var(--card);
@@ -348,6 +348,12 @@ body {
   transform: translateY(-1px);
 }
 
+/* ---- Message Copy Button (show on hover) ---- */
+.msg-bubble-wrapper:hover .msg-copy-btn,
+.msg-bubble-wrapper .msg-copy-btn:hover {
+  opacity: 1 !important;
+}
+
 /* ---- Markdown Content ---- */
 .markdown-content pre {
   overflow-x: auto;
@@ -582,4 +588,42 @@ body {
 
 [data-theme="dark"] .ant-segmented-item-selected {
   background: var(--accent) !important;
+}
+
+/* ---- Onboarding Modal ---- */
+.onboarding-modal .ant-modal-content {
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.onboarding-modal .ant-modal-body {
+  padding: 24px;
+}
+
+.onboarding-modal .ant-modal-footer {
+  padding: 0 24px 24px;
+  border-top: none;
+}
+
+/* ---- Screen Reader Only ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Reduced Motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

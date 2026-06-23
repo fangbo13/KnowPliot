@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { Card, Typography, Space } from 'antd';
+import { Card, Typography, Space, Tooltip, message as antdMessage, Button } from 'antd';
+import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
+import { useState } from 'react';
 import type { Message } from '../../store/chatStore';
 
 const { Text } = Typography;
@@ -25,6 +27,29 @@ interface Props {
 export default function MessageBubble({ message, isStreaming = false }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      antdMessage.success(t('copied') || '已复制');
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for browsers without clipboard API
+      const textarea = document.createElement('textarea');
+      textarea.value = message.content;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      antdMessage.success(t('copied') || '已复制');
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div
@@ -37,11 +62,41 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
       }}
     >
       <div
+        className="msg-bubble-wrapper"
         style={{
           maxWidth: '75%',
           padding: isUser ? '0' : '0',
+          position: 'relative',
         }}
       >
+        {/* Copy button for assistant messages */}
+        {!isUser && (
+          <div
+            className="msg-copy-btn"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              opacity: 0,
+              transition: 'opacity 0.2s ease',
+              zIndex: 1,
+            }}
+          >
+            <Tooltip title={copied ? t('copied') : t('copy_message')}>
+              <Button
+                type="text"
+                size="small"
+                icon={copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
+                onClick={handleCopy}
+                aria-label={copied ? t('copied') : t('copy_message')}
+                style={{
+                  padding: '2px 6px',
+                  color: copied ? '#52c41a' : 'var(--color-text-tertiary)',
+                }}
+              />
+            </Tooltip>
+          </div>
+        )}
         <Card
           className={!isUser ? 'msg-bubble-assistant' : undefined}
           style={{

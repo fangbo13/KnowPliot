@@ -204,14 +204,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         }
         get().setStreaming(false);
         const errorMsg = (error as Error).message;
-        if (errorMsg.includes('401')) {
-          set({ sendError: 'Response error: API authentication failed. Please check backend configuration.' });
-        } else if (errorMsg.includes('500')) {
-          set({ sendError: 'Response error: Server error. Please try again later.' });
-        } else if (errorMsg.includes('NetworkError') || errorMsg.includes('fetch')) {
-          set({ sendError: 'Network error. Please check your connection.' });
+        if (errorMsg.includes('401') || errorMsg.includes('403')) {
+          set({ sendError: 'error_auth' });
+        } else if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
+          set({ sendError: 'error_server' });
+        } else if (errorMsg.includes('NetworkError') || errorMsg.includes('fetch') || errorMsg.includes('Failed to fetch')) {
+          set({ sendError: 'error_network' });
         } else {
-          set({ sendError: `Response error: ${errorMsg}` });
+          set({ sendError: 'error_generic' });
         }
         return false;
       }

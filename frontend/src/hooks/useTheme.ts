@@ -75,7 +75,7 @@ export const eyTheme = {
       colorPrimary: '#0052FF',
       colorText: '#0F172A',
       colorTextSecondary: '#64748B',
-      colorTextTertiary: '#8C8C8C',
+      colorTextTertiary: '#595959',
       colorBgLayout: '#FAFAFA',
       colorBgContainer: '#FFFFFF',
       colorBgElevated: '#FFFFFF',

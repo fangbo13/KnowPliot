@@ -32,7 +32,7 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Login failed. Please check your credentials.');
+        throw new Error('login_failed');
       }
 
       const tokenData = await response.json();
@@ -42,7 +42,7 @@ export default function LoginPage() {
       });
 
       if (!profileResponse.ok) {
-        throw new Error('Failed to load user profile.');
+        throw new Error('profile_load_failed');
       }
 
       const user = await profileResponse.json();
@@ -67,8 +67,8 @@ export default function LoginPage() {
         i18n.changeLanguage(user.language_preference);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Login failed';
-      setError(message);
+      const message = err instanceof Error ? err.message : 'login_failed';
+      setError(t(message) || t('login_failed'));
     } finally {
       setLoading(false);
     }
@@ -165,12 +165,12 @@ export default function LoginPage() {
                 fontSize: 14,
                 maxWidth: 280,
               }}>
-                Your intelligent onboarding assistant. Ask me anything about policies, benefits, and more.
+                {t('login_brand_desc')}
               </Paragraph>
 
               {/* Feature list */}
               <Space direction="vertical" size={12} style={{ marginTop: 40 }}>
-                {['Smart Q&A powered by AI', 'Knowledge base integration', 'Personalized assistance'].map((item) => (
+                {[t('login_feature_1'), t('login_feature_2'), t('login_feature_3')].map((item) => (
                   <Space key={item} style={{ color: 'rgba(255,255,255,0.7)' }}>
                     <div style={{
                       width: 6,
@@ -223,6 +223,7 @@ export default function LoginPage() {
             >
               <Form.Item
                 name="email"
+                label={t('email_label')}
                 rules={[
                   { required: true, message: t('validation_email_required') },
                   { type: 'email', message: t('validation_email_invalid') },
@@ -237,6 +238,7 @@ export default function LoginPage() {
 
               <Form.Item
                 name="password"
+                label={t('password_label')}
                 rules={[{ required: true, message: t('validation_password_required') }]}
               >
                 <Input.Password

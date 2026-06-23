@@ -29,6 +29,17 @@ function App() {
       }
     };
     syncLanguage();
+
+    // Dynamic html lang sync with i18n language changes
+    import('./i18n').then(({ default: i18nModule }) => {
+      const langHandler = () => {
+        const lang = i18nModule.language || 'en';
+        document.documentElement.lang = lang.startsWith('zh') ? 'zh' : 'en';
+      };
+      i18nModule.on('languageChanged', langHandler);
+      langHandler();
+      return () => { i18nModule.off('languageChanged', langHandler); };
+    });
   }, []);
 
   return (
