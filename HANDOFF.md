@@ -11,14 +11,25 @@
 
 ## 已完成的工作
 
-### ✅ 迭代 5 — 历史搜索/新手指引/消息复制（最新）
+### ✅ 迭代 5 — 历史搜索/新手指引/消息复制
 - HistoryPage 添加 Input.Search 关键词搜索 + Segmented 时间筛选（今天/本周/本月/更早）
 - AppLayout 添加首次登录引导 Modal（4 功能卡片 2×2 网格，localStorage: ey-onboarding-seen）
 - MessageBubble hover 显示 CopyOutlined 按钮 + clipboard API + Toast 反馈
 - 新增 17 个 i18n keys（zh + en）
-- TypeScript 检查通过（0 新增错误）
 - PPT: `ux_improvement_report/UX优化成果汇报.pptx`（7 页中文汇报）
 - Bug 修复：复制按钮 CSS hover 选择器修正（.msg-bubble-wrapper）
+
+### ✅ 迭代 6 — UX 审计全部完成（12/12）（最新）
+- ChatPage 添加「+ 新建对话」按钮，点击 resetSession 回到 WelcomeScreen
+- ProfilePage 邮箱禁用态优化（LockOutlined + 灰色背景 + 提示文字）
+- 平板中等屏幕（768-1024px）侧边栏默认折叠，Content padding 优化
+- MessageBubble 新增分享/重新生成按钮（navigator.share + fallback 复制）
+- 引用卡片可折叠紧凑列表，分数转"高/中/低相关"标签
+- 交互式 Onboarding Tour（4 步引导，高亮侧边栏导航项 + CSS 脉冲动画）
+- chatStore.ts 智能对话标题生成（去除无意义词、问句截断、CJK/English 自适应）
+- 新增 22 个 i18n keys（zh + en）
+- TypeScript 检查通过（0 新增错误）
+- 报告: `ux_improvement_report/迭代6功能验证报告.md`
 
 ### ✅ 迭代 1 — WelcomeScreen 对话输入框
 - 显式 Input + Send 按钮、自动聚焦、键盘支持
@@ -48,22 +59,16 @@
 - **Bug #2**: ChatPage 添加 `useLocation` 监听路由变化，返回对话时正确重新加载消息
 - **Bug #3**: 输入框改为 `position: fixed` 浮动在底部中心（DeepSeek/Claude 风格）
 
-## 剩余工作（按 UX 审计报告路线图）
+## 剩余工作（全部完成 — 12/12）
 
-### 🔲 剩余工作（迭代 6 — 一次性完成全部 8 项）
-
-#### 🔴 高优先级
-4. **聊天页添加新建对话按钮** — ChatPage 加按钮，清空会话回 WelcomeScreen
-6. **交互式 Onboarding 多步引导** — react-joyride 或自建 Tour 组件
-
-#### 🟡 中优先级
-5. **消息气泡分享/重新生成** — 扩展 hover 操作菜单（复制 | 分享 | 重新生成）
-7. **对话标题自动生成优化** — 智能截断 / LLM 摘要
-
-#### 🟢 低优先级（⚠️ 审计遗漏，之前未执行）
-9. **邮箱禁用态视觉优化** — ProfilePage Input disabled 加锁图标+提示文字
-10. **响应式中等屏幕优化** — 768-1024px 断点下默认折叠侧边栏
-12. **引用卡片信息密度优化** — 可折叠紧凑列表 + 分数转直观标签
+### ✅ 全部完成（迭代 6）
+- 4. **聊天页添加新建对话按钮** — ✅ 迭代 6
+- 6. **交互式 Onboarding 多步引导** — ✅ 迭代 6
+- 5. **消息气泡分享/重新生成** — ✅ 迭代 6
+- 7. **对话标题自动生成优化** — ✅ 迭代 6
+- 9. **邮箱禁用态视觉优化** — ✅ 迭代 6
+- 10. **响应式中等屏幕优化** — ✅ 迭代 6
+- 12. **引用卡片信息密度优化** — ✅ 迭代 6
 
 ## 关键文件
 
