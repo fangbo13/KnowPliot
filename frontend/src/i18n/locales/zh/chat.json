@@ -12,5 +12,13 @@
   "loading_messages": "正在加载消息...",
   "error_title": "错误",
   "error_retry": "重试",
-  "new_chat": "新建对话"
+  "new_chat": "新建对话",
+  "share_message": "分享消息",
+  "regenerate": "重新生成",
+  "sources_count": "{{count}} 个来源",
+  "high_relevance": "高相关",
+  "medium_relevance": "中相关",
+  "low_relevance": "低相关",
+  "expand_sources": "展开来源",
+  "collapse_sources": "收起来源"
 }

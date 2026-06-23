@@ -12,5 +12,13 @@
   "loading_messages": "Loading messages...",
   "error_title": "Error",
   "error_retry": "Retry",
-  "new_chat": "New Chat"
+  "new_chat": "New Chat",
+  "share_message": "Share Message",
+  "regenerate": "Regenerate",
+  "sources_count": "{{count}} sources",
+  "high_relevance": "High",
+  "medium_relevance": "Medium",
+  "low_relevance": "Low",
+  "expand_sources": "Expand sources",
+  "collapse_sources": "Collapse sources"
 }

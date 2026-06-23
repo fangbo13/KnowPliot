@@ -165,7 +165,11 @@ export default function ChatPageContainer() {
         )}
 
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            onRegenerate={msg.role === 'assistant' ? handleRetry : undefined}
+          />
         ))}
 
         {isStreaming && streamContent && (

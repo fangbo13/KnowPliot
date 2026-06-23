@@ -1,14 +1,13 @@
 import { useTranslation } from 'react-i18next';
-import { Card, Typography, Space, Tooltip, message as antdMessage, Button } from 'antd';
-import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
+import { Card, Typography, Tooltip, message as antdMessage, Button } from 'antd';
+import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import { useState } from 'react';
-import type { Message } from '../../store/chatStore';
+import type { Message, Citation } from '../../store/chatStore';
 
 const { Text } = Typography;
 
 // XSS protection: whitelist only safe Markdown elements
-// Block: script, iframe, object, embed, form, input, style, link, meta, base
 const ALLOWED_ELEMENTS = [
   'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins', 'sub', 'sup',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -19,15 +18,30 @@ const ALLOWED_ELEMENTS = [
   'details', 'summary',
 ];
 
+// Convert score to relevance label
+function getRelevanceLabel(score: number, t: (key: string) => string): string {
+  if (score > 0.8) return t('high_relevance');
+  if (score > 0.5) return t('medium_relevance');
+  return t('low_relevance');
+}
+
+function getRelevanceColor(score: number): string {
+  if (score > 0.8) return '#52c41a';  // green
+  if (score > 0.5) return '#faad14';  // orange
+  return '#8c8c8c';  // gray
+}
+
 interface Props {
   message: Message;
   isStreaming?: boolean;
+  onRegenerate?: () => void;
 }
 
-export default function MessageBubble({ message, isStreaming = false }: Props) {
+export default function MessageBubble({ message, isStreaming = false, onRegenerate }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
 
   const handleCopy = async () => {
     try {
@@ -36,7 +50,6 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
       antdMessage.success(t('copied') || '已复制');
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback for browsers without clipboard API
       const textarea = document.createElement('textarea');
       textarea.value = message.content;
       textarea.style.position = 'fixed';
@@ -48,6 +61,22 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
       setCopied(true);
       antdMessage.success(t('copied') || '已复制');
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'EY Onboarding AI',
+          text: message.content,
+        });
+      } catch {
+        // User cancelled share, fallback to copy
+        handleCopy();
+      }
+    } else {
+      handleCopy();
     }
   };
 
@@ -65,11 +94,11 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
         className="msg-bubble-wrapper"
         style={{
           maxWidth: '75%',
-          padding: isUser ? '0' : '0',
+          padding: '0',
           position: 'relative',
         }}
       >
-        {/* Copy button for assistant messages */}
+        {/* Action buttons for assistant messages */}
         {!isUser && (
           <div
             className="msg-copy-btn"
@@ -80,6 +109,8 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
               opacity: 0,
               transition: 'opacity 0.2s ease',
               zIndex: 1,
+              display: 'flex',
+              gap: 2,
             }}
           >
             <Tooltip title={copied ? t('copied') : t('copy_message')}>
@@ -95,6 +126,34 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
                 }}
               />
             </Tooltip>
+            <Tooltip title={t('share_message')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<ShareAltOutlined />}
+                onClick={handleShare}
+                aria-label={t('share_message')}
+                style={{
+                  padding: '2px 6px',
+                  color: 'var(--color-text-tertiary)',
+                }}
+              />
+            </Tooltip>
+            {onRegenerate && (
+              <Tooltip title={t('regenerate')}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={onRegenerate}
+                  aria-label={t('regenerate')}
+                  style={{
+                    padding: '2px 6px',
+                    color: 'var(--color-text-tertiary)',
+                  }}
+                />
+              </Tooltip>
+            )}
           </div>
         )}
         <Card
@@ -108,7 +167,7 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
             boxShadow: isUser ? 'none' : 'var(--shadow-sm, none)',
           }}
           bodyStyle={{
-            padding: isUser ? '12px 16px' : '12px 16px',
+            padding: '12px 16px',
           }}
         >
           {isUser ? (
@@ -133,7 +192,6 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
                     </a>
                   ),
                   img: ({ src, alt }) => (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={src} alt={alt || ''} loading="lazy" />
                   ),
                 }}
@@ -155,32 +213,84 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
           )}
         </Card>
 
+        {/* Collapsible citations for assistant messages */}
         {!isUser && message.citations && message.citations.length > 0 && (
           <div style={{ marginTop: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('sources')}</Text>
-            <Space wrap style={{ marginTop: 4 }}>
-              {message.citations.map((cit, i) => (
-                <Card
-                  key={i}
-                  size="small"
-                  style={{
-                    background: 'var(--color-bg-elevated, #fafafa)',
-                    fontSize: 12,
-                    maxWidth: 250,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Text strong ellipsis style={{ maxWidth: '100%', display: 'block' }}>
-                    {cit.document_title}
-                  </Text>
-                  {cit.page_number && <Text> 路 p.{cit.page_number}</Text>}
-                  <br />
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    Score: {cit.score}
-                  </Text>
-                </Card>
-              ))}
-            </Space>
+            <Button
+              type="text"
+              size="small"
+              onClick={() => setSourcesExpanded(!sourcesExpanded)}
+              icon={sourcesExpanded ? <DownOutlined /> : <RightOutlined />}
+              style={{
+                fontSize: 12,
+                color: 'var(--color-text-secondary)',
+                padding: '2px 4px',
+                height: 'auto',
+              }}
+            >
+              📎 {t('sources_count', { count: message.citations.length })}
+            </Button>
+
+            {sourcesExpanded && (
+              <div
+                className="citation-list"
+                style={{
+                  marginTop: 4,
+                  padding: '6px 8px',
+                  background: 'var(--color-bg-elevated, #fafafa)',
+                  borderRadius: 8,
+                  border: '1px solid var(--color-border-secondary)',
+                }}
+              >
+                {message.citations.map((cit: Citation, i: number) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                      padding: '4px 0',
+                      borderBottom: i < (message.citations?.length ?? 0) - 1 ? '1px solid var(--color-border-secondary)' : 'none',
+                    }}
+                  >
+                    <span style={{
+                      fontSize: 11,
+                      color: 'var(--color-text-tertiary)',
+                      minWidth: 18,
+                      paddingTop: 1,
+                    }}>
+                      {i + 1}.
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Text
+                        strong
+                        ellipsis={{ tooltip: cit.document_title }}
+                        style={{ fontSize: 12, display: 'block', maxWidth: '100%' }}
+                      >
+                        {cit.document_title}
+                      </Text>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                        {cit.page_number && (
+                          <Text type="secondary" style={{ fontSize: 11 }}>
+                            第 {cit.page_number} 页
+                          </Text>
+                        )}
+                        <span
+                          className="relevance-badge"
+                          style={{
+                            fontSize: 11,
+                            color: getRelevanceColor(cit.score),
+                            fontWeight: 500,
+                          }}
+                        >
+                          {getRelevanceLabel(cit.score, t)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

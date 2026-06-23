@@ -49,6 +49,15 @@ export default function AppLayout() {
     return !localStorage.getItem('ey-onboarding-seen');
   });
 
+  // Interactive multi-step tour state
+  const [tourStep, setTourStep] = useState(-1); // -1 = not in tour mode
+  const tourSteps = useMemo(() => [
+    { target: 'tour-nav-chat', title: t('tour_step_chat_title'), desc: t('tour_step_chat_desc'), placement: 'right' },
+    { target: 'tour-nav-history', title: t('tour_step_history_title'), desc: t('tour_step_history_desc'), placement: 'right' },
+    { target: 'tour-nav-knowledge', title: t('tour_step_knowledge_title'), desc: t('tour_step_knowledge_desc'), placement: 'right' },
+    { target: 'tour-nav-profile', title: t('tour_step_profile_title'), desc: t('tour_step_profile_desc'), placement: 'right' },
+  ], [t]);
+
   useEffect(() => {
     const handler = () => {
       const w = window.innerWidth;
@@ -142,6 +151,27 @@ export default function AppLayout() {
     { icon: <BookOutlined style={{ fontSize: 24 }} />, title: t('onboarding_knowledge_title'), desc: t('onboarding_knowledge_desc') },
     { icon: <UserOutlined style={{ fontSize: 24 }} />, title: t('onboarding_profile_title'), desc: t('onboarding_profile_desc') },
   ], [t]);
+
+  // Tour handlers
+  const handleStartTour = useCallback(() => {
+    setOnboardingVisible(false);
+    localStorage.setItem('ey-onboarding-seen', 'true');
+    setTourStep(0);
+  }, []);
+
+  const handleTourNext = useCallback(() => {
+    if (tourStep < tourSteps.length - 1) {
+      setTourStep(prev => prev + 1);
+    } else {
+      setTourStep(-1);
+      localStorage.setItem('ey-onboarding-tour-done', 'true');
+    }
+  }, [tourStep, tourSteps.length]);
+
+  const handleTourSkip = useCallback(() => {
+    setTourStep(-1);
+    localStorage.setItem('ey-onboarding-tour-done', 'true');
+  }, []);
 
   // Sider logo/header content (reused in Drawer)
   const siderHeader = (
