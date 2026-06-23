@@ -33,23 +33,23 @@ export default function WelcomeScreen({ onQuickAction }: { onQuickAction: (q: st
           width: 72,
           height: 72,
           borderRadius: 18,
-          background: 'linear-gradient(145deg, #FFE500 0%, #FDD800 100%)',
+          background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
           marginBottom: 20,
-          boxShadow: '0 8px 24px rgba(255, 229, 0, 0.25), 0 2px 8px rgba(255, 229, 0, 0.15)',
+          boxShadow: '0 8px 24px rgba(0, 82, 255, 0.25), 0 2px 8px rgba(0, 82, 255, 0.15)',
           animation: 'fadeInUp 0.5s ease-out',
         }}>
           <span style={{
             fontSize: 32,
             fontWeight: 800,
-            color: '#262626',
+            color: '#FFFFFF',
             letterSpacing: -1,
           }}>EY</span>
         </div>
         <Title level={3} style={{
-          fontWeight: 500,
-          color: 'var(--color-text, #333)',
+          fontWeight: 400,
+          color: 'var(--color-text, #0F172A)',
           marginTop: 8,
-          fontFamily: 'var(--font-family-display)',
+          fontFamily: "'Calistoga', Georgia, serif",
         }}>
           {t('title')}
         </Title>
@@ -87,8 +87,8 @@ export default function WelcomeScreen({ onQuickAction }: { onQuickAction: (q: st
                 }}
                 onMouseEnter={(e) => {
                   const target = e.currentTarget;
-                  target.style.boxShadow = 'var(--shadow-md)';
-                  target.style.borderColor = 'var(--ey-yellow)';
+                  target.style.boxShadow = 'var(--shadow-accent)';
+                  target.style.borderColor = 'var(--accent)';
                   target.style.transform = 'translateY(-2px)';
                 }}
                 onMouseLeave={(e) => {
@@ -99,7 +99,7 @@ export default function WelcomeScreen({ onQuickAction }: { onQuickAction: (q: st
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'var(--ey-yellow)', fontSize: 16 }}>{action.icon}</span>
+                  <span style={{ color: 'var(--accent)', fontSize: 16 }}>{action.icon}</span>
                   <span style={{ fontWeight: 600, fontSize: 14 }}>{action.label}</span>
                 </div>
                 <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.4 }}>

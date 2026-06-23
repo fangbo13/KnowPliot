@@ -1,13 +1,11 @@
 ﻿import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
-import { Card, Form, Input, Select, Button, Typography, message, Segmented } from 'antd';
+import { Card, Form, Input, Select, Button, message, Segmented } from 'antd';
 import { SunOutlined, MoonOutlined, DesktopOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
 import apiClient from '../api/client';
 import i18n from '../i18n';
-
-const { Title } = Typography;
 
 export default function ProfilePage() {
   const { t } = useTranslation('common');
@@ -43,8 +41,14 @@ export default function ProfilePage() {
 
   return (
     <div style={{ maxWidth: 'min(680px, 100%)', width: '100%', margin: '0 auto' }}>
-      <Card style={{ marginBottom: 16 }}>
-        <Title level={4}>{t('profile_settings')}</Title>
+      <Card
+        title={
+          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            {t('profile_settings')}
+          </span>
+        }
+        style={{ marginBottom: 16 }}
+      >
         <Form
           layout="vertical"
           initialValues={{
@@ -73,8 +77,13 @@ export default function ProfilePage() {
         </Form>
       </Card>
 
-      <Card>
-        <Title level={4}>{t('appearance')}</Title>
+      <Card
+        title={
+          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            {t('appearance')}
+          </span>
+        }
+      >
         <p style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>
           {t('theme_desc')}
         </p>

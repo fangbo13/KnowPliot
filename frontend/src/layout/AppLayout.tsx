@@ -1,4 +1,4 @@
-﻿import { useTranslation } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Avatar, Dropdown, Space, Button } from 'antd';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
+import { useMemo, useCallback } from 'react';
 
 const { Header, Sider, Content } = Layout;
 
@@ -23,16 +24,18 @@ export default function AppLayout() {
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
 
-  const menuItems = [
+  // Memoize menu items to prevent unnecessary re-renders
+  const menuItems = useMemo(() => [
     { key: '/chat', icon: <MessageOutlined />, label: t('nav_chat') },
     { key: '/history', icon: <HistoryOutlined />, label: t('nav_history') },
     ...(user?.is_hr_admin
       ? [{ key: '/admin/knowledge', icon: <BookOutlined />, label: t('nav_knowledge') }]
       : []),
     { key: '/profile', icon: <UserOutlined />, label: t('nav_profile') },
-  ];
+  ], [user?.is_hr_admin, t]);
 
-  const userMenu = {
+  // Memoize user dropdown menu
+  const userMenu = useMemo(() => ({
     items: [
       {
         key: 'logout',
@@ -44,10 +47,15 @@ export default function AppLayout() {
         },
       },
     ],
-  };
+  }), [logout, navigate, t]);
 
-  // Normalize root path to /chat for menu highlight (since index route redirects to /chat)
+  // Normalize root path to /chat for menu highlight
   const selectedKey = location.pathname === '/' ? '/chat' : location.pathname;
+
+  // Memoize theme toggle handler
+  const handleThemeToggle = useCallback(() => {
+    setThemeMode(isDark ? 'light' : 'dark');
+  }, [isDark, setThemeMode]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -70,14 +78,14 @@ export default function AppLayout() {
             width: 32,
             height: 32,
             borderRadius: 8,
-            background: 'linear-gradient(135deg, #FFE500 0%, #FDD800 100%)',
+            background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            boxShadow: '0 2px 8px rgba(255, 229, 0, 0.25)',
+            boxShadow: '0 2px 8px rgba(0, 82, 255, 0.25)',
           }}>
-            <span style={{ fontSize: 14, fontWeight: 800, color: '#262626', lineHeight: 1 }}>EY</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: '#FFFFFF', lineHeight: 1 }}>EY</span>
           </div>
           <h2 style={{
             margin: 0,
@@ -111,12 +119,13 @@ export default function AppLayout() {
           <Button
             type="text"
             icon={isDark ? <SunOutlined /> : <MoonOutlined />}
-            onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
+            onClick={handleThemeToggle}
+            aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')}
             style={{ marginRight: 16, color: 'var(--color-text-secondary)' }}
             title={isDark ? t('switch_to_light') : t('switch_to_dark')}
           />
           <Dropdown menu={userMenu}>
-            <Space style={{ cursor: 'pointer' }}>
+            <Space style={{ cursor: 'pointer' }} aria-label={t('user_menu') || 'User menu'}>
               <Avatar icon={<UserOutlined />} />
               <span style={{
                 maxWidth: 200,

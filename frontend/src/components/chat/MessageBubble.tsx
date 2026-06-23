@@ -1,9 +1,21 @@
-﻿import { useTranslation } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 import { Card, Typography, Space } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '../../store/chatStore';
 
 const { Text } = Typography;
+
+// XSS protection: whitelist only safe Markdown elements
+// Block: script, iframe, object, embed, form, input, style, link, meta, base
+const ALLOWED_ELEMENTS = [
+  'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins', 'sub', 'sup',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'ul', 'ol', 'li',
+  'blockquote', 'code', 'pre', 'hr',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'a', 'img',
+  'details', 'summary',
+];
 
 interface Props {
   message: Message;
@@ -36,7 +48,7 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
             background: isUser ? 'var(--user-msg-bg, #262626)' : 'var(--color-bg-container, white)',
             color: isUser ? 'white' : undefined,
             border: isUser ? 'none' : '1px solid var(--color-border-secondary, #f0f0f0)',
-            borderLeft: isUser ? '4px solid var(--user-msg-accent, #FFE500)' : undefined,
+            borderLeft: isUser ? '4px solid var(--user-msg-accent, #0052FF)' : undefined,
             borderRadius: 12,
             boxShadow: isUser ? 'none' : 'var(--shadow-sm, none)',
           }}
@@ -56,18 +68,32 @@ export default function MessageBubble({ message, isStreaming = false }: Props) {
               overflowWrap: 'break-word',
               wordBreak: 'break-word',
             }}>
-              <ReactMarkdown>{message.content}</ReactMarkdown>
+              <ReactMarkdown
+                allowedElements={ALLOWED_ELEMENTS}
+                unwrapDisallowed={true}
+                components={{
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer">
+                      {children}
+                    </a>
+                  ),
+                  img: ({ src, alt }) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={src} alt={alt || ''} loading="lazy" />
+                  ),
+                }}
+              >{message.content}</ReactMarkdown>
               {isStreaming && (
                 <span style={{
                   display: 'inline-block',
                   width: 2,
                   height: 18,
-                  background: 'var(--ey-yellow)',
+                  background: '#0052FF',
                   marginLeft: 4,
                   verticalAlign: 'text-bottom',
                   animation: 'blink 0.8s ease-in-out infinite',
                   borderRadius: 1,
-                  boxShadow: '0 0 4px rgba(255, 229, 0, 0.4)',
+                  boxShadow: '0 0 4px rgba(0, 82, 255, 0.4)',
                 }} />
               )}
             </div>

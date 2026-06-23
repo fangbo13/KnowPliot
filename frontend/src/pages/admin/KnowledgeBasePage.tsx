@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Upload, message, Typography, Modal, Empty } from 'antd';
+import { Card, Table, Tag, Button, Space, Upload, message, Modal, Empty } from 'antd';
 import { ReloadOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import { documentApi } from '../../api/documents';
 import { getAuthToken } from '../../api/client';
-
-const { Title } = Typography;
 
 interface Document {
   id: string;
@@ -149,7 +147,9 @@ export default function KnowledgeBasePage() {
   return (
     <Card>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>{t('nav_knowledge')}</Title>
+        <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400, margin: 0 }}>
+          {t('nav_knowledge')}
+        </span>
         <Space>
           <Upload
             action="/api/v1/documents/"

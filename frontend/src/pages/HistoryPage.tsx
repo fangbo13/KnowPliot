@@ -25,7 +25,13 @@ export default function HistoryPage() {
   }
 
   return (
-    <Card title={t('conversation_history')}>
+    <Card
+      title={
+        <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+          {t('conversation_history')}
+        </span>
+      }
+    >
       <List
         dataSource={sessions}
         renderItem={(session) => (

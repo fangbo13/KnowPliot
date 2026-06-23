@@ -1,10 +1,22 @@
-﻿import { useTranslation } from 'react-i18next';
-import { useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Input, Button, Space, Spin, Alert } from 'antd';
 import { SendOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useChatStore } from '../store/chatStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import MessageBubble from '../components/chat/MessageBubble';
+
+// Throttle helper for scroll optimization
+function throttle<T extends (...args: unknown[]) => void>(fn: T, limit: number): T {
+  let inThrottle = false;
+  return ((...args: Parameters<T>) => {
+    if (!inThrottle) {
+      fn(...args);
+      inThrottle = true;
+      setTimeout(() => { inThrottle = false; }, limit);
+    }
+  }) as T;
+}
 
 export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
@@ -33,16 +45,21 @@ export default function ChatPageContainer() {
     }
   }, [activeSessionId, loadMessages]);
 
+  // Throttle scroll during streaming to prevent excessive renders
+  const throttledScroll = useRef(
+    throttle((behavior: ScrollBehavior) => {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }, 200)
+  ).current;
+
   useEffect(() => {
     const container = messagesEndRef.current?.parentElement;
     if (!container) return;
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
     if (isNearBottom || !isStreaming) {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: isStreaming ? 'instant' : 'smooth',
-      });
+      throttledScroll(isStreaming ? 'instant' : 'smooth');
     }
-  }, [messages, streamContent, isStreaming]);
+  }, [messages, streamContent, isStreaming, throttledScroll]);
 
   const handleSend = () => {
     if (!inputValue.trim() || isStreaming) return;
@@ -70,6 +87,20 @@ export default function ChatPageContainer() {
     );
   }
 
+  // Classify error message for better user feedback
+  const getErrorDescription = (error: string) => {
+    if (error.includes('401') || error.includes('authentication')) {
+      return t('error_auth') || 'API authentication failed. Please check backend configuration.';
+    }
+    if (error.includes('500') || error.includes('Server error')) {
+      return t('error_server') || 'Server error. Please try again later.';
+    }
+    if (error.includes('NetworkError') || error.includes('fetch') || error.includes('Network')) {
+      return t('error_network') || 'Network error. Please check your connection.';
+    }
+    return error;
+  };
+
   return (
     <div style={{
       display: 'flex',
@@ -90,7 +121,7 @@ export default function ChatPageContainer() {
         {sendError && (
           <Alert
             message={t('error_title') || 'Error'}
-            description={sendError}
+            description={getErrorDescription(sendError)}
             type="error"
             showIcon
             closable
@@ -139,7 +170,7 @@ export default function ChatPageContainer() {
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  background: 'var(--ey-yellow)',
+                  background: 'var(--accent)',
                   animation: `dotBounce 1.4s ease-in-out ${i * 0.16}s infinite`,
                 }} />
               ))}
@@ -169,6 +200,7 @@ export default function ChatPageContainer() {
             disabled={isStreaming}
             size="large"
             maxLength={4000}
+            aria-label={t('chat_input_label') || 'Type your message'}
           />
           <Button
             type="primary"

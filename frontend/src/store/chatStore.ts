@@ -121,6 +121,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         set({ isStreaming: false, sendError: 'Failed to start conversation' });
         return;
       }
+    } else {
+      // Validate sessionId format (M6: security enhancement)
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+        set({ isStreaming: false, sendError: 'Invalid session ID format' });
+        return;
+      }
     }
 
     const userMessage: Message = {
