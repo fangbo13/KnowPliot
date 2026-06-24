@@ -20,5 +20,9 @@
   "medium_relevance": "Medium",
   "low_relevance": "Low",
   "expand_sources": "Expand sources",
-  "collapse_sources": "Collapse sources"
+  "collapse_sources": "Collapse sources",
+  "copy_message": "Copy message",
+  "chat_input_label": "Type your message",
+  "welcome_tip": "Welcome to EY Onboarding AI! Type your question below or choose a quick question from Common Questions.",
+  "new_messages": "New messages"
 }

@@ -3,10 +3,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   // Allow configuring proxy target via environment variable
-  // Docker: VITE_PROXY_TARGET=http://backend:8000 (default)
-  // Host machine: VITE_PROXY_TARGET=http://127.0.0.1:8000
+  // Host machine defaults to local Django.
+  // Docker overrides this with VITE_PROXY_TARGET=http://backend:8000.
   const env = loadEnv(mode, process.cwd(), '');
-  const proxyTarget = env.VITE_PROXY_TARGET || 'http://backend:8000';
+  const proxyTarget = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000';
 
   return {
     plugins: [react()],

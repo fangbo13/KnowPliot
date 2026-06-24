@@ -1,120 +1,133 @@
 import { useTranslation } from 'react-i18next';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, Button, Drawer, Modal, Card, Typography } from 'antd';
+import { Outlet, useNavigate } from 'react-router-dom';
+import {
+  Avatar, Dropdown, Button, Drawer, Modal, Card, Typography,
+  Popconfirm, Input,
+} from 'antd';
 import {
   MessageOutlined,
-  HistoryOutlined,
   BookOutlined,
   UserOutlined,
   LogoutOutlined,
   SunOutlined,
   MoonOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   GlobalOutlined,
   RocketOutlined,
+  SettingOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  SearchOutlined,
+  MoreOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
-import { useMemo, useCallback, useState, useEffect } from 'react';
+import { useBreakpoint } from '../hooks/useBreakpoint';
+import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
+import { useDebounce } from '../hooks/useDebounce';
+import { useChatStore } from '../store/chatStore';
+import { chatApi } from '../api/chat';
+import { getDateGroupKey, DATE_GROUP_ORDER } from '../utils/dateGroup';
 import i18n from '../i18n';
+import NetworkStatusBanner from '../components/NetworkStatusBanner';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 const { Text } = Typography;
-
-const { Header, Sider, Content } = Layout;
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [collapsed, setCollapsed] = useState(() => {
-    // On tablet widths, default to collapsed for better content space
-    if (typeof window !== 'undefined' && window.innerWidth >= 768 && window.innerWidth <= 1024) {
-      return true;
-    }
-    const saved = localStorage.getItem('ey-sidebar-collapsed');
-    return saved === 'true';
-  });
+  const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
 
-  // Mobile responsive state
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
-  const [isTablet, setIsTablet] = useState(() => window.innerWidth >= 768 && window.innerWidth <= 1024);
+  // Sidebar conversation list state
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    return new Set(['7days', '30days', 'earlier']);
+  });
+  const [contextMenuSession, setContextMenuSession] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const [sidebarActionMenu, setSidebarActionMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const sidebarActionMenuRef = useRef<HTMLDivElement>(null);
+
+  // Debounced sidebar search
+  const debouncedSidebarSearch = useDebounce(sidebarSearch, 300);
+
+  // P1-7: Unified breakpoints
+  const bp = useBreakpoint();
+  const isMobile = bp.sm;
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
-  // Onboarding tour state
+  // Onboarding modal state (no more interactive tour — nav structure changed)
   const [onboardingVisible, setOnboardingVisible] = useState(() => {
     return !localStorage.getItem('ey-onboarding-seen');
   });
 
-  // Interactive multi-step tour state
-  const [tourStep, setTourStep] = useState(-1); // -1 = not in tour mode
-  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
-  const tourSteps = useMemo(() => [
-    { target: 'tour-nav-chat', title: t('tour_step_chat_title'), desc: t('tour_step_chat_desc') },
-    { target: 'tour-nav-history', title: t('tour_step_history_title'), desc: t('tour_step_history_desc') },
-    { target: 'tour-nav-knowledge', title: t('tour_step_knowledge_title'), desc: t('tour_step_knowledge_desc') },
-    { target: 'tour-nav-profile', title: t('tour_step_profile_title'), desc: t('tour_step_profile_desc') },
-  ], [t]);
-
-  // Compute target element position for tour tooltip
+  // Load sessions on mount and periodically
   useEffect(() => {
-    if (tourStep < 0 || tourStep >= tourSteps.length) {
-      setTargetRect(null);
-      return;
-    }
-    const el = document.getElementById(tourSteps[tourStep].target);
-    if (el) {
-      const rect = el.getBoundingClientRect();
-      setTargetRect(rect);
-      el.classList.add('tour-highlight');
-      return () => el.classList.remove('tour-highlight');
-    }
-  }, [tourStep, tourSteps]);
+    loadSessions();
+  }, [loadSessions]);
 
+  // Close context menu on outside click
   useEffect(() => {
-    const handler = () => {
-      const w = window.innerWidth;
-      setIsMobile(w < 768);
-      setIsTablet(w >= 768 && w <= 1024);
-      // Auto-collapse sidebar when entering tablet range
-      if (w >= 768 && w <= 1024 && !isTablet) {
-        setCollapsed(true);
+    if (!contextMenuSession) return;
+    const handler = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenuSession(null);
       }
     };
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, [isMobile, isTablet]);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [contextMenuSession]);
 
-  // Normalize root path to /chat for menu highlight
-  const selectedKey = location.pathname === '/' ? '/chat' : location.pathname;
+  // Close sidebar action menu on outside click
+  useEffect(() => {
+    if (!sidebarActionMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (sidebarActionMenuRef.current && !sidebarActionMenuRef.current.contains(e.target as Node)) {
+        setSidebarActionMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [sidebarActionMenu]);
 
-  // Memoize menu items to prevent unnecessary re-renders
-  const menuItems = useMemo(() => [
-    { key: '/chat', icon: <MessageOutlined />, label: <span id="tour-nav-chat">{t('nav_chat')}</span>, 'aria-current': selectedKey === '/chat' ? 'page' as const : undefined },
-    { key: '/history', icon: <HistoryOutlined />, label: <span id="tour-nav-history">{t('nav_history')}</span>, 'aria-current': selectedKey === '/history' ? 'page' as const : undefined },
-    ...(user?.is_hr_admin
-      ? [{ key: '/admin/knowledge', icon: <BookOutlined />, label: <span id="tour-nav-knowledge">{t('nav_knowledge')}</span>, 'aria-current': selectedKey === '/admin/knowledge' ? 'page' as const : undefined }]
-      : []),
-    { key: '/profile', icon: <UserOutlined />, label: <span id="tour-nav-profile">{t('nav_profile')}</span>, 'aria-current': selectedKey === '/profile' ? 'page' as const : undefined },
-  ], [selectedKey, user?.is_hr_admin, t]);
+  // Memoize user dropdown menu (header — includes knowledge base for admins)
+  const userMenu = useMemo(() => {
+    const items: any[] = [];
 
-  // Memoize user dropdown menu
-  const userMenu = useMemo(() => ({
-    items: [
-      {
-        key: 'logout',
-        icon: <LogoutOutlined />,
-        label: t('logout'),
-        onClick: async () => {
-          await logout();
-          navigate('/login');
-        },
+    // Knowledge base — admin only
+    if (user?.is_hr_admin) {
+      items.push({
+        key: 'knowledge',
+        icon: <BookOutlined />,
+        label: t('knowledge_base'),
+        onClick: () => navigate('/admin/knowledge'),
+      });
+      items.push({ type: 'divider' as const });
+    }
+
+    items.push({
+      key: 'profile',
+      icon: <SettingOutlined />,
+      label: t('user_settings'),
+      onClick: () => navigate('/profile'),
+    });
+    items.push({ type: 'divider' as const });
+    items.push({
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: t('logout'),
+      onClick: async () => {
+        await logout();
+        navigate('/login');
       },
-    ],
-  }), [logout, navigate, t]);
+    });
+
+    return { items };
+  }, [logout, navigate, t, user?.is_hr_admin]);
 
   // Memoize theme toggle handler
   const handleThemeToggle = useCallback(() => {
@@ -145,59 +158,95 @@ export default function AppLayout() {
     ],
   }), [currentLang, handleLangChange]);
 
-  // Sidebar collapse toggle with persistence
-  const handleToggleCollapsed = useCallback(() => {
-    setCollapsed(prev => {
-      const next = !prev;
-      localStorage.setItem('ey-sidebar-collapsed', String(next));
-      return next;
-    });
-  }, []);
-
-  // Onboarding tour handler
+  // Onboarding handler
   const handleOnboardingClose = useCallback(() => {
     localStorage.setItem('ey-onboarding-seen', 'true');
     setOnboardingVisible(false);
   }, []);
 
-  // Onboarding feature cards data
+  // Onboarding feature cards data (simplified — no history/nav references)
   const onboardingFeatures = useMemo(() => [
     { icon: <MessageOutlined style={{ fontSize: 24 }} />, title: t('onboarding_chat_title'), desc: t('onboarding_chat_desc') },
-    { icon: <HistoryOutlined style={{ fontSize: 24 }} />, title: t('onboarding_history_title'), desc: t('onboarding_history_desc') },
     { icon: <BookOutlined style={{ fontSize: 24 }} />, title: t('onboarding_knowledge_title'), desc: t('onboarding_knowledge_desc') },
     { icon: <UserOutlined style={{ fontSize: 24 }} />, title: t('onboarding_profile_title'), desc: t('onboarding_profile_desc') },
   ], [t]);
 
-  // Tour handlers
-  const handleStartTour = useCallback(() => {
-    setOnboardingVisible(false);
-    localStorage.setItem('ey-onboarding-seen', 'true');
-    setTourStep(0);
-  }, []);
+  // Filtered and grouped sidebar sessions
+  const sidebarSessions = useMemo(() => {
+    const query = debouncedSidebarSearch.toLowerCase();
+    const filtered = sessions.filter((s) => {
+      if (query && !(s.title || '').toLowerCase().includes(query)) return false;
+      return true;
+    });
 
-  const handleTourNext = useCallback(() => {
-    if (tourStep < tourSteps.length - 1) {
-      setTourStep(prev => prev + 1);
-    } else {
-      setTourStep(-1);
-      localStorage.setItem('ey-onboarding-tour-done', 'true');
+    const groups: Record<string, typeof filtered> = {};
+    for (const key of DATE_GROUP_ORDER) {
+      groups[key] = [];
     }
-  }, [tourStep, tourSteps.length]);
+    for (const s of filtered) {
+      const gk = getDateGroupKey(s.updatedAt);
+      groups[gk].push(s);
+    }
+    return groups;
+  }, [sessions, debouncedSidebarSearch]);
 
-  const handleTourSkip = useCallback(() => {
-    setTourStep(-1);
-    localStorage.setItem('ey-onboarding-tour-done', 'true');
+  // Toggle collapsed group
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }, []);
 
-  // Sider logo/header content (reused in Drawer)
+  // Handle sidebar session click
+  const handleSidebarSessionClick = useCallback((id: string) => {
+    setActiveSession(id);
+    navigate('/chat');
+    setMobileDrawerOpen(false);
+    setContextMenuSession(null);
+    setSidebarActionMenu(null);
+  }, [setActiveSession, navigate]);
+
+  // Handle new chat from sidebar
+  const handleNewChat = useCallback(() => {
+    resetSession();
+    navigate('/chat');
+    setMobileDrawerOpen(false);
+  }, [resetSession, navigate]);
+
+  // Handle delete session
+  const handleDeleteSession = useCallback(async (id: string) => {
+    try {
+      await chatApi.deleteSession(id);
+      loadSessions();
+      if (activeSessionId === id) {
+        resetSession();
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+    }
+    setContextMenuSession(null);
+    setSidebarActionMenu(null);
+  }, [activeSessionId, loadSessions, resetSession]);
+
+  // Group label i18n key
+  const groupLabelKey: Record<string, string> = {
+    today: 'sidebar_today',
+    yesterday: 'sidebar_yesterday',
+    '7days': 'sidebar_7days',
+    '30days': 'sidebar_30days',
+    earlier: 'sidebar_earlier',
+  };
+
+  // Sidebar header content (reused in Drawer)
   const siderHeader = (
     <div style={{
-      padding: 16,
-      borderBottom: '1px solid var(--color-border-secondary)',
+      padding: '16px 16px 8px',
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      gap: 12,
     }}>
       <div style={{
         width: 32,
@@ -217,45 +266,247 @@ export default function AppLayout() {
         fontSize: 16,
         fontWeight: 600,
         color: 'var(--color-text)',
-        whiteSpace: 'nowrap',
-        transition: 'opacity 0.2s ease',
-        opacity: collapsed ? 0 : 1,
-        pointerEvents: 'none',
       }}>Onboarding</h2>
-      <Button
-        type="text"
-        icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-        onClick={handleToggleCollapsed}
-        aria-label={collapsed ? t('expand_sidebar') : t('collapse_sidebar')}
-        aria-expanded={!collapsed}
-        style={{
-          color: 'var(--color-text-secondary)',
-          flexShrink: 0,
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        }}
-      />
     </div>
   );
 
+  // Sidebar user area (reused in Drawer)
+  const sidebarUserArea = useMemo(() => {
+    const userMenuItems: any[] = [
+      {
+        key: 'profile',
+        icon: <SettingOutlined />,
+        label: t('user_settings'),
+        onClick: () => {
+          navigate('/profile');
+          setMobileDrawerOpen(false);
+        },
+      },
+      { type: 'divider' as const },
+      {
+        key: 'logout',
+        icon: <LogoutOutlined />,
+        label: t('logout'),
+        onClick: async () => {
+          await logout();
+          navigate('/login');
+          setMobileDrawerOpen(false);
+        },
+      },
+    ];
+
+    return (
+      <div style={{
+        padding: '8px 12px',
+        borderTop: '1px solid var(--color-border-secondary)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        cursor: 'pointer',
+        borderRadius: '8px 8px 0 0',
+        transition: 'background 0.15s ease',
+      }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+      >
+        <Avatar icon={<UserOutlined />} size="small" />
+        <span style={{
+          flex: 1,
+          fontSize: 13,
+          color: 'var(--color-text)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>{user?.email}</span>
+        <Dropdown menu={{ items: userMenuItems }} placement="topRight" trigger={['click']}>
+          <Button
+            type="text"
+            icon={<MoreOutlined />}
+            size="small"
+            aria-label={t('user_settings')}
+            style={{ color: 'var(--color-text-secondary)', padding: '0 4px' }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Dropdown>
+      </div>
+    );
+  }, [user?.email, logout, navigate, t]);
+
+  // Shared conversation list renderer
+  const renderConversationList = () => (
+    <>
+      {/* Search capsule */}
+      <div style={{ padding: '0 12px 8px' }}>
+        <Input
+          id="sidebar-search-input"
+          size="small"
+          placeholder={t('sidebar_search')}
+          prefix={<SearchOutlined style={{ fontSize: 12 }} />}
+          value={sidebarSearch}
+          onChange={(e) => setSidebarSearch(e.target.value)}
+          allowClear
+          style={{
+            borderRadius: 20,
+            background: 'var(--color-fill-secondary)',
+            border: 'none',
+          }}
+          aria-label={t('sidebar_search')}
+        />
+      </div>
+
+      {/* Grouped conversation list */}
+      {sessions.length === 0 ? (
+        <div style={{
+          padding: '24px 16px',
+          textAlign: 'center',
+          color: 'var(--color-text-tertiary)',
+          fontSize: 12,
+        }}>
+          {t('sidebar_empty_state')}
+        </div>
+      ) : (
+        DATE_GROUP_ORDER.map((groupKey) => {
+          const groupSessions = sidebarSessions[groupKey];
+          if (!groupSessions || groupSessions.length === 0) return null;
+
+          const isCollapsed = collapsedGroups.has(groupKey);
+          const label = t(groupLabelKey[groupKey] || groupKey);
+
+          return (
+            <div key={groupKey} style={{ marginBottom: 4 }}>
+              {/* Group header */}
+              <div
+                onClick={() => toggleGroup(groupKey)}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--color-text-tertiary)',
+                  padding: '6px 16px 4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  userSelect: 'none',
+                }}
+                role="button"
+                aria-expanded={!isCollapsed}
+              >
+                <span style={{
+                  transition: 'transform 0.2s ease',
+                  display: 'inline-block',
+                  transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0)',
+                  fontSize: 10,
+                }}>
+                  ▾
+                </span>
+                {label}
+                <span style={{ marginLeft: 'auto', fontWeight: 400, opacity: 0.6 }}>
+                  {groupSessions.length}
+                </span>
+              </div>
+
+              {/* Group items */}
+              {!isCollapsed && groupSessions.map((session) => {
+                const isActive = session.id === activeSessionId;
+                return (
+                  <div
+                    key={session.id}
+                    className="sidebar-chat-item"
+                    onClick={() => handleSidebarSessionClick(session.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenuSession({
+                        id: session.id,
+                        title: session.title || t('new_conversation'),
+                        x: e.clientX,
+                        y: e.clientY,
+                      });
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '6px 12px',
+                      margin: '0 8px',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      lineHeight: '20px',
+                      color: isActive ? 'var(--color-text)' : 'var(--color-text-secondary)',
+                      background: isActive ? 'rgba(0, 82, 255, 0.08)' : 'transparent',
+                      fontWeight: isActive ? 600 : 400,
+                      borderRadius: 6,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      position: 'relative',
+                      transition: 'background 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) e.currentTarget.style.background = 'var(--color-fill)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) e.currentTarget.style.background = 'transparent';
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSidebarSessionClick(session.id);
+                    }}
+                  >
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {session.title || t('new_conversation')}
+                    </span>
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<MoreOutlined style={{ fontSize: 12 }} />}
+                        style={{
+                          padding: '0 4px',
+                          height: 24,
+                          minWidth: 24,
+                          color: 'var(--color-text-tertiary)',
+                          opacity: isActive ? 1 : 0,
+                          transition: 'opacity 0.15s ease',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setSidebarActionMenu({
+                            sessionId: session.id,
+                            x: rect.right,
+                            y: rect.bottom,
+                          });
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.opacity = '1';
+                          e.currentTarget.style.background = 'var(--color-fill)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.opacity = isActive ? '1' : '0';
+                          e.currentTarget.style.background = 'transparent';
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })
+      )}
+    </>
+  );
+
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      {/* Onboarding tour modal for first-time users */}
+    <div style={{ height: '100vh', display: 'flex' }}>
+      {/* Onboarding modal for first-time users */}
       <Modal
         open={onboardingVisible}
         onCancel={handleOnboardingClose}
-        footer={
-          <Button
-            type="primary"
-            size="large"
-            icon={<RocketOutlined />}
-            onClick={handleStartTour}
-            style={{ borderRadius: 12, fontWeight: 500, padding: '0 32px' }}
-          >
-            {t('onboarding_start')}
-          </Button>
-        }
+        footer={null}
         centered
-        closable={false}
+        closable
+        maskClosable
         width={520}
         className="onboarding-modal"
       >
@@ -314,126 +565,68 @@ export default function AppLayout() {
             </Card>
           ))}
         </div>
+
+        <div style={{ textAlign: 'center', marginTop: 20 }}>
+          <Button
+            type="primary"
+            size="large"
+            icon={<RocketOutlined />}
+            onClick={handleOnboardingClose}
+            style={{ borderRadius: 12, fontWeight: 500, padding: '0 32px' }}
+          >
+            {t('onboarding_start')}
+          </Button>
+        </div>
       </Modal>
 
-      {/* Interactive multi-step tour overlay */}
-      {tourStep >= 0 && tourStep < tourSteps.length && (
-        <>
-          {/* Dark overlay */}
-          <div
-            className="tour-overlay"
-            onClick={handleTourSkip}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0, 0, 0, 0.6)',
-              zIndex: 999,
-              cursor: 'pointer',
-            }}
-          />
-          {/* Tour tooltip */}
-          {targetRect && (
-          <div
-            className="tour-tooltip"
-            role="dialog"
-            aria-label="Onboarding tour"
-            style={{
-              position: 'fixed',
-              top: targetRect.top - 8,
-              left: targetRect.right + 16,
-              transform: 'translateY(-50%)',
-              zIndex: 1000,
-              background: 'var(--color-bg-container)',
-              borderRadius: 16,
-              padding: '20px 24px',
-              maxWidth: 300,
-              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.2)',
-              border: '1px solid var(--color-border)',
-              animation: 'fadeInUp 0.3s ease-out',
-            }}
-          >
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 8,
-            }}>
-              <Typography.Text strong style={{ fontSize: 14, color: 'var(--color-text)' }}>
-                {tourSteps[tourStep].title}
-              </Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {tourStep + 1}/{tourSteps.length}
-              </Typography.Text>
-            </div>
-            <Typography.Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 16, lineHeight: 1.5 }}>
-              {tourSteps[tourStep].desc}
-            </Typography.Text>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Button
-                type="text"
-                size="small"
-                onClick={handleTourSkip}
-                style={{ fontSize: 12 }}
-              >
-                {t('tour_skip')}
-              </Button>
-              <Button
-                type="primary"
-                size="small"
-                onClick={handleTourNext}
-                style={{ borderRadius: 8, fontSize: 12 }}
-              >
-                {tourStep < tourSteps.length - 1 ? t('tour_next') : t('tour_finish')}
-              </Button>
-            </div>
-          </div>
-          )}
-        </>
-      )}
-
       {/* Skip to content link */}
-      <a
-        href="#main-content"
-        style={{
-          position: 'absolute',
-          top: -40,
-          left: 0,
-          background: 'var(--accent)',
-          color: '#fff',
-          padding: '8px 16px',
-          zIndex: 9999,
-          textDecoration: 'none',
-          transition: 'top 0.2s',
-        }}
-        onFocus={(e) => { e.currentTarget.style.top = '0'; }}
-        onBlur={(e) => { e.currentTarget.style.top = '-40px'; }}
-      >
+      <a href="#main-content" className="skip-link">
         {t('skip_to_content') || 'Skip to main content'}
       </a>
 
-      {/* Desktop Sider */}
+      {/* Desktop Sidebar — DeepSeek pattern: fixed width flex child */}
       {!isMobile && (
-        <Sider
-          collapsed={collapsed}
-          collapsible={false}
-          breakpoint="md"
-          collapsedWidth={64}
-          role="navigation"
-          aria-label={t('nav_sidebar') || 'Navigation sidebar'}
-          style={{
-            borderRight: '1px solid var(--color-border-secondary)',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          }}
-        >
+        <div style={{
+          width: 260,
+          flexShrink: 0,
+          borderRight: '1px solid var(--color-border-secondary)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          background: 'var(--color-bg-container)',
+        }}>
+          {/* Sidebar header: Logo + icons */}
           {siderHeader}
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKey]}
-            items={menuItems}
-            onClick={({ key }) => navigate(key)}
-            style={{ border: 'none' }}
-          />
-        </Sider>
+
+          {/* New Chat button */}
+          <div style={{ padding: '4px 12px 8px' }}>
+            <Button
+              type="default"
+              icon={<PlusOutlined />}
+              onClick={handleNewChat}
+              block
+              size="middle"
+              className="new-chat-btn"
+            >
+              {t('sidebar_new_chat')}
+            </Button>
+          </div>
+
+          {/* Conversation list area */}
+          <div style={{
+            borderTop: '1px solid var(--color-border-secondary)',
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '8px 0',
+          }}>
+            {renderConversationList()}
+          </div>
+
+          {/* Bottom user area */}
+          {sidebarUserArea}
+        </div>
       )}
 
       {/* Mobile Drawer */}
@@ -443,7 +636,7 @@ export default function AppLayout() {
           onClose={() => setMobileDrawerOpen(false)}
           open={mobileDrawerOpen}
           width={280}
-          styles={{ body: { padding: 0 } }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{
@@ -457,21 +650,47 @@ export default function AppLayout() {
             </div>
           }
         >
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKey]}
-            items={menuItems}
-            onClick={({ key }) => {
-              navigate(key);
-              setMobileDrawerOpen(false);
-            }}
-            style={{ border: 'none' }}
-          />
+          {/* New Chat button */}
+          <div style={{ padding: '0 16px 8px' }}>
+            <Button
+              type="default"
+              icon={<PlusOutlined />}
+              onClick={handleNewChat}
+              block
+              className="new-chat-btn"
+              style={{ margin: 0, width: '100%' }}
+            >
+              {t('sidebar_new_chat')}
+            </Button>
+          </div>
+
+          {/* Mobile conversation list */}
+          <div style={{
+            borderTop: '1px solid var(--color-border-secondary)',
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '8px 0',
+          }}>
+            {renderConversationList()}
+          </div>
+
+          {/* Mobile bottom user area */}
+          {sidebarUserArea}
         </Drawer>
       )}
 
-      <Layout>
-        <Header style={{
+      {/* Main content area — DeepSeek pattern: flex-1 fills remaining space */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
+      }}>
+        {/* Header bar */}
+        <div style={{
           background: 'var(--color-bg-container)',
           padding: '0 24px',
           borderBottom: '1px solid var(--color-border-secondary)',
@@ -479,7 +698,7 @@ export default function AppLayout() {
           justifyContent: 'flex-end',
           alignItems: 'center',
           height: 56,
-          lineHeight: '56px',
+          flexShrink: 0,
           transition: 'background 0.3s ease, border-color 0.3s ease',
         }}>
           {/* Mobile hamburger button */}
@@ -534,20 +753,163 @@ export default function AppLayout() {
               }}>{user?.email}</span>
             </Button>
           </Dropdown>
-        </Header>
-        <Content style={{
-          margin: 16,
+        </div>
+
+        {/* Content area — fills remaining space */}
+        <div style={{
+          flex: 1,
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
         }}>
-          <main id="main-content" role="main" style={{ flex: 1, minHeight: 0 }}>
-            <div className="page-enter">
-              <Outlet />
-            </div>
+          <NetworkStatusBanner />
+          <main id="main-content" role="main" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column' }}>
+            <ErrorBoundary
+              title={t('error_boundary_title')}
+              description={t('error_boundary_desc')}
+              retryText={t('error_boundary_retry')}
+            >
+              <div className="page-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                <Outlet />
+              </div>
+            </ErrorBoundary>
           </main>
-        </Content>
-      </Layout>
-    </Layout>
+        </div>
+      </div>
+
+      {/* Right-click context menu for sidebar session actions */}
+      {contextMenuSession && (
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            top: contextMenuSession.y,
+            left: contextMenuSession.x,
+            zIndex: 10000,
+            background: 'var(--color-bg-container)',
+            borderRadius: 8,
+            boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+            border: '1px solid var(--color-border)',
+            padding: '4px 0',
+            minWidth: 160,
+          }}
+        >
+          <div
+            style={{
+              padding: '8px 16px',
+              cursor: 'pointer',
+              fontSize: 13,
+              color: 'var(--color-text-secondary)',
+              borderBottom: '1px solid var(--color-border-secondary)',
+              marginBottom: 4,
+            }}
+          >
+            {contextMenuSession.title}
+          </div>
+          <div
+            onClick={() => {
+              setContextMenuSession(null);
+            }}
+            style={{
+              padding: '8px 16px',
+              cursor: 'pointer',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: 'var(--color-text)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <MoreOutlined /> {t('sidebar_rename')}
+          </div>
+          <Popconfirm
+            title={t('sidebar_delete')}
+            description={t('sidebar_delete_confirm')}
+            okText={t('confirm')}
+            cancelText={t('cancel')}
+            onConfirm={() => handleDeleteSession(contextMenuSession.id)}
+          >
+            <div
+              style={{
+                padding: '8px 16px',
+                cursor: 'pointer',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                color: '#ff4d4f',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <DeleteOutlined /> {t('sidebar_delete')}
+            </div>
+          </Popconfirm>
+        </div>
+      )}
+
+      {/* Three-dot action menu for sidebar session items */}
+      {sidebarActionMenu && (
+        <div
+          ref={sidebarActionMenuRef}
+          style={{
+            position: 'fixed',
+            top: sidebarActionMenu.y,
+            left: sidebarActionMenu.x,
+            zIndex: 10000,
+            background: 'var(--color-bg-container)',
+            borderRadius: 8,
+            boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+            border: '1px solid var(--color-border)',
+            padding: '4px 0',
+            minWidth: 140,
+          }}
+        >
+          <div
+            onClick={() => {
+              setSidebarActionMenu(null);
+            }}
+            style={{
+              padding: '8px 16px',
+              cursor: 'pointer',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: 'var(--color-text)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <MoreOutlined /> {t('sidebar_rename')}
+          </div>
+          <Popconfirm
+            title={t('sidebar_delete')}
+            description={t('sidebar_delete_confirm')}
+            okText={t('confirm')}
+            cancelText={t('cancel')}
+            onConfirm={() => handleDeleteSession(sidebarActionMenu.sessionId)}
+          >
+            <div
+              style={{
+                padding: '8px 16px',
+                cursor: 'pointer',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                color: '#ff4d4f',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <DeleteOutlined /> {t('sidebar_delete')}
+            </div>
+          </Popconfirm>
+        </div>
+      )}
+    </div>
   );
 }

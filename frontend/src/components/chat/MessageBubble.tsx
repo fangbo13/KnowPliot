@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { Card, Typography, Tooltip, message as antdMessage, Button } from 'antd';
-import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
+import { Card, Typography, Tooltip, message as antdMessage, Button, Popover } from 'antd';
+import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined, MoreOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import type { Message, Citation } from '../../store/chatStore';
 
 const { Text } = Typography;
@@ -42,6 +42,35 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [longPressActive, setLongPressActive] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTouchStart = useCallback(() => {
+    // Long press visual feedback (P1-2)
+    setLongPressActive(true);
+    // Vibrate on devices that support it
+    if (navigator.vibrate) navigator.vibrate(50);
+    longPressTimer.current = setTimeout(() => {
+      setMobileMenuOpen(true);
+    }, 500);
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    setLongPressActive(false);
+  }, []);
+
+  const handleTouchCancel = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    setLongPressActive(false);
+  }, []);
 
   const handleCopy = async () => {
     try {
@@ -92,6 +121,9 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
     >
       <div
         className="msg-bubble-wrapper"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         style={{
           maxWidth: '75%',
           padding: '0',
@@ -100,6 +132,7 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
       >
         {/* Action buttons for assistant messages */}
         {!isUser && (
+          <>
           <div
             className="msg-copy-btn"
             style={{
@@ -155,9 +188,50 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
               </Tooltip>
             )}
           </div>
+          {/* Mobile always-visible "more" button */}
+          <div
+            className="mobile-msg-menu"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              display: 'none',
+            }}
+          >
+            <Popover
+              content={
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => { handleCopy(); setMobileMenuOpen(false); }}>
+                    {t('copy_message')}
+                  </Button>
+                  <Button type="text" size="small" icon={<ShareAltOutlined />} onClick={() => { handleShare(); setMobileMenuOpen(false); }}>
+                    {t('share_message')}
+                  </Button>
+                  {onRegenerate && (
+                    <Button type="text" size="small" icon={<ReloadOutlined />} onClick={() => { onRegenerate(); setMobileMenuOpen(false); }}>
+                      {t('regenerate')}
+                    </Button>
+                  )}
+                </div>
+              }
+              trigger="click"
+              open={mobileMenuOpen}
+              onOpenChange={setMobileMenuOpen}
+              placement="bottomRight"
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<MoreOutlined />}
+                aria-label="Message actions"
+                style={{ padding: '2px 6px', color: 'var(--color-text-tertiary)' }}
+              />
+            </Popover>
+          </div>
+          </>
         )}
         <Card
-          className={!isUser ? 'msg-bubble-assistant' : undefined}
+          className={`${longPressActive ? 'long-press-active' : ''} ${!isUser ? 'msg-bubble-assistant' : ''}`.trim()}
           style={{
             background: isUser ? 'var(--user-msg-bg, #262626)' : 'var(--color-bg-container, white)',
             color: isUser ? 'white' : undefined,

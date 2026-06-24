@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import AppLayout from './layout/AppLayout';
 import ChatPage from './pages/ChatPage';
-import HistoryPage from './pages/HistoryPage';
 import ProfilePage from './pages/ProfilePage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
 import LoginPage from './auth/LoginPage';
@@ -58,7 +57,6 @@ function App() {
       >
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
-        <Route path="history" element={<HistoryPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="admin/knowledge" element={<KnowledgeBasePage />} />
       </Route>

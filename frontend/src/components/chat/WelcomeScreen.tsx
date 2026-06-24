@@ -65,7 +65,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
       }}>
         <RocketOutlined style={{ fontSize: 18, color: 'var(--accent)', flexShrink: 0 }} />
         <Text style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
-          欢迎使用 EY 入职助手！你可以直接在下方的输入框中提问，也可以从下方「常见问题」中选择快捷问题。
+          {t('welcome_tip')}
         </Text>
       </div>
 
@@ -154,6 +154,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
           {quickActions.map((action) => (
             <Col xs={24} sm={12} md={8} key={action.label}>
               <div
+                className="welcome-card"
                 onClick={() => onQuickAction(action.question)}
                 role="button"
                 tabIndex={0}
@@ -170,23 +171,10 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
                   borderRadius: 'var(--radius-lg)',
                   padding: '16px',
                   cursor: 'pointer',
-                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                   minHeight: 72,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 4,
-                }}
-                onMouseEnter={(e) => {
-                  const target = e.currentTarget;
-                  target.style.boxShadow = 'var(--shadow-accent)';
-                  target.style.borderColor = 'var(--accent)';
-                  target.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  const target = e.currentTarget;
-                  target.style.boxShadow = '';
-                  target.style.borderColor = '';
-                  target.style.transform = '';
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

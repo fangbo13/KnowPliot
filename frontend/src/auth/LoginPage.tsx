@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Form, Input, Button, Typography, Alert, Layout, Space } from 'antd';
 import { MailOutlined, LockOutlined, LoginOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 
 const { Title, Text, Paragraph } = Typography;
 const { Content } = Layout;
@@ -10,16 +11,10 @@ const { Content } = Layout;
 export default function LoginPage() {
   const { t } = useTranslation('common');
   const { login } = useAuth();
+  const bp = useBreakpoint();
+  const isNarrow = bp.sm; // P1-7: unified breakpoint
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isNarrow, setIsNarrow] = useState(window.innerWidth < 800);
-
-  // Responsive: hide brand panel on narrow screens
-  useEffect(() => {
-    const handler = () => setIsNarrow(window.innerWidth < 800);
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, []);
 
   const handleLogin = async (values: { email: string; password: string }) => {
     setLoading(true);
@@ -214,12 +209,21 @@ export default function LoginPage() {
               />
             )}
 
+            <Alert
+              type="info"
+              message={t('demo_hint')}
+              showIcon
+              closable
+              style={{ marginBottom: 24 }}
+            />
+
             <Form
               layout="vertical"
               size="large"
-              initialValues={{ email: 'admin@ey.com', password: 'admin123' }}
+              initialValues={{ email: '' }}
               onFinish={handleLogin}
               requiredMark={false}
+              validateTrigger="onChange"
             >
               <Form.Item
                 name="email"

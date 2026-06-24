@@ -11,5 +11,7 @@
   "delete": "Delete",
   "upload_success": "Document uploaded successfully",
   "upload_error": "Failed to upload document",
-  "file_types": "PDF, Word documents supported"
+  "file_types": "PDF, Word documents supported",
+  "file_type_error": "Only PDF, Word, Text, CSV, Excel, and PowerPoint files are allowed.",
+  "file_size_error": "File must be smaller than {{maxSize}}MB"
 }

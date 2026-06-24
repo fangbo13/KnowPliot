@@ -11,5 +11,7 @@
   "delete": "删除",
   "upload_success": "文档上传成功",
   "upload_error": "文档上传失败",
-  "file_types": "支持 PDF、Word 文档"
+  "file_types": "支持 PDF、Word 文档",
+  "file_type_error": "仅支持 PDF、Word、文本、CSV、Excel 和 PowerPoint 文件",
+  "file_size_error": "文件大小必须小于 {{maxSize}}MB"
 }

@@ -361,6 +361,17 @@ body {
   opacity: 1 !important;
 }
 
+/* Touch devices: always show action buttons (no hover state) */
+@media (hover: none) and (pointer: coarse) {
+  .msg-bubble-wrapper:hover .msg-copy-btn,
+  .msg-copy-btn {
+    opacity: 0 !important; /* Hide individual buttons on touch */
+  }
+  .msg-bubble-wrapper .mobile-msg-menu {
+    display: block !important; /* Show "more" button on touch */
+  }
+}
+
 /* ---- Markdown Content ---- */
 .markdown-content pre {
   overflow-x: auto;
@@ -677,3 +688,152 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- Sidebar Session Items (Iteration 8) ---- */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.sidebar-session-item {
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-session-item:hover {
+  background: var(--color-fill) !important;
+}
+
+.sidebar-session-item:active {
+  background: var(--color-fill-secondary) !important;
+}
+
+/* Sidebar scrollable area */
+.ant-layout-sider > div {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---- Message Transition Animation (P1-5) ---- */
+.message-transition {
+  animation: fadeInUp 0.2s ease-out;
+}
+
+/* ---- Long Press Visual Feedback (P1-2) ---- */
+@keyframes longPressHighlight {
+  0% { box-shadow: 0 0 0 0 rgba(0, 82, 255, 0.3); transform: scale(1); }
+  50% { box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.15); transform: scale(0.99); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 82, 255, 0); transform: scale(1); }
+}
+
+.long-press-active {
+  animation: longPressHighlight 0.3s ease-out;
+  border: 1px solid var(--accent) !important;
+}
+
+/* ---- Message Skeleton Shimmer (P1-4) ---- */
+.message-skeleton {
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--color-border-secondary) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+  border-radius: 12px;
+}
+
+/* ---- WelcomeScreen Card Hover (P2-1) ---- */
+.welcome-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.welcome-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-accent) !important;
+  border-color: var(--accent) !important;
+}
+
+/* ---- Skip Link CSS Class (P2-2) ---- */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 8px 16px;
+  z-index: 9999;
+  text-decoration: none;
+  border-radius: 0 0 var(--radius-sm) 0;
+  font-weight: 500;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus-visible {
+  top: 0;
+  outline: 2px solid var(--foreground);
+  outline-offset: 0;
+}
+
+/* ============================================
+   Iteration 9: DeepSeek Sidebar Styles
+   ============================================ */
+
+/* New chat button — DeepSeek style */
+.new-chat-btn {
+  background: var(--color-bg-container) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 20px !important;
+  padding: 6px 16px !important;
+  font-size: 13px;
+  color: var(--color-text) !important;
+  height: auto !important;
+  transition: all 0.2s ease !important;
+}
+
+.new-chat-btn:hover {
+  background: var(--color-fill) !important;
+  border-color: var(--color-text-secondary) !important;
+}
+
+/* Sidebar chat item — hover and active states */
+.sidebar-chat-item:hover {
+  background: var(--color-fill) !important;
+}
+
+/* Page transition */
+.page-enter {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Onboarding modal */
+.onboarding-modal .ant-modal-content {
+  border-radius: 16px;
+}
+
+/* Tour highlight (kept for compatibility, no longer actively used) */
+.tour-highlight {
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.3);
+  border-radius: 8px;
+}
+
+.tour-overlay {
+  pointer-events: auto;
+}
+
+/* Message bubble hover effects */
+.message-bubble-wrapper {
+  transition: box-shadow 0.2s ease;
+}
+
+.message-bubble-wrapper:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Message action button transitions */
+.msg-action-btn {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+

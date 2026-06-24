@@ -84,12 +84,12 @@ export default function KnowledgeBasePage() {
     const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
     const isValidType = ALLOWED_EXTENSIONS.includes(ext);
     if (!isValidType) {
-      message.error('Only PDF, Word, Text, CSV, Excel, and PowerPoint files are allowed.');
+      message.error(t('file_type_error'));
       return Upload.LIST_IGNORE;
     }
     const isLt50M = file.size / 1024 / 1024 < MAX_FILE_SIZE_MB;
     if (!isLt50M) {
-      message.error(`File must be smaller than ${MAX_FILE_SIZE_MB}MB.`);
+      message.error(t('file_size_error', { maxSize: MAX_FILE_SIZE_MB }));
       return Upload.LIST_IGNORE;
     }
     return true;

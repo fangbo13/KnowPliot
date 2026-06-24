@@ -20,5 +20,9 @@
   "medium_relevance": "中相关",
   "low_relevance": "低相关",
   "expand_sources": "展开来源",
-  "collapse_sources": "收起来源"
+  "collapse_sources": "收起来源",
+  "copy_message": "复制消息",
+  "chat_input_label": "输入你的问题",
+  "welcome_tip": "欢迎使用 EY 入职助手！你可以直接在下方输入框中提问，或从「常见问题」中选择快捷问题。",
+  "new_messages": "新消息"
 }

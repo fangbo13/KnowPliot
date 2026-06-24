@@ -1,9 +1,8 @@
 ﻿import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
-import { Card, Form, Input, Select, Button, message, Segmented, Typography } from 'antd';
-import { SunOutlined, MoonOutlined, DesktopOutlined, LockOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Select, Button, message, Typography } from 'antd';
+import { LockOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useTheme } from '../hooks/useTheme';
 import apiClient from '../api/client';
 import i18n from '../i18n';
 
@@ -12,7 +11,6 @@ const { Text } = Typography;
 export default function ProfilePage() {
   const { t } = useTranslation('common');
   const { user, login } = useAuth();
-  const { mode, setThemeMode } = useTheme();
   const [loading, setLoading] = useState(false);
 
   const handleFinish = async (values: { language_preference: string }) => {
@@ -86,28 +84,6 @@ export default function ProfilePage() {
             </Button>
           </Form.Item>
         </Form>
-      </Card>
-
-      <Card
-        title={
-          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
-            {t('appearance')}
-          </span>
-        }
-      >
-        <p style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>
-          {t('theme_desc')}
-        </p>
-        <Segmented
-          size="large"
-          value={mode}
-          onChange={(val) => setThemeMode(val as 'light' | 'dark' | 'system')}
-          options={[
-            { label: t('light'), value: 'light', icon: <SunOutlined /> },
-            { label: t('dark'), value: 'dark', icon: <MoonOutlined /> },
-            { label: t('system'), value: 'system', icon: <DesktopOutlined /> },
-          ]}
-        />
       </Card>
     </div>
   );

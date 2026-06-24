@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next';
 import { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Input, Button, Space, Spin, Alert, type InputRef } from 'antd';
-import { SendOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { Input, Button, Space, Alert, type InputRef } from 'antd';
+const { TextArea } = Input;
+import { SendOutlined, ReloadOutlined, DownOutlined } from '@ant-design/icons';
 import { useChatStore } from '../store/chatStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import MessageBubble from '../components/chat/MessageBubble';
@@ -19,6 +20,22 @@ function throttle<T extends (...args: any[]) => void>(fn: T, limit: number): T {
   }) as T;
 }
 
+/**
+ * P1-8: Clip text at sentence boundary for better screen reader experience.
+ * Instead of hard slice(-100), find the last sentence boundary (period,
+ * question mark, exclamation, or newline) and truncate there.
+ */
+function clipForScreenReader(text: string, maxLength: number = 100): string {
+  if (text.length <= maxLength) return text;
+  const truncated = text.slice(-maxLength);
+  // Find the last sentence boundary
+  const boundaryMatch = truncated.search(/[.!?？。\n]/);
+  if (boundaryMatch > 0 && boundaryMatch < truncated.length - 5) {
+    return truncated.slice(boundaryMatch + 1);
+  }
+  return truncated;
+}
+
 export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
   const location = useLocation();
@@ -33,13 +50,15 @@ export default function ChatPageContainer() {
     setSendError,
     sendMessage,
     loadMessages,
-    resetSession,
   } = useChatStore();
 
   const [inputValue, setInputValue] = useState('');
+  const [isNearBottom, setIsNearBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputRef>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadedSessionRef = useRef<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false); // P1-5
 
   // Reset loadedSessionRef when navigating to /chat — ensures messages reload
   // after returning from HistoryPage where setActiveSession was called
@@ -49,8 +68,12 @@ export default function ChatPageContainer() {
 
   useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
+      // P1-5: Show transition state
+      setIsTransitioning(true);
       loadedSessionRef.current = activeSessionId;
-      loadMessages(activeSessionId);
+      loadMessages(activeSessionId).finally(() => {
+        setIsTransitioning(false);
+      });
     }
   }, [activeSessionId, loadMessages]);
 
@@ -70,6 +93,18 @@ export default function ChatPageContainer() {
     }
   }, [messages, streamContent, isStreaming, throttledScroll]);
 
+  // IntersectionObserver to detect if user scrolled away from bottom
+  useEffect(() => {
+    const sentinel = messagesEndRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsNearBottom(entry.isIntersecting),
+      { root: sentinel.parentElement ?? undefined, threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [messages.length, streamContent]);
+
   const handleSend = () => {
     if (!inputValue.trim() || isStreaming) return;
     sendMessage(inputValue.trim());
@@ -87,11 +122,6 @@ export default function ChatPageContainer() {
       setSendError(null);
       sendMessage(lastUserMsg.content);
     }
-  };
-
-  const handleNewChat = () => {
-    resetSession();
-    inputRef.current?.focus();
   };
 
   if (!activeSessionId && messages.length === 0) {
@@ -122,24 +152,43 @@ export default function ChatPageContainer() {
       flexDirection: 'column',
       flex: 1,
       minHeight: 0,
+      height: '100%',
       maxWidth: 900,
       margin: '0 auto',
       width: '100%',
     }}>
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        paddingBottom: 120,
-      }}>
-        {/* Screen reader live region for streaming */}
+      <div
+        ref={scrollContainerRef}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          paddingBottom: 80,
+          minHeight: 0,
+          position: 'relative',
+        }}
+      >
+        {/* Screen reader live region for streaming — P1-8: sentence-boundary clipping */}
         <div aria-live="polite" aria-atomic="false" className="sr-only">
-          {isStreaming && streamContent && `AI正在输入: ${streamContent.slice(-100)}`}
+          {isStreaming && streamContent && `AI正在输入: ${clipForScreenReader(streamContent)}`}
           {isStreaming && !streamContent && (t('thinking') || '思考中...')}
         </div>
 
         {isLoadingMessages && messages.length === 0 && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
-            <Spin size="large" tip={t('loading_messages') || 'Loading...'} />
+          <div style={{ padding: '16px 0' }}>
+            {/* P1-4: Skeleton message bubbles instead of Spinner */}
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="message-skeleton"
+                style={{
+                  height: i === 1 ? 60 : 40,
+                  width: i % 2 === 0 ? '60%' : '80%',
+                  marginBottom: 8,
+                  marginLeft: i % 2 === 0 ? 'auto' : 0,
+                  marginRight: i % 2 === 0 ? 0 : 'auto',
+                }}
+              />
+            ))}
           </div>
         )}
 
@@ -163,6 +212,12 @@ export default function ChatPageContainer() {
             }
           />
         )}
+
+        {/* P1-5: Transition wrapper for smooth content switching */}
+        <div
+          className="message-transition"
+          style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity 0.2s ease' }}
+        >
 
         {messages.map((msg) => (
           <MessageBubble
@@ -211,6 +266,33 @@ export default function ChatPageContainer() {
         )}
 
         <div ref={messagesEndRef} />
+
+        {/* Scroll to bottom button — shown when user scrolled up during streaming */}
+        {!isNearBottom && isStreaming && (
+          <div style={{
+            position: 'absolute',
+            bottom: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            animation: 'fadeIn 0.2s ease',
+          }}>
+            <Button
+              size="small"
+              icon={<DownOutlined />}
+              onClick={() => throttledScroll('smooth')}
+              style={{
+                borderRadius: 20,
+                boxShadow: 'var(--shadow-md)',
+                background: 'var(--color-bg-container)',
+                borderColor: 'var(--color-border)',
+              }}
+            >
+              {t('new_messages')}
+            </Button>
+          </div>
+        )}
+        </div>
       </div>
 
       {/* Floating Input Bar — DeepSeek style (fixed to viewport) */}
@@ -230,31 +312,6 @@ export default function ChatPageContainer() {
           padding: '0 24px',
           pointerEvents: 'auto',
         }}>
-          {/* New Chat button */}
-          {activeSessionId && (
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              marginBottom: 8,
-              pointerEvents: 'auto',
-            }}>
-              <Button
-                type="text"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={handleNewChat}
-                style={{
-                  color: 'var(--color-text-secondary)',
-                  fontSize: 12,
-                  padding: '4px 12px',
-                  height: 'auto',
-                }}
-              >
-                {t('new_chat')}
-              </Button>
-            </div>
-          )}
-
           <div style={{
             background: 'var(--color-bg-container)',
             border: '1px solid var(--color-border)',
@@ -264,22 +321,27 @@ export default function ChatPageContainer() {
             transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
           }}>
             <Space.Compact style={{ width: '100%' }}>
-              <Input
-                ref={inputRef}
+              <TextArea
+                ref={inputRef as any}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onPressEnter={handleSend}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
                 placeholder={t('placeholder')}
                 disabled={isStreaming}
-                size="large"
                 maxLength={4000}
+                autoSize={{ minRows: 1, maxRows: 4 }}
                 aria-label={t('chat_input_label') || 'Type your message'}
                 style={{
                   border: 'none',
                   boxShadow: 'none',
                   fontSize: 14,
+                  resize: 'none',
                 }}
-                styles={{ input: { padding: '4px 0' } }}
               />
               <Button
                 type="primary"
@@ -296,6 +358,19 @@ export default function ChatPageContainer() {
               />
             </Space.Compact>
           </div>
+          {/* Character counter */}
+          {inputValue.length > 0 && (
+            <div style={{
+              textAlign: 'right',
+              fontSize: 11,
+              color: inputValue.length >= 4000 ? '#ff4d4f' : inputValue.length > 3500 ? '#faad14' : 'var(--color-text-tertiary)',
+              marginTop: 4,
+              paddingRight: 4,
+              transition: 'color 0.2s ease',
+            }}>
+              {inputValue.length}/4000
+            </div>
+          )}
         </div>
       </div>
     </div>
