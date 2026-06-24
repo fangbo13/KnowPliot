@@ -86,6 +86,9 @@ interface ChatState {
   citations: Citation[];
   isLoadingMessages: boolean;
   sendError: string | null;
+  // P0-1/P0-2: Progressive thinking indicator & SSE connection feedback
+  thinkingPhase: 'connecting' | 'searching' | 'generating';
+  connectionStatus: 'idle' | 'connecting' | 'streaming' | 'error' | 'fallback';
 
   // Actions
   setActiveSession: (id: string) => void;
@@ -95,6 +98,8 @@ interface ChatState {
   setStreaming: (isStreaming: boolean) => void;
   setStreamCitations: (citations: Citation[]) => void;
   setSendError: (error: string | null) => void;
+  setThinkingPhase: (phase: 'connecting' | 'searching' | 'generating') => void;
+  setConnectionStatus: (status: 'idle' | 'connecting' | 'streaming' | 'error' | 'fallback') => void;
   loadSessions: () => Promise<void>;
   loadMessages: (sessionId: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
@@ -110,6 +115,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   citations: [],
   isLoadingMessages: false,
   sendError: null,
+  thinkingPhase: 'connecting',
+  connectionStatus: 'idle',
 
   setActiveSession: (id) => set({ activeSessionId: id, messages: [], sendError: null }),
 
@@ -121,11 +128,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   updateStreamContent: (content) => set({ streamContent: content }),
 
-  setStreaming: (isStreaming) => set({ isStreaming, streamContent: '', citations: [] }),
+  setStreaming: (isStreaming) => set({
+    isStreaming,
+    streamContent: '',
+    citations: [],
+    // P0-1/P0-2: reset connection state when streaming ends
+    ...(isStreaming ? {} : { thinkingPhase: 'connecting', connectionStatus: 'idle' }),
+  }),
 
   setStreamCitations: (citations) => set({ citations }),
 
   setSendError: (sendError) => set({ sendError }),
+
+  setThinkingPhase: (phase) => set({ thinkingPhase: phase }),
+  setConnectionStatus: (status) => set({ connectionStatus: status }),
 
   loadSessions: async () => {
     try {
@@ -161,6 +177,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
     set({ sendError: null });
     get().setStreaming(true);
+    // P0-1/P0-2: Instant feedback — show thinking indicator immediately, not after 10s
+    get().setThinkingPhase('connecting');
+    get().setConnectionStatus('connecting');
 
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -196,8 +215,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const maxRetries = 2;
 
     const streamWithRetry = async (attempt: number): Promise<boolean> => {
-      // P0-4/#17: SSE timeout monitoring — declared at function scope for cleanup
-      let thinkingCheckInterval: ReturnType<typeof setInterval> | undefined;
+      // P0-1/P0-2: Progressive thinking phases + connection status tracking
+      // Replaces old 10s THINKING_THRESHOLD + thinkingShown injection into streamContent
+      let abortInterval: ReturnType<typeof setInterval> | undefined;
+      let phaseTimerSearching: ReturnType<typeof setTimeout> | undefined;
+      let phaseTimerGenerating: ReturnType<typeof setTimeout> | undefined;
+      let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const clearAllTimers = () => {
+        if (abortInterval) clearInterval(abortInterval);
+        if (phaseTimerSearching) clearTimeout(phaseTimerSearching);
+        if (phaseTimerGenerating) clearTimeout(phaseTimerGenerating);
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+      };
+
       try {
         const response = await fetch(`/api/v1/chat/sessions/${sessionId}/send/`, {
           method: 'POST',
@@ -212,28 +243,49 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           throw new Error(`HTTP ${response.status}`);
         }
 
+        // P0-2: Headers received — connection established
+        get().setConnectionStatus('streaming');
+
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let assistantContent = '';
         let currentEvent = '';
 
-        // P0-4/#17: SSE timeout monitoring — show "thinking" prompt after 10s idle, abort after 30s
+        // P0-1/P0-2: Progressive thinking phase timers
         let lastTokenTime = Date.now();
-        const THINKING_THRESHOLD = 10000; // 10s — show thinking prompt
-        const ABORT_THRESHOLD = 30000;   // 30s — abort stream
-        let thinkingShown = false;
-        thinkingCheckInterval = setInterval(() => {
-          const elapsed = Date.now() - lastTokenTime;
-          if (elapsed > THINKING_THRESHOLD && !thinkingShown && get().isStreaming) {
-            thinkingShown = true;
-            // Append a "still thinking..." indicator to stream content
-            get().updateStreamContent(assistantContent + '\n\n⏳ _仍在思考中..._');
+        const ABORT_THRESHOLD = 30000; // 30s — abort stream (unchanged)
+
+        // Phase 1: After 3s of no tokens → "searching" phase
+        phaseTimerSearching = setTimeout(() => {
+          if (get().isStreaming && get().thinkingPhase === 'connecting') {
+            get().setThinkingPhase('searching');
           }
+        }, 3000);
+
+        // Phase 2: After 8s of no tokens → "generating" phase
+        phaseTimerGenerating = setTimeout(() => {
+          if (get().isStreaming && get().thinkingPhase === 'searching') {
+            get().setThinkingPhase('generating');
+          }
+        }, 8000);
+
+        // P0-2: Fallback detection — if 5s with no tokens after connection, indicate slow connection
+        fallbackTimer = setTimeout(() => {
+          if (get().isStreaming && get().connectionStatus === 'streaming' && !assistantContent) {
+            get().setConnectionStatus('fallback');
+            get().setThinkingPhase('searching'); // Skip to more informative phase
+          }
+        }, 5000);
+
+        // Abort timer: cancel stream if no tokens for 30s
+        abortInterval = setInterval(() => {
+          const elapsed = Date.now() - lastTokenTime;
           if (elapsed > ABORT_THRESHOLD && get().isStreaming) {
-            clearInterval(thinkingCheckInterval);
+            clearAllTimers();
             reader.cancel();
             get().setStreaming(false);
+            get().setConnectionStatus('error');
             set({ sendError: 'Stream timed out — no response for 30 seconds' });
           }
         }, 3000);
@@ -241,7 +293,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            clearInterval(thinkingCheckInterval); // #17: SSE timeout cleanup
+            clearAllTimers();
             break;
           }
 
@@ -256,12 +308,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               const data = JSON.parse(line.slice(6));
               switch (currentEvent) {
                 case 'token':
-                  lastTokenTime = Date.now(); // #17: SSE timeout — reset idle timer on token
-                  if (thinkingShown) {
-                    thinkingShown = false;
-                    // Remove the "still thinking..." indicator
-                    get().updateStreamContent(assistantContent);
-                  }
+                  lastTokenTime = Date.now();
+                  // P0-1: First token received — clear all timers and thinking state
+                  clearAllTimers();
                   assistantContent += data.token || '';
                   get().updateStreamContent(assistantContent);
                   break;
@@ -269,11 +318,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   get().setStreamCitations(data);
                   break;
                 case 'done':
-                  clearInterval(thinkingCheckInterval); // #17: SSE timeout cleanup
+                  clearAllTimers();
+                  get().setConnectionStatus('idle');
                   get().finishStreamingMessage(data.message_id, data.session_id);
                   return true;
                 case 'error':
-                  clearInterval(thinkingCheckInterval); // #17: SSE timeout cleanup
+                  clearAllTimers();
+                  get().setConnectionStatus('error');
                   console.error('Stream error:', data.error);
                   get().setStreaming(false);
                   set({ sendError: data.error || 'Stream error occurred' });
@@ -282,9 +333,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             }
           }
         }
+        clearAllTimers();
         return true;
       } catch (error) {
-        if (thinkingCheckInterval) clearInterval(thinkingCheckInterval);
+        clearAllTimers();
         console.error(`Streaming error (attempt ${attempt + 1}):`, error);
         if (attempt < maxRetries) {
           const delay = (attempt + 1) * 1000;
@@ -292,6 +344,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           return streamWithRetry(attempt + 1);
         }
         get().setStreaming(false);
+        get().setConnectionStatus('error');
         const errorMsg = (error as Error).message;
         if (errorMsg.includes('401') || errorMsg.includes('403')) {
           set({ sendError: 'error_auth' });

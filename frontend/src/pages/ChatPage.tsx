@@ -68,6 +68,9 @@ export default function ChatPageContainer() {
     sendMessage,
     loadMessages,
   } = useChatStore();
+  // P0-1/P0-2: Progressive thinking indicator & connection status
+  const thinkingPhase = useChatStore(state => state.thinkingPhase);
+  const connectionStatus = useChatStore(state => state.connectionStatus);
 
   const [inputValue, setInputValue] = useState('');
   const [isNearBottom, setIsNearBottom] = useState(true);
@@ -193,7 +196,11 @@ export default function ChatPageContainer() {
         {/* Screen reader live region for streaming — P1-8: sentence-boundary clipping */}
         <div aria-live="polite" aria-atomic="false" className="sr-only">
           {isStreaming && streamContent && `AI正在输入: ${clipForScreenReader(streamContent)}`}
-          {isStreaming && !streamContent && (t('thinking') || '思考中...')}
+          {isStreaming && !streamContent && (
+            thinkingPhase === 'connecting' ? t('thinking_connecting')
+            : thinkingPhase === 'searching' ? t('thinking_searching')
+            : t('thinking_generating')
+          )}
         </div>
 
         {isLoadingMessages && messages.length === 0 && (
@@ -270,6 +277,10 @@ export default function ChatPageContainer() {
             alignItems: 'center',
             gap: 8,
             animation: 'fadeIn 0.3s ease',
+            ...(connectionStatus === 'fallback' ? {
+              background: 'rgba(250, 173, 20, 0.06)',
+              borderRadius: 8,
+            } : {}),
           }}>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               {[0, 1, 2].map(i => (
@@ -283,8 +294,15 @@ export default function ChatPageContainer() {
               ))}
             </div>
             <span style={{ color: 'var(--color-text-tertiary)', fontSize: 13, fontWeight: 500 }}>
-              {t('thinking')}
+              {thinkingPhase === 'connecting' ? t('thinking_connecting')
+                : thinkingPhase === 'searching' ? t('thinking_searching')
+                : t('thinking_generating')}
             </span>
+            {connectionStatus === 'fallback' && (
+              <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginLeft: 4 }}>
+                ({t('connection_slow')})
+              </span>
+            )}
           </div>
         )}
 

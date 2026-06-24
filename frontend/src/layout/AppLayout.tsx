@@ -18,7 +18,7 @@ import {
   DeleteOutlined,
   SearchOutlined,
   MoreOutlined,
-  MenuUnfoldOutlined,
+  MenuOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
@@ -70,6 +70,16 @@ export default function AppLayout() {
   useEffect(() => {
     loadSessions();
   }, [loadSessions]);
+
+  // P1-3: Auto-open mobile drawer for first-time visitors on mobile
+  useEffect(() => {
+    if (isMobile && !localStorage.getItem('ey-mobile-drawer-seen')) {
+      setMobileDrawerOpen(true);
+      localStorage.setItem('ey-mobile-drawer-seen', 'true');
+      const timer = setTimeout(() => setMobileDrawerOpen(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isMobile]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -346,9 +356,9 @@ export default function AppLayout() {
       <div style={{ padding: '0 12px 8px' }}>
         <Input
           id="sidebar-search-input"
-          size="small"
+          size="middle"
           placeholder={t('sidebar_search')}
-          prefix={<SearchOutlined style={{ fontSize: 12 }} />}
+          prefix={<SearchOutlined style={{ fontSize: 14 }} />}
           value={sidebarSearch}
           onChange={(e) => setSidebarSearch(e.target.value)}
           allowClear
@@ -578,6 +588,16 @@ export default function AppLayout() {
           >
             {t('onboarding_start')}
           </Button>
+          {/* P2-1: Skip option for users who don't want the guided tour */}
+          <div style={{ marginTop: 12 }}>
+            <Button
+              type="link"
+              onClick={handleOnboardingClose}
+              style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}
+            >
+              {t('skip_for_now')}
+            </Button>
+          </div>
         </div>
       </Modal>
 
@@ -729,14 +749,22 @@ export default function AppLayout() {
           flexShrink: 0,
           transition: 'background 0.3s ease, border-color 0.3s ease',
         }}>
-          {/* Mobile hamburger button */}
+          {/* Mobile hamburger button — P1-3: improved icon + larger touch target */}
           {isMobile && (
             <Button
               type="text"
-              icon={<MenuUnfoldOutlined />}
+              icon={<MenuOutlined />}
               onClick={() => setMobileDrawerOpen(true)}
               aria-label={t('mobile_menu') || 'Open mobile menu'}
-              style={{ marginRight: 12, color: 'var(--color-text-secondary)' }}
+              style={{
+                marginRight: 12,
+                color: 'var(--color-text)',
+                minWidth: 44,
+                minHeight: 44,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             />
           )}
 

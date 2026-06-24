@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Form, Input, Button, Typography, Alert, Layout, Space } from 'antd';
-import { MailOutlined, LockOutlined, LoginOutlined } from '@ant-design/icons';
+import { MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
 import { useBreakpoint } from '../hooks/useBreakpoint';
@@ -15,6 +15,7 @@ export default function LoginPage() {
   const isNarrow = bp.sm; // P1-7: unified breakpoint
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [form] = Form.useForm(); // P1-1: Demo account one-click fill
 
   const handleLogin = async (values: { email: string; password: string }) => {
     setLoading(true);
@@ -214,13 +215,25 @@ export default function LoginPage() {
               message={t('demo_hint')}
               showIcon
               closable
-              style={{ marginBottom: 24 }}
+              style={{ marginBottom: 16 }}
             />
 
+            {/* P1-1: Demo account one-click fill button */}
+            <Button
+              type="link"
+              size="small"
+              icon={<UserSwitchOutlined />}
+              onClick={() => form.setFieldsValue({ email: 'admin@ey.com', password: 'admin123' })}
+              style={{ marginBottom: 24, color: 'var(--accent)', fontWeight: 500 }}
+            >
+              {t('demo_fill_btn')}
+            </Button>
+
             <Form
+              form={form}
               layout="vertical"
               size="large"
-              initialValues={{ email: '' }}
+              initialValues={{ email: '', password: '' }}
               onFinish={handleLogin}
               requiredMark={false}
               validateTrigger="onChange"

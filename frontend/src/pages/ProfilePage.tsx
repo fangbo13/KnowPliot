@@ -1,12 +1,10 @@
-﻿import { useTranslation } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
-import { Card, Form, Input, Select, Button, message, Typography } from 'antd';
-import { LockOutlined } from '@ant-design/icons';
+import { Card, Form, Select, Button, message, Typography, Avatar, Divider, Row, Col } from 'antd';
+import { UserOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import apiClient from '../api/client';
 import i18n from '../i18n';
-
-const { Text } = Typography;
 
 export default function ProfilePage() {
   const { t } = useTranslation('common');
@@ -41,10 +39,90 @@ export default function ProfilePage() {
 
   return (
     <div style={{ maxWidth: 'min(680px, 100%)', width: '100%', margin: '0 auto' }}>
+      {/* P1-2: Account Info Card — display all user model fields */}
       <Card
         title={
           <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
-            {t('profile_settings')}
+            {t('account_info')}
+          </span>
+        }
+        style={{ marginBottom: 16 }}
+      >
+        {/* Avatar + Username header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
+          <Avatar
+            size={64}
+            icon={<UserOutlined />}
+            style={{
+              background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+              fontSize: 28,
+              color: '#FFFFFF',
+            }}
+          >
+            {user?.username?.charAt(0)?.toUpperCase()}
+          </Avatar>
+          <div>
+            <Typography.Text strong style={{ fontSize: 16 }}>
+              {user?.username || user?.email}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {user?.email}
+            </Typography.Text>
+          </div>
+        </div>
+
+        <Divider style={{ margin: '0 0 16px' }} />
+
+        {/* Detail fields in a responsive grid */}
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('service_line')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.service_line || '—'}
+              </div>
+            </div>
+          </Col>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('office_location')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.office_location || '—'}
+              </div>
+            </div>
+          </Col>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('role_level')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.role_level || '—'}
+              </div>
+            </div>
+          </Col>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('email')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.email || '—'}
+              </div>
+            </div>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* P1-2: Preferences Card — language preference (editable) */}
+      <Card
+        title={
+          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            {t('preferences')}
           </span>
         }
         style={{ marginBottom: 16 }}
@@ -52,25 +130,10 @@ export default function ProfilePage() {
         <Form
           layout="vertical"
           initialValues={{
-            email: user?.email,
-            username: user?.username,
             language_preference: user?.language_preference || 'en',
           }}
           onFinish={handleFinish}
         >
-          <Form.Item label={t('email')} name="email">
-            <Input
-              disabled
-              prefix={<LockOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
-              style={{ background: 'var(--color-bg-elevated)', cursor: 'not-allowed' }}
-            />
-            <div style={{ marginTop: 4 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t('email_readonly_hint')}
-              </Text>
-            </div>
-          </Form.Item>
-
           <Form.Item label={t('language_pref')} name="language_preference">
             <Select>
               <Select.Option value="en">English</Select.Option>

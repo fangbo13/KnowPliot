@@ -13,6 +13,12 @@
   "save_error": "更新失败",
   "profile_settings": "个人设置",
   "email": "邮箱",
+  "account_info": "账户信息",
+  "preferences": "偏好设置",
+  "service_line": "服务线",
+  "office_location": "办公地点",
+  "role_level": "职级",
+  "username": "用户名",
   "language_pref": "语言偏好",
   "appearance": "外观",
   "theme_desc": "选择你偏好的主题。深色模式将应用于所有页面。",
@@ -24,6 +30,7 @@
   "login_error": "登录错误",
   "sign_in": "登录",
   "demo_hint": "演示账户：admin@ey.com / admin123",
+  "demo_fill_btn": "使用演示账户",
   "switch_to_light": "切换到浅色模式",
   "switch_to_dark": "切换到深色模式",
   "delete_confirm": "确认删除",
@@ -141,5 +148,6 @@
   "kb_chunks": "分块数",
   "kb_status": "状态",
   "kb_created": "创建时间",
-  "kb_actions": "操作"
+  "kb_actions": "操作",
+  "skip_for_now": "暂时跳过"
 }

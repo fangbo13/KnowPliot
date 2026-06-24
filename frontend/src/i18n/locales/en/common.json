@@ -13,6 +13,12 @@
   "save_error": "Update failed",
   "profile_settings": "Profile Settings",
   "email": "Email",
+  "account_info": "Account Information",
+  "preferences": "Preferences",
+  "service_line": "Service Line",
+  "office_location": "Office Location",
+  "role_level": "Role Level",
+  "username": "Username",
   "language_pref": "Language Preference",
   "appearance": "Appearance",
   "theme_desc": "Choose your preferred theme. Dark mode applies to all pages.",
@@ -24,6 +30,7 @@
   "login_error": "Login Error",
   "sign_in": "Sign In",
   "demo_hint": "Demo account: admin@ey.com / admin123",
+  "demo_fill_btn": "Use Demo Account",
   "switch_to_light": "Switch to Light Mode",
   "switch_to_dark": "Switch to Dark Mode",
   "delete_confirm": "Confirm Delete",
@@ -143,5 +150,6 @@
   "kb_chunks": "Chunks",
   "kb_status": "Status",
   "kb_created": "Created",
-  "kb_actions": "Actions"
+  "kb_actions": "Actions",
+  "skip_for_now": "Skip for now"
 }
