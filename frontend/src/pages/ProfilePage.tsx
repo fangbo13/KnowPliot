@@ -81,7 +81,11 @@ export default function ProfilePage() {
                 {t('service_line')}
               </Typography.Text>
               <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
-                {user?.service_line || '—'}
+                {user?.service_line || (
+                  <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
+                    {t('field_not_set')}
+                  </span>
+                )}
               </div>
             </div>
           </Col>
@@ -91,7 +95,11 @@ export default function ProfilePage() {
                 {t('office_location')}
               </Typography.Text>
               <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
-                {user?.office_location || '—'}
+                {user?.office_location || (
+                  <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
+                    {t('field_not_set')}
+                  </span>
+                )}
               </div>
             </div>
           </Col>
@@ -101,7 +109,11 @@ export default function ProfilePage() {
                 {t('role_level')}
               </Typography.Text>
               <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
-                {user?.role_level || '—'}
+                {user?.role_level || (
+                  <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
+                    {t('field_not_set')}
+                  </span>
+                )}
               </div>
             </div>
           </Col>

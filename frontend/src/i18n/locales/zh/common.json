@@ -1,4 +1,4 @@
-﻿{
+{
   "app_name": "安永入职 AI",
   "nav_chat": "对话",
   "nav_history": "历史",
@@ -51,9 +51,11 @@
   "no_history": "暂无对话记录",
   "conversation_history": "对话历史",
   "new_conversation": "新对话",
-  "error_network": "网络错误，请检查连接后重试",
   "error_response": "服务器响应错误",
   "error_retry": "重试",
+  "error_title": "错误",
+  "user_menu": "用户菜单",
+  "field_not_set": "暂未设置",
   "email_placeholder": "请输入你的邮箱",
   "password_placeholder": "请输入你的密码",
   "validation_email_required": "请输入邮箱",

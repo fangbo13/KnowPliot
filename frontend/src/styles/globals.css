@@ -492,6 +492,19 @@ body {
   box-shadow: 0 0 0 2px rgba(0, 82, 255, 0.1) !important;
 }
 
+/* Sidebar Search Input — fix visual height regression from border:none + capsule style */
+/* The id is on the inner <input>, so we target both the input and its parent affix-wrapper */
+#sidebar-search-input {
+  height: 36px !important;
+  padding: 4px 12px !important;
+}
+
+/* The affix-wrapper that wraps the input — needs height and padding too */
+.ant-input-affix-wrapper:has(#sidebar-search-input) {
+  min-height: 36px !important;
+  padding: 4px 12px !important;
+}
+
 /* Card Styling */
 .ant-card {
   border-radius: 12px !important;

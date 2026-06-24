@@ -363,9 +363,10 @@ export default function AppLayout() {
           onChange={(e) => setSidebarSearch(e.target.value)}
           allowClear
           style={{
-            borderRadius: 20,
+            borderRadius: 18,
             background: 'var(--color-fill-secondary)',
             border: 'none',
+            transition: 'all 0.2s ease',
           }}
           aria-label={t('sidebar_search')}
         />
