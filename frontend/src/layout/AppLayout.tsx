@@ -28,7 +28,8 @@ import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useDebounce } from '../hooks/useDebounce';
 import { useChatStore } from '../store/chatStore';
 import { chatApi } from '../api/chat';
-import { getDateGroupKey, DATE_GROUP_ORDER } from '../utils/dateGroup';
+import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
+import { abortActiveStream } from '../stream/StreamLifecycleManager';
 import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -38,7 +39,8 @@ const { Text } = Typography;
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
+  const { sessions, activeSessionId, streamPhase, loadSessions, setActiveSession, resetSession } = useChatStore();
+  const isStreaming = streamPhase !== 'idle'; // V3.5: Derived from streamPhase
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
@@ -188,7 +190,7 @@ export default function AppLayout() {
     { icon: <UserOutlined style={{ fontSize: 24 }} />, title: t('onboarding_profile_title'), desc: t('onboarding_profile_desc') },
   ], [t]);
 
-  // Filtered and grouped sidebar sessions
+  // Filtered and grouped sidebar sessions — V3.5: dynamic month-level grouping
   const sidebarSessions = useMemo(() => {
     const query = debouncedSidebarSearch.toLowerCase();
     const filtered = sessions.filter((s) => {
@@ -197,15 +199,16 @@ export default function AppLayout() {
     });
 
     const groups: Record<string, typeof filtered> = {};
-    for (const key of DATE_GROUP_ORDER) {
-      groups[key] = [];
-    }
     for (const s of filtered) {
       const gk = getDateGroupKey(s.updatedAt);
+      if (!groups[gk]) groups[gk] = [];
       groups[gk].push(s);
     }
     return groups;
   }, [sessions, debouncedSidebarSearch]);
+
+  // V3.5: Dynamic group ordering — recent groups first, then month groups in reverse chronological order
+  const groupOrder = useMemo(() => computeGroupOrder(sidebarSessions), [sidebarSessions]);
 
   // Toggle collapsed group
   const toggleGroup = useCallback((key: string) => {
@@ -233,8 +236,20 @@ export default function AppLayout() {
     setMobileDrawerOpen(false);
   }, [resetSession, navigate]);
 
-  // Handle delete session
+  // Handle delete session — V3.5 HIGH-002: abort stream if deleting active streaming session
+  // V3.6: Edge case guard — force-unlock if send is locked (session creation phase)
   const handleDeleteSession = useCallback(async (id: string) => {
+    // V3.5: If deleting the currently active session while streaming, abort the stream first
+    if (activeSessionId === id && isStreaming) {
+      abortActiveStream();
+    }
+    // V3.6: Force unlock if send is locked — covers session creation phase where
+    // AbortController doesn't manage the createSession fetch
+    const chatState = useChatStore.getState();
+    if (chatState.isSendLocked) {
+      chatState.unlockSend();
+      chatState.setStreamPhase('idle');
+    }
     try {
       await chatApi.deleteSession(id);
       loadSessions();
@@ -246,16 +261,9 @@ export default function AppLayout() {
     }
     setContextMenuSession(null);
     setSidebarActionMenu(null);
-  }, [activeSessionId, loadSessions, resetSession]);
+  }, [activeSessionId, isStreaming, loadSessions, resetSession]);
 
-  // Group label i18n key
-  const groupLabelKey: Record<string, string> = {
-    today: 'sidebar_today',
-    yesterday: 'sidebar_yesterday',
-    '7days': 'sidebar_7days',
-    '30days': 'sidebar_30days',
-    earlier: 'sidebar_earlier',
-  };
+  // V3.5: Dynamic group labels with month-level i18n support
 
   // Sidebar header content (reused in Drawer)
   const siderHeader = (
@@ -383,12 +391,14 @@ export default function AppLayout() {
           {t('sidebar_empty_state')}
         </div>
       ) : (
-        DATE_GROUP_ORDER.map((groupKey) => {
+        // V3.5: Dynamic group ordering with month-level grouping
+        groupOrder.map((groupKey) => {
           const groupSessions = sidebarSessions[groupKey];
           if (!groupSessions || groupSessions.length === 0) return null;
 
           const isCollapsed = collapsedGroups.has(groupKey);
-          const label = t(groupLabelKey[groupKey] || groupKey);
+          // V3.5: Dynamic group labels — supports month keys like '2026-05'
+          const label = getGroupLabel(groupKey, currentLang);
 
           return (
             <div key={groupKey} style={{ marginBottom: 4 }}>

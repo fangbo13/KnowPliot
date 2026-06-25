@@ -7,53 +7,17 @@ import { useChatStore, type Message } from '../store/chatStore';
 import { chatApi } from '../api/chat';
 import MessageBubble from '../components/chat/MessageBubble';
 import { useDebounce } from '../hooks/useDebounce';
+import { getDateGroupKey, getGroupLabel, computeGroupOrder, formatDate } from '../utils/dateGroup';
+import i18n from '../i18n';
 
 const { Text } = Typography;
 
 type TimeFilter = 'all' | 'today' | 'this_week' | 'this_month' | 'earlier';
 
-// Format date for display in history list
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
-  if (hours < 24) return `${hours} 小时前`;
-
-  return d.toLocaleDateString('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-// Get date group key for grouping
-function getDateGroup(dateStr: string | undefined, t: (key: string) => string): string {
-  if (!dateStr) return t('filter_earlier');
-
-  const d = new Date(dateStr);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today.getTime() - 86400000);
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-
-  if (d >= today) return t('filter_today');
-  if (d >= yesterday) return '昨天';
-  if (d >= startOfWeek) return t('filter_this_week');
-  return t('filter_earlier');
-}
-
-// Group order for display
-const GROUP_ORDER = ['filter_today', '昨天', 'filter_this_week', 'filter_earlier'];
-
 export default function HistoryPage() {
   const { t } = useTranslation('common');
+  // V3.6 HIGH-001: Use i18n language for unified date group labels
+  const currentLang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const { sessions, loadSessions, setActiveSession } = useChatStore();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -343,13 +307,21 @@ export default function HistoryPage() {
           overflowX: 'hidden',
           paddingRight: 4,
         }}>
-          {GROUP_ORDER.map((groupKey) => {
-            const groupSessions = paginatedSessions.filter((s) =>
-              getDateGroup(s.updatedAt, t) === groupKey || (groupKey === '昨天' && getDateGroup(s.updatedAt, t) === '昨天')
-            );
-            if (groupSessions.length === 0) return null;
+          // V3.6 HIGH-001: Unified date grouping — uses getDateGroupKey + computeGroupOrder from dateGroup.ts
+          // Same grouping logic as AppLayout sidebar — no more hardcoded '昨天' or weekly-based inconsistency
+          {(() => {
+            const groupedSessions: Record<string, typeof paginatedSessions> = {};
+            for (const s of paginatedSessions) {
+              const gk = getDateGroupKey(s.updatedAt);
+              if (!groupedSessions[gk]) groupedSessions[gk] = [];
+              groupedSessions[gk].push(s);
+            }
+            const groupOrder = computeGroupOrder(groupedSessions);
+            return groupOrder.map((groupKey) => {
+              const groupSessions = groupedSessions[groupKey];
+              if (!groupSessions || groupSessions.length === 0) return null;
 
-            const groupLabel = groupKey === '昨天' ? '昨天' : t(groupKey);
+              const groupLabel = getGroupLabel(groupKey, currentLang);
 
             return (
               <div key={groupKey} style={{ marginBottom: 16 }}>
@@ -395,7 +367,7 @@ export default function HistoryPage() {
                 />
               </div>
             );
-          })}
+          })})()}
           {filteredSessions.length > PAGE_SIZE && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16, paddingBottom: 4 }}>
               <Pagination

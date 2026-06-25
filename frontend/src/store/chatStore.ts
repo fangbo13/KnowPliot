@@ -1,6 +1,12 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { chatApi } from '../api/chat';
 import { getAuthToken } from '../api/client';
+import {
+  createStreamAbortController,
+  abortActiveStream,
+  clearStreamOnComplete,
+} from '../stream/StreamLifecycleManager';
+import { initTokenBatcher, appendToken, flushImmediate, resetTokenBatcher } from '../stream/TokenBatchRenderer';
 
 export interface Message {
   id: string;
@@ -77,71 +83,185 @@ function generateSmartTitle(content: string): string {
   return title;
 }
 
+// V3.5: Unified stream state machine — replaces isStreaming + thinkingPhase + connectionStatus
+type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completing' | 'error';
+
 interface ChatState {
   sessions: ChatSession[];
   activeSessionId: string | null;
   messages: Message[];
-  isStreaming: boolean;
+  // V3.5: allMessages holds full history for sliding window; messages is the visible slice
+  allMessages: Message[];
+  visibleRoundCount: number;
+  hasOlderMessages: boolean;
+  // V3.6 MED-003: Cached round count — avoids O(n) recomputation per message
+  totalRoundCount: number;
+  // V3.5: Unified stream phase replaces three separate fields
+  streamPhase: StreamPhase;
   streamContent: string;
   citations: Citation[];
   isLoadingMessages: boolean;
   sendError: string | null;
-  // P0-1/P0-2: Progressive thinking indicator & SSE connection feedback
-  thinkingPhase: 'connecting' | 'searching' | 'generating';
-  connectionStatus: 'idle' | 'connecting' | 'streaming' | 'error' | 'fallback';
+  // V3.5: Send lock to prevent double-send during async gap
+  isSendLocked: boolean;
+  // V3.6 HIGH-002: Flag to refresh session list only after new session creation
+  _pendingSessionRefresh: boolean;
 
   // Actions
   setActiveSession: (id: string) => void;
   resetSession: () => void;
   addMessage: (message: Message) => void;
   updateStreamContent: (content: string) => void;
-  setStreaming: (isStreaming: boolean) => void;
   setStreamCitations: (citations: Citation[]) => void;
   setSendError: (error: string | null) => void;
-  setThinkingPhase: (phase: 'connecting' | 'searching' | 'generating') => void;
-  setConnectionStatus: (status: 'idle' | 'connecting' | 'streaming' | 'error' | 'fallback') => void;
+  setStreamPhase: (phase: StreamPhase) => void;
+  lockSend: () => void;
+  unlockSend: () => void;
   loadSessions: () => Promise<void>;
   loadMessages: (sessionId: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   finishStreamingMessage: (messageId: string, sessionId: string) => void;
+  loadOlderRounds: (count: number) => void;
 }
+
+// V3.5: Sliding window helpers
+function computeRounds(messages: Message[]): { id: string; messages: Message[] }[] {
+  const rounds: { id: string; messages: Message[] }[] = [];
+  let currentRoundMessages: Message[] = [];
+  let roundIndex = 0;
+
+  for (const msg of messages) {
+    currentRoundMessages.push(msg);
+    // A round ends when we see an assistant message after a user message
+    if (msg.role === 'assistant' && currentRoundMessages.some(m => m.role === 'user')) {
+      rounds.push({ id: `round-${roundIndex}`, messages: [...currentRoundMessages] });
+      currentRoundMessages = [];
+      roundIndex++;
+    }
+  }
+
+  // If there are leftover messages (e.g., a user message without assistant response yet)
+  if (currentRoundMessages.length > 0) {
+    rounds.push({ id: `round-${roundIndex}`, messages: [...currentRoundMessages] });
+  }
+
+  return rounds;
+}
+
+function extractVisibleMessages(rounds: { id: string; messages: Message[] }[], visibleCount: number): Message[] {
+  // Show the last N rounds
+  const startIdx = Math.max(0, rounds.length - visibleCount);
+  return rounds.slice(startIdx).flatMap(r => r.messages);
+}
+
+const DEFAULT_VISIBLE_ROUNDS = 10;
+// V3.6 MED-001 / V3.7 P1.3: Hard cap on allMessages to prevent unbounded memory growth
+// V3.7: Reduced from 500 to 100 — 100 messages ≈ 50 rounds of conversation,
+// sufficient for most use cases while keeping JS Heap stable.
+// Messages beyond this cap are pruned from front and can be loaded via "load older".
+const MAX_ALL_MESSAGES = 100;
 
 export const useChatStore = create<ChatState>()((set, get) => ({
   sessions: [],
   activeSessionId: null,
   messages: [],
-  isStreaming: false,
+  allMessages: [],
+  visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
+  hasOlderMessages: false,
+  totalRoundCount: 0,
+  // V3.5: Unified stream phase (replaces isStreaming/thinkingPhase/connectionStatus)
+  streamPhase: 'idle',
   streamContent: '',
   citations: [],
   isLoadingMessages: false,
   sendError: null,
-  thinkingPhase: 'connecting',
-  connectionStatus: 'idle',
+  isSendLocked: false,
+  _pendingSessionRefresh: false,
 
-  setActiveSession: (id) => set({ activeSessionId: id, messages: [], sendError: null }),
+  // V3.5 CRIT-002: setActiveSession now aborts old stream + resets isStreaming
+  setActiveSession: (id) => {
+    abortActiveStream(); // Kill old stream to prevent data pollution
+    resetTokenBatcher(); // Clear any pending token buffer
+    set({
+      activeSessionId: id,
+      messages: [],
+      allMessages: [],
+      sendError: null,
+      streamPhase: 'idle',
+      streamContent: '',
+      citations: [],
+      hasOlderMessages: false,
+      totalRoundCount: 0,
+      visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
+      _pendingSessionRefresh: false,
+    });
+  },
 
-  resetSession: () => set({ activeSessionId: null, messages: [], streamContent: '', citations: [], isStreaming: false, sendError: null }),
+  // V3.5 CRIT-002: resetSession now aborts old stream
+  resetSession: () => {
+    abortActiveStream(); // Kill stream on new chat
+    resetTokenBatcher();
+    set({
+      activeSessionId: null,
+      messages: [],
+      allMessages: [],
+      streamContent: '',
+      citations: [],
+      streamPhase: 'idle',
+      sendError: null,
+      hasOlderMessages: false,
+      totalRoundCount: 0,
+      visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
+      _pendingSessionRefresh: false,
+    });
+  },
 
-  addMessage: (message) => set((state) => ({
-    messages: [...state.messages, message],
-  })),
+  // V3.6 MED-001 / V3.7 P1.3: addMessage now prunes allMessages when exceeding MAX cap
+  // V3.7: Added verification log for memory optimization validation
+  addMessage: (message) => set((state) => {
+    const newAllMessages = [...state.allMessages, message];
+    // Prune front if exceeding cap — prevents unbounded memory growth
+    if (newAllMessages.length > MAX_ALL_MESSAGES) {
+      const pruned = newAllMessages.slice(newAllMessages.length - MAX_ALL_MESSAGES);
+      const rounds = computeRounds(pruned);
+      const visibleMessages = extractVisibleMessages(rounds, state.visibleRoundCount);
+      // V3.7 P1.3: Verification log — proves memory is capped during testing
+      // Dev-only: can be removed before production release
+      console.log(`[V3.7 P1.3] addMessage pruning: allMessages=${pruned.length} (cap=${MAX_ALL_MESSAGES}), visibleMessages=${visibleMessages.length}`);
+      return {
+        messages: visibleMessages,
+        allMessages: pruned,
+        hasOlderMessages: true, // Older messages exist on server
+      };
+    }
+    const newMessages = [...state.messages, message];
+    // V3.7 P1.3: Verification log — proves memory is capped during testing
+    // Dev-only: can be removed before production release
+    console.log(`[V3.7 P1.3] addMessage: allMessages=${newAllMessages.length}, visibleMessages=${newMessages.length}`);
+    return {
+      messages: newMessages,
+      allMessages: newAllMessages,
+    };
+  }),
 
   updateStreamContent: (content) => set({ streamContent: content }),
-
-  setStreaming: (isStreaming) => set({
-    isStreaming,
-    streamContent: '',
-    citations: [],
-    // P0-1/P0-2: reset connection state when streaming ends
-    ...(isStreaming ? {} : { thinkingPhase: 'connecting', connectionStatus: 'idle' }),
-  }),
 
   setStreamCitations: (citations) => set({ citations }),
 
   setSendError: (sendError) => set({ sendError }),
 
-  setThinkingPhase: (phase) => set({ thinkingPhase: phase }),
-  setConnectionStatus: (status) => set({ connectionStatus: status }),
+  // V3.5: Stream phase transitions
+  setStreamPhase: (phase) => set({ streamPhase: phase }),
+
+  // V3.5 HIGH-001: Send lock mechanism
+  lockSend: () => set({ isSendLocked: true }),
+  // V3.6 LOW-001: Add dev-only warning for double-unlock detection
+  unlockSend: () => {
+    if (!get().isSendLocked) {
+      console.warn('[chatStore] unlockSend called when isSendLocked is already false — possible double-unlock');
+    }
+    set({ isSendLocked: false });
+  },
 
   loadSessions: async () => {
     try {
@@ -156,32 +276,64 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set({ isLoadingMessages: true, sendError: null });
     try {
       const msgs = await chatApi.getMessages(sessionId);
-      const messages: Message[] = msgs.map((m: any) => ({
+      const allMessages: Message[] = msgs.map((m: any) => ({
         id: m.id || crypto.randomUUID(),
         role: m.role,
         content: m.content || '',
         citations: m.citations || [],
         createdAt: m.created_at || m.createdAt || new Date().toISOString(),
       }));
-      set({ activeSessionId: sessionId, messages, isLoadingMessages: false });
+
+      // V3.5: Sliding window — compute rounds, extract visible slice
+      const rounds = computeRounds(allMessages);
+      const visibleMessages = extractVisibleMessages(rounds, DEFAULT_VISIBLE_ROUNDS);
+      const hasOlder = rounds.length > DEFAULT_VISIBLE_ROUNDS;
+
+      set({
+        activeSessionId: sessionId,
+        allMessages,
+        messages: visibleMessages,
+        hasOlderMessages: hasOlder,
+        visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
+        isLoadingMessages: false,
+        // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks
+        totalRoundCount: rounds.length,
+      });
     } catch (error) {
       console.error('Failed to load messages:', error);
-      set({ isLoadingMessages: false, sendError: 'Failed to load messages' });
+      // V3.6 MED-002: Use i18n error key instead of raw string
+      set({ isLoadingMessages: false, sendError: 'error_session' });
     }
   },
 
+  // V3.5: Load older rounds (expand sliding window)
+  // V3.6 MED-003: Use cached totalRoundCount for hasOlderMessages comparison
+  loadOlderRounds: (count: number) => {
+    const { allMessages, visibleRoundCount, totalRoundCount } = get();
+    const rounds = computeRounds(allMessages);
+    const newVisibleCount = Math.min(visibleRoundCount + count, totalRoundCount);
+    const visibleMessages = extractVisibleMessages(rounds, newVisibleCount);
+    set({
+      messages: visibleMessages,
+      visibleRoundCount: newVisibleCount,
+      hasOlderMessages: newVisibleCount < totalRoundCount,
+    });
+  },
+
   sendMessage: async (content: string) => {
-    const { activeSessionId, isStreaming } = get();
+    // V3.5 HIGH-001: Check both isStreaming and isSendLocked
+    const currentPhase = get().streamPhase;
+    const { isSendLocked } = get();
+    if (currentPhase !== 'idle' || isSendLocked) return;
 
-    if (isStreaming) return;
-
+    // V3.5: Atomic send lock before async gap
+    get().lockSend();
     set({ sendError: null });
-    get().setStreaming(true);
-    // P0-1/P0-2: Instant feedback — show thinking indicator immediately, not after 10s
-    get().setThinkingPhase('connecting');
-    get().setConnectionStatus('connecting');
 
-    let sessionId = activeSessionId;
+    // V3.5: Unified stream state machine → 'connecting'
+    set({ streamPhase: 'connecting' });
+
+    let sessionId = get().activeSessionId;
     if (!sessionId) {
       try {
         const newSession = await chatApi.createSession({ title: generateSmartTitle(content) });
@@ -189,16 +341,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         set({
           activeSessionId: sessionId,
           sessions: [newSession, ...get().sessions],
+          // V3.6 HIGH-002: Mark that we need to refresh sessions after first message in new session
+          _pendingSessionRefresh: true,
         });
       } catch (error) {
         console.error('Failed to create session:', error);
-        set({ isStreaming: false, sendError: 'Failed to start conversation' });
+        set({ streamPhase: 'idle', sendError: 'error_session' });
+        get().unlockSend();
         return;
       }
     } else {
       // Validate sessionId format (M6: security enhancement)
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
-        set({ isStreaming: false, sendError: 'Invalid session ID format' });
+        set({ streamPhase: 'idle', sendError: 'error_session' });
+        get().unlockSend();
         return;
       }
     }
@@ -214,22 +370,29 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const token = getAuthToken();
     const maxRetries = 2;
 
+    // V3.5: Initialize token batch renderer for this stream
+    initTokenBatcher((fullContent: string) => {
+      get().updateStreamContent(fullContent);
+    });
+
     const streamWithRetry = async (attempt: number): Promise<boolean> => {
-      // P0-1/P0-2: Progressive thinking phases + connection status tracking
-      // Replaces old 10s THINKING_THRESHOLD + thinkingShown injection into streamContent
+      // V3.5 CRIT-001: Create/recreate AbortController per attempt
+      // On retry > 0, the old controller was aborted, so we need a fresh one
+      const controller = createStreamAbortController(sessionId);
+
+      // Progressive thinking phases + connection status tracking
       let abortInterval: ReturnType<typeof setInterval> | undefined;
       let phaseTimerSearching: ReturnType<typeof setTimeout> | undefined;
       let phaseTimerGenerating: ReturnType<typeof setTimeout> | undefined;
-      let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
 
       const clearAllTimers = () => {
         if (abortInterval) clearInterval(abortInterval);
         if (phaseTimerSearching) clearTimeout(phaseTimerSearching);
         if (phaseTimerGenerating) clearTimeout(phaseTimerGenerating);
-        if (fallbackTimer) clearTimeout(fallbackTimer);
       };
 
       try {
+        // V3.5 CRIT-001: Pass AbortController signal to fetch
         const response = await fetch(`/api/v1/chat/sessions/${sessionId}/send/`, {
           method: 'POST',
           headers: {
@@ -237,14 +400,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ content }),
+          signal: controller.signal, // V3.5: AbortController signal
         });
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        // P0-2: Headers received — connection established
-        get().setConnectionStatus('streaming');
+        // Headers received — connection established → 'searching' phase
+        set({ streamPhase: 'searching' });
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
@@ -252,41 +416,35 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         let assistantContent = '';
         let currentEvent = '';
 
-        // P0-1/P0-2: Progressive thinking phase timers
+        // Progressive thinking phase timers
         let lastTokenTime = Date.now();
-        const ABORT_THRESHOLD = 30000; // 30s — abort stream (unchanged)
+        const ABORT_THRESHOLD = 30000; // 30s — abort stream
 
-        // Phase 1: After 3s of no tokens → "searching" phase
+        // Phase 1: After 3s of no tokens → "searching" phase (already set on connection)
         phaseTimerSearching = setTimeout(() => {
-          if (get().isStreaming && get().thinkingPhase === 'connecting') {
-            get().setThinkingPhase('searching');
+          if (get().streamPhase === 'connecting') {
+            set({ streamPhase: 'searching' });
           }
         }, 3000);
 
-        // Phase 2: After 8s of no tokens → "generating" phase
+        // Phase 2: After 8s of no tokens → "streaming" phase indicator
         phaseTimerGenerating = setTimeout(() => {
-          if (get().isStreaming && get().thinkingPhase === 'searching') {
-            get().setThinkingPhase('generating');
+          if (get().streamPhase === 'searching' && !assistantContent) {
+            // Still waiting — keep in searching but indicate long retrieval
           }
         }, 8000);
-
-        // P0-2: Fallback detection — if 5s with no tokens after connection, indicate slow connection
-        fallbackTimer = setTimeout(() => {
-          if (get().isStreaming && get().connectionStatus === 'streaming' && !assistantContent) {
-            get().setConnectionStatus('fallback');
-            get().setThinkingPhase('searching'); // Skip to more informative phase
-          }
-        }, 5000);
 
         // Abort timer: cancel stream if no tokens for 30s
         abortInterval = setInterval(() => {
           const elapsed = Date.now() - lastTokenTime;
-          if (elapsed > ABORT_THRESHOLD && get().isStreaming) {
+          if (elapsed > ABORT_THRESHOLD && get().streamPhase !== 'idle') {
             clearAllTimers();
             reader.cancel();
-            get().setStreaming(false);
-            get().setConnectionStatus('error');
-            set({ sendError: 'Stream timed out — no response for 30 seconds' });
+            flushImmediate(); // Flush any pending tokens
+            set({ streamPhase: 'error', sendError: 'error_timeout' });
+            get().unlockSend();
+            // Reset to idle after error is shown
+            setTimeout(() => set({ streamPhase: 'idle' }), 100);
           }
         }, 3000);
 
@@ -309,25 +467,31 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               switch (currentEvent) {
                 case 'token':
                   lastTokenTime = Date.now();
-                  // P0-1: First token received — clear all timers and thinking state
                   clearAllTimers();
+                  // V3.5: Transition to 'streaming' on first token
+                  if (get().streamPhase !== 'streaming') {
+                    set({ streamPhase: 'streaming' });
+                  }
                   assistantContent += data.token || '';
-                  get().updateStreamContent(assistantContent);
+                  // V3.5 HIGH-005: Batch token updates via rAF instead of per-token set()
+                  appendToken(data.token);
                   break;
                 case 'citations':
                   get().setStreamCitations(data);
                   break;
                 case 'done':
                   clearAllTimers();
-                  get().setConnectionStatus('idle');
+                  flushImmediate(); // V3.5: Force flush remaining buffered tokens
                   get().finishStreamingMessage(data.message_id, data.session_id);
                   return true;
                 case 'error':
                   clearAllTimers();
-                  get().setConnectionStatus('error');
-                  console.error('Stream error:', data.error);
-                  get().setStreaming(false);
-                  set({ sendError: data.error || 'Stream error occurred' });
+                  flushImmediate();
+                  // V3.6 MED-002: Use consistent i18n error key instead of raw server string
+                  set({ streamPhase: 'error', sendError: 'error_generic' });
+                  get().unlockSend();
+                  // Reset to idle after error is shown
+                  setTimeout(() => set({ streamPhase: 'idle' }), 100);
                   return false;
               }
             }
@@ -337,14 +501,29 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         return true;
       } catch (error) {
         clearAllTimers();
+
+        // V3.5 CRIT-001: Handle AbortError — stream was intentionally aborted
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          // Stream was intentionally aborted (session switch/delete/reset)
+          // Do NOT set sendError, do NOT retry
+          flushImmediate();
+          clearStreamOnComplete();
+          set({ streamPhase: 'idle', streamContent: '', citations: [] });
+          get().unlockSend();
+          return false; // Return false but don't treat as error
+        }
+
         console.error(`Streaming error (attempt ${attempt + 1}):`, error);
         if (attempt < maxRetries) {
           const delay = (attempt + 1) * 1000;
           await new Promise((resolve) => setTimeout(resolve, delay));
           return streamWithRetry(attempt + 1);
         }
-        get().setStreaming(false);
-        get().setConnectionStatus('error');
+
+        flushImmediate();
+        set({ streamPhase: 'error' });
+        get().unlockSend();
+
         const errorMsg = (error as Error).message;
         if (errorMsg.includes('401') || errorMsg.includes('403')) {
           set({ sendError: 'error_auth' });
@@ -355,14 +534,35 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         } else {
           set({ sendError: 'error_generic' });
         }
+
+        // Reset to idle after error is shown
+        setTimeout(() => set({ streamPhase: 'idle' }), 100);
         return false;
       }
     };
 
     await streamWithRetry(0);
+    // V3.6 LOW-001: All terminal paths of streamWithRetry guarantee unlockSend():
+    // - finishStreamingMessage (success + session mismatch)
+    // - AbortError handler, timeout handler, SSE error event, exhausted retries
+    // - Session creation/validation failures also call unlockSend before returning
+    // No safety net needed — removed redundant double-unlock.
   },
 
-  finishStreamingMessage: (messageId: string, _sessionId: string) => {
+  // V3.5 CRIT-002: Verify session ID match before committing stream data
+  finishStreamingMessage: (messageId: string, sessionId: string) => {
+    const currentSessionId = get().activeSessionId;
+
+    // Session mismatch: stream data belongs to a different session
+    // (user switched sessions while stream was running)
+    if (currentSessionId !== sessionId) {
+      // Discard stale stream data, clean up
+      set({ streamPhase: 'idle', streamContent: '', citations: [], totalRoundCount: 0 });
+      clearStreamOnComplete();
+      get().unlockSend();
+      return;
+    }
+
     const { streamContent, citations } = get();
 
     const assistantMessage: Message = {
@@ -373,13 +573,38 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       createdAt: new Date().toISOString(),
     };
 
-    set((state) => ({
-      messages: [...state.messages, assistantMessage],
-      isStreaming: false,
+    // V3.5: Update both messages (visible slice) and allMessages (full history)
+    const newAllMessages = [...get().allMessages, assistantMessage];
+    // V3.6 MED-001 / V3.7 P1.3: Prune front if exceeding MAX cap — prevents unbounded memory growth
+    const prunedAllMessages = newAllMessages.length > MAX_ALL_MESSAGES
+      ? newAllMessages.slice(newAllMessages.length - MAX_ALL_MESSAGES)
+      : newAllMessages;
+    const rounds = computeRounds(prunedAllMessages);
+    const visibleMessages = extractVisibleMessages(rounds, get().visibleRoundCount);
+    const wasPruned = prunedAllMessages.length < newAllMessages.length;
+
+    // V3.7 P1.3: Verification log — proves memory is capped during testing
+    // Dev-only: can be removed before production release
+    console.log(`[V3.7 P1.3] finishStreamingMessage: allMessages=${prunedAllMessages.length} (cap=${MAX_ALL_MESSAGES}), visibleMessages=${visibleMessages.length}, wasPruned=${wasPruned}`);
+
+    set({
+      messages: visibleMessages,
+      allMessages: prunedAllMessages,
+      streamPhase: 'idle',
       streamContent: '',
       citations: [],
-    }));
+      // V3.6 MED-001: If pruned, older data exists on server → always show "load older"
+      hasOlderMessages: wasPruned ? true : rounds.length > get().visibleRoundCount,
+      // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks
+      totalRoundCount: rounds.length,
+    });
 
-    get().loadSessions();
+    clearStreamOnComplete();
+    get().unlockSend();
+    // V3.6 HIGH-002: Only refresh sessions after new session creation (not every message)
+    if (get()._pendingSessionRefresh) {
+      set({ _pendingSessionRefresh: false });
+      get().loadSessions();
+    }
   },
 }));

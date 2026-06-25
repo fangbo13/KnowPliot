@@ -32,5 +32,11 @@
   "offline_send_warning": "当前网络不可用，请检查网络连接后重试",
   "markdown_error_title": "渲染错误",
   "markdown_error_desc": "此消息渲染时出现问题",
-  "markdown_error_retry": "重新加载"
+  "markdown_error_retry": "重新加载",
+  "error_auth": "服务暂时不可用，请稍后再试",
+  "error_server": "服务器繁忙，请稍后再试",
+  "error_network": "网络连接失败，请检查网络后重试",
+  "error_generic": "请求失败，请稍后再试",
+  "error_session": "无法开始对话，请重试",
+  "error_timeout": "响应超时，请稍后重试"
 }

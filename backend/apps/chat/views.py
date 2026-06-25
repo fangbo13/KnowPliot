@@ -8,6 +8,7 @@ from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
 
 from .models import ChatSession, Message, Citation, Feedback
@@ -19,6 +20,18 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# V3.5 HIGH-004: Cursor pagination for sessions
+class SessionCursorPagination(CursorPagination):
+    ordering = '-updated_at'
+    page_size = 20
+
+
+# V3.5 HIGH-004: Cursor pagination for messages
+class MessageCursorPagination(CursorPagination):
+    ordering = 'created_at'
+    page_size = 40  # ~20 rounds
 
 
 def _estimate_token_count(text: str) -> int:
@@ -44,7 +57,8 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
 
     serializer_class = ChatSessionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class = None  # Sessions list is small per user
+    # V3.5 HIGH-004: Enable cursor pagination for sessions (was None)
+    pagination_class = SessionCursorPagination
     ordering = '-updated_at'  # Most recent first
 
     def get_queryset(self):
@@ -71,14 +85,16 @@ class ChatSessionMessagesView(generics.ListAPIView):
 
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class = None  # Messages per session is small
+    # V3.5 HIGH-004: Enable cursor pagination for messages + N+1 fix via prefetch_related
+    pagination_class = MessageCursorPagination
 
     def get_queryset(self):
+        # V3.5 HIGH-004: prefetch_related eliminates N+1 citation queries
         return Message.objects.filter(
             session_id=self.kwargs["session_id"],
             session__user=self.request.user,
             session__is_active=True,
-        ).order_by("created_at")
+        ).order_by("created_at").prefetch_related("citations__document")
 
 
 def _save_citations(assistant_message, citations_data):
@@ -140,11 +156,13 @@ def send_message(request, session_id):
     # Save user message
     Message.objects.create(session=session, role="user", content=content)
 
-    # Get conversation history (last 8 turns)
+    # V3.5 HIGH-006: Sliding window aligned with frontend — 10 rounds (20 messages)
+    # (was fixed 16 messages = 8 rounds, misaligned with frontend's 10-round default)
+    WINDOW_ROUNDS = 10
     history = list(
         Message.objects.filter(session=session)
         .exclude(role="user", content=content)  # exclude the one we just saved
-        .order_by("-created_at")[:16]
+        .order_by("-created_at")[:WINDOW_ROUNDS * 2]
         .values_list("role", "content")
     )
     history.reverse()

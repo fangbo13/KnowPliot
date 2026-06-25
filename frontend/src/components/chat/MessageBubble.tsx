@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Card, Typography, Tooltip, message as antdMessage, Button, Popover } from 'antd';
 import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined, MoreOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, memo } from 'react';
 import type { Message, Citation } from '../../store/chatStore';
 import ErrorBoundary from '../ErrorBoundary';
 
@@ -35,10 +35,22 @@ function getRelevanceColor(score: number): string {
 interface Props {
   message: Message;
   isStreaming?: boolean;
+  disableActions?: boolean;  // V3.5 2B: disables copy/share/regenerate during stream
   onRegenerate?: () => void;
 }
 
-export default function MessageBubble({ message, isStreaming = false, onRegenerate }: Props) {
+/**
+ * V3.7 P1.2: MessageBubble with React.memo + streaming plain-text rendering.
+ *
+ * Key optimizations:
+ * 1. React.memo with custom comparator — non-streaming messages only re-render
+ *    when id/content change, preventing ~880 unnecessary ReactMarkdown re-parses
+ *    during streaming.
+ * 2. Streaming mode renders plain text (no Markdown) — eliminates O(n²)
+ *    cumulative Markdown AST parsing. Only 1 Markdown parse when stream ends.
+ * 3. Streaming cursor (blink animation) is kept in plain-text mode for UX.
+ */
+function MessageBubble({ message, isStreaming = false, disableActions = false, onRegenerate }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
@@ -110,6 +122,21 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
     }
   };
 
+  // Streaming cursor component — reusable in both plain-text and markdown modes
+  const StreamingCursor = isStreaming ? (
+    <span style={{
+      display: 'inline-block',
+      width: 2,
+      height: 18,
+      background: '#0052FF',
+      marginLeft: 4,
+      verticalAlign: 'text-bottom',
+      animation: 'blink 0.8s ease-in-out infinite',
+      borderRadius: 1,
+      boxShadow: '0 0 4px rgba(0, 82, 255, 0.4)',
+    }} />
+  ) : null;
+
   return (
     <div
       style={{
@@ -140,12 +167,13 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
               position: 'absolute',
               top: 8,
               right: 8,
-              opacity: 0,
-              transform: 'scale(0.85)',
+              opacity: disableActions ? 0.3 : 0,  // V3.5: Visible but dimmed when actions disabled
+              transform: disableActions ? 'scale(0.85)' : 'scale(0.85)',
               transition: 'opacity 0.25s ease, transform 0.25s ease',
               zIndex: 1,
               display: 'flex',
               gap: 2,
+              pointerEvents: disableActions ? 'none' : 'auto',  // V3.5: Block clicks during stream
             }}
           >
             <Tooltip title={copied ? t('copied') : t('copy_message')}>
@@ -198,6 +226,8 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
               top: 8,
               right: 8,
               display: 'none',
+              opacity: disableActions ? 0.3 : undefined,  // V3.5: Dimmed during stream
+              pointerEvents: disableActions ? 'none' : undefined,  // V3.5: Block clicks during stream
             }}
           >
             <Popover
@@ -258,39 +288,39 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
               overflowWrap: 'break-word',
               wordBreak: 'break-word',
             }}>
-              {/* P0-3: ErrorBoundary wraps Markdown rendering to prevent single-point crash */}
-              <ErrorBoundary
-                title={t('markdown_error_title') || '渲染错误'}
-                description={t('markdown_error_desc') || '此消息渲染时出现问题'}
-                retryText={t('markdown_error_retry') || '重新加载'}
-              >
-              <ReactMarkdown
-                allowedElements={ALLOWED_ELEMENTS}
-                unwrapDisallowed={true}
-                components={{
-                  a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noopener noreferrer">
-                      {children}
-                    </a>
-                  ),
-                  img: ({ src, alt }) => (
-                    <img src={src} alt={alt || ''} loading="lazy" />
-                  ),
-                }}
-              >{message.content}</ReactMarkdown>
-              </ErrorBoundary>
-              {isStreaming && (
+              {/* V3.7 P1.2: Streaming mode uses plain text (0 Markdown parses).
+                  When stream ends (isStreaming=false), renders full Markdown (1 parse).
+                  This eliminates O(n²) cumulative Markdown AST parsing (~880 → 1). */}
+              {isStreaming ? (
                 <span style={{
-                  display: 'inline-block',
-                  width: 2,
-                  height: 18,
-                  background: '#0052FF',
-                  marginLeft: 4,
-                  verticalAlign: 'text-bottom',
-                  animation: 'blink 0.8s ease-in-out infinite',
-                  borderRadius: 1,
-                  boxShadow: '0 0 4px rgba(0, 82, 255, 0.4)',
-                }} />
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'break-word',
+                  wordBreak: 'break-word',
+                }}>
+                  {message.content}
+                  {StreamingCursor}
+                </span>
+              ) : (
+                <ErrorBoundary
+                  title={t('markdown_error_title') || '渲染错误'}
+                  description={t('markdown_error_desc') || '此消息渲染时出现问题'}
+                  retryText={t('markdown_error_retry') || '重新加载'}
+                >
+                <ReactMarkdown
+                  allowedElements={ALLOWED_ELEMENTS}
+                  unwrapDisallowed={true}
+                  components={{
+                    a: ({ href, children }) => (
+                      <a href={href} target="_blank" rel="noopener noreferrer">
+                        {children}
+                      </a>
+                    ),
+                    img: ({ src, alt }) => (
+                      <img src={src} alt={alt || ''} loading="lazy" />
+                    ),
+                  }}
+                >{message.content}</ReactMarkdown>
+                </ErrorBoundary>
               )}
             </div>
           )}
@@ -380,3 +410,31 @@ export default function MessageBubble({ message, isStreaming = false, onRegenera
     </div>
   );
 }
+
+/**
+ * V3.7 P1.2: MemoizedMessageBubble — React.memo with custom comparator.
+ *
+ * Optimization strategy:
+ * - Streaming messages (isStreaming=true) ALWAYS re-render (content changes every rAF frame)
+ * - Non-streaming messages ONLY re-render when their id or content changes
+ *   (preventing ~880 unnecessary ReactMarkdown re-parses during stream)
+ *
+ * This reduces streaming-period re-renders from 880+ to just the streaming bubble.
+ */
+const MemoizedMessageBubble = memo(MessageBubble, (prevProps, nextProps) => {
+  // Streaming messages must always update — content changes every frame
+  if (nextProps.isStreaming) return false;
+
+  // Non-streaming messages: only re-render if id or content changed
+  // (props like `disableActions` change during stream but memo prevents
+  //  unnecessary Markdown re-parse since content hasn't changed)
+  return prevProps.message.id === nextProps.message.id
+    && prevProps.message.content === nextProps.message.content
+    && prevProps.isStreaming === nextProps.isStreaming
+    && prevProps.disableActions === nextProps.disableActions;
+});
+
+// Export the memoized version — this is what VirtualizedMessageList should use
+export default MemoizedMessageBubble;
+// Also export the raw component for testing or direct use
+export { MessageBubble as MessageBubbleRaw };

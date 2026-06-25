@@ -32,5 +32,11 @@
   "offline_send_warning": "Network unavailable. Please check your connection and try again.",
   "markdown_error_title": "Rendering Error",
   "markdown_error_desc": "An error occurred while rendering this message",
-  "markdown_error_retry": "Reload"
+  "markdown_error_retry": "Reload",
+  "error_auth": "Service temporarily unavailable. Please try again later.",
+  "error_server": "Server busy. Please try again later.",
+  "error_network": "Connection failed. Please check your network.",
+  "error_generic": "Request failed. Please try again later.",
+  "error_session": "Failed to start conversation. Please retry.",
+  "error_timeout": "Response timed out. Please try again later."
 }

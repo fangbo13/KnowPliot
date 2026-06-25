@@ -10,6 +10,7 @@ import {
   SendOutlined,
   RocketOutlined,
 } from '@ant-design/icons';
+import { useChatStore } from '../../store/chatStore';
 import { useState, useRef, useEffect } from 'react';
 
 const { Title, Text } = Typography;
@@ -32,14 +33,18 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
   const { t } = useTranslation('chat');
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<any>(null);
+  // V3.5 HIGH-001: Read send lock from store to prevent double-send
+  const isSendLocked = useChatStore(state => state.isSendLocked);
+  const isStreaming = useChatStore(state => state.streamPhase !== 'idle');
 
   // Auto-focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  // V3.5 HIGH-001: handleSend checks isSendLocked
   const handleSend = () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isSendLocked || isStreaming) return;
     if (onSendMessage) {
       onSendMessage(inputValue.trim());
     } else {
@@ -117,6 +122,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
             placeholder={t('placeholder') || "在此输入你的问题..."}
             size="large"
             maxLength={4000}
+            disabled={isSendLocked || isStreaming}  // V3.5 HIGH-001: disable during send lock
             style={{
               borderRadius: 'var(--radius-lg) 0 0 var(--radius-lg)',
               borderRight: 'none',
@@ -127,7 +133,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
             type="primary"
             icon={<SendOutlined />}
             onClick={handleSend}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || isSendLocked || isStreaming}  // V3.5 HIGH-001: send lock guard
             size="large"
             style={{
               minWidth: 56,

@@ -6,7 +6,7 @@ const { TextArea } = Input;
 import { SendOutlined, ReloadOutlined, DownOutlined } from '@ant-design/icons';
 import { useChatStore } from '../store/chatStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
-import MessageBubble from '../components/chat/MessageBubble';
+import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 
 // P0-4: Online status tracking for send button disable
 function useOnlineStatus() {
@@ -58,30 +58,38 @@ export default function ChatPageContainer() {
   const isOnline = useOnlineStatus(); // P0-4
   const {
     messages,
-    isStreaming,
     streamContent,
     citations,
     activeSessionId,
     isLoadingMessages,
     sendError,
+    hasOlderMessages,
     setSendError,
     sendMessage,
     loadMessages,
+    loadOlderRounds,
   } = useChatStore();
-  // P0-1/P0-2: Progressive thinking indicator & connection status
-  const thinkingPhase = useChatStore(state => state.thinkingPhase);
-  const connectionStatus = useChatStore(state => state.connectionStatus);
+
+  // V3.5: Read unified stream phase + send lock
+  const streamPhase = useChatStore(state => state.streamPhase);
+  const isSendLocked = useChatStore(state => state.isSendLocked);
+  const isStreaming = streamPhase !== 'idle'; // V3.5: Derived from streamPhase
 
   const [inputValue, setInputValue] = useState('');
-  const [isNearBottom, setIsNearBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputRef>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadedSessionRef = useRef<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false); // P1-5
 
-  // Reset loadedSessionRef when navigating to /chat — ensures messages reload
-  // after returning from HistoryPage where setActiveSession was called
+  // V3.7 P1.2: IntersectionObserver fix — use ref instead of state to prevent
+  // Observer recreation on every streamContent change (was 60 rebuilds/second).
+  // Observer is created once and only re-observes when messages.length changes.
+  const isNearBottomRef = useRef(true);
+  const [, forceUpdate] = useState(0); // Only used for "scroll to bottom" button visibility
+
+  // V3.6: Reset loadedSessionRef when navigating to /chat — ensures messages reload
+  // when a session was previously set (e.g., from sidebar click)
   useEffect(() => {
     loadedSessionRef.current = null;
   }, [location.pathname]);
@@ -107,27 +115,40 @@ export default function ChatPageContainer() {
   useEffect(() => {
     const container = messagesEndRef.current?.parentElement;
     if (!container) return;
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-    if (isNearBottom || !isStreaming) {
-      // P2-#16: Use smooth scroll for all cases; throttle already limits frequency during streaming
+    // V3.7 P1.2: Use ref value instead of state — avoids re-render per streamContent frame
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom || !isStreaming) {
       throttledScroll('smooth');
     }
   }, [messages, streamContent, isStreaming, throttledScroll]);
 
   // IntersectionObserver to detect if user scrolled away from bottom
+  // V3.7 P1.2: Removed streamContent from dependencies — Observer is now created
+  // only once per session (or when messages.length changes). The isNearBottom
+  // value is stored in a ref to prevent React re-renders from streamContent changes.
+  // This eliminates ~60 Observer create/destroy cycles per second during streaming.
   useEffect(() => {
     const sentinel = messagesEndRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
-      ([entry]) => setIsNearBottom(entry.isIntersecting),
+      ([entry]) => {
+        isNearBottomRef.current = entry.isIntersecting;
+        // Only trigger re-render for "scroll to bottom" button visibility
+        // when the value actually changes (not every streamContent frame)
+        forceUpdate(prev => prev + 1);
+      },
       { root: sentinel.parentElement ?? undefined, threshold: 0.1 }
     );
     observer.observe(sentinel);
+    // V3.7: Log Observer creation for verification (should only appear once per session)
+    console.log('[V3.7 P1.2] IntersectionObserver created — this should log only once per session');
     return () => observer.disconnect();
-  }, [messages.length, streamContent]);
+  }, [messages.length]); // V3.7: Removed streamContent — only re-observe when new messages arrive
 
+  // V3.5 HIGH-001: handleSend now checks isSendLocked
   const handleSend = () => {
-    if (!inputValue.trim() || isStreaming) return;
+    if (!inputValue.trim() || isStreaming || isSendLocked) return;
     // P0-4: Block sending when offline
     if (!navigator.onLine) {
       antMessage.warning(t('offline_send_warning') || '当前网络不可用，请检查网络连接后重试');
@@ -150,6 +171,11 @@ export default function ChatPageContainer() {
     }
   };
 
+  // V3.5: Load older messages handler for sliding window
+  const handleLoadOlder = () => {
+    loadOlderRounds(5);
+  };
+
   if (!activeSessionId && messages.length === 0) {
     return (
       <div style={{ maxWidth: 800, margin: '0 auto', padding: '40px 16px' }}>
@@ -163,13 +189,15 @@ export default function ChatPageContainer() {
     );
   }
 
-  // Classify error message for better user feedback
+  // V3.6: Classify error message for better user feedback — unified i18n error keys
   const getErrorDescription = (error: string) => {
     if (error === 'error_auth') return t('error_auth');
     if (error === 'error_server') return t('error_server');
     if (error === 'error_network') return t('error_network');
     if (error === 'error_generic') return t('error_generic');
-    return t('error_generic');
+    if (error === 'error_session') return t('error_session');
+    if (error === 'error_timeout') return t('error_timeout');
+    return t('error_generic'); // Fallback for any unknown error key
   };
 
   return (
@@ -197,8 +225,8 @@ export default function ChatPageContainer() {
         <div aria-live="polite" aria-atomic="false" className="sr-only">
           {isStreaming && streamContent && `AI正在输入: ${clipForScreenReader(streamContent)}`}
           {isStreaming && !streamContent && (
-            thinkingPhase === 'connecting' ? t('thinking_connecting')
-            : thinkingPhase === 'searching' ? t('thinking_searching')
+            streamPhase === 'connecting' ? t('thinking_connecting')
+            : streamPhase === 'searching' ? t('thinking_searching')
             : t('thinking_generating')
           )}
         </div>
@@ -246,70 +274,24 @@ export default function ChatPageContainer() {
         {/* P1-5: Transition wrapper for smooth content switching */}
         <div
           className="message-transition"
-          style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity 0.2s ease' }}
+          style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity 0.2s ease', flex: 1, minHeight: 0 }}
         >
 
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            onRegenerate={msg.role === 'assistant' ? handleRetry : undefined}
-          />
-        ))}
-
-        {isStreaming && streamContent && (
-          <MessageBubble
-            message={{
-              id: 'streaming',
-              role: 'assistant',
-              content: streamContent,
-              citations,
-              createdAt: new Date().toISOString(),
-            }}
-            isStreaming
-          />
-        )}
-
-        {isStreaming && !streamContent && (
-          <div style={{
-            padding: '16px 24px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            animation: 'fadeIn 0.3s ease',
-            ...(connectionStatus === 'fallback' ? {
-              background: 'rgba(250, 173, 20, 0.06)',
-              borderRadius: 8,
-            } : {}),
-          }}>
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              {[0, 1, 2].map(i => (
-                <div key={i} style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: 'var(--accent)',
-                  animation: `dotBounce 1.4s ease-in-out ${i * 0.16}s infinite`,
-                }} />
-              ))}
-            </div>
-            <span style={{ color: 'var(--color-text-tertiary)', fontSize: 13, fontWeight: 500 }}>
-              {thinkingPhase === 'connecting' ? t('thinking_connecting')
-                : thinkingPhase === 'searching' ? t('thinking_searching')
-                : t('thinking_generating')}
-            </span>
-            {connectionStatus === 'fallback' && (
-              <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginLeft: 4 }}>
-                ({t('connection_slow')})
-              </span>
-            )}
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+        {/* V3.5 HIGH-003: Virtualized message list with sliding window + stream state isolation */}
+        <VirtualizedMessageList
+          messages={messages}
+          hasOlderMessages={hasOlderMessages}
+          onLoadOlder={handleLoadOlder}
+          isStreaming={isStreaming}
+          streamContent={streamContent}
+          citations={citations}
+          streamPhase={streamPhase}
+          onRegenerate={handleRetry}
+        />
 
         {/* Scroll to bottom button — shown when user scrolled up during streaming */}
-        {!isNearBottom && isStreaming && (
+        {/* V3.7 P1.2: Uses isNearBottomRef instead of isNearBottom state */}
+        {!isNearBottomRef.current && isStreaming && (
           <div style={{
             position: 'absolute',
             bottom: 16,
@@ -373,7 +355,7 @@ export default function ChatPageContainer() {
                   }
                 }}
                 placeholder={t('placeholder')}
-                disabled={isStreaming}
+                disabled={isStreaming || isSendLocked}  // V3.5 HIGH-001: also disabled during send lock
                 maxLength={4000}
                 autoSize={{ minRows: 1, maxRows: 4 }}
                 aria-label={t('chat_input_label') || 'Type your message'}
@@ -388,7 +370,7 @@ export default function ChatPageContainer() {
                 type="primary"
                 icon={<SendOutlined />}
                 onClick={handleSend}
-                disabled={!inputValue.trim() || isStreaming || !isOnline}
+                disabled={!inputValue.trim() || isStreaming || isSendLocked || !isOnline}  // V3.5 HIGH-001: send lock guard
                 size="large"
                 style={{
                   minWidth: 44,

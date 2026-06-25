@@ -1,15 +1,21 @@
 """Vector retrieval with metadata filtering.
 
 Supports both pgvector (PostgreSQL) and JSON embeddings (SQLite dev).
+
+V3.7 P0.2: Added retrieval timing logs for pgvector performance verification.
 """
 
+import time
 import math
+import logging
 from django.db import connection
 from django.conf import settings
 
 from apps.knowledge.models import DocumentChunk
 from .embedding import EmbeddingService
 from .config import TOP_K, SIMILARITY_THRESHOLD
+
+logger = logging.getLogger(__name__)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -53,10 +59,22 @@ class PgVectorRetriever:
         # Check if we're using pgvector (PostgreSQL) or JSON (SQLite)
         is_postgres = "postgresql" in settings.DATABASES["default"]["ENGINE"]
 
+        # V3.7 P0.2: Log retrieval timing for performance monitoring
+        start_time = time.time()
+
         if is_postgres:
-            return self._search_pgvector(query, top_k, threshold, filters)
+            results = self._search_pgvector(query, top_k, threshold, filters)
         else:
-            return self._search_sqlite(query, top_k, threshold, filters)
+            results = self._search_sqlite(query, top_k, threshold, filters)
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        search_mode = "pgvector" if is_postgres else "sqlite"
+        logger.info(
+            "[Retriever] %s search completed in %dms — query='%s...' top_k=%d results=%d",
+            search_mode, elapsed_ms, query[:50], top_k, len(results),
+        )
+
+        return results
 
     def _search_sqlite(
         self, query: str, top_k: int, threshold: float, filters: dict | None
@@ -98,31 +116,66 @@ class PgVectorRetriever:
     def _search_pgvector(
         self, query: str, top_k: int, threshold: float, filters: dict | None
     ) -> list[dict]:
-        """PostgreSQL + pgvector: use native vector similarity."""
+        """PostgreSQL + pgvector: use native vector similarity.
+
+        V3.7 P0.2: Uses embedding_vector column (VectorField) for pgvector
+        cosine similarity search. This column is populated by migration 0004
+        from the JSON embedding data, and has an HNSW index for fast retrieval.
+        """
         from pgvector.django import CosineDistance
 
+        # V3.7 P0.2: Use EmbeddingService singleton — reuses global httpx.Client
         embedder = EmbeddingService()
         query_embedding = embedder.embed(query)
 
-        qs = DocumentChunk.objects.filter(embedding__isnull=False)
-        if filters:
-            qs = qs.filter(**filters)
+        # Use raw SQL to query embedding_vector column since it's added via migration
+        # (not declared as a Django model field to maintain SQLite dev compatibility)
+        with connection.cursor() as cursor:
+            # Build WHERE clause for filters
+            filter_sql = ""
+            filter_params: list = []
+            if filters:
+                filter_parts = []
+                for key, value in filters.items():
+                    filter_parts.append(f"{key} = %s")
+                    filter_params.append(value)
+                filter_sql = " AND " + " AND ".join(filter_parts)
 
-        results = (
-            qs.annotate(distance=CosineDistance("embedding"))
-            .filter(distance__lte=1 - threshold)
-            .order_by("distance")[:top_k]
-        )
+            # V3.7 P0.2: Query embedding_vector (vector column) with HNSW index
+            # Cosine distance operator <=> provided by pgvector
+            threshold_distance = 1 - threshold
+            cursor.execute(
+                f"""
+                SELECT dc.id, dc.content, dc.page_number, dc.metadata,
+                       dc.document_id, d.title AS document_title,
+                       (dc.embedding_vector <=> %s) AS distance
+                FROM knowledge_documentchunk dc
+                JOIN knowledge_document d ON dc.document_id = d.id
+                WHERE dc.embedding_vector IS NOT NULL
+                AND (dc.embedding_vector <=> %s) <= %s
+                {filter_sql}
+                ORDER BY distance ASC
+                LIMIT %s
+                """,
+                [
+                    str(query_embedding),  # pgvector expects string format for vector param
+                    str(query_embedding),
+                    threshold_distance,
+                    *filter_params,
+                    top_k,
+                ],
+            )
+            rows = cursor.fetchall()
 
         return [
             {
-                "id": str(r.id),
-                "content": r.content,
-                "document_id": str(r.document.id),
-                "document_title": r.document.title,
-                "score": round(1 - float(r.distance), 4),
-                "page_number": r.page_number,
-                "metadata": r.metadata,
+                "id": str(row[0]),
+                "content": row[1],
+                "document_id": str(row[4]),
+                "document_title": row[5],
+                "score": round(1 - float(row[6]), 4),
+                "page_number": row[2],
+                "metadata": row[3],
             }
-            for r in results
+            for row in rows
         ]
