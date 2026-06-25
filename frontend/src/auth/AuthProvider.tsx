@@ -5,7 +5,9 @@ interface User {
   id: string;
   email: string;
   username: string;
-  is_hr_admin: boolean;
+  is_hr_admin: boolean;       // Phase 2 dual-authorization: kept for backward compat
+  roles: string[];             // V4.0: ['hr'] or ['admin'] or []
+  permissions: string[];       // V4.0: ['document.create', 'category.read', ...]
   language_preference: string;
   service_line?: string;
   office_location?: string;
@@ -20,7 +22,7 @@ interface AuthState {
 
 interface AuthContextType extends AuthState {
   login: (data: { token: string; user: User }) => void;
-  logout: () => void;
+  logout: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -31,7 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const saved = localStorage.getItem('ey-auth');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // V4.0 migration: if old format lacks roles/permissions, derive from is_hr_admin
+        if (parsed.user && !parsed.user.roles) {
+          parsed.user.roles = parsed.user.is_hr_admin ? ['hr'] : [];
+          parsed.user.permissions = []; // Will be populated on next login
+        }
+        return parsed;
       }
     } catch {
       // ignore
@@ -40,19 +48,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const login = useCallback(({ token, user }: { token: string; user: User }) => {
-    const newState: AuthState = { isAuthenticated: true, user, token };
+    // V4.0: Ensure roles/permissions are present (backend now provides them)
+    const enrichedUser: User = {
+      ...user,
+      roles: user.roles || (user.is_hr_admin ? ['hr'] : []),
+      permissions: user.permissions || [],
+    };
+    const newState: AuthState = { isAuthenticated: true, user: enrichedUser, token };
     setState(newState);
     localStorage.setItem('ey-auth', JSON.stringify(newState));
   }, []);
 
-  const logout = useCallback(async () => {
+  // V4.1 BUG-014: logout now only clears local state on successful API response.
+  // Previously, logout always cleared isAuthenticated + navigated to /login, even on API failure.
+  // If the /login page has a rendering issue, the user is stuck. Now:
+  // - API success → clear state + return true (caller navigates to /login)
+  // - API failure → don't clear isAuthenticated, return false (caller shows error toast)
+  // ProtectedRoute only redirects when isAuthenticated=false, which only happens on success.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-014]
+  const logout = useCallback(async (): Promise<boolean> => {
     try {
       await apiClient.post('/auth/logout/');
+      // Success: clear local state
+      setState({ isAuthenticated: false, user: null, token: null });
+      localStorage.removeItem('ey-auth');
+      return true;
     } catch {
-      // Best-effort: clear local state even if API call fails
+      // Failure: do NOT clear local state — user stays on current page
+      // They can try logging out again. ProtectedRoute stays engaged.
+      return false;
     }
-    setState({ isAuthenticated: false, user: null, token: null });
-    localStorage.removeItem('ey-auth');
   }, []);
 
   return (

@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate } from 'react-router-dom';
 import {
   Avatar, Dropdown, Button, Drawer, Modal, Card, Typography,
-  Popconfirm, Input, Tooltip,
+  Popconfirm, Input, Tooltip, message as antMessage,
 } from 'antd';
 import {
   MessageOutlined,
@@ -185,9 +185,15 @@ export default function AppLayout() {
       key: 'logout',
       icon: <LogoutOutlined />,
       label: t('logout'),
+      // V4.1 BUG-014: Only navigate on successful logout. If API fails, stay on
+      // current page and show error toast. This prevents stuck-on-broken-login scenario.
       onClick: async () => {
-        await logout();
-        navigate('/login');
+        const success = await logout();
+        if (success) {
+          navigate('/login');
+        } else {
+          antMessage.error(t('logout_failed') || 'Logout failed — please try again');
+        }
       },
     });
 
@@ -426,8 +432,13 @@ export default function AppLayout() {
           aria-label={t('logout')}
           style={{ color: 'var(--color-text-secondary)', padding: '0 4px' }}
           onClick={async () => {
-            await logout();
-            navigate('/login');
+            // V4.1 BUG-014: Guard navigation behind successful logout
+            const success = await logout();
+            if (success) {
+              navigate('/login');
+            } else {
+              antMessage.error(t('logout_failed') || 'Logout failed — please try again');
+            }
             setMobileDrawerOpen(false);
           }}
         />
