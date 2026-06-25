@@ -102,6 +102,24 @@ export default function AppLayout() {
     }
   }, [isMobile]);
 
+  // V4.1 BUG-009: CSS :has() Safari compatibility fallback.
+  // Safari <15.4 does not support :has() selector. Detect via CSS.supports()
+  // and apply fallback class to the sidebar search affix-wrapper element.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-009]
+  useEffect(() => {
+    const hasSupport = CSS.supports('selector(:has(*))');
+    if (!hasSupport) {
+      // Find the affix-wrapper that contains #sidebar-search-input
+      const input = document.getElementById('sidebar-search-input');
+      if (input) {
+        const affixWrapper = input.closest('.ant-input-affix-wrapper');
+        if (affixWrapper) {
+          affixWrapper.classList.add('sidebar-search-affix-fix');
+        }
+      }
+    }
+  }, []);
+
   // Close context menu on outside click
   useEffect(() => {
     if (!contextMenuSession) return;

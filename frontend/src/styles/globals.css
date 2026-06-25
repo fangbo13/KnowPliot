@@ -632,7 +632,16 @@ body {
 }
 
 /* The affix-wrapper that wraps the input — needs height and padding too */
+/* V4.1 BUG-009: Safari <15.4 compatibility fallback for :has() selector.
+* The :has() selector is not supported in Safari <15.4. This fallback class
+* (.sidebar-search-affix-fix) provides identical styles via JS feature detection
+* in AppLayout.tsx. Modern browsers use :has(), older browsers get the class. */
 .ant-input-affix-wrapper:has(#sidebar-search-input) {
+  min-height: 36px !important;
+  padding: 4px 12px !important;
+}
+
+.sidebar-search-affix-fix {
   min-height: 36px !important;
   padding: 4px 12px !important;
 }
