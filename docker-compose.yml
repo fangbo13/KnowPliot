@@ -29,6 +29,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.docker
     command: >
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8000"
@@ -49,6 +51,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.docker
     command: celery -A config worker -l info -c 4
     volumes:
       - ./backend:/app
