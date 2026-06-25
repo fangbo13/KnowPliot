@@ -2,13 +2,17 @@ import { useTranslation } from 'react-i18next';
 import { Card, Typography, Tooltip, message as antdMessage, Button, Popover } from 'antd';
 import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined, MoreOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import { useState, useRef, useCallback, memo } from 'react';
 import type { Message, Citation } from '../../store/chatStore';
 import ErrorBoundary from '../ErrorBoundary';
+import CopyCodeButton from './CopyCodeButton';
 
 const { Text } = Typography;
 
 // XSS protection: whitelist only safe Markdown elements
+// V4.0: Added 'span' for highlight.js syntax tokens, 'input' for GFM task list checkboxes
 const ALLOWED_ELEMENTS = [
   'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins', 'sub', 'sup',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -17,6 +21,8 @@ const ALLOWED_ELEMENTS = [
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
   'a', 'img',
   'details', 'summary',
+  'span',   // V4.0 P0-2: highlight.js generates <span class="hljs-*"> for syntax tokens
+  'input',  // V4.0 P0-3: GFM task lists generate <input type="checkbox">
 ];
 
 // Convert score to relevance label
@@ -128,7 +134,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
       display: 'inline-block',
       width: 2,
       height: 18,
-      background: '#0052FF',
+      background: 'var(--accent)',
       marginLeft: 4,
       verticalAlign: 'text-bottom',
       animation: 'blink 0.8s ease-in-out infinite',
@@ -180,12 +186,12 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
               <Button
                 type="text"
                 size="small"
-                icon={copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
+                icon={copied ? <CheckOutlined style={{ color: 'var(--color-success)' }} /> : <CopyOutlined />}
                 onClick={handleCopy}
                 aria-label={copied ? t('copied') : t('copy_message')}
                 style={{
                   padding: '2px 6px',
-                  color: copied ? '#52c41a' : 'var(--color-text-tertiary)',
+                  color: copied ? 'var(--color-success)' : 'var(--color-text-tertiary)',
                 }}
               />
             </Tooltip>
@@ -273,7 +279,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
             boxShadow: isUser ? 'none' : 'var(--shadow-sm, none)',
           }}
           bodyStyle={{
-            padding: '12px 16px',
+            padding: 'var(--msg-bubble-padding, 12px 16px)',  // V4.0 UI-LOW-001: Use CSS variable for responsive padding
           }}
         >
           {isUser ? (
@@ -309,15 +315,66 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
                 <ReactMarkdown
                   allowedElements={ALLOWED_ELEMENTS}
                   unwrapDisallowed={true}
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
                   components={{
-                    a: ({ href, children }) => (
-                      <a href={href} target="_blank" rel="noopener noreferrer">
-                        {children}
-                      </a>
-                    ),
-                    img: ({ src, alt }) => (
-                      <img src={src} alt={alt || ''} loading="lazy" />
-                    ),
+                    pre: ({ children, node, ...props }) => {
+                      // V4.0 P1-1: Wrap <pre> in a relative container for CopyCodeButton positioning
+                      // Extract code content and language from the child <code> element via AST node
+                      let codeContent = '';
+                      let language = '';
+
+                      // Traverse node children to find the code element and extract text
+                      if (node?.children?.[0]) {
+                        const codeNode = node.children[0] as any;
+                        // Extract language from className (e.g. "language-python")
+                        if (codeNode?.properties?.className) {
+                          const classes = Array.isArray(codeNode.properties.className)
+                            ? codeNode.properties.className
+                            : [codeNode.properties.className];
+                          const langClass = classes.find((c: string) => c.startsWith('language-'));
+                          if (langClass) language = langClass.replace('language-', '');
+                        }
+                        // Extract text content from code node children
+                        if (codeNode?.children) {
+                          codeContent = codeNode.children
+                            .map((c: any) => c.value || '')
+                            .join('');
+                        }
+                      }
+
+                      return (
+                        <div style={{ position: 'relative' }}>
+                          <pre {...props}>{children}</pre>
+                          <CopyCodeButton code={codeContent} language={language} />
+                        </div>
+                      );
+                    },
+                    // V4.0 DEFECT-002: Protocol validation on href/src to prevent XSS.
+                    // Without this, javascript:alert(1) in <a href> and data:image/svg+xml
+                    // in <img src> would execute arbitrary code. Unsafe protocols render
+                    // as plain text instead of interactive elements.
+                    // [Source: V4.0/deep_sys_defect_list.md §DEFECT-002]
+                    a: ({ href, children }) => {
+                      const SAFE_HREF_PROTOCOLS = ['http://', 'https://', 'mailto:'];
+                      const isSafe = href && SAFE_HREF_PROTOCOLS.some(p => href.toLowerCase().startsWith(p));
+                      if (!isSafe) {
+                        // Unsafe href (javascript:, data:, vbscript:, etc.) → render as plain text
+                        return <span style={{ color: 'var(--color-text-secondary)' }}>{children}</span>;
+                      }
+                      return (
+                        <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+                      );
+                    },
+                    img: ({ src, alt }) => {
+                      const SAFE_SRC_PROTOCOLS = ['http://', 'https://'];
+                      const isSafe = src && SAFE_SRC_PROTOCOLS.some(p => src.toLowerCase().startsWith(p));
+                      if (!isSafe) {
+                        // Unsafe src (data: URI SVG XSS, javascript:, etc.) → render alt text or null
+                        return alt ? <span style={{ color: 'var(--color-text-secondary)' }}>[{alt}]</span> : null;
+                      }
+                      return <img src={src} alt={alt || ''} loading="lazy" />;
+                    },
                   }}
                 >{message.content}</ReactMarkdown>
                 </ErrorBoundary>

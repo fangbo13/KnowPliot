@@ -4,6 +4,8 @@
    Typography: Calistoga (display) + Inter (UI) + JetBrains Mono (labels)
    ============================================ */
 @import "antd/dist/reset.css";
+/* V4.0 P0-2: highlight.js base theme for syntax highlighting */
+@import "highlight.js/styles/github.css";
 
 /* ---- Color Tokens ---- */
 :root {
@@ -31,6 +33,12 @@
   --color-bg-elevated: var(--card);
   --color-border: var(--border);
   --color-border-secondary: var(--border-secondary);
+  /* V4.1 BUG-005: Semantic success/error tokens for dark mode consistency.
+  * Previously used hardcoded #52c41a/#ff4d4f which had poor contrast in dark mode.
+  * [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-005] */
+  --color-success: #22C55E;
+  --color-error: #EF4444;
+  --color-warning: #FAAD14;
 
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -69,6 +77,9 @@
   /* User Message Bubble */
   --user-msg-bg: var(--foreground);
   --user-msg-accent: var(--accent);
+
+  /* V4.0 UI-LOW-001: Responsive message bubble padding (CSS variable replaces hardcoded inline style) */
+  --msg-bubble-padding: 12px 16px;
 }
 
 /* ---- Dark Mode ---- */
@@ -86,6 +97,14 @@
   --accent-hover: #6B9AFF;
   --accent-active: #3A6FFF;
   --color-primary: var(--accent);
+
+  /* V4.1 BUG-005: Dark mode success/error tokens with better contrast.
+  * Light mode #22C55E/#EF4444 are too bright on dark backgrounds;
+  * these variants have appropriate contrast against #1E293B background.
+  * [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-005] */
+  --color-success: #4ADE80;
+  --color-error: #F87171;
+  --color-warning: #FBBF24;
 
   --user-msg-bg: #2D3A4F;
   --user-msg-accent: var(--accent);
@@ -419,6 +438,108 @@ body {
   font-weight: 600;
 }
 
+/* ---- V4.0: Code Block Copy Button ---- */
+.code-block-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 2;
+}
+
+.markdown-content pre:hover .code-block-copy-btn,
+.code-block-copy-btn:hover {
+  opacity: 1;
+}
+
+.code-lang-label {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-elevated);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-family-mono), monospace;
+}
+
+/* Touch devices: always show copy button (no hover state) */
+@media (hover: none) and (pointer: coarse) {
+  .code-block-copy-btn {
+    opacity: 0.6;
+  }
+}
+
+/* ---- V4.0 P0-3: GFM Tables ---- */
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  display: block;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid var(--color-border-secondary);
+  padding: 6px 12px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.markdown-content th {
+  background: var(--color-bg-elevated);
+  font-weight: 600;
+}
+
+.markdown-content tr:nth-child(even) {
+  background: var(--muted);
+}
+
+/* ---- V4.0 P0-3: GFM Strikethrough & Task Lists ---- */
+.markdown-content del {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}
+
+.markdown-content input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--accent);
+}
+
+/* ---- V4.0 UI-MED-003: Mobile Overflow Fix (<400px) ---- */
+@media (max-width: 400px) {
+  :root {
+    --msg-bubble-padding: 8px 10px;  /* Reduce bubble padding on small screens */
+  }
+
+  .markdown-content pre {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  .markdown-content code {
+    font-size: 11px;
+    padding: 1px 4px;
+  }
+
+  .markdown-content table {
+    font-size: 11px;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .msg-bubble-wrapper {
+    max-width: 90% !important;  /* Expand bubble width on very small screens */
+  }
+}
+
 /* ---- Login Submit Button ---- */
 .login-submit {
   transition: all 0.2s ease !important;
@@ -620,6 +741,63 @@ body {
 
 [data-theme="dark"] .ant-segmented-item-selected {
   background: var(--accent) !important;
+}
+
+/* V4.0 P0-2: highlight.js dark mode override — override github.css light theme in dark mode */
+[data-theme="dark"] .hljs {
+  background: var(--color-bg-elevated) !important;
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .hljs-keyword,
+[data-theme="dark"] .hljs-selector-tag,
+[data-theme="dark"] .hljs-built_in {
+  color: #c678dd !important;
+}
+
+[data-theme="dark"] .hljs-string,
+[data-theme="dark"] .hljs-attr,
+[data-theme="dark"] .hljs-template-variable {
+  color: #98c379 !important;
+}
+
+[data-theme="dark"] .hljs-comment,
+[data-theme="dark"] .hljs-doctag {
+  color: #5c6370 !important;
+}
+
+[data-theme="dark"] .hljs-number,
+[data-theme="dark"] .hljs-literal {
+  color: #d19a66 !important;
+}
+
+[data-theme="dark"] .hljs-title,
+[data-theme="dark"] .hljs-section {
+  color: #61afef !important;
+}
+
+[data-theme="dark"] .hljs-function .hljs-title {
+  color: #61afef !important;
+}
+
+[data-theme="dark"] .hljs-type,
+[data-theme="dark"] .hljs-class .hljs-title {
+  color: #e5c07b !important;
+}
+
+[data-theme="dark"] .hljs-variable,
+[data-theme="dark"] .hljs-params {
+  color: #e06c75 !important;
+}
+
+/* V4.0: Code block copy button dark mode */
+[data-theme="dark"] .code-lang-label {
+  background: #334155 !important;
+  color: #94A3B8 !important;
+}
+
+[data-theme="dark"] .code-block-copy-btn .ant-btn-text {
+  color: #94A3B8 !important;
 }
 
 /* ---- Onboarding Modal ---- */

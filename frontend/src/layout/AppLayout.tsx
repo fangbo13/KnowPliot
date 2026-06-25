@@ -33,6 +33,8 @@ import { abortActiveStream } from '../stream/StreamLifecycleManager';
 import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
+// V4.0 DEFECT-008: BroadcastChannel cross-tab sync
+import { initCrossTabSync, broadcastSessionDelete } from '../sync/crossTabSync';
 
 const { Text } = Typography;
 
@@ -71,6 +73,7 @@ export default function AppLayout() {
   // Load sessions on mount and periodically
   useEffect(() => {
     loadSessions();
+    initCrossTabSync(); // V4.0 DEFECT-008: start cross-tab listener
   }, [loadSessions]);
 
   // P1-3: Auto-open mobile drawer for first-time visitors on mobile
@@ -107,18 +110,33 @@ export default function AppLayout() {
     return () => document.removeEventListener('mousedown', handler);
   }, [sidebarActionMenu]);
 
-  // Memoize user dropdown menu (header — includes knowledge base for admins)
+  // Memoize user dropdown menu (header — V4.0 dual-track navigation)
   const userMenu = useMemo(() => {
     const items: any[] = [];
 
-    // Knowledge base — admin only
-    if (user?.is_hr_admin) {
+    // V4.0: Knowledge base — HR and Admin both can access
+    const hasHRAccess = user?.roles?.includes('hr') || user?.roles?.includes('admin') || user?.is_hr_admin;
+    if (hasHRAccess) {
       items.push({
         key: 'knowledge',
         icon: <BookOutlined />,
         label: t('knowledge_base'),
         onClick: () => navigate('/admin/knowledge'),
       });
+    }
+
+    // V4.0: Admin Dashboard — Admin only (system domain)
+    const hasAdminAccess = user?.roles?.includes('admin') || (user?.is_hr_admin && user?.is_superuser);
+    if (hasAdminAccess) {
+      items.push({
+        key: 'admin-dashboard',
+        icon: <AppstoreOutlined />,
+        label: t('admin_dashboard') || 'Admin Dashboard',
+        onClick: () => navigate('/admin/dashboard'),
+      });
+    }
+
+    if (hasHRAccess || hasAdminAccess) {
       items.push({ type: 'divider' as const });
     }
 
@@ -140,7 +158,7 @@ export default function AppLayout() {
     });
 
     return { items };
-  }, [logout, navigate, t, user?.is_hr_admin]);
+  }, [logout, navigate, t, user?.roles, user?.is_hr_admin]);
 
   // Memoize theme toggle handler
   const handleThemeToggle = useCallback(() => {
@@ -252,6 +270,7 @@ export default function AppLayout() {
     }
     try {
       await chatApi.deleteSession(id);
+      broadcastSessionDelete(id); // V4.0 DEFECT-008: notify other tabs of session deletion
       loadSessions();
       if (activeSessionId === id) {
         resetSession();
@@ -906,7 +925,7 @@ export default function AppLayout() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                color: '#ff4d4f',
+                color: 'var(--color-error)',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -967,7 +986,7 @@ export default function AppLayout() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                color: '#ff4d4f',
+                color: 'var(--color-error)',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
