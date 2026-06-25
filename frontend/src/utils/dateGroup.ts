@@ -68,8 +68,11 @@ export function computeGroupOrder(groups: Record<string, any[]>): string[] {
   return [...recentPresent, ...monthKeys];
 }
 
-/** Legacy static order — kept for backward compatibility with HistoryPage */
-export const DATE_GROUP_ORDER: DateGroupKey[] = ['today', 'yesterday', '7days', '30days', 'earlier'];
+/** @deprecated V4.1 BUG-013: Legacy static order — no longer used by sidebar (sidebar
+ * uses computeGroupOrder). Kept for backward compatibility with HistoryPage which now
+ * uses computeGroupOrder too. The 'earlier' key is deprecated in favor of 30-day threshold.
+ * [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-013] */
+export const DATE_GROUP_ORDER: DateGroupKey[] = ['today', 'yesterday', '7days', '30days'];
 
 /** Format a date for display (relative time) */
 export function formatDate(dateStr: string): string {

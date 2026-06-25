@@ -12,7 +12,7 @@ import i18n from '../i18n';
 
 const { Text } = Typography;
 
-type TimeFilter = 'all' | 'today' | 'this_week' | 'this_month' | 'earlier';
+type TimeFilter = 'all' | 'today' | 'this_week' | 'this_month' | 'older';
 
 export default function HistoryPage() {
   const { t } = useTranslation('common');
@@ -69,7 +69,7 @@ export default function HistoryPage() {
       if (timeFilter === 'all') return true;
 
       const updatedAt = session.updatedAt ? new Date(session.updatedAt) : null;
-      if (!updatedAt) return timeFilter === 'earlier';
+      if (!updatedAt) return timeFilter === 'older';
 
       switch (timeFilter) {
         case 'today':
@@ -78,8 +78,15 @@ export default function HistoryPage() {
           return updatedAt >= startOfWeek;
         case 'this_month':
           return updatedAt >= startOfMonth;
-        case 'earlier':
-          return updatedAt < startOfMonth;
+        // V4.1 BUG-013: Use 30-day threshold (matching sidebar's getDateGroupKey)
+        // instead of startOfMonth to ensure consistent grouping between sidebar
+        // and HistoryPage. Previously 'earlier' used startOfMonth which could
+        // include sessions that sidebar groups as '30days'.
+        // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-013]
+        case 'older': {
+          const thirtyDaysAgo = new Date(startOfToday.getTime() - 30 * 86400000);
+          return updatedAt < thirtyDaysAgo;
+        }
         default:
           return true;
       }
@@ -128,7 +135,7 @@ export default function HistoryPage() {
     { label: t('filter_today'), value: 'today' },
     { label: t('filter_this_week'), value: 'this_week' },
     { label: t('filter_this_month'), value: 'this_month' },
-    { label: t('filter_earlier'), value: 'earlier' },
+    { label: t('filter_older') || t('filter_earlier'), value: 'older' },
   ];
 
   // Viewing a specific session — show messages inline (read-only)
