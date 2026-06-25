@@ -540,6 +540,17 @@ body {
   }
 }
 
+/* V4.1 BUG-006: Floating input bar responsive fix for mobile (<500px).
+* On mobile browsers, the visible viewport height fluctuates when the address bar
+* expands/collapses. The fixed bottom positioning can clip the input below the
+* visible area. This responsive rule reduces spacing and uses full width. */
+@media (max-width: 500px) {
+  .floating-input-inner {
+    max-width: 100% !important;
+    padding: 0 12px !important;
+  }
+}
+
 /* ---- Login Submit Button ---- */
 .login-submit {
   transition: all 0.2s ease !important;

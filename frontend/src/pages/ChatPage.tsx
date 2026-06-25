@@ -247,7 +247,7 @@ export default function ChatPageContainer() {
         style={{
           flex: 1,
           overflowY: 'auto',
-          paddingBottom: 80,
+          paddingBottom: 100, // V4.1 BUG-006: Increased from 80 to match new floating input bottom offset
           minHeight: 0,
           position: 'relative',
         }}
@@ -358,10 +358,15 @@ export default function ChatPageContainer() {
         </div>
       </div>
 
-      {/* Floating Input Bar — DeepSeek style (fixed to viewport) */}
+      {/* Floating Input Bar — DeepSeek style (fixed to viewport)
+       * V4.1 BUG-006: Responsive bottom offset with safe-area-inset for mobile browsers.
+       * Uses calc(16px + env(safe-area-inset-bottom)) to handle iOS Safari address bar
+       * and Android Chrome viewport height fluctuations. Small screens (<500px) use
+       * tighter spacing and full-width input.
+       * [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-006] */}
       <div style={{
         position: 'fixed',
-        bottom: 32,
+        bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
         left: 0,
         right: 0,
         display: 'flex',
@@ -369,7 +374,7 @@ export default function ChatPageContainer() {
         zIndex: 100,
         pointerEvents: 'none',
       }}>
-        <div style={{
+        <div className="floating-input-inner" style={{
           width: '100%',
           maxWidth: 720,
           padding: '0 24px',
