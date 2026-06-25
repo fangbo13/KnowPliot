@@ -1,8 +1,13 @@
-"""Knowledge views."""
+"""Knowledge views — V4.1 SYS-V4.1-006: Document reindex concurrency protection.
+
+Added select_for_update() + transaction.atomic() to prevent parallel
+ingest_document tasks from running simultaneously on the same document.
+"""
 
 import os
 
 from django.conf import settings
+from django.db import transaction
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -65,6 +70,13 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        # V4.1 KB-V4.1-003: Only uploader or admin-role user can delete a document.
+        # Prevents HR-A from deleting HR-B's documents (horizontal privilege escalation).
+        if instance.uploaded_by != request.user and not request.user.has_role("admin"):
+            return Response(
+                {"detail": "You can only delete documents you uploaded."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         create_audit_log(
             user=request.user,
             action="document_delete",
@@ -85,10 +97,21 @@ class DocumentReindexView(generics.GenericAPIView):
     def get_queryset(self):
         return Document.objects.all()
 
+    # V4.1 SYS-V4.1-006: select_for_update() + transaction prevents concurrent reindex
     def post(self, request, pk):
-        document = self.get_object()
-        document.status = "processing"
-        document.save()
+        # Acquire row-level lock and check status atomically
+        try:
+            with transaction.atomic():
+                document = Document.objects.select_for_update().get(id=pk)
+                if document.status == "processing":
+                    return Response(
+                        {"error": "Document is already being processed"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                document.status = "processing"
+                document.save(update_fields=["status"])
+        except Document.DoesNotExist:
+            return Response({"error": "Document not found"}, status=404)
 
         create_audit_log(
             user=request.user,
@@ -99,6 +122,7 @@ class DocumentReindexView(generics.GenericAPIView):
             request=request,
         )
 
+        # Trigger Celery task OUTSIDE the transaction (avoid long DB lock)
         from apps.rag.services import ingest_document
         ingest_document.delay(str(document.id))
 
@@ -118,10 +142,23 @@ class DocumentChunksView(generics.ListAPIView):
 
 
 class CategoryListView(generics.ListCreateAPIView):
-    """List and create document categories."""
+    """List and create document categories.
+
+    V4.0 RBAC fix: POST (create) requires category.create permission
+    (HR/Admin only). GET (list) is available to all authenticated users.
+    """
 
     serializer_class = DocumentCategorySerializer
-    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        """V4.0: Separate GET/POST permission requirements.
+
+        GET: Any authenticated user can list categories (needed for chat dropdown).
+        POST: Only HR/Admin can create categories (category.create codename).
+        """
+        if self.request.method == "POST":
+            return [permissions.IsAuthenticated(), IsHROrAdmin()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         return DocumentCategory.objects.all()

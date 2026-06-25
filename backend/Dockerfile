@@ -5,9 +5,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install only runtime dependencies (no build-essential to save memory)
+# Install runtime dependencies (V4.1 SYS-V4.1-011: added ca-certificates for HTTPS)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PIP_TRUSTED_HOST=mirrors.tuna.tsinghua.edu.cn

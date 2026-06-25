@@ -7,9 +7,10 @@ import time
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 
 from .models import ChatSession, Message, Citation, Feedback
 from .serializers import (
@@ -120,10 +121,25 @@ def _save_citations(assistant_message, citations_data):
             logger.warning("Citation save failed for message %s: %s", assistant_message.id, e)
 
 
+# V4.0 DEFECT-001: SSE endpoint must be throttled — @api_view bypasses DEFAULT_THROTTLE_CLASSES
+# Without this, authenticated users can call the RAG+LLM pipeline at unlimited rate,
+# causing DashScope cost explosion (¥0.004/call × 1000/min = ¥4+/min per attacker).
+class SendMessageRateThrottle(UserRateThrottle):
+    rate = '10/minute'  # Normal users: 5-10 msg/hr; Active: 1-2 msg/min; Blocks cost explosion
+
+
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
+@throttle_classes([SendMessageRateThrottle])
 def send_message(request, session_id):
-    """Send a message and get streaming response (SSE)."""
+    """Send a message and get streaming response (SSE).
+
+    TODO (SYS-V4.1-007): Add Redis session-level lock when migrating to
+    gunicorn multi-worker deployment. Current runserver is single-threaded
+    so concurrent SSE requests cannot race. Future: acquire Redis lock
+    with key "chat:session_lock:{session_id}" before streaming, release
+    in GeneratorExit/finally block.
+    """
     serializer = ChatMessageRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
@@ -207,8 +223,10 @@ def send_message(request, session_id):
             logger.info("Client disconnected during stream for session %s", session_id)
             return
         except Exception as e:
+            # V4.0 DEFECT-013: SSE error event must NOT leak str(e) to frontend
+            logger.error("Stream error for session %s: %s", session_id, e, exc_info=True)
             yield "event: error\n"
-            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'error': 'stream_error'}, ensure_ascii=False)}\n\n"
             return
 
         # H-04: Don't save message if client disconnected before streaming completed

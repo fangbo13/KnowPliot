@@ -1,6 +1,14 @@
-"""Knowledge serializers."""
+"""Knowledge serializers — V4.1 KB-V4.1-006/008: Magic number + file size validation.
 
+DocumentSerializer now validates:
+- V4.1 SYS-V4.1-012: File size against settings.MAX_UPLOAD_SIZE_MB (existing)
+- V4.1 KB-V4.1-006: File content type matches declared file_type (magic number)
+- V4.1 KB-V4.1-008: Min/max file size enforcement
+"""
+
+from django.conf import settings
 from rest_framework import serializers
+from apps.core.validators import validate_file_content_type, validate_file_size, MIN_FILE_SIZE
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
 
 
@@ -13,6 +21,35 @@ class DocumentCategorySerializer(serializers.ModelSerializer):
 
 class DocumentSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
+
+    def validate_file(self, value):
+        """Validate uploaded file: size limits + magic number content type check.
+
+        V4.1 SYS-V4.1-012: Max file size against MAX_UPLOAD_SIZE_MB setting.
+        V4.1 KB-V4.1-006: Magic number validation — content must match declared type.
+        V4.1 KB-V4.1-008: Min file size — reject empty/near-empty files.
+        """
+        # V4.1 SYS-V4.1-012: Max file size check (existing, preserved)
+        max_size_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        if value.size > max_size_bytes:
+            raise serializers.ValidationError(
+                "File size exceeds the limit of %dMB. "
+                "Your file is %.1fMB."
+                % (settings.MAX_UPLOAD_SIZE_MB, value.size / 1024 / 1024)
+            )
+
+        # V4.1 KB-V4.1-008: Min file size check
+        if value.size < MIN_FILE_SIZE:
+            raise serializers.ValidationError(
+                f"File is too small ({value.size} bytes). Minimum size is 1KB."
+            )
+
+        # V4.1 KB-V4.1-006: Magic number content type validation
+        declared_type = self.initial_data.get("file_type")
+        if declared_type:
+            validate_file_content_type(value, declared_type)
+
+        return value
 
     class Meta:
         model = Document

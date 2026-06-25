@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 
 # Load .env file
@@ -14,8 +15,25 @@ except ImportError:
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Core settings
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "change-me-to-a-random-string")
+# Core settings — V4.1 SYS-V4.1-003: SECRET_KEY must be >= 32 bytes for HMAC security
+# Old default "change-me-to-a-random-string" was only 26 bytes (InsecureKeyLengthWarning).
+# Now: if env var is set and >= 32 bytes → use it; if unset → auto-generate (dev safe);
+# if set but < 32 bytes → warn but still use it (dev friendly, not blocking startup).
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    warnings.warn(
+        "DJANGO_SECRET_KEY not set — using auto-generated temporary key. "
+        "Set DJANGO_SECRET_KEY in .env for persistent security (sessions/JWT survive restarts).",
+        RuntimeWarning,
+    )
+    import secrets
+    SECRET_KEY = secrets.token_urlsafe(50)
+elif len(SECRET_KEY) < 32:
+    warnings.warn(
+        "DJANGO_SECRET_KEY is %d bytes — minimum 32 bytes recommended for HMAC security. "
+        "Current key may be vulnerable to brute-force attacks." % len(SECRET_KEY),
+        RuntimeWarning,
+    )
 DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -50,17 +68,21 @@ LOCAL_APPS = [
     "apps.knowledge",
     "apps.rag",
     "apps.audit",
+    "apps.rbac",
+    "apps.crawler",  # V4.1: Web crawler module
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.core.middleware.SafeErrorResponseMiddleware",  # V4.1 SYS-V4.1-002: intercept ALL 500 errors
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.middleware.AuthenticatedMediaMiddleware",  # V4.1 KB-V4.1-007: auth required for /media/
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
@@ -143,11 +165,14 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
+    # V4.1 SYS-V4.1-004: Added AnonRateThrottle (100/min per IP) alongside UserRateThrottle
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "user": "30/minute",
+        "anon": "100/minute",  # Per IP — prevents mass registration + API abuse
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
 }
@@ -177,13 +202,17 @@ ACCOUNT_EMAIL_VERIFICATION = "optional"
 # CORS
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
-# Celery
-CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+# Celery — V4.1 SYS-V4.1-010: Redis now requires password
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+# V4.1 SYS-V4.1-009: Task timeout — prevents worker slot exhaustion from large PDFs
+CELERY_TASK_TIME_LIMIT = 300  # 5 min hard timeout (worker SIGKILL)
+CELERY_TASK_SOFT_TIME_LIMIT = 240  # 4 min soft timeout (raises SoftTimeLimitExceeded)
+CELERY_TASK_MAX_RETRIES = 3
 
 # pgvector
 PGVECTOR_DIMENSION = 1024  # Qwen text-embedding-v4
