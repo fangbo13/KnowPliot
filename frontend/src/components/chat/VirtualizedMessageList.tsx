@@ -172,6 +172,14 @@ export default function VirtualizedMessageList({
       initialTopMostItemIndex={data.length - 1}
       computeItemKey={(_index, item) => item.id}
       increaseViewportBy={{ top: 200, bottom: 200 }}
+      // V4.1 BUG-008: Stable item height estimation to prevent jump when streaming
+      // placeholder is replaced by the final message. The streaming placeholder uses
+      // a stable key ('streaming'), so Virtuoso caches its measured height. When the
+      // placeholder is removed and the final message (with a new UUID key) appears,
+      // Virtuoso estimates its height using this value instead of the default 30px,
+      // preventing a sudden upward jump.
+      // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-008]
+      defaultItemHeight={80}
       components={{
         Footer: () => thinkingIndicator ? <>{thinkingIndicator}</> : null,
       }}

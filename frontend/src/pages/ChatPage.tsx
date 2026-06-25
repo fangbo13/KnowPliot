@@ -126,19 +126,23 @@ export default function ChatPageContainer() {
   useEffect(() => {
     const container = messagesEndRef.current?.parentElement;
     if (!container) return;
-    // V3.7 P1.2: Use ref value instead of state — avoids re-render per streamContent frame
-    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-    isNearBottomRef.current = nearBottom;
-    if (nearBottom || !isStreaming) {
+    // V4.1 BUG-017: Use single source of truth (isNearBottomRef from IntersectionObserver)
+    // instead of separate scroll heuristic. Removed the heuristic calculation:
+    // container.scrollHeight - container.scrollTop - container.clientHeight < 100
+    // The IntersectionObserver with rootMargin '0px 0px 100px 0px' provides the same
+    // proximity detection with no flicker from dual thresholds.
+    // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-017]
+    if (isNearBottomRef.current || !isStreaming) {
       throttledScroll('smooth');
     }
   }, [messages, streamContent, isStreaming, throttledScroll]);
 
   // IntersectionObserver to detect if user scrolled away from bottom
-  // V3.7 P1.2: Removed streamContent from dependencies — Observer is now created
-  // only once per session (or when messages.length changes). The isNearBottom
-  // value is stored in a ref to prevent React re-renders from streamContent changes.
-  // This eliminates ~60 Observer create/destroy cycles per second during streaming.
+  // V4.1 BUG-017: Changed from threshold:0.1 to rootMargin:'0px 0px 100px 0px'.
+  // rootMargin extends the intersection root by 100px below, so the sentinel is
+  // "intersecting" when the user is within 100px of the bottom. This matches the
+  // previous heuristic threshold (<100px) but uses a single, reliable mechanism.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-017]
   useEffect(() => {
     const sentinel = messagesEndRef.current;
     if (!sentinel) return;
@@ -149,7 +153,7 @@ export default function ChatPageContainer() {
         // when the value actually changes (not every streamContent frame)
         forceUpdate(prev => prev + 1);
       },
-      { root: sentinel.parentElement ?? undefined, threshold: 0.1 }
+      { root: sentinel.parentElement ?? undefined, rootMargin: '0px 0px 100px 0px' }
     );
     observer.observe(sentinel);
     // V3.7: Log Observer creation for verification (should only appear once per session)
@@ -182,6 +186,10 @@ export default function ChatPageContainer() {
 
   const handleQuickAction = (question: string) => {
     sendMessage(question);
+    // V4.1 BUG-016: Focus chat input after quick-action for keyboard navigation continuity.
+    // Without this, focus remains on the clicked card, breaking keyboard nav flow.
+    // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-016]
+    inputRef.current?.focus();
   };
 
   const handleRetry = () => {
