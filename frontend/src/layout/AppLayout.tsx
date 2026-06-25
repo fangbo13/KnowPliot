@@ -200,9 +200,15 @@ export default function AppLayout() {
     return { items };
   }, [logout, navigate, t, user?.roles, user?.is_hr_admin]);
 
-  // Memoize theme toggle handler
+  // V4.1 BUG-015: Theme toggle animation — 0.3s spin transition on icon change.
+  // When user clicks the toggle, themeAnimating is set true for 300ms, applying
+  // the .theme-toggle-spin CSS class which rotates the icon 180deg.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-015]
+  const [themeAnimating, setThemeAnimating] = useState(false);
   const handleThemeToggle = useCallback(() => {
+    setThemeAnimating(true);
     setThemeMode(isDark ? 'light' : 'dark');
+    setTimeout(() => setThemeAnimating(false), 300);
   }, [isDark, setThemeMode]);
 
   // Language switch
@@ -889,6 +895,7 @@ export default function AppLayout() {
             icon={isDark ? <SunOutlined /> : <MoonOutlined />}
             onClick={handleThemeToggle}
             aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')}
+            className={themeAnimating ? 'theme-toggle-spin' : ''}
             style={{ marginRight: 16, color: 'var(--color-text-secondary)' }}
             title={isDark ? t('switch_to_light') : t('switch_to_dark')}
           />

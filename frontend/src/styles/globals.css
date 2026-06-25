@@ -552,6 +552,15 @@ body {
 }
 
 /* ---- Login Submit Button ---- */
+/* ---- V4.1 BUG-015: Theme toggle spin animation ---- */
+.theme-toggle-spin {
+  animation: themeIconSpin 0.3s ease-in-out;
+}
+@keyframes themeIconSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(180deg); }
+}
+
 .login-submit {
   transition: all 0.2s ease !important;
 }
