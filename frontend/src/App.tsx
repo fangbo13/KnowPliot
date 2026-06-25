@@ -4,9 +4,12 @@ import AppLayout from './layout/AppLayout';
 import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
+import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import LoginPage from './auth/LoginPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { RoleGuard } from './auth/RoleGuard';
 import { useAuth } from './auth/AuthProvider';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
   const { isAuthenticated } = useAuth();
@@ -41,7 +44,18 @@ function App() {
     });
   }, []);
 
+  // V4.1 BUG-004: Top-level ErrorBoundary wrapping entire Routes.
+  // Without this, a crash in LoginPage or route transitions causes a white screen.
+  // The existing ErrorBoundary inside AppLayout (L853) catches content-area crashes,
+  // giving a two-tier error recovery: top → layout/auth, inner → content.
+  // ErrorBoundary is outside i18n context, so we use static English strings.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-004]
   return (
+    <ErrorBoundary
+      title="Something went wrong"
+      description="An unexpected error occurred. Please try reloading the page."
+      retryText="Reload"
+    >
     <Routes>
       <Route
         path="/login"
@@ -58,9 +72,27 @@ function App() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="profile" element={<ProfilePage />} />
-        <Route path="admin/knowledge" element={<KnowledgeBasePage />} />
+        {/* V4.0 RBAC: HR knowledge base — requires hr or admin role */}
+        <Route
+          path="admin/knowledge"
+          element={
+            <RoleGuard requiredRole="hr">
+              <KnowledgeBasePage />
+            </RoleGuard>
+          }
+        />
+        {/* V4.0 RBAC: Admin dashboard — requires admin role */}
+        <Route
+          path="admin/dashboard"
+          element={
+            <RoleGuard requiredRole="admin">
+              <AdminDashboardPage />
+            </RoleGuard>
+          }
+        />
       </Route>
     </Routes>
+    </ErrorBoundary>
   );
 }
 
