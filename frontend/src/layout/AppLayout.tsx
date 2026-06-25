@@ -38,6 +38,19 @@ import { initCrossTabSync, broadcastSessionDelete } from '../sync/crossTabSync';
 
 const { Text } = Typography;
 
+// V4.1 BUG-007: Clamp context/action menu position to viewport bounds.
+// Prevents menus from overflowing the screen edge when the user right-clicks near
+// the bottom or right side of the viewport. Menu width is ~160px, estimated height ~120px.
+// [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-007]
+function clampToViewport(x: number, y: number, menuWidth: number = 160, menuHeight: number = 120) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return {
+    x: Math.max(0, Math.min(x, vw - menuWidth)),
+    y: Math.max(0, Math.min(y, vh - menuHeight)),
+  };
+}
+
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -76,13 +89,16 @@ export default function AppLayout() {
     initCrossTabSync(); // V4.0 DEFECT-008: start cross-tab listener
   }, [loadSessions]);
 
-  // P1-3: Auto-open mobile drawer for first-time visitors on mobile
+  // V4.1 BUG-011: Removed auto-close after 2 seconds. The drawer now stays open
+  // until the user explicitly taps a conversation or presses the close button.
+  // Previously, setTimeout auto-close made the onboarding gesture useless.
+  // localStorage 'ey-mobile-drawer-seen' flag still prevents re-opening on future visits.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-011]
   useEffect(() => {
     if (isMobile && !localStorage.getItem('ey-mobile-drawer-seen')) {
       setMobileDrawerOpen(true);
       localStorage.setItem('ey-mobile-drawer-seen', 'true');
-      const timer = setTimeout(() => setMobileDrawerOpen(false), 2000);
-      return () => clearTimeout(timer);
+      // No auto-close timer — user must interact to dismiss
     }
   }, [isMobile]);
 
@@ -227,6 +243,31 @@ export default function AppLayout() {
 
   // V3.5: Dynamic group ordering — recent groups first, then month groups in reverse chronological order
   const groupOrder = useMemo(() => computeGroupOrder(sidebarSessions), [sidebarSessions]);
+
+  // V4.1 BUG-012: Auto-expand collapsed groups that contain search matches.
+  // When sidebar search is active, compute which groups have matching sessions
+  // and expand them so results are visible. When search is cleared, restore
+  // previous collapsed state.
+  // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-012]
+  const prevCollapsedRef = useRef<Set<string>>(collapsedGroups);
+  useEffect(() => {
+    if (debouncedSidebarSearch) {
+      // Search active: save current state, then expand groups with matches
+      prevCollapsedRef.current = new Set(collapsedGroups);
+      const matchingGroupKeys = new Set(Object.keys(sidebarSessions));
+      setCollapsedGroups(prev => {
+        const next = new Set(prev);
+        // Remove groups from collapsed set that have search matches
+        for (const key of matchingGroupKeys) {
+          next.delete(key);
+        }
+        return next;
+      });
+    } else {
+      // Search cleared: restore previous collapsed state
+      setCollapsedGroups(prevCollapsedRef.current);
+    }
+  }, [debouncedSidebarSearch, sidebarSessions]);
 
   // Toggle collapsed group
   const toggleGroup = useCallback((key: string) => {
@@ -466,11 +507,13 @@ export default function AppLayout() {
                     onClick={() => handleSidebarSessionClick(session.id)}
                     onContextMenu={(e) => {
                       e.preventDefault();
+                      // V4.1 BUG-007: Clamp menu position to viewport bounds
+                      const clamped = clampToViewport(e.clientX, e.clientY);
                       setContextMenuSession({
                         id: session.id,
                         title: session.title || t('new_conversation'),
-                        x: e.clientX,
-                        y: e.clientY,
+                        x: clamped.x,
+                        y: clamped.y,
                       });
                     }}
                     style={{
@@ -520,10 +563,12 @@ export default function AppLayout() {
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = e.currentTarget.getBoundingClientRect();
+                          // V4.1 BUG-007: Clamp action menu position to viewport bounds
+                          const clamped = clampToViewport(rect.right, rect.bottom, 140);
                           setSidebarActionMenu({
                             sessionId: session.id,
-                            x: rect.right,
-                            y: rect.bottom,
+                            x: clamped.x,
+                            y: clamped.y,
                           });
                         }}
                       />
