@@ -4,6 +4,9 @@ V4.2 SYS-V4.2-014: Added DashScope circuit breaker protection.
 When DashScope API fails 3 times consecutively, the circuit opens
 and returns a degraded response for 30 seconds (half-open recovery).
 This prevents external API failures from blocking the entire server.
+
+V4.2 KB-V4.2-BATCH-006: Added extracted text size limit + chunk count limit.
+V4.2 KB-V4.2-BATCH-009: Added metadata sanitization via bleach.
 """
 
 import logging
@@ -18,6 +21,7 @@ from .prompt_builder import PromptBuilder
 from .guardrails import GuardrailsService, LiteLLMChatService
 from .config import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K, SIMILARITY_THRESHOLD
 from apps.core.circuit_breaker import dashscope_breaker  # V4.2 SYS-V4.2-014
+from apps.knowledge.batch import sanitize_metadata, is_zero_vector  # V4.2 BATCH-009/012
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,10 @@ class RAGPipeline:
     def ingest(self, document) -> list:
         """Parse, chunk, embed, and store a document.
 
+        V4.2 KB-V4.2-BATCH-006: Added extracted text size limit.
+        V4.2 KB-V4.2-BATCH-009: Added metadata sanitization via bleach.
+        V4.2 KB-V4.2-BATCH-012: Zero-vector detection + failure marking.
+
         Args:
             document: Django Document model instance.
 
@@ -52,22 +60,80 @@ class RAGPipeline:
         # Parse document
         raw_text, page_metadata = self.parser.parse(document.file.path, document.file_type)
 
+        # V4.2 KB-V4.2-BATCH-006: Extracted text size limit
+        max_text_size = getattr(settings, "MAX_EXTRACTED_TEXT_SIZE", 10_000_000)
+        if len(raw_text) > max_text_size:
+            logger.warning(
+                f"[BATCH-006] Extracted text from '{document.title}' is "
+                f"{len(raw_text)} bytes — exceeds limit of {max_text_size} bytes. "
+                f"Truncating to limit."
+            )
+            raw_text = raw_text[:max_text_size]
+            document.processing_error = "Extracted text exceeds size limit — truncated."
+            document.save(update_fields=["processing_error"])
+
         # Chunk
         chunks = self.chunker.split(raw_text, page_metadata)
+
+        # V4.2 KB-V4.2-BATCH-006: Chunk count limit per document
+        max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
+        if len(chunks) > max_chunks:
+            logger.warning(
+                f"[BATCH-006] Document '{document.title}' produces {len(chunks)} chunks — "
+                f"exceeds limit of {max_chunks}. Truncating."
+            )
+            chunks = chunks[:max_chunks]
+            document.processing_error = (
+                f"Document produces too many chunks ({len(chunks)}) — truncated to {max_chunks}."
+            )
+            document.save(update_fields=["processing_error"])
 
         # Embed in batches
         texts = [c["text"] for c in chunks]
         embeddings = self.embedder.embed_batch(texts)
 
-        # Store
+        # V4.2 KB-V4.2-BATCH-012: Zero-vector detection
+        # Count how many embeddings are zero vectors (failed)
+        zero_vector_count = sum(1 for emb in embeddings if is_zero_vector(emb))
+
+        # If >50% of embeddings are zero vectors, mark document as failed
+        if zero_vector_count > len(embeddings) * 0.5 and len(embeddings) > 0:
+            document.status = "failed"
+            document.processing_error = (
+                f"Embedding failure: {zero_vector_count}/{len(embeddings)} chunks "
+                f"returned zero vectors (>50%). Document may not be searchable."
+            )
+            document.save(update_fields=["status", "processing_error"])
+            logger.error(
+                f"[BATCH-012] Document '{document.title}' has {zero_vector_count} zero vectors "
+                f"out of {len(embeddings)} — marked as failed."
+            )
+            # Still create chunks but mark them with metadata
+            for chunk, embedding in zip(chunks, embeddings):
+                chunk["metadata"]["embedding_failed"] = is_zero_vector(embedding)
+            # Return early — don't store these chunks as they're unusable
+            return []
+
+        # Store chunks with sanitized metadata
         document_chunks = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            # V4.2 KB-V4.2-BATCH-009: Sanitize metadata before storing
+            raw_metadata = chunk.get("metadata", {})
+            clean_metadata = sanitize_metadata(raw_metadata)
+
+            # V4.2 KB-V4.2-BATCH-012: Mark individual failed embeddings
+            if is_zero_vector(embedding):
+                clean_metadata["embedding_failed"] = True
+                logger.warning(
+                    f"[BATCH-012] Chunk {i} of '{document.title}' has zero vector — marked."
+                )
+
             doc_chunk = DocumentChunk.objects.create(
                 document=document,
                 content=chunk["text"],
                 chunk_index=i,
-                page_number=chunk.get("metadata", {}).get("page"),
-                metadata=chunk.get("metadata", {}),
+                page_number=clean_metadata.get("page"),
+                metadata=clean_metadata,
                 embedding=embedding,
             )
             document_chunks.append(doc_chunk)

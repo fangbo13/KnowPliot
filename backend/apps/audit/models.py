@@ -1,4 +1,8 @@
-"""Audit log models."""
+"""Audit log models — V4.0 extended with system-level actions and role_used.
+
+V3.8: 11 ACTION_CHOICES (content domain only)
+V4.0: +9 system-level ACTION_CHOICES + role_used field for dual-role audit tracing
+"""
 
 import uuid
 
@@ -7,9 +11,14 @@ from django.conf import settings
 
 
 class AuditLog(models.Model):
-    """Audit log entry for admin actions."""
+    """Audit log entry for admin actions.
+
+    V4.0: Extended with 9 new system-level action types and role_used
+    field for tracking which role (hr/admin) was active during the operation.
+    """
 
     ACTION_CHOICES = [
+        # ── Content domain (V3.8 original) ──
         ("document_upload", "Document Upload"),
         ("document_delete", "Document Delete"),
         ("document_reindex", "Document Reindex"),
@@ -21,6 +30,22 @@ class AuditLog(models.Model):
         ("export_data", "Export Data"),
         ("category_create", "Category Create"),
         ("category_update", "Category Update"),
+        # ── System domain (V4.0 new) ──
+        ("role_assign", "Role Assign"),
+        ("role_revoke", "Role Revoke"),
+        ("user_create", "User Create"),
+        ("user_update", "User Update"),
+        ("user_deactivate", "User Deactivate"),
+        ("config_change", "Config Change"),
+        ("system_health_view", "System Health View"),
+        ("audit_export", "Audit Export"),
+        ("role_change_log", "Role Change Log"),
+        # ── Crawler domain (V4.1 new) ──
+        ("document_crawl", "Document Crawl"),
+        ("document_crawl_withdraw", "Document Crawl Withdraw"),
+        # ── Batch domain (V4.2 new) ──
+        ("document_batch_import", "Document Batch Import"),
+        ("document_batch_result_view", "Document Batch Result View"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -35,6 +60,9 @@ class AuditLog(models.Model):
     details = models.JSONField(default=dict, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.CharField(max_length=500, blank=True, default="")
+    # V4.0: role_used tracks which role was active during the operation
+    # (hr/admin/superuser/employee) — critical for dual-role audit tracing
+    role_used = models.CharField(max_length=20, blank=True, default="", help_text="Role used for this action")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

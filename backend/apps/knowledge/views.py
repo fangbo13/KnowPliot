@@ -2,6 +2,8 @@
 
 Added select_for_update() + transaction.atomic() to prevent parallel
 ingest_document tasks from running simultaneously on the same document.
+
+V4.2 KB-V4.2-BATCH-004: Added DocumentUploadRateThrottle to all upload views.
 """
 
 import os
@@ -22,12 +24,18 @@ from .serializers import (
     DocumentChunkSerializer,
     AnswerTemplateSerializer,
 )
+# V4.2 KB-V4.2-BATCH-004: Upload rate throttle
+from .batch_views import DocumentUploadRateThrottle
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
-    """List and upload documents (admin only)."""
+    """List and upload documents (admin only).
+
+    V4.2 KB-V4.2-BATCH-004: Added upload rate throttle (10/minute/user).
+    """
 
     permission_classes = [permissions.IsAuthenticated, IsHROrAdmin]
+    throttle_classes = [DocumentUploadRateThrottle]  # V4.2 BATCH-004
 
     def get_queryset(self):
         qs = Document.objects.all()

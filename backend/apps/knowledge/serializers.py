@@ -4,11 +4,13 @@ DocumentSerializer now validates:
 - V4.1 SYS-V4.1-012: File size against settings.MAX_UPLOAD_SIZE_MB (existing)
 - V4.1 KB-V4.1-006: File content type matches declared file_type (magic number)
 - V4.1 KB-V4.1-008: Min/max file size enforcement
+- V4.2 KB-V4.2-BATCH-008: Title sanitization to prevent stored XSS
 """
 
 from django.conf import settings
 from rest_framework import serializers
 from apps.core.validators import validate_file_content_type, validate_file_size, MIN_FILE_SIZE
+from apps.knowledge.batch import sanitize_title  # V4.2 BATCH-008
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
 
 
@@ -51,17 +53,24 @@ class DocumentSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate_title(self, value):
+        """V4.2 KB-V4.2-BATCH-008: Sanitize title to prevent stored XSS."""
+        sanitized = sanitize_title(value)
+        if not sanitized:
+            raise serializers.ValidationError("Title contains only dangerous characters.")
+        return sanitized
+
     class Meta:
         model = Document
         fields = [
             "id", "title", "file", "file_type", "file_size",
             "category", "category_name", "tags", "status",
             "version", "effective_from", "effective_to",
-            "chunk_count", "processing_error", "created_at", "updated_at",
+            "chunk_count", "processing_error", "content_hash", "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "status", "version", "chunk_count",
-            "processing_error", "created_at", "updated_at",
+            "processing_error", "content_hash", "created_at", "updated_at",
         ]
 
 

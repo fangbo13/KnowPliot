@@ -189,6 +189,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "user": "30/minute",
         "anon": "100/minute",  # Per IP — prevents mass registration + API abuse
+        # V4.2 KB-V4.2-BATCH-004: Dedicated upload throttle rates
+        "document_upload": "10/minute",  # Per user — prevents API resource exhaustion
+        "batch_upload": "3/minute",  # Per user — stricter limit for batch ZIP uploads
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
 }
@@ -226,8 +229,9 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 # V4.1 SYS-V4.1-009: Task timeout — prevents worker slot exhaustion from large PDFs
-CELERY_TASK_TIME_LIMIT = 300  # 5 min hard timeout (worker SIGKILL)
-CELERY_TASK_SOFT_TIME_LIMIT = 240  # 4 min soft timeout (raises SoftTimeLimitExceeded)
+# V4.2 KB-V4.2-BATCH-005: Extended timeout for batch ingestion (large ZIP with many docs)
+CELERY_TASK_TIME_LIMIT = 1800  # 30 min hard timeout (was 300/5min) — batch docs need more time
+CELERY_TASK_SOFT_TIME_LIMIT = 1500  # 25 min soft timeout (was 240/4min)
 CELERY_TASK_MAX_RETRIES = 3
 # V4.2 SYS-V4.2-013: Queue routing — critical tasks get dedicated slots
 # Previous: all tasks in single default queue, competing for 4 slots equally.
@@ -259,6 +263,13 @@ LITELLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # File Upload
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
+
+# V4.2 KB-V4.2-BATCH-004/005/006: Batch upload settings
+BULK_UPLOAD_MAX_DOCUMENTS = int(os.environ.get("BULK_UPLOAD_MAX_DOCUMENTS", "100"))  # Max files per ZIP
+BULK_UPLOAD_TOTAL_SIZE_MB = int(os.environ.get("BULK_UPLOAD_TOTAL_SIZE_MB", "500"))  # Max ZIP total size MB
+MAX_EXTRACTED_TEXT_SIZE = 10_000_000  # 10MB — max extracted text size per document (BATCH-006)
+MAX_CHUNKS_PER_DOCUMENT = 500  # Max chunks per document (BATCH-006)
+MAX_CHUNKS_PER_BATCH = 5000  # Max total chunks per batch (BATCH-005)
 
 # SSL Verification (for LLM API calls)
 SSL_VERIFY = os.environ.get("SSL_VERIFY", "true").lower() == "true"

@@ -132,17 +132,23 @@ class PgVectorRetriever:
         # (not declared as a Django model field to maintain SQLite dev compatibility)
         with connection.cursor() as cursor:
             # Build WHERE clause for filters
+            # V4.1 KB-V4.1-004: Whitelist allowed filter keys to prevent SQL column name injection.
+            # Only allow known column names that are safe to interpolate into raw SQL.
+            ALLOWED_FILTER_KEYS = {"document_id", "category_id", "document__status"}
             filter_sql = ""
             filter_params: list = []
             if filters:
                 filter_parts = []
                 for key, value in filters.items():
+                    if key not in ALLOWED_FILTER_KEYS:
+                        raise ValueError(f"Invalid filter key: '{key}'. Allowed keys: {sorted(ALLOWED_FILTER_KEYS)}")
                     filter_parts.append(f"{key} = %s")
                     filter_params.append(value)
                 filter_sql = " AND " + " AND ".join(filter_parts)
 
             # V3.7 P0.2: Query embedding_vector (vector column) with HNSW index
             # Cosine distance operator <=> provided by pgvector
+            # V4.2 KB-V4.2-BATCH-012: Exclude zero vectors and failed embeddings
             threshold_distance = 1 - threshold
             cursor.execute(
                 f"""
@@ -153,6 +159,7 @@ class PgVectorRetriever:
                 JOIN knowledge_document d ON dc.document_id = d.id
                 WHERE dc.embedding_vector IS NOT NULL
                 AND (dc.embedding_vector <=> %s) <= %s
+                AND NOT (dc.metadata @> '{"embedding_failed": true}'::jsonb)
                 {filter_sql}
                 ORDER BY distance ASC
                 LIMIT %s
