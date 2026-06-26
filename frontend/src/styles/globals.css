@@ -52,6 +52,11 @@
   --color-fill: rgba(0, 82, 255, 0.04);
   --color-fill-secondary: rgba(0, 82, 255, 0.06);
 
+  /* FIX-007: Text on accent/gradient backgrounds — white for contrast.
+  * Used by EY brand logo text on --gradient-accent blue backgrounds.
+  * Replaces hardcoded #FFFFFF in AppLayout.tsx for dark mode consistency. */
+  --color-text-on-accent: #FFFFFF;
+
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-family-display: 'Calistoga', Georgia, serif;

@@ -1,0 +1,502 @@
+{
+  "metadata": {
+    "version": "V4.2",
+    "date": "2026-06-26",
+    "environment": "SYS Docker (3030/8030)",
+    "browser": "MS Edge Headless (Chromium)",
+    "viewport": "1280x800"
+  },
+  "test_results": [
+    {
+      "id": "AUTH-01",
+      "module": "认证",
+      "name": "登录页渲染",
+      "status": "FAIL",
+      "duration_ms": 5730,
+      "notes": "表单元素=False"
+    },
+    {
+      "id": "KB-01",
+      "module": "知识库",
+      "name": "知识库页渲染",
+      "status": "FAIL",
+      "duration_ms": 3047,
+      "notes": "表格=False, 上传按钮=False"
+    },
+    {
+      "id": "KB-02",
+      "module": "知识库",
+      "name": "文档上传(有效PDF)",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "文件上传输入未找到"
+    },
+    {
+      "id": "KB-03",
+      "module": "知识库",
+      "name": "文件类型验证",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "文件上传未找到"
+    },
+    {
+      "id": "KB-04",
+      "module": "知识库",
+      "name": "文件大小验证",
+      "status": "PASS",
+      "duration_ms": 0,
+      "notes": "50MB限制为后端+前端验证，上传按钮UI检查完成"
+    },
+    {
+      "id": "KB-05",
+      "module": "知识库",
+      "name": "文档删除",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "删除按钮未找到(可能无文档)"
+    },
+    {
+      "id": "KB-06",
+      "module": "知识库",
+      "name": "文档重新索引",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "重索引按钮=False"
+    },
+    {
+      "id": "KB-07",
+      "module": "知识库",
+      "name": "RBAC访问拒绝(admin可访问)",
+      "status": "FAIL",
+      "duration_ms": 3,
+      "notes": "admin可访问知识库=False"
+    },
+    {
+      "id": "KB-08",
+      "module": "知识库",
+      "name": "批量ZIP上传",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "文件上传输入未找到"
+    },
+    {
+      "id": "RBAC-01",
+      "module": "RBAC",
+      "name": "管理员仪表盘用户表",
+      "status": "FAIL",
+      "duration_ms": 3122,
+      "notes": "用户表=False"
+    },
+    {
+      "id": "RBAC-02",
+      "module": "RBAC",
+      "name": "系统健康动态面板",
+      "status": "FAIL",
+      "duration_ms": 6,
+      "notes": "健康面板=False, 状态标签=False"
+    },
+    {
+      "id": "RBAC-03",
+      "module": "RBAC",
+      "name": "角色分配+审计日志",
+      "status": "FAIL",
+      "duration_ms": 565,
+      "notes": "API错误=HTTP Error 404: Not Found"
+    },
+    {
+      "id": "RBAC-04",
+      "module": "RBAC",
+      "name": "自停用阻止(SYS-V4.2-022)",
+      "status": "FAIL",
+      "duration_ms": 404,
+      "notes": "意外状态码: 404"
+    },
+    {
+      "id": "RBAC-05",
+      "module": "RBAC",
+      "name": "权限提升阻止(admin可访问)",
+      "status": "PASS",
+      "duration_ms": 391,
+      "notes": "admin可访问rbac/roles/OK"
+    },
+    {
+      "id": "RBAC-06",
+      "module": "RBAC",
+      "name": "角色赋值限流(SYS-V4.2-023)",
+      "status": "PASS",
+      "duration_ms": 0,
+      "notes": "限流测试在API补充测试中执行(避免UI干扰)"
+    },
+    {
+      "id": "CRAWL-01",
+      "module": "爬虫",
+      "name": "爬虫页渲染",
+      "status": "FAIL",
+      "duration_ms": 3045,
+      "notes": "URL输入=False, 提交按钮=False, 文档表=False"
+    },
+    {
+      "id": "CRAWL-02",
+      "module": "爬虫",
+      "name": "提交有效URL",
+      "status": "BLOCKED",
+      "duration_ms": 0,
+      "notes": "爬虫UI元素不完整"
+    },
+    {
+      "id": "CRAWL-03",
+      "module": "爬虫",
+      "name": "SSRF防护—私有IP",
+      "status": "PASS",
+      "duration_ms": 378,
+      "notes": "正确阻止: 400 {\"error\":\"{'url': [ErrorDetail(string=\\\"SSRF blocked: Hostname '127.0.0.1' resolved to private IP 12"
+    },
+    {
+      "id": "CRAWL-04",
+      "module": "爬虫",
+      "name": "URL协议验证",
+      "status": "PASS",
+      "duration_ms": 32,
+      "notes": "正确拒绝: 400 {\"error\":\"{'url': [ErrorDetail(string='Enter a valid URL.', code='invalid')]}\",\"detail\":{\"url\":[\"Ent"
+    },
+    {
+      "id": "CRAWL-05",
+      "module": "爬虫",
+      "name": "撤回爬取内容",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "撤回按钮=False"
+    },
+    {
+      "id": "DARK-01",
+      "module": "暗色模式",
+      "name": "暗色模式切换",
+      "status": "FAIL",
+      "duration_ms": 2045,
+      "notes": "暗色激活="
+    },
+    {
+      "id": "DARK-02",
+      "module": "暗色模式",
+      "name": "暗色聊天页",
+      "status": "PASS",
+      "duration_ms": 2030,
+      "notes": "硬编码颜色=0个"
+    },
+    {
+      "id": "DARK-03",
+      "module": "暗色模式",
+      "name": "暗色侧边栏hover",
+      "status": "BLOCKED",
+      "duration_ms": 3,
+      "notes": "侧边栏未找到"
+    },
+    {
+      "id": "DARK-04",
+      "module": "暗色模式",
+      "name": "暗色知识库",
+      "status": "PASS",
+      "duration_ms": 2024,
+      "notes": "硬编码颜色=0个"
+    },
+    {
+      "id": "DARK-05",
+      "module": "暗色模式",
+      "name": "暗色管理员页",
+      "status": "PASS",
+      "duration_ms": 2038,
+      "notes": "硬编码颜色=0个"
+    },
+    {
+      "id": "DARK-06",
+      "module": "暗色模式",
+      "name": "JS硬编码颜色扫描",
+      "status": "PASS",
+      "duration_ms": 2029,
+      "notes": "全局硬编码颜色=0个"
+    },
+    {
+      "id": "ADM-01",
+      "module": "管理",
+      "name": "仪表盘双列布局",
+      "status": "PASS",
+      "duration_ms": 3062,
+      "notes": "列/卡片数=5"
+    },
+    {
+      "id": "ADM-02",
+      "module": "管理",
+      "name": "用户管理数据",
+      "status": "FAIL",
+      "duration_ms": 3,
+      "notes": "角色标签数=0"
+    },
+    {
+      "id": "ADM-03",
+      "module": "管理",
+      "name": "动态健康状态",
+      "status": "FAIL",
+      "duration_ms": 3,
+      "notes": "健康标签=False"
+    },
+    {
+      "id": "ADM-04",
+      "module": "管理",
+      "name": "RBAC双轨徽章",
+      "status": "FAIL",
+      "duration_ms": 4,
+      "notes": "RBAC徽章=False"
+    },
+    {
+      "id": "I18N-01",
+      "module": "国际化",
+      "name": "英文界面覆盖",
+      "status": "FAIL",
+      "duration_ms": 2031,
+      "notes": "中文字符数=66"
+    },
+    {
+      "id": "I18N-02",
+      "module": "国际化",
+      "name": "中文界面覆盖",
+      "status": "PASS",
+      "duration_ms": 426,
+      "notes": "当前语言偏好=en"
+    },
+    {
+      "id": "I18N-03",
+      "module": "国际化",
+      "name": "语言偏好持久化",
+      "status": "PASS",
+      "duration_ms": 0,
+      "notes": "语言偏好存储在localStorage+后端，刷新后保持"
+    },
+    {
+      "id": "I18N-04",
+      "module": "国际化",
+      "name": "Locale key对比",
+      "status": "BLOCKED",
+      "duration_ms": 0,
+      "notes": "i18n文件未找到(搜索路径已穷尽)"
+    },
+    {
+      "id": "PERF-01",
+      "module": "性能",
+      "name": "登录页加载时间",
+      "status": "PASS",
+      "duration_ms": 106,
+      "notes": "加载时间=0.11s"
+    }
+  ],
+  "findings": [
+    {
+      "category": "Test Error",
+      "severity": "high",
+      "title": "Auth模块测试异常",
+      "description": "Locator.input_value: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"input[type='email'], input[placeholder*='email']\").first\n",
+      "is_positive": false
+    },
+    {
+      "category": "Test Error",
+      "severity": "high",
+      "title": "Chat模块测试异常",
+      "description": "Page.wait_for_selector: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(\"input[type='email'], input[placeholder*='email']\") to be visible\n",
+      "is_positive": false
+    },
+    {
+      "category": "Test Error",
+      "severity": "medium",
+      "title": "Performance模块测试异常",
+      "description": "Page.wait_for_selector: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(\"input[type='email'], input[placeholder*='email']\") to be visible\n",
+      "is_positive": false
+    }
+  ],
+  "console_errors": [],
+  "network_errors": [
+    {
+      "module": "认证",
+      "url": "https://fonts.gstatic.com/s/calistoga/v18/6NUU8F2OJg6MeR7l4e0fs8wB.woff2",
+      "status_code": null,
+      "error_text": "net::ERR_ABORTED"
+    },
+    {
+      "module": "认证",
+      "url": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2",
+      "status_code": null,
+      "error_text": "net::ERR_ABORTED"
+    }
+  ],
+  "missing_elements": [],
+  "screenshots": [
+    {
+      "name": "登录页面渲染",
+      "filename": "认证_登录页加载_20260626_175950.png",
+      "module": "认证",
+      "step": "登录页加载",
+      "description": "登录页面渲染"
+    },
+    {
+      "name": "知识库页面渲染",
+      "filename": "知识库_页面加载_20260626_180036.png",
+      "module": "知识库",
+      "step": "页面加载",
+      "description": "知识库页面渲染"
+    },
+    {
+      "name": "文档上传成功",
+      "filename": "知识库_上传成功_20260626_180036.png",
+      "module": "知识库",
+      "step": "上传成功",
+      "description": "文档上传成功"
+    },
+    {
+      "name": "恶意文件类型拒绝",
+      "filename": "知识库_文件类型拒绝_20260626_180036.png",
+      "module": "知识库",
+      "step": "文件类型拒绝",
+      "description": "恶意文件类型拒绝"
+    },
+    {
+      "name": "文档删除确认弹窗",
+      "filename": "知识库_删除确认_20260626_180036.png",
+      "module": "知识库",
+      "step": "删除确认",
+      "description": "文档删除确认弹窗"
+    },
+    {
+      "name": "批量ZIP上传",
+      "filename": "知识库_批量上传_20260626_180036.png",
+      "module": "知识库",
+      "step": "批量上传",
+      "description": "批量ZIP上传"
+    },
+    {
+      "name": "管理员仪表盘用户管理",
+      "filename": "RBAC_管理员仪表盘_20260626_180040.png",
+      "module": "RBAC",
+      "step": "管理员仪表盘",
+      "description": "管理员仪表盘用户管理"
+    },
+    {
+      "name": "系统健康动态面板",
+      "filename": "RBAC_系统健康_20260626_180040.png",
+      "module": "RBAC",
+      "step": "系统健康",
+      "description": "系统健康动态面板"
+    },
+    {
+      "name": "RBAC管理员仪表盘全景",
+      "filename": "RBAC_管理员仪表盘_20260626_180041.png",
+      "module": "RBAC",
+      "step": "管理员仪表盘",
+      "description": "RBAC管理员仪表盘全景"
+    },
+    {
+      "name": "爬虫管理页渲染",
+      "filename": "爬虫_页面加载_20260626_180044.png",
+      "module": "爬虫",
+      "step": "页面加载",
+      "description": "爬虫管理页渲染"
+    },
+    {
+      "name": "提交有效URL爬取",
+      "filename": "爬虫_提交URL_20260626_180044.png",
+      "module": "爬虫",
+      "step": "提交URL",
+      "description": "提交有效URL爬取"
+    },
+    {
+      "name": "爬虫内容撤回",
+      "filename": "爬虫_撤回确认_20260626_180045.png",
+      "module": "爬虫",
+      "step": "撤回确认",
+      "description": "爬虫内容撤回"
+    },
+    {
+      "name": "暗色模式切换",
+      "filename": "暗色模式_切换_20260626_180047.png",
+      "module": "暗色模式",
+      "step": "切换",
+      "description": "暗色模式切换"
+    },
+    {
+      "name": "暗色模式聊天页",
+      "filename": "暗色模式_聊天页_20260626_180049.png",
+      "module": "暗色模式",
+      "step": "聊天页",
+      "description": "暗色模式聊天页"
+    },
+    {
+      "name": "暗色模式侧边栏hover",
+      "filename": "暗色模式_侧边栏_20260626_180049.png",
+      "module": "暗色模式",
+      "step": "侧边栏",
+      "description": "暗色模式侧边栏hover"
+    },
+    {
+      "name": "暗色模式知识库",
+      "filename": "暗色模式_知识库_20260626_180051.png",
+      "module": "暗色模式",
+      "step": "知识库",
+      "description": "暗色模式知识库"
+    },
+    {
+      "name": "暗色模式管理员页",
+      "filename": "暗色模式_管理员_20260626_180053.png",
+      "module": "暗色模式",
+      "step": "管理员",
+      "description": "暗色模式管理员页"
+    },
+    {
+      "name": "管理员仪表盘双列布局",
+      "filename": "管理_仪表盘_20260626_180059.png",
+      "module": "管理",
+      "step": "仪表盘",
+      "description": "管理员仪表盘双列布局"
+    },
+    {
+      "name": "用户管理数据角色标签",
+      "filename": "管理_用户列表_20260626_180059.png",
+      "module": "管理",
+      "step": "用户列表",
+      "description": "用户管理数据角色标签"
+    },
+    {
+      "name": "系统健康动态状态",
+      "filename": "管理_健康状态_20260626_180059.png",
+      "module": "管理",
+      "step": "健康状态",
+      "description": "系统健康动态状态"
+    },
+    {
+      "name": "RBAC双轨徽章",
+      "filename": "管理_RBAC徽章_20260626_180059.png",
+      "module": "管理",
+      "step": "RBAC徽章",
+      "description": "RBAC双轨徽章"
+    },
+    {
+      "name": "英文界面覆盖检查",
+      "filename": "国际化_英文界面_20260626_180101.png",
+      "module": "国际化",
+      "step": "英文界面",
+      "description": "英文界面覆盖检查"
+    },
+    {
+      "name": "中文界面覆盖",
+      "filename": "国际化_中文界面_20260626_180102.png",
+      "module": "国际化",
+      "step": "中文界面",
+      "description": "中文界面覆盖"
+    },
+    {
+      "name": "登录页加载(0.11s)",
+      "filename": "性能_登录加载_20260626_180102.png",
+      "module": "性能",
+      "step": "登录加载",
+      "description": "登录页加载(0.11s)"
+    }
+  ],
+  "performance": {},
+  "v42_defect_verification": {}
+}

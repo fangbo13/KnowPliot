@@ -11,7 +11,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework.throttling import AnonRateThrottle
 from .models import User
 from .serializers import UserSerializer, UserPreferenceSerializer
@@ -111,13 +111,13 @@ class BlacklistCheckingTokenRefreshSerializer(TokenRefreshSerializer):
                 jti = refresh_token.get("jti")
 
                 # V4.2 SYS-V4.2-020: Check if this JTI is in the blacklist
-                if jti:
-                    outstanding = OutstandingToken.objects.filter(jti=jti).first()
-                    if outstanding and BlacklistedToken.objects.filter(token=outstanding).exists():
-                        from rest_framework.exceptions import AuthenticationFailed
-                        raise AuthenticationFailed(
-                            "Token is blacklisted — cannot refresh."
-                        )
+                # FIX-001: Use single-step FK traversal query matching SimpleJWT's
+                # check_blacklist() pattern, instead of two-step OutstandingToken + BlacklistedToken.
+                if jti and BlacklistedToken.objects.filter(token__jti=jti).exists():
+                    from rest_framework.exceptions import AuthenticationFailed
+                    raise AuthenticationFailed(
+                        "Token is blacklisted — cannot refresh."
+                    )
             except Exception:
                 # If token decoding fails, let the parent validate() handle it
                 # (it will raise its own appropriate error)

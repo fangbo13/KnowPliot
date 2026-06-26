@@ -5,7 +5,7 @@ crawled document status. Includes withdraw (takedown) functionality
 for copyright compliance.
  **/
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Card, Table, Tag, Button, Space, Typography, Input, Switch,
   Modal, message, Tooltip, Spin, Alert, Form,
@@ -15,6 +15,7 @@ import {
   ReloadOutlined, DeleteOutlined, LinkOutlined,
   WarningOutlined, CheckCircleOutlined, ClockCircleOutlined,
   CloseCircleOutlined, ExclamationCircleOutlined,
+  LockOutlined,  // FIX-011: Replace 🔒 emoji with semantic icon
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -57,7 +58,6 @@ export default function CrawlerAdminPage() {
   const [submitting, setSubmitting] = useState(false);
   const [crawlUrl, setCrawlUrl] = useState('');
   const [internalOnly, setInternalOnly] = useState(false);
-  const [polling, setPolling] = useState(false);
 
   // Fetch crawl documents
   const fetchDocs = useCallback(async () => {
@@ -81,25 +81,21 @@ export default function CrawlerAdminPage() {
     fetchDocs();
   }, []);
 
-  // Poll for status updates when pending tasks exist
+  // FIX-003: Use ref for stable fetchDocs reference to avoid useEffect dependency storm.
+  // Previously, the polling useEffect had [crawlDocs, polling, fetchDocs] dependencies,
+  // causing repeated interval setup/teardown on every state change.
+  // Now: ref provides stable reference; interval runs every 30s with empty dependency array.
+  // [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-001]
+  const fetchDocsRef = useRef(fetchDocs);
+  fetchDocsRef.current = fetchDocs;
+
+  // FIX-003: Mount-only polling interval — 30s background refresh, empty dependency array.
   useEffect(() => {
-    const hasPending = crawlDocs.some(d =>
-      ['pending', 'fetching', 'parsing', 'cleaning', 'embedding'].includes(d.crawl_status)
-    );
-    if (hasPending && !polling) {
-      setPolling(true);
-      const interval = setInterval(() => {
-        fetchDocs();
-      }, 5000);
-      return () => {
-        clearInterval(interval);
-        setPolling(false);
-      };
-    }
-    if (!hasPending) {
-      setPolling(false);
-    }
-  }, [crawlDocs, polling, fetchDocs]);
+    const interval = setInterval(() => {
+      fetchDocsRef.current();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Submit crawl request
   const handleSubmit = async () => {
@@ -185,7 +181,10 @@ export default function CrawlerAdminPage() {
       dataIndex: 'internal_only',
       key: 'internal_only',
       width: 80,
-      render: (internal: boolean) => internal ? <Tag color="orange">🔒</Tag> : <Tag color="green">🌐</Tag>,
+      // FIX-011: Replace emoji 🔒/🌐 with semantic antd icons + aria-label for accessibility
+      render: (internal: boolean) => internal
+        ? <Tag color="orange" aria-label={t('crawler_internal_only', 'Internal Only')}><LockOutlined /></Tag>
+        : <Tag color="green" aria-label={t('crawler_public', 'Public')}><GlobalOutlined /></Tag>,
     },
     {
       title: t('crawler_submitted_by', 'Submitted By'),
@@ -249,8 +248,9 @@ export default function CrawlerAdminPage() {
             <Switch
               checked={internalOnly}
               onChange={setInternalOnly}
-              checkedChildren={t('crawler_internal_only', '🔒 Internal')}
-              unCheckedChildren={t('crawler_public', '🌐 Public')}
+              // FIX-011: Replace emoji 🔒/🌐 with antd icons for screen reader accessibility
+              checkedChildren={<><LockOutlined /> {t('crawler_internal_only', 'Internal')}</>}
+              unCheckedChildren={<><GlobalOutlined /> {t('crawler_public', 'Public')}</>}
             />
             <Button
               type="primary"
@@ -261,14 +261,6 @@ export default function CrawlerAdminPage() {
               {t('crawler_submit', 'Submit')}
             </Button>
           </Space.Compact>
-          {polling && (
-            <Alert
-              type="info"
-              message={t('crawler_polling', 'Auto-refreshing: pending tasks detected')}
-              showIcon
-              banner
-            />
-          )}
         </Space>
       </Card>
 

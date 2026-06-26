@@ -170,8 +170,12 @@ CRAWL_USER_AGENT = os.environ.get("CRAWL_USER_AGENT", "EY-Onboarding-AI-Crawler/
 
 # Django REST Framework
 REST_FRAMEWORK = {
+    # V4.2 SYS-V4.2-020: Use custom auth class that checks blacklist table.
+    # Default JWTAuthentication only validates signature + expiry, ignoring
+    # blacklisted_tokens — meaning blacklisted access tokens remain valid
+    # for their full 15-minute lifetime after logout.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.users.authentication.BlacklistCheckingJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",

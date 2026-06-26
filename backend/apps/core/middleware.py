@@ -87,10 +87,12 @@ class AuthenticatedMediaMiddleware:
 
     def __call__(self, request):
         if request.path.startswith(self.MEDIA_PREFIX):
-            from rest_framework_simplejwt.authentication import JWTAuthentication
+            # V4.2 SYS-V4.2-020: Use BlacklistCheckingJWTAuthentication so
+            # media access is also denied for blacklisted tokens (e.g. after logout).
+            from apps.users.authentication import BlacklistCheckingJWTAuthentication
 
             try:
-                validated = JWTAuthentication().authenticate(request)
+                validated = BlacklistCheckingJWTAuthentication().authenticate(request)
                 if validated is None:
                     # No auth header provided
                     logger.warning(

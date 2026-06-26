@@ -1,0 +1,173 @@
+{
+  "api_tests": [
+    {
+      "id": "API-AUTH-01",
+      "name": "Login and token retrieval",
+      "status": "PASS",
+      "notes": "access_len=277, user=admin@ey.com",
+      "response_code": 200,
+      "response_body": null
+    },
+    {
+      "id": "API-AUTH-02",
+      "name": "JWT claims: is_hr_admin removed (KB-V4.1-009)",
+      "status": "PASS",
+      "notes": "is_hr_admin in payload=False, keys=['token_type', 'exp', 'iat', 'jti', 'user_id']",
+      "response_code": null,
+      "response_body": null
+    },
+    {
+      "id": "API-AUTH-03",
+      "name": "Logout (blacklist tokens)",
+      "status": "PASS",
+      "notes": "logout status=200",
+      "response_code": 200,
+      "response_body": null
+    },
+    {
+      "id": "API-AUTH-04",
+      "name": "Blacklisted access token rejected (SYS-V4.2-020)",
+      "status": "PASS",
+      "notes": "status=401, body={\"error\":\"Token has been blacklisted.\",\"detail\":{\"detail\":\"Token has been blacklisted.\"}}",
+      "response_code": 401,
+      "response_body": null
+    },
+    {
+      "id": "API-AUTH-05",
+      "name": "Blacklisted refresh token rejected (SYS-V4.2-020)",
+      "status": "PASS",
+      "notes": "status=401, body={\"error\":\"Token is blacklisted\",\"detail\":{\"detail\":\"Token is blacklisted\",\"code\":\"token_not_valid\"}}",
+      "response_code": 401,
+      "response_body": null
+    },
+    {
+      "id": "API-AUTH-06",
+      "name": "Invalid credentials rejection",
+      "status": "PASS",
+      "notes": "status=401",
+      "response_code": 401,
+      "response_body": null
+    },
+    {
+      "id": "API-RBAC-01",
+      "name": "Self-deactivation blocked (SYS-V4.2-022)",
+      "status": "PASS",
+      "notes": "status=400, body={\"detail\":\"Cannot deactivate your own account.\"}",
+      "response_code": 400,
+      "response_body": null
+    },
+    {
+      "id": "API-RBAC-02",
+      "name": "Admin can access RBAC roles endpoint",
+      "status": "PASS",
+      "notes": "status=200",
+      "response_code": 200,
+      "response_body": null
+    },
+    {
+      "id": "API-RBAC-03",
+      "name": "Admin can access users endpoint",
+      "status": "PASS",
+      "notes": "status=200",
+      "response_code": 200,
+      "response_body": null
+    },
+    {
+      "id": "API-RBAC-04",
+      "name": "Role assignment rate limit 5/min (SYS-V4.2-023)",
+      "status": "PASS",
+      "notes": "throttled=True on attempt #2",
+      "response_code": null,
+      "response_body": null
+    },
+    {
+      "id": "API-RBAC-05",
+      "name": "Admin can access audit logs",
+      "status": "PASS",
+      "notes": "status=200",
+      "response_code": 200,
+      "response_body": null
+    },
+    {
+      "id": "API-SSRF-01",
+      "name": "SSRF: Private IP 127.0.0.1 blocked (SYS-V4.2-001)",
+      "status": "PASS",
+      "notes": "status=400, body={\"error\":\"{'url': [ErrorDetail(string=\\\"SSRF blocked: Hostname '127.0.0.1' resolved to private IP 127.0.0.1: IP 127.0.0.1 is a private/reserved addres",
+      "response_code": 400,
+      "response_body": null
+    },
+    {
+      "id": "API-SSRF-02",
+      "name": "SSRF: IPv4-mapped IPv6 blocked (SYS-V4.2-002)",
+      "status": "PASS",
+      "notes": "status=400, body={\"error\":\"{'url': [ErrorDetail(string=\\\"SSRF blocked: Hostname '::ffff:127.0.0.1' resolved to private IP ::ffff:127.0.0.1: IPv4-mapped IPv6 address ::",
+      "response_code": 400,
+      "response_body": null
+    },
+    {
+      "id": "API-SSRF-03",
+      "name": "SSRF: Cloud metadata IP blocked",
+      "status": "PASS",
+      "notes": "status=400, body={\"error\":\"{'url': [ErrorDetail(string=\\\"SSRF blocked: Hostname '169.254.169.254' resolved to private IP 169.254.169.254: IP 169.254.169.254 is a priva",
+      "response_code": 400,
+      "response_body": null
+    },
+    {
+      "id": "API-SSRF-04",
+      "name": "URL protocol: file:// rejected",
+      "status": "PASS",
+      "notes": "status=400, body={\"error\":\"{'url': [ErrorDetail(string='Enter a valid URL.', code='invalid')]}\",\"detail\":{\"url\":[\"Enter a valid URL.\"]}}",
+      "response_code": 400,
+      "response_body": null
+    },
+    {
+      "id": "API-SSRF-05",
+      "name": "SSRF: localhost DNS rebinding blocked (SYS-V4.2-003)",
+      "status": "PASS",
+      "notes": "status=400, body={\"error\":\"{'url': [ErrorDetail(string=\\\"SSRF blocked: Hostname 'localhost' resolved to private IP ::1: IP ::1 is a private/reserved address (::1/128)\\",
+      "response_code": 400,
+      "response_body": null
+    },
+    {
+      "id": "API-SSRF-06",
+      "name": "Valid public URL accepted",
+      "status": "PASS",
+      "notes": "status=201",
+      "response_code": 201,
+      "response_body": null
+    },
+    {
+      "id": "API-RATE-01",
+      "name": "Login rate limit 5/min (SYS-V4.1-005)",
+      "status": "PASS",
+      "notes": "throttled=True at attempt #5",
+      "response_code": null,
+      "response_body": null
+    },
+    {
+      "id": "API-PROD-01",
+      "name": "404 error: no stack trace leak (SYS-V4.2-010)",
+      "status": "PASS",
+      "notes": "status=404, has_traceback=False",
+      "response_code": 404,
+      "response_body": null
+    },
+    {
+      "id": "API-PROD-02",
+      "name": "Frontend: nginx production build (SYS-V4.2-011)",
+      "status": "PASS",
+      "notes": "has_build_assets=True, server=nginx/1.31.2",
+      "response_code": null,
+      "response_body": null
+    },
+    {
+      "id": "API-PROD-03",
+      "name": "CORS not allowing all origins (SYS-V4.1-001)",
+      "status": "PASS",
+      "notes": "allow_origin=",
+      "response_code": null,
+      "response_body": null
+    }
+  ],
+  "findings": []
+}

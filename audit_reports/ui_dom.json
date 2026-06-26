@@ -1,0 +1,290 @@
+{
+  "url": "http://127.0.0.1:3030/chat",
+  "chat": [
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-default ant-btn-color-default ant-btn-variant-outlin",
+      "x": "Start New Chat",
+      "p": ""
+    },
+    {
+      "t": "DIV",
+      "c": "sidebar-scroll-area",
+      "x": "▾Last 30 Days1",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-input-clear-icon ant-input-clear-icon-hidden",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "DIV",
+      "c": "sidebar-user-area",
+      "x": "admin@ey.com",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "admin@ey.com",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-modal-close",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ",
+      "x": "Get Started",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "c": "ant-btn css-1xlrfgc ant-btn-link ant-btn-color-link ant-btn-variant-link",
+      "x": "Skip for now",
+      "p": ""
+    }
+  ],
+  "dash": [
+    {
+      "t": "DIV",
+      "c": "ant-card css-1xlrfgc",
+      "x": "Common QuestionsIT 设置如何设置公司邮箱和电脑？报销流程报销流程是什么？年假天数我"
+    },
+    {
+      "t": "DIV",
+      "c": "ant-card ant-card-bordered ant-card-hoverable ant-card-small css-1xlrfgc",
+      "x": "Smart ChatAsk the AI assistant any onboarding, pol"
+    },
+    {
+      "t": "DIV",
+      "c": "ant-card ant-card-bordered ant-card-hoverable ant-card-small css-1xlrfgc",
+      "x": "Knowledge BaseBrowse company policy and guide docu"
+    },
+    {
+      "t": "DIV",
+      "c": "ant-card ant-card-bordered ant-card-hoverable ant-card-small css-1xlrfgc",
+      "x": "Profile SettingsManage your language and theme pre"
+    }
+  ],
+  "kb": [
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-default ant-btn-color-default ant-btn-variant-outlin",
+      "x": "Start New Chat"
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-input-clear-icon ant-input-clear-icon-hidden",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "admin@ey.com"
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-modal-close",
+      "x": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ",
+      "x": "Get Started"
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-link ant-btn-color-link ant-btn-variant-link",
+      "x": "Skip for now"
+    }
+  ],
+  "crawl": [
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-default ant-btn-color-default ant-btn-variant-outlin",
+      "x": "Start New Chat",
+      "p": ""
+    },
+    {
+      "t": "INPUT",
+      "tp": "text",
+      "c": "ant-input css-1xlrfgc",
+      "x": "",
+      "p": "Search conversations"
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-input-clear-icon ant-input-clear-icon-hidden",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-text ant-btn-color-default ant-btn-variant-text ant-",
+      "x": "admin@ey.com",
+      "p": ""
+    },
+    {
+      "t": "INPUT",
+      "tp": "text",
+      "c": "ant-input ant-input-lg css-1xlrfgc ant-input-outlined ant-input-compact-item ant",
+      "x": "",
+      "p": "Type your question here..."
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-modal-close",
+      "x": "",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ",
+      "x": "Get Started",
+      "p": ""
+    },
+    {
+      "t": "BUTTON",
+      "tp": "button",
+      "c": "ant-btn css-1xlrfgc ant-btn-link ant-btn-color-link ant-btn-variant-link",
+      "x": "Skip for now",
+      "p": ""
+    }
+  ],
+  "theme": {
+    "dt": "light",
+    "seg": 0,
+    "segItems": []
+  }
+}

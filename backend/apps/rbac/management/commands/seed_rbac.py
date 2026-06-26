@@ -139,3 +139,26 @@ class Command(BaseCommand):
             f"HR={RolePermission.objects.filter(role=hr_role).count()} perms, "
             f"Admin={RolePermission.objects.filter(role=admin_role).count()} perms"
         ))
+
+        # ── FIX-006: Assign admin role to superusers ──
+        # Previously, seed_rbac only created Role + Permission mappings but never
+        # assigned any user to a role. The admin@ey.com user (a Django superuser)
+        # would only get "admin" in roles via the has_role() superuser bypass,
+        # but lacked an explicit UserRole entry for auditability and proper RBAC flow.
+        # Now: superusers get explicit UserRole assignments during seeding.
+        from django.contrib.auth import get_user_model
+        from apps.rbac.models import UserRole
+        User = get_user_model()
+        user_count = 0
+        for user in User.objects.filter(is_superuser=True):
+            _, created = UserRole.objects.get_or_create(
+                user=user,
+                role=admin_role,
+                defaults={"assigned_by": user, "is_active": True},
+            )
+            if created:
+                user_count += 1
+                self.stdout.write(f"  ✓ Admin role assigned to {user.email}")
+
+        if user_count > 0:
+            self.stdout.write(f"\n  Assigned admin role to {user_count} superuser(s)")

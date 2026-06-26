@@ -382,7 +382,8 @@ export default function AppLayout() {
           flexShrink: 0,
           boxShadow: 'var(--shadow-accent)',
         }}>
-          <span style={{ fontSize: 14, fontWeight: 800, color: '#FFFFFF', lineHeight: 1 }}>EY</span>
+          {/* FIX-007: Use CSS variable instead of hardcoded #FFFFFF for dark mode consistency */}
+          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--color-text-on-accent)', lineHeight: 1 }}>EY</span>
         </div>
         <h2 style={{
           margin: 0,
@@ -651,7 +652,8 @@ export default function AppLayout() {
             marginBottom: 16,
             boxShadow: 'var(--shadow-accent-lg)',
           }}>
-            <span style={{ fontSize: 24, fontWeight: 800, color: '#FFFFFF' }}>EY</span>
+            {/* FIX-007: Use CSS variable instead of hardcoded #FFFFFF for dark mode consistency */}
+            <span style={{ fontSize: 24, fontWeight: 800, color: 'var(--color-text-on-accent)' }}>EY</span>
           </div>
           <Typography.Title level={4} style={{ margin: '0 0 4px', fontWeight: 600 }}>
             {t('onboarding_title')}
@@ -787,7 +789,8 @@ export default function AppLayout() {
                   background: 'var(--gradient-accent)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: '#FFFFFF' }}>EY</span>
+                  {/* FIX-007: Use CSS variable instead of hardcoded #FFFFFF for dark mode consistency */}
+                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--color-text-on-accent)' }}>EY</span>
                 </div>
                 <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text)' }}>Onboarding</span>
               </div>
