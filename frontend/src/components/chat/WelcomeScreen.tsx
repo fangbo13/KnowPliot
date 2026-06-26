@@ -8,9 +8,11 @@ import {
   EnvironmentOutlined,
   TeamOutlined,
   SendOutlined,
+  StopOutlined,
   RocketOutlined,
 } from '@ant-design/icons';
 import { useChatStore } from '../../store/chatStore';
+import { abortActiveStream } from '../../stream/StreamLifecycleManager';
 import { useState, useRef, useEffect } from 'react';
 
 const { Title, Text } = Typography;
@@ -54,12 +56,17 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
     setInputValue('');
   };
 
+  // V4.0 UI-HIGH-001: Stop generation handler (same logic as ChatPage)
+  const handleStop = () => {
+    abortActiveStream();
+  };
+
   return (
     <div style={{ animation: 'fadeInUp 0.4s ease-out' }}>
       {/* Onboarding tip for first-time users */}
       <div style={{
-        background: 'linear-gradient(135deg, rgba(0, 82, 255, 0.06), rgba(77, 124, 255, 0.04))',
-        border: '1px solid rgba(0, 82, 255, 0.15)',
+        background: 'var(--color-fill)',
+        border: '1px solid var(--color-border-secondary)',
         borderRadius: 'var(--radius-lg)',
         padding: '12px 20px',
         marginBottom: 24,
@@ -82,9 +89,9 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
           width: 72,
           height: 72,
           borderRadius: 18,
-          background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+          background: 'var(--gradient-accent)',
           marginBottom: 20,
-          boxShadow: '0 8px 24px rgba(0, 82, 255, 0.25), 0 2px 8px rgba(0, 82, 255, 0.15)',
+          boxShadow: 'var(--shadow-accent-lg), var(--shadow-sm)',
           animation: 'fadeInUp 0.5s ease-out',
         }}>
           <span style={{
@@ -129,19 +136,36 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
             }}
             aria-label={t('chat_input_label') || "输入你的问题"}
           />
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            onClick={handleSend}
-            disabled={!inputValue.trim() || isSendLocked || isStreaming}  // V3.5 HIGH-001: send lock guard
-            size="large"
-            style={{
-              minWidth: 56,
-              padding: inputValue.trim() ? '0 16px' : '0 20px',
-              fontWeight: 600,
-              borderRadius: '0 var(--radius-lg) var(--radius-lg) 0',
-            }}
-          />
+          {/* V4.0 UI-HIGH-001: Conditional Stop/Send button */}
+          {isStreaming ? (
+            <Button
+              type="primary"
+              danger
+              icon={<StopOutlined />}
+              onClick={handleStop}
+              size="large"
+              aria-label={t('stop_generation') || '停止生成'}
+              style={{
+                minWidth: 56,
+                fontWeight: 600,
+                borderRadius: '0 var(--radius-lg) var(--radius-lg) 0',
+              }}
+            />
+          ) : (
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={handleSend}
+              disabled={!inputValue.trim() || isSendLocked || isStreaming}  // V3.5 HIGH-001: send lock guard
+              size="large"
+              style={{
+                minWidth: 56,
+                padding: inputValue.trim() ? '0 16px' : '0 20px',
+                fontWeight: 600,
+                borderRadius: '0 var(--radius-lg) var(--radius-lg) 0',
+              }}
+            />
+          )}
         </Space.Compact>
       </div>
 

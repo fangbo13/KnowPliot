@@ -27,6 +27,18 @@ dependencies = [
     "pydantic>=2.0",
     "python-dotenv>=1.0",
     "Pillow>=10.0",
+    # V4.1 KB-V4.1-006: File magic number detection (pure Python, no system deps)
+    "filetype>=1.2",
+    # V4.1 KB-V4.1-016: HTML content XSS cleaning
+    "bleach>=6.1",
+    # V4.1 Crawler: Web content extraction
+    "trafilatura>=1.8",
+    # V4.1 Crawler: Near-duplicate content detection
+    "simhash>=1.0",
+    # V4.1 Crawler: gevent pool for async Celery tasks
+    "gevent>=24.0",
+    # V4.1 Crawler: async HTTP client (already used for embeddings, explicit here)
+    "httpx[http2]>=0.27",
 ]
 
 [project.optional-dependencies]

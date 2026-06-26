@@ -35,7 +35,12 @@ export default function NetworkStatusBanner() {
       style={{
         borderRadius: 8,
         marginBottom: 8,
-        animation: 'slideDown 0.3s ease-out',
+        // V4.2 UI-V4.2-012: Removed inline 'slideDown' animation reference.
+        // @keyframes slideDown is defined in globals.css, but inline style
+        // animation references may fail under strict CSP (no unsafe-inline).
+        // antd Alert has its own built-in entrance animation, so this was
+        // redundant dead code. Now relies on antd's internal animation.
+        // [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-012]
       }}
     />
   );

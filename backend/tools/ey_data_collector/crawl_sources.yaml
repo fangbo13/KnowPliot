@@ -1,0 +1,218 @@
+# EY Data Collector — 公开知识源爬取配置
+# 目标: 收集 EY 相关公开知识内容，用于新入职培训 AI 知识库
+
+global:
+  user_agent: "EY-DataCollector/1.0"
+  contact_email: "onboarding.ai@ey.com"
+  purpose: "New employee training knowledge content collection"
+  max_url_length: 2048
+  max_redirects: 3
+  max_content_size: 500000
+  rate_limit:
+    min_delay: 3.0
+    max_delay: 7.0
+  max_retries: 2
+  retry_backoff_base: 60
+  timeout:
+    connect: 5.0
+    read: 30.0
+    write: 10.0
+  output:
+    format: "jsonl"
+    dir: "./crawled_knowledge/raw"
+  dedup_enabled: true
+  logging:
+    level: "INFO"
+    file: "./crawled_knowledge/crawl.log"
+
+sources:
+  # ═══ EY 官方网站 — 企业文化与职业 ═══
+  - name: "EY Careers Main"
+    url: "https://www.ey.com/en_careers"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "careers", "public"]
+    category: "company-overview"
+
+  - name: "EY About Us"
+    url: "https://www.ey.com/en_gl/about-us"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "about", "public"]
+    category: "company-overview"
+
+  - name: "EY Our Purpose"
+    url: "https://www.ey.com/en_gl/about-us/our-purpose"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "purpose", "public"]
+    category: "company-overview"
+
+  - name: "EY Our Values"
+    url: "https://www.ey.com/en_gl/about-us/our-values"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "values", "public"]
+    category: "company-overview"
+
+  - name: "EY Culture"
+    url: "https://www.ey.com/en_careers/culture"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "culture", "public"]
+    category: "company-overview"
+
+  - name: "EY Global Review"
+    url: "https://www.ey.com/en_gl/global-review"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "global-review", "public"]
+    category: "company-overview"
+
+  - name: "EY Insights"
+    url: "https://www.ey.com/en_gl/insights"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "insights", "public"]
+    category: "industry-knowledge"
+
+  - name: "EY Industries"
+    url: "https://www.ey.com/en_gl/industries"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "industries", "public"]
+    category: "industry-knowledge"
+
+  - name: "EY Services"
+    url: "https://www.ey.com/en_gl/services"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "services", "public"]
+    category: "industry-knowledge"
+
+  - name: "EY Diversity and Inclusiveness"
+    url: "https://www.ey.com/en_gl/about-us/our-commitment-to-diversity-and-inclusiveness"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["ey", "diversity", "public"]
+    category: "company-overview"
+
+  # ═══ 维基百科 — EY 与行业知识 ═══
+  - name: "Wikipedia Ernst & Young"
+    url: "https://en.wikipedia.org/wiki/Ernst_%26_Young"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "ey", "public"]
+    category: "company-overview"
+
+  - name: "Wikipedia Onboarding"
+    url: "https://en.wikipedia.org/wiki/Onboarding"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "onboarding", "public"]
+    category: "training-knowledge"
+
+  - name: "Wikipedia Management Consulting"
+    url: "https://en.wikipedia.org/wiki/Management_consulting"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "consulting", "public"]
+    category: "industry-knowledge"
+
+  - name: "Wikipedia Auditing"
+    url: "https://en.wikipedia.org/wiki/Auditing"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "auditing", "public"]
+    category: "industry-knowledge"
+
+  - name: "Wikipedia Accounting"
+    url: "https://en.wikipedia.org/wiki/Accounting"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "accounting", "public"]
+    category: "industry-knowledge"
+
+  - name: "Wikipedia Professional Services"
+    url: "https://en.wikipedia.org/wiki/Professional_services"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "professional-services", "public"]
+    category: "industry-knowledge"
+
+  - name: "Wikipedia Big Four Accounting Firms"
+    url: "https://en.wikipedia.org/wiki/Big_Four_accounting_firms"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "big-four", "public"]
+    category: "industry-knowledge"
+
+  - name: "Wikipedia Corporate Culture"
+    url: "https://en.wikipedia.org/wiki/Organizational_culture"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "culture", "public"]
+    category: "training-knowledge"
+
+  - name: "Wikipedia Business Ethics"
+    url: "https://en.wikipedia.org/wiki/Business_ethics"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "ethics", "public"]
+    category: "training-knowledge"
+
+  - name: "Wikipedia Tax Advisory"
+    url: "https://en.wikipedia.org/wiki/Tax_advisor"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "tax", "public"]
+    category: "industry-knowledge"
+
+  - name: "Wikipedia Corporate Governance"
+    url: "https://en.wikipedia.org/wiki/Corporate_governance"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["wikipedia", "governance", "public"]
+    category: "industry-knowledge"

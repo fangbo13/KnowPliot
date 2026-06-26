@@ -25,6 +25,7 @@
 
   /* Semantic Tokens */
   --color-primary: var(--accent);
+  --color-primary-rgb: 0, 82, 255;
   --color-text: var(--foreground);
   --color-text-secondary: var(--muted-foreground);
   --color-text-tertiary: #595959;
@@ -38,7 +39,18 @@
   * [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-005] */
   --color-success: #22C55E;
   --color-error: #EF4444;
+  --color-error-rgb: 239, 68, 68;
   --color-warning: #FAAD14;
+  --color-success-rgb: 34, 197, 94;
+  --color-warning-rgb: 250, 173, 20;
+
+  /* V4.2 UI-V4.2-007: Define --color-fill and --color-fill-secondary for
+  * sidebar hover states. These were previously undefined CSS variables
+  * (Ant Design internal tokens not available in global CSS context),
+  * causing sidebar hover backgrounds to be invisible.
+  * [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-007] */
+  --color-fill: rgba(0, 82, 255, 0.04);
+  --color-fill-secondary: rgba(0, 82, 255, 0.06);
 
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -97,6 +109,7 @@
   --accent-hover: #6B9AFF;
   --accent-active: #3A6FFF;
   --color-primary: var(--accent);
+  --color-primary-rgb: 77, 124, 255;
 
   /* V4.1 BUG-005: Dark mode success/error tokens with better contrast.
   * Light mode #22C55E/#EF4444 are too bright on dark backgrounds;
@@ -105,6 +118,15 @@
   --color-success: #4ADE80;
   --color-error: #F87171;
   --color-warning: #FBBF24;
+  --color-error-rgb: 248, 113, 113;
+  --color-success-rgb: 74, 222, 128;
+  --color-warning-rgb: 251, 191, 36;
+
+  /* V4.2 UI-V4.2-007: Dark mode fill tokens — lighter tint for visibility
+  * against dark backgrounds.
+  * [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-007] */
+  --color-fill: rgba(77, 124, 255, 0.08);
+  --color-fill-secondary: rgba(77, 124, 255, 0.12);
 
   --user-msg-bg: #2D3A4F;
   --user-msg-accent: var(--accent);
@@ -189,6 +211,9 @@ body {
   background: rgba(0, 82, 255, 0.12);
   color: var(--accent);
 }
+[data-theme="dark"] ::selection {
+  background: rgba(77, 124, 255, 0.15);
+}
 
 /* ---- Animations ---- */
 @keyframes blink {
@@ -272,8 +297,8 @@ body {
   gap: 8px;
   padding: 6px 16px;
   border-radius: 999px;
-  border: 1px solid rgba(0, 82, 255, 0.3);
-  background: rgba(0, 82, 255, 0.05);
+  border: 1px solid rgba(var(--color-primary-rgb, 0, 82, 255), 0.3);
+  background: var(--color-fill);
   font-family: var(--font-family-mono);
   font-size: 11px;
   text-transform: uppercase;
@@ -566,7 +591,7 @@ body {
 }
 
 .login-submit:hover {
-  box-shadow: 0 4px 16px rgba(0, 82, 255, 0.35) !important;
+  box-shadow: var(--shadow-accent) !important;
   transform: translateY(-1px);
 }
 
@@ -630,7 +655,13 @@ body {
 .ant-input-affix-wrapper:focus,
 .ant-input-affix-wrapper-focused {
   border-color: var(--accent) !important;
-  box-shadow: 0 0 0 2px rgba(0, 82, 255, 0.1) !important;
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 0, 82, 255), 0.1) !important;
+}
+[data-theme="dark"] .ant-input:focus,
+[data-theme="dark"] .ant-input-focused,
+[data-theme="dark"] .ant-input-affix-wrapper:focus,
+[data-theme="dark"] .ant-input-affix-wrapper-focused {
+  box-shadow: 0 0 0 2px rgba(77, 124, 255, 0.15) !important;
 }
 
 /* Sidebar Search Input — fix visual height regression from border:none + capsule style */

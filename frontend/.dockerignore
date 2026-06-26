@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+*.sqlite3
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.DS_Store
+audit_reports
+*.md
+!README.md

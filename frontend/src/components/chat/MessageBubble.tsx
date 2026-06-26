@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Card, Typography, Tooltip, message as antdMessage, Button, Popover } from 'antd';
-import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined, MoreOutlined } from '@ant-design/icons';
+import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined, MoreOutlined, PaperClipOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -32,10 +32,13 @@ function getRelevanceLabel(score: number, t: (key: string) => string): string {
   return t('low_relevance');
 }
 
+// V4.2 UI-V4.2-006: Replace hardcoded Ant Design light-mode colors with CSS variables
+// for dark mode compatibility. #52c41a/#faad14/#8c8c8c had poor contrast in dark mode.
+// [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-006]
 function getRelevanceColor(score: number): string {
-  if (score > 0.8) return '#52c41a';  // green
-  if (score > 0.5) return '#faad14';  // orange
-  return '#8c8c8c';  // gray
+  if (score > 0.8) return 'var(--color-success)';    // green (adapts to dark)
+  if (score > 0.5) return 'var(--color-warning)';    // orange (adapts to dark)
+  return 'var(--color-text-tertiary)';                // gray (adapts to dark)
 }
 
 interface Props {
@@ -139,7 +142,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
       verticalAlign: 'text-bottom',
       animation: 'blink 0.8s ease-in-out infinite',
       borderRadius: 1,
-      boxShadow: '0 0 4px rgba(0, 82, 255, 0.4)',
+      boxShadow: 'var(--shadow-accent)',
     }} />
   ) : null;
 
@@ -398,7 +401,13 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
                 height: 'auto',
               }}
             >
-              📎 {t('sources_count', { count: message.citations.length })}
+            {/* V4.2 UI-V4.2-008: Replace emoji 📎 with semantic <PaperClipOutlined> icon
+            * + aria-label for screen reader accessibility. Emoji Unicode names are
+            * unpredictable across screen readers and cannot be localized.
+            * [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-008] */}
+            <PaperClipOutlined aria-label={t('sources')} />
+            {' '}
+            {t('sources_count', { count: message.citations.length })}
             </Button>
 
             {sourcesExpanded && (

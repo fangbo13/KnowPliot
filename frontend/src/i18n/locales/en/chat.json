@@ -38,5 +38,9 @@
   "error_network": "Connection failed. Please check your network.",
   "error_generic": "Request failed. Please try again later.",
   "error_session": "Failed to start conversation. Please retry.",
-  "error_timeout": "Response timed out. Please try again later."
+  "error_timeout": "Response timed out. Please try again later.",
+  "code_copied": "Code copied",
+  "copy_code": "Copy code",
+  "stop_generation": "Stop generation",
+  "copied": "Copied"
 }

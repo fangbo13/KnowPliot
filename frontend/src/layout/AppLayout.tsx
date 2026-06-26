@@ -168,6 +168,13 @@ export default function AppLayout() {
         label: t('admin_dashboard') || 'Admin Dashboard',
         onClick: () => navigate('/admin/dashboard'),
       });
+      // V4.1: Web Crawler — Admin only (crawler domain)
+      items.push({
+        key: 'web-crawler',
+        icon: <GlobalOutlined />,
+        label: t('web_crawler') || 'Web Crawler',
+        onClick: () => navigate('/admin/crawler'),
+      });
     }
 
     if (hasHRAccess || hasAdminAccess) {
@@ -223,13 +230,13 @@ export default function AppLayout() {
       {
         key: 'zh',
         label: '中文',
-        icon: currentLang === 'zh' ? <span style={{ color: '#0052FF' }}>●</span> : null,
+        icon: currentLang === 'zh' ? <span style={{ color: 'var(--accent)' }}>●</span> : null,
         onClick: () => handleLangChange('zh'),
       },
       {
         key: 'en',
         label: 'English',
-        icon: currentLang === 'en' ? <span style={{ color: '#0052FF' }}>●</span> : null,
+        icon: currentLang === 'en' ? <span style={{ color: 'var(--accent)' }}>●</span> : null,
         onClick: () => handleLangChange('en'),
       },
     ],
@@ -368,12 +375,12 @@ export default function AppLayout() {
           width: 32,
           height: 32,
           borderRadius: 8,
-          background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+          background: 'var(--gradient-accent)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
-          boxShadow: '0 2px 8px rgba(0, 82, 255, 0.25)',
+          boxShadow: 'var(--shadow-accent)',
         }}>
           <span style={{ fontSize: 14, fontWeight: 800, color: '#FFFFFF', lineHeight: 1 }}>EY</span>
         </div>
@@ -560,7 +567,7 @@ export default function AppLayout() {
                       fontSize: 13,
                       lineHeight: '20px',
                       color: isActive ? 'var(--color-text)' : 'var(--color-text-secondary)',
-                      background: isActive ? 'rgba(0, 82, 255, 0.08)' : 'transparent',
+                      background: isActive ? 'var(--color-fill-secondary)' : 'transparent',
                       fontWeight: isActive ? 600 : 400,
                       borderRadius: 6,
                       overflow: 'hidden',
@@ -640,9 +647,9 @@ export default function AppLayout() {
             width: 56,
             height: 56,
             borderRadius: 14,
-            background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+            background: 'var(--gradient-accent)',
             marginBottom: 16,
-            boxShadow: '0 6px 20px rgba(0, 82, 255, 0.25)',
+            boxShadow: 'var(--shadow-accent-lg)',
           }}>
             <span style={{ fontSize: 24, fontWeight: 800, color: '#FFFFFF' }}>EY</span>
           </div>
@@ -671,7 +678,7 @@ export default function AppLayout() {
                 width: 44,
                 height: 44,
                 borderRadius: 10,
-                background: 'rgba(0, 82, 255, 0.08)',
+                background: 'var(--color-fill-secondary)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -777,7 +784,7 @@ export default function AppLayout() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: 8,
-                  background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+                  background: 'var(--gradient-accent)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <span style={{ fontSize: 14, fontWeight: 800, color: '#FFFFFF' }}>EY</span>
@@ -884,7 +891,7 @@ export default function AppLayout() {
               icon={<GlobalOutlined />}
               aria-label={t('language_switch') || 'Switch language'}
               style={{
-                color: currentLang === 'zh' ? '#0052FF' : 'var(--color-text-secondary)',
+                color: currentLang === 'zh' ? 'var(--accent)' : 'var(--color-text-secondary)',
                 marginRight: 8,
               }}
               title={currentLang === 'zh' ? '切换至 English' : 'Switch to 中文'}

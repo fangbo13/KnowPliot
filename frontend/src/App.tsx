@@ -5,6 +5,7 @@ import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
+import CrawlerAdminPage from './pages/admin/CrawlerAdminPage';
 import LoginPage from './auth/LoginPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { RoleGuard } from './auth/RoleGuard';
@@ -87,6 +88,15 @@ function App() {
           element={
             <RoleGuard requiredRole="admin">
               <AdminDashboardPage />
+            </RoleGuard>
+          }
+        />
+        {/* V4.1 Crawler: Web crawl admin — requires admin role */}
+        <Route
+          path="admin/crawler"
+          element={
+            <RoleGuard requiredRole="admin">
+              <CrawlerAdminPage />
             </RoleGuard>
           }
         />

@@ -1,0 +1,116 @@
+# ──────────────────────────────────────────────────────────────────
+# EY Data Collector — 示例数据源配置文件
+# ──────────────────────────────────────────────────────────────────
+#
+# INTERNAL USE ONLY — 仅配置经 EY 数据治理审批的授权数据源。
+# 使用者须严格遵守 EY 信息安全政策和数据分类规范。
+# 任何未授权数据源的添加由使用者自行承担责任。
+#
+# 环境变量引用格式: ${ENV_VAR} 或 ${ENV_VAR:default_value}
+# 运行前请确保相关环境变量已设置。
+# ──────────────────────────────────────────────────────────────────
+
+global:
+  # ── 身份标识与透明度 ──
+  user_agent: "EY-DataCollector/1.0"
+  contact_email: "${EY_CRAWL_CONTACT_EMAIL}"           # 从环境变量读取内网邮箱
+  purpose: "New employee training knowledge content collection"  # X-Purpose 头
+
+  # ── URL 与内容限制 ──
+  max_url_length: 2048                                  # 对齐 settings CRAWL_MAX_URL_LENGTH
+  max_redirects: 3                                      # 对齐 settings CRAWL_MAX_REDIRECTS
+  max_content_size: 500000                              # 500KB，对齐 CRAWL_MAX_CONTENT_SIZE_KB
+
+  # ── 速率限制 ──
+  rate_limit:
+    min_delay: 2.0                                      # 每次请求间最小延迟（秒）
+    max_delay: 5.0                                      # 每次请求间最大延迟（秒）
+
+  # ── 重试策略 ──
+  max_retries: 3                                        # 最大重试次数
+  retry_backoff_base: 60                                # 基础退避秒数（delay = 60 * 2^attempt）
+
+  # ── HTTP 超时 ──
+  timeout:
+    connect: 5.0                                        # 连接超时（秒）
+    read: 30.0                                          # 读取超时（秒）
+    write: 10.0                                         # 写入超时（秒）
+
+  # ── 输出设置 ──
+  output:
+    format: "jsonl"                                     # "jsonl" 或 "csv"
+    dir: "./output"                                     # 输出目录
+
+  # ── 去重 ──
+  dedup_enabled: true                                   # SHA256 精确去重
+
+  # ── 日志 ──
+  logging:
+    level: "INFO"                                       # DEBUG/INFO/WARNING/ERROR
+    file: ""                                            # 日志文件路径（空=仅stdout）
+
+# ──────────────────────────────────────────────────────────────────
+# 数据源列表
+# ──────────────────────────────────────────────────────────────────
+
+sources:
+  # ═══ 内部数据源（需要认证） ═══
+
+  - name: "EY 内部 SharePoint — 新入职 Hub"
+    url: "https://ey.sharepoint.com/sites/onboarding-hub"
+    source_type: "internal"                             # 内部数据源 → SSRF IP 校验跳过
+    auth_type: "kerberos"                               # Kerberos 认证（需 kinit）
+    content_type_hint: "html"
+    internal_only: true                                 # 仅内部参考，排除外部检索
+    tags: ["onboarding", "training", "internal"]
+    category: "employee-onboarding"
+
+  - name: "EY 内部 Wiki — 政策与流程"
+    url: "https://wiki.ey.internal/policies-and-procedures"
+    source_type: "internal"
+    auth_type: "bearer"                                 # Bearer Token 认证
+    auth_env_var: "EY_INTERNAL_API_TOKEN"               # 从环境变量读取 Token
+    content_type_hint: "html"
+    internal_only: true
+    tags: ["policies", "procedures", "compliance"]
+    category: "policies"
+
+  - name: "EY 培训材料 PDF 库"
+    url: "https://training.ey.internal/materials/new-employee-guide.pdf"
+    source_type: "internal"
+    auth_type: "api_key"                                # API Key 认证
+    auth_env_var: "EY_TRAINING_API_KEY"                 # 从环境变量读取 API Key
+    content_type_hint: "pdf"                             # PDF 文档
+    internal_only: true
+    tags: ["training", "guide", "pdf"]
+    category: "training-materials"
+
+  - name: "EY 行为准则文档"
+    url: "https://ethics.ey.internal/code-of-conduct.docx"
+    source_type: "internal"
+    auth_type: "bearer"
+    auth_env_var: "EY_ETHICS_API_TOKEN"
+    content_type_hint: "word"                            # Word 文档
+    internal_only: true
+    tags: ["ethics", "code-of-conduct"]
+    category: "ethics"
+
+  # ═══ 外部数据源（公开 EY 官网，无需认证） ═══
+
+  - name: "EY 公开 — 企业文化介绍"
+    url: "https://www.ey.com/en/careers/culture"
+    source_type: "external"                             # 外部数据源 → 完整 SSRF + robots.txt 校验
+    auth_type: "none"                                   # 无认证
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["culture", "careers", "public"]
+    category: "company-overview"
+
+  - name: "EY 公开 — 全球回顾报告"
+    url: "https://www.ey.com/en_gl/global-review"
+    source_type: "external"
+    auth_type: "none"
+    content_type_hint: "html"
+    internal_only: false
+    tags: ["global-review", "public"]
+    category: "company-overview"

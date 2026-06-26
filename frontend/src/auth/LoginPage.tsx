@@ -112,7 +112,7 @@ export default function LoginPage() {
                 left: 0,
                 width: '100%',
                 height: 4,
-                background: 'linear-gradient(to right, #0052FF, #4D7CFF)',
+                background: 'var(--gradient-accent)',
               }} />
 
               {/* Blue accent stripe - left edge */}
@@ -122,7 +122,7 @@ export default function LoginPage() {
                 left: 0,
                 width: 3,
                 height: '80%',
-                background: 'linear-gradient(to bottom, transparent, #0052FF, transparent)',
+                background: `linear-gradient(to bottom, transparent, var(--accent), transparent)`,
                 borderRadius: 2,
               }} />
 
@@ -131,12 +131,12 @@ export default function LoginPage() {
                 width: 100,
                 height: 100,
                 borderRadius: 20,
-                background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+                background: 'var(--gradient-accent)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 marginBottom: 32,
-                boxShadow: '0 8px 32px rgba(0, 82, 255, 0.35)',
+                boxShadow: 'var(--shadow-accent-lg)',
               }}>
                 <span style={{
                   fontSize: 48,
@@ -172,7 +172,7 @@ export default function LoginPage() {
                       width: 6,
                       height: 6,
                       borderRadius: 3,
-                      background: '#0052FF',
+                      background: 'var(--accent)',
                       flexShrink: 0,
                     }} />
                     <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{item}</Text>

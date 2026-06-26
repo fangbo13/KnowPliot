@@ -199,11 +199,22 @@ export default function ChatPageContainer() {
     inputRef.current?.focus();
   };
 
+  // V4.2 UI-V4.2-002: handleRetry now reuses handleSend's full guard chain.
+  // Previously bypassed isStreaming/isSendLocked/isSendingRef/navigator.onLine checks,
+  // allowing offline sends and potential concurrent double-stream.
+  // [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-002]
   const handleRetry = () => {
+    if (isStreaming || isSendLocked || isSendingRef.current) return;
+    if (!navigator.onLine) {
+      antMessage.warning(t('offline_send_warning') || '当前网络不可用，请检查网络连接后重试');
+      return;
+    }
     const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
     if (lastUserMsg) {
       setSendError(null);
+      isSendingRef.current = true;
       sendMessage(lastUserMsg.content);
+      requestAnimationFrame(() => { isSendingRef.current = false; });
     }
   };
 
@@ -305,13 +316,15 @@ export default function ChatPageContainer() {
             closable
             onClose={() => setSendError(null)}
             // V4.0 DEFECT-007: Network errors get stronger visual treatment for clearer feedback
+            // V4.2 UI-V4.2-003: Replace hardcoded #fff2f0/#ff4d4f with CSS variables for dark mode.
+            // Previously #fff2f0 (light-only pink) was jarring on dark backgrounds.
+            // [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-003]
             style={{
               marginBottom: 16,
               borderRadius: 8,
               ...(sendError === 'error_network' ? {
-                border: '2px solid #ff4d4f',
-                background: '#fff2f0',
-                animation: 'slideDown 0.3s ease-out',
+                border: '2px solid var(--color-error)',
+                background: 'rgba(var(--color-error-rgb, 239, 68, 68), 0.08)',
               } : {}),
             }}
             action={
@@ -459,12 +472,19 @@ export default function ChatPageContainer() {
               )}
             </Space.Compact>
           </div>
-          {/* Character counter */}
+          {/* V4.2 UI-V4.2-009: Character counter with ARIA live region.
+          * Screen readers now announce character count changes, especially
+          * critical near the 3500+ threshold when color changes to amber/red.
+          * [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-009] */}
           {inputValue.length > 0 && (
-            <div style={{
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label={`Character count: ${inputValue.length} of 4000`}
+              style={{
               textAlign: 'right',
               fontSize: 11,
-              color: inputValue.length >= 4000 ? '#ff4d4f' : inputValue.length > 3500 ? '#faad14' : 'var(--color-text-tertiary)',
+              color: inputValue.length >= 4000 ? 'var(--color-error)' : inputValue.length > 3500 ? 'var(--color-warning)' : 'var(--color-text-tertiary)',
               marginTop: 4,
               paddingRight: 4,
               transition: 'color 0.2s ease',

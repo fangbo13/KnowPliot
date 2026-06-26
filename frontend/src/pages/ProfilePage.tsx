@@ -54,7 +54,7 @@ export default function ProfilePage() {
             size={64}
             icon={<UserOutlined />}
             style={{
-              background: 'linear-gradient(135deg, #0052FF, #4D7CFF)',
+              background: 'var(--gradient-accent)',
               fontSize: 28,
               color: '#FFFFFF',
             }}
