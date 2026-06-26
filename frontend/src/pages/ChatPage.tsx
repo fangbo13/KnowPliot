@@ -413,7 +413,7 @@ export default function ChatPageContainer() {
             border: '1px solid var(--color-border)',
             borderRadius: 16,
             padding: '8px 8px 8px 16px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
+            boxShadow: 'var(--shadow-floating-input)',
             transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
           }}>
             <Space.Compact style={{ width: '100%' }}>

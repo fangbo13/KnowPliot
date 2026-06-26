@@ -90,6 +90,12 @@
   --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
   --shadow-accent: 0 4px 14px rgba(0, 82, 255, 0.25);
   --shadow-accent-lg: 0 8px 24px rgba(0, 82, 255, 0.35);
+  /* P1-2: Context menu and floating input shadows for dark mode consistency.
+  * Previously hardcoded rgba(0,0,0,0.12) in AppLayout context menus and
+  * rgba(0,0,0,0.08/0.04) in ChatPage floating input — these were too dark
+  * in dark mode backgrounds, creating a visual "halo" effect. */
+  --shadow-context-menu: 0 6px 16px rgba(0, 0, 0, 0.12);
+  --shadow-floating-input: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
 
   /* User Message Bubble */
   --user-msg-bg: var(--foreground);
@@ -142,6 +148,11 @@
   --shadow-xl: 0 20px 50px rgba(0, 0, 0, 0.5);
   --shadow-accent: 0 4px 14px rgba(77, 124, 255, 0.2);
   --shadow-accent-lg: 0 8px 24px rgba(77, 124, 255, 0.3);
+  /* P1-2: Dark mode context menu + floating input shadows — lighter than light mode.
+  * In dark mode, shadows should be subtler (lower opacity) to avoid the "halo"
+  * effect against dark backgrounds like #1E293B. */
+  --shadow-context-menu: 0 6px 16px rgba(0, 0, 0, 0.4);
+  --shadow-floating-input: 0 8px 32px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* ---- Smooth Theme Transitions ---- */
@@ -1085,7 +1096,7 @@ body {
 }
 
 .message-bubble-wrapper:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Message action button transitions */
