@@ -579,19 +579,26 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         }
 
         flushImmediate();
-        set({ streamPhase: 'error' });
-        get().unlockSend();
 
+        // P0-2: Combine streamPhase + sendError into single set() call to prevent
+        // a one-frame gap where streamPhase='error' but sendError=null.
+        // Previously: set({ streamPhase: 'error' }) → unlockSend() → then set({ sendError })
+        // This caused a render frame with error phase but no visible error Alert.
+        // Now: single atomic update ensures ChatPage always sees both values together.
         const errorMsg = (error as Error).message;
+        let errorKey: string;
         if (errorMsg.includes('401') || errorMsg.includes('403')) {
-          set({ sendError: 'error_auth' });
+          errorKey = 'error_auth';
         } else if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
-          set({ sendError: 'error_server' });
+          errorKey = 'error_server';
         } else if (errorMsg.includes('NetworkError') || errorMsg.includes('fetch') || errorMsg.includes('Failed to fetch')) {
-          set({ sendError: 'error_network' });
+          errorKey = 'error_network';
         } else {
-          set({ sendError: 'error_generic' });
+          errorKey = 'error_generic';
         }
+
+        set({ streamPhase: 'error', sendError: errorKey });
+        get().unlockSend();
 
         // Reset to idle after error is shown
         setTimeout(() => set({ streamPhase: 'idle' }), 100);
