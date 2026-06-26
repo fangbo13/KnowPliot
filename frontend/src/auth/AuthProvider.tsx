@@ -35,9 +35,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         // V4.0 migration: if old format lacks roles/permissions, derive from is_hr_admin
+        // P1-1: Also derive from role_level if roles are empty (admin role_level → roles=['admin'])
         if (parsed.user && !parsed.user.roles) {
           parsed.user.roles = parsed.user.is_hr_admin ? ['hr'] : [];
           parsed.user.permissions = []; // Will be populated on next login
+        }
+        // P1-1: If roles array is empty but role_level exists, derive roles from it
+        if (parsed.user && parsed.user.roles?.length === 0 && parsed.user.role_level) {
+          const roleLevelMap: Record<string, string[]> = {
+            'admin': ['admin'],
+            'superadmin': ['admin', 'superadmin'],
+            'hr': ['hr'],
+            'employee': [],
+          };
+          parsed.user.roles = roleLevelMap[parsed.user.role_level] || [parsed.user.role_level];
+        }
+        if (parsed.user && parsed.user.roles?.length === 0 && parsed.user.is_hr_admin) {
+          parsed.user.roles = ['hr'];
         }
         return parsed;
       }
@@ -49,9 +63,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(({ token, user }: { token: string; user: User }) => {
     // V4.0: Ensure roles/permissions are present (backend now provides them)
+    // P1-1: Also derive roles from role_level if roles array is empty.
+    // Some backend responses return role_level='admin' but roles=[], which
+    // causes RoleGuard to deny access. Map role_level to roles as fallback.
+    let derivedRoles = user.roles || [];
+    if (derivedRoles.length === 0 && user.role_level) {
+      // Map role_level to roles array for RoleGuard compatibility
+      const roleLevelMap: Record<string, string[]> = {
+        'admin': ['admin'],
+        'superadmin': ['admin', 'superadmin'],
+        'hr': ['hr'],
+        'employee': [],
+      };
+      derivedRoles = roleLevelMap[user.role_level] || [user.role_level];
+    }
+    // If still empty but is_hr_admin, add 'hr' role
+    if (derivedRoles.length === 0 && user.is_hr_admin) {
+      derivedRoles = ['hr'];
+    }
+
     const enrichedUser: User = {
       ...user,
-      roles: user.roles || (user.is_hr_admin ? ['hr'] : []),
+      roles: derivedRoles,
       permissions: user.permissions || [],
     };
     const newState: AuthState = { isAuthenticated: true, user: enrichedUser, token };

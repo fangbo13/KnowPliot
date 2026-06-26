@@ -21,6 +21,10 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
  * Phase 2 dual-authorization: checks RBAC roles/permissions AND
  * falls back to is_hr_admin for backward compatibility.
  *
+ * P1-1: Also checks role_level field — some backend responses return
+ * role_level='admin' but roles=[], which would incorrectly deny access.
+ * RoleGuard now matches via roles array OR role_level string.
+ *
  * Usage:
  *   <RoleGuard requiredRole="hr"><KnowledgeBasePage /></RoleGuard>
  *   <RoleGuard requiredRole="admin"><AdminDashboardPage /></RoleGuard>
@@ -60,19 +64,24 @@ export function RoleGuard({
 /**
  * Check if user has access based on role/permission requirements.
  * Phase 2 dual-authorization: RBAC OR is_hr_admin fallback.
+ * P1-1: Also checks role_level field for admin/superadmin matching.
  */
 function checkAccess(
-  user: { roles: string[]; permissions: string[]; is_hr_admin: boolean },
+  user: { roles: string[]; permissions: string[]; is_hr_admin: boolean; role_level?: string },
   requiredRole?: string,
   requiredPermission?: string,
 ): boolean {
   // Check role requirement
   if (requiredRole) {
     if (user.roles.includes(requiredRole)) return true;
+    // P1-1: Also match via role_level field (admin/superadmin → admin access)
+    if (requiredRole === 'admin' && (user.role_level === 'admin' || user.role_level === 'superadmin')) return true;
     // Phase 2 fallback: is_hr_admin = hr equivalent
     if (requiredRole === 'hr' && user.is_hr_admin) return true;
     // admin includes all hr permissions, so admin users can access hr-only pages
     if (requiredRole === 'hr' && user.roles.includes('admin')) return true;
+    // P1-1: superadmin also includes hr access
+    if (requiredRole === 'hr' && (user.role_level === 'admin' || user.role_level === 'superadmin')) return true;
   }
 
   // Check permission requirement
@@ -83,6 +92,10 @@ function checkAccess(
       const contentResources = ['document', 'category', 'template', 'workflow', 'audit'];
       const resource = requiredPermission.split('.')[0];
       if (contentResources.includes(resource)) return true;
+    }
+    // P1-1: admin/superadmin role_level grants all permissions
+    if (user.role_level === 'admin' || user.role_level === 'superadmin') {
+      return true;
     }
   }
 
