@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Row, Col, Typography, Card, Input, Button, Space } from 'antd';
+import { Row, Col, Typography, Card, Input } from 'antd';
 import {
   LaptopOutlined,
   DollarOutlined,
@@ -37,7 +37,11 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
   const inputRef = useRef<any>(null);
   // V3.5 HIGH-001: Read send lock from store to prevent double-send
   const isSendLocked = useChatStore(state => state.isSendLocked);
-  const isStreaming = useChatStore(state => state.streamPhase !== 'idle');
+  const streamPhase = useChatStore(state => state.streamPhase);
+  const streamingSessionId = useChatStore(state => state.streamingSessionId);
+  const activeSessionId = useChatStore(state => state.activeSessionId);
+  // V4.6: Only show streaming UI when the stream belongs to the active session
+  const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -109,64 +113,98 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
         }}>
           {t('title')}
         </Title>
-        <Text type="secondary" style={{ display: 'block', maxWidth: 480, margin: '0 auto' }}>
-          {t('welcome_message')}
-        </Text>
       </div>
 
-      {/* Chat Input Box - NEW */}
+      {/* Chat Input Box */}
       <div style={{
         maxWidth: 680,
-        margin: '0 auto 32px',
+        margin: '0 auto',
         animation: 'fadeInUp 0.4s ease-out 0.2s both',
       }}>
-        <Space.Compact style={{ width: '100%' }}>
-          <Input
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onPressEnter={handleSend}
-            placeholder={t('placeholder') || "在此输入你的问题..."}
-            size="large"
-            maxLength={4000}
-            disabled={isSendLocked || isStreaming}  // V3.5 HIGH-001: disable during send lock
-            style={{
-              borderRadius: 'var(--radius-lg) 0 0 var(--radius-lg)',
-              borderRight: 'none',
-            }}
-            aria-label={t('chat_input_label') || "输入你的问题"}
-          />
-          {/* V4.0 UI-HIGH-001: Conditional Stop/Send button */}
-          {isStreaming ? (
-            <Button
-              type="primary"
-              danger
-              icon={<StopOutlined />}
-              onClick={handleStop}
-              size="large"
-              aria-label={t('stop_generation') || '停止生成'}
+        <div
+          className="chat-input-container"
+          style={{
+            background: 'var(--color-bg-container)',
+            border: '1.5px solid var(--color-border)',
+            borderRadius: 24,
+            padding: '12px 16px',
+            boxShadow: 'var(--shadow-md)',
+            transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
+          }}
+        >
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}>
+            <Input
+              ref={inputRef}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onPressEnter={handleSend}
+              placeholder={t('placeholder') || "在此输入你的问题..."}
+              maxLength={4000}
+              disabled={isSendLocked || isStreaming}
+              className="chat-input-singleline"
+              aria-label={t('chat_input_label') || "输入你的问题"}
               style={{
-                minWidth: 56,
-                fontWeight: 600,
-                borderRadius: '0 var(--radius-lg) var(--radius-lg) 0',
+                border: 'none',
+                boxShadow: 'none',
+                fontSize: 15,
+                padding: '4px 0',
+                background: 'transparent',
               }}
             />
-          ) : (
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              disabled={!inputValue.trim() || isSendLocked || isStreaming}  // V3.5 HIGH-001: send lock guard
-              size="large"
-              style={{
-                minWidth: 56,
-                padding: inputValue.trim() ? '0 16px' : '0 20px',
-                fontWeight: 600,
-                borderRadius: '0 var(--radius-lg) var(--radius-lg) 0',
-              }}
-            />
-          )}
-        </Space.Compact>
+            {isStreaming ? (
+              <button
+                className="chat-input-stop-btn"
+                onClick={handleStop}
+                aria-label={t('stop_generation') || '停止生成'}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 20,
+                  border: '1.5px solid var(--color-error)',
+                  background: 'rgba(var(--color-error-rgb, 239, 68, 68), 0.08)',
+                  color: 'var(--color-error)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'all 0.2s ease',
+                  fontSize: 16,
+                }}
+              >
+                <StopOutlined />
+              </button>
+            ) : (
+              <button
+                className="chat-input-send-btn"
+                onClick={handleSend}
+                disabled={!inputValue.trim() || isSendLocked || isStreaming}
+                aria-label={t('send_message') || '发送'}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 20,
+                  border: 'none',
+                  background: inputValue.trim() ? 'var(--gradient-accent)' : 'var(--color-border)',
+                  color: inputValue.trim() ? '#fff' : 'var(--color-text-tertiary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: inputValue.trim() ? 'pointer' : 'default',
+                  flexShrink: 0,
+                  transition: 'all 0.2s ease',
+                  fontSize: 15,
+                }}
+              >
+                <SendOutlined />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       <Card
@@ -178,6 +216,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
           borderRadius: 'var(--radius-lg)',
           boxShadow: 'var(--shadow-sm)',
           animation: 'fadeInUp 0.4s ease-out 0.3s both',
+          marginTop: 24,
         }}
       >
         <Row gutter={[16, 16]}>

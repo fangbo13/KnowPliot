@@ -25,4 +25,6 @@ RUN mkdir -p /app/media
 
 EXPOSE 8000
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# V4.6: gunicorn (threaded workers) instead of runserver — serves concurrent SSE
+# chat streams without blocking. docker-compose overrides this with --reload for dev.
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "8", "--worker-class", "gthread", "--timeout", "120"]

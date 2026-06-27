@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+﻿import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -40,9 +40,19 @@ async function login(page) {
   return true;
 }
 async function dism(page) {
-  for (let i=0;i<3;i++) {
-    const btn = page.locator("button").filter({hasText:/Skip|Close|Got it|Start|Next|Finish/i}).first();
-    if (await btn.count()>0 && await btn.isVisible().catch(()=>false)) { try{await btn.click({timeout:1500});await sl(300);}catch{} } else break;
+  // Try ESC key first (fix: onboarding ESC close)
+  try { await page.keyboard.press("Escape"); await sl(500); } catch {}
+  // Wait for 5s delayed skip hint to appear
+  await sl(6000);
+  // Try clicking any dismiss button
+  for (let i=0;i<5;i++) {
+    const btn = page.locator("button").filter({hasText:/Skip|跳过|Close|close|Got it|知道了|Start|开始|Next|Finish|完成|skip/i}).first();
+    if (await btn.count()>0 && await btn.isVisible().catch(()=>false)) { try{await btn.click({timeout:2000});await sl(500);}catch{} } else break;
+  }
+  // Try ESC again if modal still present
+  const modal = page.locator(".ant-modal-wrap").first();
+  if (await modal.count()>0 && await modal.isVisible().catch(()=>false)) {
+    try { await page.keyboard.press("Escape"); await sl(500); } catch {}
   }
 }
 async function doLogout(page) {
@@ -244,3 +254,4 @@ async function run() {
   console.log("Results saved.");
 }
 run().catch(e=>{console.error("FATAL:",e.message);process.exit(1);});
+

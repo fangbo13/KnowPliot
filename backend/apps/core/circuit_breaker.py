@@ -18,6 +18,7 @@ Note: This is a process-level circuit breaker (in-memory singleton).
 For multi-worker deployments (gunicorn), use Redis-backed state.
 """
 
+import os
 import time
 import logging
 import threading
@@ -128,9 +129,14 @@ class CircuitBreaker:
                 )
 
 
-# V4.2 SYS-V4.2-014: Module-level singleton for DashScope circuit breaker
+# V4.2 SYS-V4.2-014: Module-level singleton for DashScope circuit breaker.
+# V4.6: Relaxed defaults + env overrides. The previous 3-failures / 30s-global-block
+# was too aggressive for multi-conversation use — a couple of transient DashScope
+# timeouts (common when several SSE replies stream at once) tripped the breaker and
+# made EVERY conversation fail-fast for 30s. Defaults are now 6 failures / 15s recovery;
+# tighten for prod via env (e.g. DASHSCOPE_BREAKER_THRESHOLD=3, DASHSCOPE_BREAKER_RECOVERY=30).
 dashscope_breaker = CircuitBreaker(
     name="dashscope",
-    failure_threshold=3,
-    recovery_timeout=30.0,
+    failure_threshold=int(os.environ.get("DASHSCOPE_BREAKER_THRESHOLD", "6")),
+    recovery_timeout=float(os.environ.get("DASHSCOPE_BREAKER_RECOVERY", "15")),
 )

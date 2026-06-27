@@ -149,6 +149,10 @@ class PgVectorRetriever:
             # V3.7 P0.2: Query embedding_vector (vector column) with HNSW index
             # Cosine distance operator <=> provided by pgvector
             # V4.2 KB-V4.2-BATCH-012: Exclude zero vectors and failed embeddings
+            # V4.3 UAT FIX: Double-escape curly braces in f-string SQL — Python interprets
+            # single {}/{} as format placeholders. '{"embedding_failed": true}' was being parsed
+            # as format specifier `: true` causing ValueError: "Invalid format specifier ' true'"
+            # Double braces {{}} produce literal braces in the output SQL string.
             threshold_distance = 1 - threshold
             cursor.execute(
                 f"""
@@ -159,7 +163,7 @@ class PgVectorRetriever:
                 JOIN knowledge_document d ON dc.document_id = d.id
                 WHERE dc.embedding_vector IS NOT NULL
                 AND (dc.embedding_vector <=> %s) <= %s
-                AND NOT (dc.metadata @> '{"embedding_failed": true}'::jsonb)
+                AND NOT (dc.metadata @> '{{"embedding_failed": true}}'::jsonb)
                 {filter_sql}
                 ORDER BY distance ASC
                 LIMIT %s

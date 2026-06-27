@@ -49,7 +49,17 @@ export default function LoginPage() {
           id: user.id,
           email: user.email,
           username: user.username,
+          // V4.3 UAT FIX: Previously omitted roles/permissions/is_superuser from profile API,
+          // causing RoleGuard to deny admin access. The backend /api/v1/auth/me/ endpoint
+          // (UserSerializer) returns roles[] and permissions[], but LoginPage only passed
+          // role_level (which is an organizational value like "partner", not RBAC "admin").
+          // AuthProvider.login() then tried to derive roles from role_level, which failed
+          // because role_level="partner" is not in the roleLevelMap.
+          // Now: pass all RBAC fields from the profile response.
           is_hr_admin: user.is_hr_admin,
+          is_superuser: user.is_superuser ?? false,
+          roles: user.roles,
+          permissions: user.permissions,
           language_preference: user.language_preference,
           service_line: user.service_line,
           office_location: user.office_location,
@@ -223,7 +233,7 @@ export default function LoginPage() {
               type="link"
               size="small"
               icon={<UserSwitchOutlined />}
-              onClick={() => form.setFieldsValue({ email: 'admin@ey.com', password: 'admin123' })}
+              onClick={() => form.setFieldsValue({ email: 'admin@test.ey.com', password: 'admin123' })}
               style={{ marginBottom: 24, color: 'var(--accent)', fontWeight: 500 }}
             >
               {t('demo_fill_btn')}

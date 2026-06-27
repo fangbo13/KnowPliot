@@ -4,7 +4,7 @@
   "placeholder": "在此输入你的问题...",
   "send": "发送",
   "thinking": "正在思考...",
-  "thinking_connecting": "正在连接...",
+  "thinking_connecting": "正在思考...",
   "thinking_searching": "正在检索知识库...",
   "thinking_generating": "正在生成回复...",
   "connection_slow": "连接较慢，正在重试...",
@@ -42,5 +42,7 @@
   "code_copied": "代码已复制",
   "copy_code": "复制代码",
   "stop_generation": "停止生成",
-  "copied": "已复制"
+  "copied": "已复制",
+  "ai_disclaimer": "内容由AI生成，请仔细甄别",
+  "rename_title_hint": "点击重命名"
 }

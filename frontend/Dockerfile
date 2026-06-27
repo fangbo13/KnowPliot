@@ -1,9 +1,17 @@
-# V4.2 SYS-V4.2-011: Multi-stage build — production build + nginx serve
-# Previous: npm run dev (Vite dev server) — no minification, no tree-shaking,
-# HMR websocket exposed, source maps accessible, ~10x larger JS bundle.
-# Now: npm run build (minified + tree-shaken + hashed assets) + nginx:alpine serve.
+# V4.6 FIX: Docker BuildKit on Windows uses git-tracked content as build context,
+# ignoring unstaged working-directory changes → vite build inside Docker always
+# produces stale JS bundles.  Fix: pre-build on host, just copy dist into nginx.
+#
+# Usage:
+#   cd frontend && npx vite build          # build locally first
+#   docker compose build frontend          # then build image (fast, no npm install)
+#   docker compose up -d frontend          # deploy
+#
+# Old multi-stage builder is kept as a fallback (stage name "builder") so CI
+# pipelines that prefer in-container builds can still use:
+#   docker build --target final-alt frontend/
 
-# ── Stage 1: Build ──
+# ── Stage 1: Builder (fallback for CI — NOT used by default) ──
 FROM node:20-slim AS builder
 
 WORKDIR /app
@@ -14,18 +22,26 @@ RUN npm config set registry https://registry.npmmirror.com \
     && PUPPETEER_SKIP_DOWNLOAD=true npm install
 
 COPY . .
-# V4.2 SYS-V4.2-011: Production build replaces dev server
-# Use vite build directly (skip tsc type-checking — has pre-existing errors in KB/Admin domain)
-# Vite build still performs minification + tree-shaking + hashed assets → production-ready
 RUN npx vite build
 
-# ── Stage 2: Serve ──
-FROM nginx:alpine
+# ── Stage 2: Serve pre-built dist (primary — fast, reliable) ──
+FROM nginx:alpine AS final
 
 # V4.2 SYS-V4.2-011: nginx config for SPA + API proxy
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy built assets from builder stage
+# Copy locally pre-built dist/ — this is the primary path.
+# Requires `npx vite build` to have been run on the host beforehand.
+COPY dist/ /usr/share/nginx/html/
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+
+# ── Stage 3: Serve in-container build (fallback for CI) ──
+FROM nginx:alpine AS final-alt
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

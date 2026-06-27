@@ -39,6 +39,11 @@ dependencies = [
     "gevent>=24.0",
     # V4.1 Crawler: async HTTP client (already used for embeddings, explicit here)
     "httpx[http2]>=0.27",
+    # V4.6: Production/concurrency-grade WSGI server. Django's runserver serializes
+    # under concurrent long-lived SSE streams (each chat reply holds a worker for its
+    # whole duration), causing slow first-token + timeouts when several conversations
+    # stream at once. gunicorn with gthread workers serves many concurrent streams.
+    "gunicorn>=22.0",
 ]
 
 [project.optional-dependencies]

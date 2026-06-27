@@ -103,6 +103,10 @@
 
   /* V4.0 UI-LOW-001: Responsive message bubble padding (CSS variable replaces hardcoded inline style) */
   --msg-bubble-padding: 12px 16px;
+
+  /* Sidebar collapse — icon narrow bar mode */
+  --sidebar-width-expanded: 260px;
+  --sidebar-width-collapsed: 120px;
 }
 
 /* ---- Dark Mode ---- */
@@ -115,6 +119,19 @@
   --color-bg-elevated: #253042;
   --color-border: #334155;
   --color-border-secondary: #2D3A4F;
+
+  /* V4.6 DARK-001: Override light-mode-only color tokens that were previously
+   * missing from dark mode, causing near-white backgrounds on dark surfaces.
+   * --muted was #F1F5F9 (near-white) → inline code & table rows invisible.
+   * --foreground was #0F172A (very dark) → inverted sections had dark-on-dark.
+   * --card was #FFFFFF (pure white) → any var(--card) usage rendered white.
+   * --background was #FAFAFA → body-level white flash on theme switch.
+   * Now all tokens are overridden to dark-appropriate values. */
+  --muted: #253042;
+  --muted-foreground: #94A3B8;
+  --foreground: #0F172A;
+  --background: #0B1120;
+  --card: #1E293B;
 
   --accent: #4D7CFF;
   --accent-hover: #6B9AFF;
@@ -153,14 +170,51 @@
   * effect against dark backgrounds like #1E293B. */
   --shadow-context-menu: 0 6px 16px rgba(0, 0, 0, 0.4);
   --shadow-floating-input: 0 8px 32px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
+
+  /* Sidebar collapse — icon narrow bar mode (same values in both themes) */
+  --sidebar-width-expanded: 260px;
+  --sidebar-width-collapsed: 120px;
 }
 
-/* ---- Smooth Theme Transitions ---- */
-.ant-layout, .ant-layout *, .ant-card, .ant-card *, .ant-menu, .ant-menu *,
-.ant-btn, .ant-input, .ant-select, .ant-modal, .ant-modal *, .ant-list, .ant-list *,
-.ant-table, .ant-table *, .ant-alert, .ant-alert *, .ant-dropdown, .ant-dropdown *,
-.ant-tag, .ant-avatar, .ant-typography, .ant-typography *, .ant-segmented, .ant-segmented *,
-.ant-form, .ant-form * {
+/* ---- Smooth Theme Transitions ----
+ * V4.6 DARK-003: Theme switch was "jarring" because:
+ * 1. The old transition rule used wildcard selectors (.ant-layout *, .ant-card *)
+ *    which matched ~thousands of DOM elements. The browser had to compute
+ *    transition start/end values for EACH element on every theme change = layout thrash.
+ * 2. Custom elements (.markdown-content, .msg-bubble-wrapper, .sidebar-chat-item)
+ *    were NOT in the transition group, so they "snapped" instantly while
+ *    Ant Design components smoothly faded = visual mismatch ("stuttering").
+ * 3. Ant Design CSS-in-JS hotswap removes old <style> tags and inserts new ones,
+ *    creating a brief "style vacuum" period.
+ *
+ * Fix strategy:
+ * - REMOVE wildcard selectors (.ant-layout *, .ant-card *, .ant-menu *) — they
+ *   cause layout thrash by matching thousands of elements. Instead, add ONLY the
+ *   specific Ant Design component root classes (.ant-layout, .ant-card, .ant-btn, etc.)
+ * - ADD all custom CSS-variable-dependent classes that were missing before
+ * - Use a faster 0.2s duration (snappier feel) instead of 0.3s (felt sluggish)
+ * - Ant Design's own CSS-in-JS handles its inner children automatically via
+ *   theme token updates — no need to force-transition every descendant
+ */
+.ant-layout, .ant-card, .ant-menu,
+.ant-btn, .ant-input, .ant-select, .ant-modal,
+.ant-table, .ant-alert, .ant-dropdown, .ant-popover, .ant-popconfirm,
+.ant-drawer, .ant-tooltip,
+.ant-tag, .ant-avatar, .ant-typography, .ant-segmented,
+.ant-form, .ant-list,
+.ant-layout-sider,
+/* V4.6 DARK-003: Custom elements that depend on CSS variables */
+.markdown-content, .markdown-content code, .markdown-content pre, .markdown-content th,
+.msg-bubble-wrapper, .msg-bubble-assistant,
+.msg-action-row, .msg-action-btn,
+.sidebar-chat-item, .sidebar-session-item, .sidebar-user-area,
+.sidebar-header-icon, .sidebar-more-btn,
+.sidebar-collapsed-icon-btn, .sidebar-collapsed-initial,
+.citation-list, .relevance-badge,
+.ey-card, .section-label,
+.new-chat-btn, .code-block-copy-btn, .code-lang-label,
+.welcome-card,
+.chat-input-container, .chat-input-send-btn, .chat-input-stop-btn {
   transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -180,7 +234,7 @@ body {
   background-color: var(--color-bg-body);
   background-image: radial-gradient(ellipse at top, rgba(0, 82, 255, 0.06) 0%, transparent 50%);
   color: var(--color-text);
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 [data-theme="dark"] body {
@@ -415,21 +469,35 @@ body {
   transform: translateY(-1px);
 }
 
-/* ---- Message Copy Button (show on hover) ---- */
-.msg-bubble-wrapper:hover .msg-copy-btn,
-.msg-bubble-wrapper .msg-copy-btn:hover {
-  opacity: 1 !important;
-  transform: scale(1) !important;
+/* ---- Message Action Buttons (always visible below bubble) ---- */
+.msg-action-btn {
+  color: var(--color-text-secondary) !important;
+  font-size: 12px !important;
+  height: auto !important;
+  padding: 2px 8px !important;
+  line-height: 1 !important;
 }
 
-/* Touch devices: always show action buttons (no hover state) */
+.msg-action-btn:hover {
+  color: var(--color-text) !important;
+  background: var(--color-fill) !important;
+}
+
+.msg-action-btn:active {
+  background: var(--color-fill-secondary) !important;
+}
+
+.msg-action-btn .anticon {
+  font-size: 12px !important;
+}
+
+/* Touch devices: hide text buttons, show "more" popover menu instead */
 @media (hover: none) and (pointer: coarse) {
-  .msg-bubble-wrapper:hover .msg-copy-btn,
-  .msg-copy-btn {
-    opacity: 0 !important; /* Hide individual buttons on touch */
+  .msg-action-row .ant-btn:not(.mobile-msg-menu-btn) {
+    display: none !important;
   }
-  .msg-bubble-wrapper .mobile-msg-menu {
-    display: block !important; /* Show "more" button on touch */
+  .mobile-msg-menu-btn {
+    display: inline-flex !important;
   }
 }
 
@@ -581,6 +649,63 @@ body {
   }
 }
 
+/* ---- Chat Input Container — Modern Capsule Style ---- */
+/* Focus-within: subtle shadow only, no accent color ring */
+.chat-input-container:focus-within {
+  border-color: var(--color-border) !important;
+  box-shadow: var(--shadow-floating-input) !important;
+}
+[data-theme="dark"] .chat-input-container:focus-within {
+  box-shadow: var(--shadow-floating-input) !important;
+}
+
+/* Strip Ant Design's default border/focus ring from inputs inside the container */
+.chat-input-textarea,
+.chat-input-singleline {
+  background: transparent !important;
+}
+.chat-input-textarea:focus,
+.chat-input-textarea.ant-input-focused,
+.chat-input-singleline:focus,
+.chat-input-singleline.ant-input-focused {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+/* Placeholder styling */
+.chat-input-textarea::placeholder,
+.chat-input-singleline::placeholder {
+  color: var(--color-text-tertiary) !important;
+  opacity: 1 !important;
+}
+
+/* Send button — hover & active states */
+.chat-input-send-btn:not(:disabled):hover {
+  transform: scale(1.08);
+  box-shadow: var(--shadow-accent);
+}
+.chat-input-send-btn:not(:disabled):active {
+  transform: scale(0.95);
+}
+
+/* Stop button — hover & active states */
+.chat-input-stop-btn:hover {
+  background: rgba(var(--color-error-rgb, 239, 68, 68), 0.15) !important;
+  transform: scale(1.08);
+}
+.chat-input-stop-btn:active {
+  transform: scale(0.95);
+}
+
+/* Dark mode chat input overrides */
+[data-theme="dark"] .chat-input-container {
+  background: var(--color-bg-elevated) !important;
+  border-color: var(--color-border) !important;
+}
+[data-theme="dark"] .chat-input-textarea,
+[data-theme="dark"] .chat-input-singleline {
+  color: var(--color-text) !important;
+}
+
 /* V4.1 BUG-006: Floating input bar responsive fix for mobile (<500px).
 * On mobile browsers, the visible viewport height fluctuates when the address bar
 * expands/collapses. The fixed bottom positioning can clip the input below the
@@ -665,19 +790,31 @@ body {
   transform: translateY(0) scale(0.98) !important;
 }
 
-/* Input Focus */
-.ant-input:focus,
-.ant-input-focused,
+/* Input Focus — only for affix-wrapper (search inputs etc.), plain ant-input focus is suppressed */
 .ant-input-affix-wrapper:focus,
 .ant-input-affix-wrapper-focused {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 0, 82, 255), 0.1) !important;
 }
-[data-theme="dark"] .ant-input:focus,
-[data-theme="dark"] .ant-input-focused,
 [data-theme="dark"] .ant-input-affix-wrapper:focus,
 [data-theme="dark"] .ant-input-affix-wrapper-focused {
   box-shadow: 0 0 0 2px rgba(77, 124, 255, 0.15) !important;
+}
+
+/* Suppress Ant Design's default blue focus ring on plain inputs / textarea */
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-textarea textarea:focus {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+[data-theme="dark"] .ant-input:focus,
+[data-theme="dark"] .ant-input-focused,
+[data-theme="dark"] .ant-input-textarea textarea:focus {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 /* Sidebar Search Input — fix visual height regression from border:none + capsule style */
@@ -876,6 +1013,110 @@ body {
   color: #94A3B8 !important;
 }
 
+/* V4.6 DARK-001: Dark mode inline code + table row overrides.
+ * With --muted now overridden to #253042, backgrounds are correct.
+ * But inline code text needs explicit color override for contrast:
+ * in dark mode, inherited --color-text (#E2E8F0) on #253042 background
+ * has adequate contrast (WCAG AA ~5.7:1), so no override needed.
+ * Pre blocks already use --color-bg-elevated (#253042) + --color-text,
+ * which is correct. Tables use --muted for even rows, now also dark. */
+
+/* V4.6 DARK-002: Inline code in dark mode — multiple selector patterns to override
+ * Ant Design CSS-in-JS dynamic injection. Ant Design 5.x darkAlgorithm injects
+ * <style> tags that may override our global CSS for <code> elements, producing
+ * near-white background (#F1F5F9 from light-mode --muted) + light text (#E2E8F0
+ * from dark-mode --color-text) = unreadable white-on-light-gray.
+ * Fix: triple-layer override with (1) class-only selector, (2) attribute+class,
+ * (3) attribute+class+element — hardcodes dark values with !important. */
+.markdown-content code,
+[data-theme="dark"] .markdown-content code,
+html[data-theme="dark"] .markdown-content code {
+  --code-bg: #F1F5F9;   /* light mode default */
+  --code-color: inherit; /* light mode default */
+}
+html[data-theme="dark"] .markdown-content code {
+  --code-bg: #1E293B !important;
+  --code-color: #93C5FD !important;
+}
+.markdown-content code {
+  background: var(--code-bg) !important;
+  color: var(--code-color) !important;
+  border: 1px solid var(--code-border-color, transparent) !important;
+}
+html[data-theme="dark"] .markdown-content code {
+  --code-bg: #1E293B !important;
+  --code-color: #93C5FD !important;
+  --code-border-color: #334155 !important;
+}
+/* Ensure pre>code inherits transparent bg (code block, not inline) */
+.markdown-content pre code {
+  background: transparent !important;
+  color: inherit !important;
+  border: none !important;
+}
+
+/* V4.6 DARK-001: Table even rows in dark mode — explicit dark bg */
+[data-theme="dark"] .markdown-content tr:nth-child(even) {
+  background: #1E293B !important;
+}
+
+/* V4.6 DARK-001: Code blocks (pre) in dark mode — explicit dark bg */
+[data-theme="dark"] .markdown-content pre {
+  background: #253042 !important;
+  border-color: #2D3A4F !important;
+}
+
+[data-theme="dark"] .markdown-content th {
+  background: #253042 !important;
+  color: #E2E8F0 !important;
+}
+
+/* V4.6: Popconfirm / Popover z-index override.
+ * Sidebar context menu and action menu use z-index: 10000,
+ * but Ant Design Popconfirm renders its popup portal at z-index ~1050
+ * (default), which places the popup BELOW the menu visually — making
+ * Cancel/Confirm buttons unreachable. Override to 10500 so the popup
+ * always appears above any in-app floating menu.
+ * V4.6 FIX: Removed getPopupContainer={() => menuRef} from Popconfirm —
+ * rendering inside the menu div caused clipping/overlap of the confirm dialog.
+ * Now Popconfirm renders in default portal (document.body) and z-index
+ * stacking works correctly: popup at 10500 > menu at 10000. */
+.ant-popover,
+.ant-popconfirm {
+  z-index: 10500 !important;
+}
+
+/* V4.6 DARK-001: Popover / Popconfirm dark mode styling.
+ * Ant Design popover defaults to white background in all themes.
+ * Override to use dark tokens so the popover is readable in dark mode. */
+[data-theme="dark"] .ant-popover-inner {
+  background: var(--color-bg-elevated) !important;
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .ant-popover-arrow::before {
+  background: var(--color-bg-elevated) !important;
+}
+
+[data-theme="dark"] .ant-popconfirm-description {
+  color: var(--color-text-secondary) !important;
+}
+
+[data-theme="dark"] .ant-popconfirm-btn .ant-btn-default {
+  background: var(--color-bg-container) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .ant-popconfirm-btn .ant-btn-primary {
+  background: var(--gradient-accent) !important;
+  border: none !important;
+}
+
+[data-theme="dark"] .ant-popover {
+  --antd-arrow-background-color: var(--color-bg-elevated);
+}
+
 /* ---- Onboarding Modal ---- */
 .onboarding-modal .ant-modal-content {
   border-radius: 20px;
@@ -955,6 +1196,15 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ---- AI Disclaimer ---- */
+.ai-disclaimer {
+  transition: color 0.2s ease;
+}
+
+[data-theme="dark"] .ai-disclaimer {
+  color: var(--color-text-secondary);
 }
 
 /* ---- Sidebar Session Items (Iteration 8) ---- */
@@ -1150,3 +1400,32 @@ body {
   background: var(--color-fill-secondary) !important;
 }
 
+/* ============================================
+   Iteration 10: Sidebar Collapse — Icon Narrow Bar
+   ============================================ */
+
+/* Collapsed sidebar icon buttons — centered with hover/active feedback */
+.sidebar-collapsed-icon-btn:hover {
+  background: var(--color-fill) !important;
+  color: var(--color-text) !important;
+}
+
+.sidebar-collapsed-icon-btn:active {
+  background: var(--color-fill-secondary) !important;
+}
+
+/* Collapsed sidebar conversation initial circles */
+.sidebar-collapsed-initial:hover {
+  background: var(--color-fill) !important;
+  opacity: 1 !important;
+}
+
+.sidebar-collapsed-initial:active {
+  background: var(--color-fill-secondary) !important;
+}
+
+/* Active conversation initial — accent gradient background */
+.sidebar-collapsed-initial-active:hover {
+  background: var(--accent-hover) !important;
+  opacity: 1 !important;
+}

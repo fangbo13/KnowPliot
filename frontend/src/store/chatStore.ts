@@ -100,6 +100,10 @@ interface ChatState {
   totalRoundCount: number;
   // V3.5: Unified stream phase replaces three separate fields
   streamPhase: StreamPhase;
+  // V4.6: Track which session owns the stream so streaming UI only shows for matching session.
+  // When user switches away during streaming, the stream continues in background; when they
+  // switch back, loadMessages fetches the completed response from the server.
+  streamingSessionId: string | null;
   streamContent: string;
   citations: Citation[];
   isLoadingMessages: boolean;
@@ -178,6 +182,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   totalRoundCount: 0,
   // V3.5: Unified stream phase (replaces isStreaming/thinkingPhase/connectionStatus)
   streamPhase: 'idle',
+  streamingSessionId: null,
   streamContent: '',
   citations: [],
   isLoadingMessages: false,
@@ -186,19 +191,31 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   _pendingSessionRefresh: false,
   _isTimeoutAbort: false,
 
-  // V3.5 CRIT-002: setActiveSession now aborts old stream + resets isStreaming
+  // V3.5 CRIT-002: setActiveSession resets UI state but does NOT abort the stream.
+  // V4.6: Stream continues in background; when it completes, finishStreamingMessage handles
+  // the session mismatch by discarding local data (server already saved the message).
+  // When user switches back, loadMessages fetches the completed response from server.
   setActiveSession: (id) => {
-    abortActiveStream(); // Kill old stream to prevent data pollution
-    resetTokenBatcher(); // Clear any pending token buffer
+    // V4.6 FIX: Do NOT resetTokenBatcher() here. Resetting it nulls the batch
+    // callback and wipes the buffer, which severs the in-flight stream's rendering
+    // pipeline: the network stream keeps running (setActiveSession does not abort it),
+    // but appendToken→flushBatch finds batchCallback === null and silently drops every
+    // token, so streamContent freezes at the switch point and the response appears
+    // stopped/truncated when the user switches away and back. The batcher is a
+    // singleton owned by the in-flight stream — let it keep flushing into streamContent
+    // (which is gated for display by streamingSessionId === activeSessionId, so the
+    // other session never shows it). It is fully re-initialized by initTokenBatcher()
+    // on the next sendMessage. Only resetSession() (new chat) and an explicit abort
+    // should tear the batcher down.
     broadcastSessionSwitch(id); // V4.0 DEFECT-008: notify other tabs of session switch
     set({
       activeSessionId: id,
       messages: [],
       allMessages: [],
       sendError: null,
-      streamPhase: 'idle',
-      streamContent: '',
-      citations: [],
+      // V4.6: DON'T reset streamPhase/streamContent/streamingSessionId here.
+      // The stream continues in background; the UI uses streamingSessionId to
+      // decide whether to show streaming indicators (only when it matches activeSessionId).
       hasOlderMessages: false,
       totalRoundCount: 0,
       visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
@@ -207,9 +224,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     });
   },
 
-  // V3.5 CRIT-002: resetSession now aborts old stream
+  // V3.5 CRIT-002: resetSession aborts old stream (user explicitly starts new chat)
   resetSession: () => {
-    abortActiveStream(); // Kill stream on new chat
+    abortActiveStream(); // Kill stream on new chat — user explicitly wants a fresh start
     resetTokenBatcher();
     broadcastSessionSwitch(null); // V4.0 DEFECT-008: notify other tabs (null = no active session)
     set({
@@ -219,6 +236,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       streamContent: '',
       citations: [],
       streamPhase: 'idle',
+      streamingSessionId: null,
       sendError: null,
       hasOlderMessages: false,
       totalRoundCount: 0,
@@ -343,7 +361,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     if (state.streamPhase !== 'idle' || state.isSendLocked) return;
 
     // Atomic lock: check + lock in one synchronous operation (no gap between read and write)
-    set({ isSendLocked: true, sendError: null, streamPhase: 'connecting' });
+    // V4.6: Set streamingSessionId to current activeSessionId (or null if creating new session).
+    // If new session is created below, streamingSessionId will be updated in the next set() call.
+    set({ isSendLocked: true, sendError: null, streamPhase: 'connecting', streamingSessionId: state.activeSessionId });
 
     let sessionId = get().activeSessionId;
     if (!sessionId) {
@@ -358,14 +378,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         });
       } catch (error) {
         console.error('Failed to create session:', error);
-        set({ streamPhase: 'idle', sendError: 'error_session' });
+        set({ streamPhase: 'idle', sendError: 'error_session', streamingSessionId: null });
         get().unlockSend();
         return;
       }
     } else {
       // Validate sessionId format (M6: security enhancement)
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
-        set({ streamPhase: 'idle', sendError: 'error_session' });
+        set({ streamPhase: 'idle', sendError: 'error_session', streamingSessionId: null });
         get().unlockSend();
         return;
       }
@@ -506,6 +526,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   appendToken(data.token);
                   break;
                 case 'citations':
+                  // V4.6 FIX: Reset the no-token stall timer on citations. Citations are
+                  // emitted right after retrieval succeeds and just before the LLM starts
+                  // producing tokens. Without this reset, the 30s abort timer counts
+                  // retrieval time + LLM time-to-first-token together — so a slow-but-working
+                  // backend (common when several conversations stream at once on the dev
+                  // server) gets falsely aborted into a timeout error before the first token.
+                  // Resetting here gives the LLM its own full window for time-to-first-token.
+                  lastTokenTime = Date.now();
                   get().setStreamCitations(data);
                   break;
                 case 'done':
@@ -517,7 +545,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   clearAllTimers();
                   flushImmediate();
                   // V3.6 MED-002: Use consistent i18n error key instead of raw server string
-                  set({ streamPhase: 'error', sendError: 'error_generic' });
+                  set({ streamPhase: 'error', sendError: 'error_generic', streamingSessionId: null });
+                  // V4.3 UAT FIX: Refresh sidebar sessions even when stream fails.
+                  // Previously, _pendingSessionRefresh was only cleared in finishStreamingMessage(),
+                  // which is NOT called on SSE error events. This meant the sidebar never
+                  // refreshed after the first message in a new session failed, showing "暂无会话".
+                  if (get()._pendingSessionRefresh) {
+                    set({ _pendingSessionRefresh: false });
+                    get().loadSessions();
+                  }
                   get().unlockSend();
                   // Reset to idle after error is shown
                   setTimeout(() => set({ streamPhase: 'idle' }), 100);
@@ -560,9 +596,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             streamPhase: isTimeout ? 'error' : 'idle',
             streamContent: '',
             citations: [],
+            streamingSessionId: null,
             sendError: isTimeout ? 'error_timeout' : null,
             _isTimeoutAbort: false,
           });
+          // V4.3 UAT FIX: Refresh sidebar sessions on abort (timeout or user stop)
+          if (get()._pendingSessionRefresh) {
+            set({ _pendingSessionRefresh: false });
+            get().loadSessions();
+          }
           get().unlockSend();
           // For timeout, reset to idle after error is shown
           if (isTimeout) {
@@ -597,7 +639,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           errorKey = 'error_generic';
         }
 
-        set({ streamPhase: 'error', sendError: errorKey });
+        set({ streamPhase: 'error', sendError: errorKey, streamingSessionId: null });
+        // V4.3 UAT FIX: Refresh sidebar sessions after all retries exhausted
+        if (get()._pendingSessionRefresh) {
+          set({ _pendingSessionRefresh: false });
+          get().loadSessions();
+        }
         get().unlockSend();
 
         // Reset to idle after error is shown
@@ -622,7 +669,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // (user switched sessions while stream was running)
     if (currentSessionId !== sessionId) {
       // Discard stale stream data, clean up
-      set({ streamPhase: 'idle', streamContent: '', citations: [], totalRoundCount: 0 });
+      set({ streamPhase: 'idle', streamContent: '', citations: [], totalRoundCount: 0, streamingSessionId: null });
       clearStreamOnComplete();
       get().unlockSend();
       return;
@@ -658,6 +705,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       streamPhase: 'idle',
       streamContent: '',
       citations: [],
+      streamingSessionId: null,
       // V3.6 MED-001: If pruned, older data exists on server → always show "load older"
       hasOlderMessages: wasPruned ? true : rounds.length > get().visibleRoundCount,
       // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks

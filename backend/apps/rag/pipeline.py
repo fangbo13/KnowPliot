@@ -136,6 +136,20 @@ class RAGPipeline:
                 metadata=clean_metadata,
                 embedding=embedding,
             )
+            # V4.3 UAT FIX: Sync JSON embedding to pgvector embedding_vector column.
+            # The ingest creates chunks with the JSON embedding field, but the retriever's
+            # _search_pgvector() queries the embedding_vector (VectorField) column which
+            # has an HNSW index. Without this sync, newly ingested chunks are invisible
+            # to the retriever — it returns 0 results even when chunks exist.
+            # Migration 0004 handles existing data, but new ingests need this immediate sync.
+            if embedding and not is_zero_vector(embedding):
+                from django.db import connection
+                with connection.cursor() as cursor:
+                    vector_str = '[' + ','.join(str(v) for v in embedding) + ']'
+                    cursor.execute(
+                        "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
+                        [vector_str, str(doc_chunk.id)]
+                    )
             document_chunks.append(doc_chunk)
 
         logger.info(f"Ingested {len(document_chunks)} chunks from {document.title}")
@@ -154,17 +168,39 @@ class RAGPipeline:
             Dicts with 'event' and 'data' keys for SSE streaming.
         """
         # Step 1: Guardrails - check for injection
-        if not self.guardrails.check_input(query):
-            yield {"event": "token", "data": {"token": self.guardrails.generate_fallback(language)}}
-            yield {"event": "done", "data": {}}
-            return
+        try:
+            if not self.guardrails.check_input(query):
+                yield {"event": "token", "data": {"token": self.guardrails.generate_fallback(language)}}
+                yield {"event": "done", "data": {}}
+                return
+        except Exception as e:
+            logger.error("Guardrails check error: %s", e, exc_info=True)
+            # V4.3 UAT: If guardrails service fails, proceed anyway —
+            # guardrails is a safety enhancement, not a hard gate.
+            pass
 
         # Step 2: Retrieve relevant chunks
-        chunks = self.retriever.search(
-            query=query,
-            top_k=TOP_K,
-            similarity_threshold=SIMILARITY_THRESHOLD,
-        )
+        # V4.3 UAT: Wrap retrieval in try/except — if retriever/embedding fails
+        # (e.g., PgVector not configured, DashScope embedding API unavailable),
+        # return graceful degraded response instead of uncaught exception that
+        # causes SSE "error" event → frontend shows "当前无法获取响应".
+        try:
+            chunks = self.retriever.search(
+                query=query,
+                top_k=TOP_K,
+                similarity_threshold=SIMILARITY_THRESHOLD,
+            )
+        except Exception as e:
+            logger.error("Retrieval error: %s", e, exc_info=True)
+            dashscope_breaker.record_failure()  # Count as failure for circuit breaker
+            degraded_msg = (
+                "抱歉，知识检索服务暂时不可用，请稍后重试。" if language == "zh"
+                else "Sorry, the knowledge retrieval service is temporarily unavailable. Please try again later."
+            )
+            yield {"event": "token", "data": {"token": degraded_msg}}
+            yield {"event": "citations", "data": []}
+            yield {"event": "done", "data": {}}
+            return
 
         # V4.2 SYS-V4.2-014: Circuit breaker check — fail fast if DashScope is down
         if not dashscope_breaker.allow_request():
@@ -204,12 +240,26 @@ class RAGPipeline:
         yield {"event": "citations", "data": citations}
 
         # Step 4: Build system prompt
-        system_prompt = self.prompt_builder.build(
-            context_chunks=chunks,
-            conversation_history=conversation_history[-8:],  # Last 8 turns
-            user_profile=user_profile,
-            language=language,
-        )
+        # V4.3 UAT: Wrap prompt building in try/except — if prompt builder fails,
+        # return graceful degraded response instead of uncaught exception.
+        try:
+            system_prompt = self.prompt_builder.build(
+                context_chunks=chunks,
+                conversation_history=conversation_history[-8:],  # Last 8 turns
+                user_profile=user_profile,
+                language=language,
+            )
+        except Exception as e:
+            logger.error("Prompt builder error: %s", e, exc_info=True)
+            dashscope_breaker.record_failure()
+            degraded_msg = (
+                "抱歉，系统暂时无法处理您的请求，请稍后重试。" if language == "zh"
+                else "Sorry, the system is temporarily unable to process your request. Please try again later."
+            )
+            yield {"event": "token", "data": {"token": degraded_msg}}
+            yield {"event": "citations", "data": citations}
+            yield {"event": "done", "data": {}}
+            return
 
         # Step 5: Stream LLM response — V4.2 SYS-V4.2-014: circuit breaker wraps the call
         # On success: record_success() closes the circuit.

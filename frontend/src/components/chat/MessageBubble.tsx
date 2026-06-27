@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next';
-import { Card, Typography, Tooltip, message as antdMessage, Button, Popover } from 'antd';
+import { Card, Typography, message as antdMessage, Button, Popover } from 'antd';
 import { CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, DownOutlined, RightOutlined, MoreOutlined, PaperClipOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useState, useRef, useCallback, memo } from 'react';
 import type { Message, Citation } from '../../store/chatStore';
+import { useTheme } from '../../hooks/useTheme';
 import ErrorBoundary from '../ErrorBoundary';
 import CopyCodeButton from './CopyCodeButton';
 
@@ -61,6 +62,8 @@ interface Props {
  */
 function MessageBubble({ message, isStreaming = false, disableActions = false, onRegenerate }: Props) {
   const { t } = useTranslation('chat');
+  const { effective: themeEffective } = useTheme();
+  const isDark = themeEffective === 'dark';
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
@@ -167,110 +170,6 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
           position: 'relative',
         }}
       >
-        {/* Action buttons for assistant messages */}
-        {!isUser && (
-          <>
-          <div
-            className="msg-copy-btn msg-action-btn-group"
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              opacity: disableActions ? 0.3 : 0,  // V3.5: Visible but dimmed when actions disabled
-              transform: disableActions ? 'scale(0.85)' : 'scale(0.85)',
-              transition: 'opacity 0.25s ease, transform 0.25s ease',
-              zIndex: 1,
-              display: 'flex',
-              gap: 2,
-              pointerEvents: disableActions ? 'none' : 'auto',  // V3.5: Block clicks during stream
-            }}
-          >
-            <Tooltip title={copied ? t('copied') : t('copy_message')}>
-              <Button
-                type="text"
-                size="small"
-                icon={copied ? <CheckOutlined style={{ color: 'var(--color-success)' }} /> : <CopyOutlined />}
-                onClick={handleCopy}
-                aria-label={copied ? t('copied') : t('copy_message')}
-                style={{
-                  padding: '2px 6px',
-                  color: copied ? 'var(--color-success)' : 'var(--color-text-tertiary)',
-                }}
-              />
-            </Tooltip>
-            <Tooltip title={t('share_message')}>
-              <Button
-                type="text"
-                size="small"
-                icon={<ShareAltOutlined />}
-                onClick={handleShare}
-                aria-label={t('share_message')}
-                style={{
-                  padding: '2px 6px',
-                  color: 'var(--color-text-tertiary)',
-                }}
-              />
-            </Tooltip>
-            {onRegenerate && (
-              <Tooltip title={t('regenerate')}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={onRegenerate}
-                  aria-label={t('regenerate')}
-                  style={{
-                    padding: '2px 6px',
-                    color: 'var(--color-text-tertiary)',
-                  }}
-                />
-              </Tooltip>
-            )}
-          </div>
-          {/* Mobile always-visible "more" button */}
-          <div
-            className="mobile-msg-menu"
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              display: 'none',
-              opacity: disableActions ? 0.3 : undefined,  // V3.5: Dimmed during stream
-              pointerEvents: disableActions ? 'none' : undefined,  // V3.5: Block clicks during stream
-            }}
-          >
-            <Popover
-              content={
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => { handleCopy(); setMobileMenuOpen(false); }}>
-                    {t('copy_message')}
-                  </Button>
-                  <Button type="text" size="small" icon={<ShareAltOutlined />} onClick={() => { handleShare(); setMobileMenuOpen(false); }}>
-                    {t('share_message')}
-                  </Button>
-                  {onRegenerate && (
-                    <Button type="text" size="small" icon={<ReloadOutlined />} onClick={() => { onRegenerate(); setMobileMenuOpen(false); }}>
-                      {t('regenerate')}
-                    </Button>
-                  )}
-                </div>
-              }
-              trigger="click"
-              open={mobileMenuOpen}
-              onOpenChange={setMobileMenuOpen}
-              placement="bottomRight"
-            >
-              <Button
-                type="text"
-                size="small"
-                icon={<MoreOutlined />}
-                aria-label="Message actions"
-                style={{ padding: '2px 6px', color: 'var(--color-text-tertiary)' }}
-              />
-            </Popover>
-          </div>
-          </>
-        )}
         <Card
           className={`${longPressActive ? 'long-press-active' : ''} ${!isUser ? 'msg-bubble-assistant' : ''}`.trim()}
           style={{
@@ -321,6 +220,47 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeHighlight]}
                   components={{
+                    // V4.6 DARK-002: Inline <code> override — hardcode dark mode colors via inline
+                    // style (highest CSS priority). Ant Design 5.x darkAlgorithm CSS-in-JS injection
+                    // overrides our globals.css rules for <code>, producing near-white background
+                    // (#F1F5F9) + light text (#E2E8F0) = unreadable. Inline style bypasses all
+                    // CSS-in-JS overrides. Code inside <pre> blocks uses the pre override instead.
+                    code: ({ children, className, ...props }) => {
+                      // Detect code blocks: rehype-highlight adds "language-*" / "hljs" className
+                      // only to <code> inside <pre> blocks. Inline <code> has no className.
+                      const isCodeBlock = className && (
+                        String(className).includes('language-') ||
+                        String(className).includes('hljs')
+                      );
+
+                      if (isCodeBlock) {
+                        // Code block inside <pre> — don't apply inline styles;
+                        // the pre component override + CSS handles code block styling
+                        return <code className={className} {...props}>{children}</code>;
+                      }
+
+                      // Inline code: hardcode theme-specific colors to bypass CSS-in-JS overrides
+                      const inlineCodeStyle: React.CSSProperties = isDark ? {
+                        background: '#1E293B',
+                        color: '#93C5FD',
+                        border: '1px solid #334155',
+                        borderRadius: 4,
+                        padding: '2px 6px',
+                        fontSize: 13,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        wordBreak: 'break-word',
+                      } : {
+                        // Light mode: use CSS variables (no CSS-in-JS interference in light mode)
+                        background: 'var(--muted)',
+                        borderRadius: 4,
+                        padding: '2px 6px',
+                        fontSize: 13,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        wordBreak: 'break-word',
+                      };
+
+                      return <code {...props} style={inlineCodeStyle}>{children}</code>;
+                    },
                     pre: ({ children, node, ...props }) => {
                       // V4.0 P1-1: Wrap <pre> in a relative container for CopyCodeButton positioning
                       // Extract code content and language from the child <code> element via AST node
@@ -385,6 +325,88 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
             </div>
           )}
         </Card>
+
+        {/* Action buttons row for assistant messages — always visible below Card */}
+        {!isUser && !isStreaming && (
+          <div
+            className="msg-action-row"
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 6,
+              padding: '2px 8px',
+            }}
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={copied ? <CheckOutlined style={{ color: 'var(--color-success)' }} /> : <CopyOutlined />}
+              onClick={handleCopy}
+              disabled={disableActions}
+              aria-label={copied ? t('copied') : t('copy_message')}
+              className="msg-action-btn"
+            >
+              {copied ? (t('copied') || '已复制') : (t('copy_message') || '复制')}
+            </Button>
+            <Button
+              type="text"
+              size="small"
+              icon={<ShareAltOutlined />}
+              onClick={handleShare}
+              disabled={disableActions}
+              aria-label={t('share_message')}
+              className="msg-action-btn"
+            >
+              {t('share_message') || '分享'}
+            </Button>
+            {onRegenerate && (
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={onRegenerate}
+                disabled={disableActions}
+                aria-label={t('regenerate')}
+                className="msg-action-btn"
+              >
+                {t('regenerate') || '重新生成'}
+              </Button>
+            )}
+            {/* Mobile "more" menu button — only shown on touch devices via CSS */}
+            <Popover
+              content={
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => { handleCopy(); setMobileMenuOpen(false); }}>
+                    {t('copy_message') || '复制'}
+                  </Button>
+                  <Button type="text" size="small" icon={<ShareAltOutlined />} onClick={() => { handleShare(); setMobileMenuOpen(false); }}>
+                    {t('share_message') || '分享'}
+                  </Button>
+                  {onRegenerate && (
+                    <Button type="text" size="small" icon={<ReloadOutlined />} onClick={() => { onRegenerate(); setMobileMenuOpen(false); }}>
+                      {t('regenerate') || '重新生成'}
+                    </Button>
+                  )}
+                </div>
+              }
+              trigger="click"
+              open={mobileMenuOpen}
+              onOpenChange={setMobileMenuOpen}
+              placement="bottomRight"
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<MoreOutlined />}
+                aria-label="Message actions"
+                className="mobile-msg-menu-btn"
+                style={{ display: 'none' }}
+              />
+            </Popover>
+          </div>
+        )}
 
         {/* Collapsible citations for assistant messages */}
         {!isUser && message.citations && message.citations.length > 0 && (

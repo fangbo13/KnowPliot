@@ -34,6 +34,10 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "backend", "0.0.0.0"]
 # Explicit whitelist replaces the dangerous allow-all setting.
 # SYS domain uses ports 3030/8030, KB domain uses ports 3020/8020.
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3003",
+    "http://127.0.0.1:3003",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
     "http://localhost:3030",
     "http://127.0.0.1:3030",
     "http://localhost:8030",

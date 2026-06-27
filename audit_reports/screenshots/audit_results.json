@@ -1,0 +1,158 @@
+{
+  "issues": [
+    {
+      "id": 1,
+      "sev": "critical",
+      "t": "Chat: no textarea found on /chat page after login"
+    },
+    {
+      "id": 2,
+      "sev": "medium",
+      "t": "RBAC: /admin/knowledge not accessible for admin (redirected to http://127.0.0.1:3030/chat)"
+    },
+    {
+      "id": 3,
+      "sev": "medium",
+      "t": "RBAC: /admin/dashboard not accessible for admin (redirected to http://127.0.0.1:3030/chat)"
+    },
+    {
+      "id": 4,
+      "sev": "medium",
+      "t": "RBAC: /admin/crawler not accessible for admin (redirected to http://127.0.0.1:3030/chat)"
+    },
+    {
+      "id": 5,
+      "sev": "medium",
+      "t": "No 404 page for invalid routes"
+    },
+    {
+      "id": 6,
+      "sev": "medium",
+      "t": "No logout button found in avatar dropdown"
+    }
+  ],
+  "consoleErrors": [
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/chat"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/chat"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/profile"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/admin/knowledge"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/admin/dashboard"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/admin/crawler"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/nonexistent-xyz-42"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/login"
+    },
+    {
+      "t": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+      "u": "http://127.0.0.1:3030/profile"
+    }
+  ],
+  "networkErrors": [
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "u": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Calistoga&family=JetBrains+Mono:wght@400;500&display=swap",
+      "f": "net::ERR_NETWORK_ACCESS_DENIED"
+    }
+  ]
+}

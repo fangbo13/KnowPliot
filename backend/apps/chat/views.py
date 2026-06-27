@@ -71,14 +71,19 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
         serializer.save(user=self.request.user)
 
 
-class ChatSessionDetailView(generics.RetrieveDestroyAPIView):
-    """Get and delete a chat session."""
+class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Get, update (rename), and delete a chat session."""
 
     serializer_class = ChatSessionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return ChatSession.objects.filter(user=self.request.user)
+
+    def perform_update(self, serializer):
+        """Only update title field — preserve updated_at so session stays in
+        its original position in the sidebar list instead of jumping to the top."""
+        serializer.save(update_fields=["title"])
 
 
 class ChatSessionMessagesView(generics.ListAPIView):
