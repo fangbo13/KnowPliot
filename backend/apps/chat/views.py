@@ -19,8 +19,33 @@ from .serializers import (
     FeedbackSerializer,
     MessageSerializer,
 )
+# V6.0: space isolation helpers.
+from apps.spaces.permissions import (
+    CHAT_ASK,
+    effective_space_role,
+    resolve_request_space,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _default_space_for(user):
+    """Backward-compatible fallback space when no X-Space-Id header is sent.
+
+    Returns the user's most-recently-accessed active space, or the default
+    'general' space. Lazily provisions membership so pre-V6.0 clients keep
+    working during the frontend rollout.
+    """
+    from apps.spaces.models import SpaceMembership
+    from apps.spaces.views import ensure_default_membership
+
+    ensure_default_membership(user)
+    membership = (
+        SpaceMembership.objects.filter(user=user, status="active")
+        .select_related("space")
+        .first()
+    )
+    return membership.space if membership else None
 
 
 # V3.5 HIGH-004: Cursor pagination for sessions
@@ -63,12 +88,18 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
     ordering = '-updated_at'  # Most recent first
 
     def get_queryset(self):
-        return ChatSession.objects.filter(
-            user=self.request.user, is_active=True
-        ).order_by('-updated_at')
+        qs = ChatSession.objects.filter(user=self.request.user, is_active=True)
+        # V6.0: when a space is active, the sidebar only shows that space's
+        # sessions. Without a header (legacy client) all sessions are returned.
+        space = resolve_request_space(self.request, required=False)
+        if space is not None:
+            qs = qs.filter(space=space)
+        return qs.order_by('-updated_at')
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        space = resolve_request_space(self.request, require_perm=CHAT_ASK, required=False) \
+            or _default_space_for(self.request.user)
+        serializer.save(user=self.request.user, space=space)
 
 
 class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -103,13 +134,24 @@ class ChatSessionMessagesView(generics.ListAPIView):
         ).order_by("created_at").prefetch_related("citations__document")
 
 
-def _save_citations(assistant_message, citations_data):
-    """Save citation records for an assistant message."""
+def _save_citations(assistant_message, citations_data, space=None):
+    """Save citation records for an assistant message.
+
+    V6.0: citations carry the message's space, and we defensively skip any
+    document that is not in the active space — retrieval is already space-scoped,
+    so this is a second line of defense against cross-space citation leakage.
+    """
     from apps.knowledge.models import Document, DocumentChunk
 
     for cit in citations_data:
         try:
             doc = Document.objects.get(id=cit.get("document_id"))
+            if space is not None and doc.space_id is not None and doc.space_id != space.id:
+                logger.warning(
+                    "Skipping cross-space citation: doc %s (space %s) != session space %s",
+                    doc.id, doc.space_id, space.id,
+                )
+                continue
             chunk = None
             if cit.get("chunk_id"):
                 chunk = DocumentChunk.objects.filter(id=cit["chunk_id"]).first()
@@ -121,6 +163,7 @@ def _save_citations(assistant_message, citations_data):
                 relevance_score=cit.get("score", 0),
                 page_number=cit.get("page_number"),
                 quoted_text=cit.get("quoted_text", ""),
+                space=space,
             )
         except Exception as e:
             logger.warning("Citation save failed for message %s: %s", assistant_message.id, e)
@@ -152,6 +195,11 @@ def send_message(request, session_id):
     user = request.user
     language = getattr(user, "language_preference", "en")
 
+    # V6.0: resolve the active space from the X-Space-Id header (if any). A new
+    # session is created in this space; an existing session keeps its own space
+    # (authoritative for isolation — you cannot move a session between spaces).
+    request_space = resolve_request_space(request, require_perm=CHAT_ASK, required=False)
+
     # Get or create session with ownership verification
     try:
         session = ChatSession.objects.get(id=session_id, user=user)
@@ -165,9 +213,22 @@ def send_message(request, session_id):
             )
         # Session doesn't exist at all; create it
         session = ChatSession.objects.create(
-            id=session_id, user=user, title=content[:50]
+            id=session_id, user=user, title=content[:50],
+            space=request_space or _default_space_for(user),
         )
         created = True
+
+    # V6.0: a session is bound to one space. Backfill legacy null space, then
+    # verify the user still has access to that space (e.g. membership revoked).
+    space = session.space or request_space or _default_space_for(user)
+    if session.space_id is None and space is not None:
+        session.space = space
+        session.save(update_fields=["space"])
+    if space is not None and effective_space_role(user, space) is None:
+        return Response(
+            {"error": "You no longer have access to this space."},
+            status=403,
+        )
 
     # Update title if new or empty
     if created or not session.title:
@@ -175,7 +236,7 @@ def send_message(request, session_id):
         session.save(update_fields=["title"])
 
     # Save user message
-    Message.objects.create(session=session, role="user", content=content)
+    Message.objects.create(session=session, role="user", content=content, space=space)
 
     # V3.5 HIGH-006: Sliding window aligned with frontend — 10 rounds (20 messages)
     # (was fixed 16 messages = 8 rounds, misaligned with frontend's 10-round default)
@@ -207,6 +268,7 @@ def send_message(request, session_id):
                 user_profile=user,
                 conversation_history=history,
                 language=language,
+                space_id=str(space.id) if space else None,  # V6.0 space isolation
             ):
                 # H-04: Check if client disconnected
                 # Django's StreamingHttpResponse will raise GeneratorExit
@@ -267,10 +329,11 @@ def send_message(request, session_id):
             model_used=pipeline.model_name,
             response_time_ms=elapsed_ms,
             retrieval_count=len(citations_data),
+            space=space,  # V6.0 space isolation
         )
 
         # Save citations
-        _save_citations(assistant_message, citations_data)
+        _save_citations(assistant_message, citations_data, space)
 
         yield "event: done\n"
         yield f"data: {json.dumps({'message_id': str(assistant_message.id), 'session_id': str(session.id), 'model': pipeline.model_name}, ensure_ascii=False)}\n\n"
@@ -292,7 +355,7 @@ def submit_feedback(request, message_id):
         data={**request.data, "message": str(message.id)}
     )
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    serializer.save(space_id=message.space_id)  # V6.0: inherit message's space
     return Response(serializer.data)
 
 

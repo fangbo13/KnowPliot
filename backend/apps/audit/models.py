@@ -40,12 +40,24 @@ class AuditLog(models.Model):
         ("system_health_view", "System Health View"),
         ("audit_export", "Audit Export"),
         ("role_change_log", "Role Change Log"),
-        # ── Crawler domain (V4.1 new) ──
+        # ── Crawler domain (V4.1) — retained for historical log compatibility.
+        #    V6.0 retired the crawler; no new logs of these types are produced.
         ("document_crawl", "Document Crawl"),
         ("document_crawl_withdraw", "Document Crawl Withdraw"),
         # ── Batch domain (V4.2 new) ──
         ("document_batch_import", "Document Batch Import"),
         ("document_batch_result_view", "Document Batch Result View"),
+        # ── Space domain (V6.0 new) ──
+        ("space_create", "Space Create"),
+        ("space_update", "Space Update"),
+        ("space_archive", "Space Archive"),
+        ("space_switch", "Space Switch"),
+        ("space_join", "Space Join (Access Code)"),
+        ("space_invite_create", "Space Invite Code Create"),
+        ("space_invite_revoke", "Space Invite Code Revoke"),
+        ("space_member_add", "Space Member Add"),
+        ("space_member_update", "Space Member Update"),
+        ("permission_denied", "Permission Denied"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

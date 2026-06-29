@@ -156,6 +156,12 @@ class BatchDocumentUploadView(generics.CreateAPIView):
 
         batch_metadata = build_batch_metadata(source_tag)
 
+        # V6.0: batch uploads land in the active space (header) or default 'general'.
+        from apps.spaces.permissions import resolve_request_space
+        from apps.spaces.models import KnowledgeSpace
+        batch_space = resolve_request_space(request, required=False) or \
+            KnowledgeSpace.objects.filter(code="general").first()
+
         total_chunks_in_batch = 0  # BATCH-005: Track total chunks
 
         for file_info in valid_files:
@@ -185,6 +191,7 @@ class BatchDocumentUploadView(generics.CreateAPIView):
                     status="processing",
                     uploaded_by=request.user,
                     content_hash=content_hash,
+                    space=batch_space,  # V6.0 space isolation
                 )
 
                 # Save file content to Document.file field

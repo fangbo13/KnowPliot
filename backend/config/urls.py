@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/v1/documents/", include("apps.knowledge.urls")),
     path("api/v1/audit/", include("apps.audit.urls")),
     path("api/v1/rbac/", include("apps.rbac.urls")),
+    path("api/v1/spaces/", include("apps.spaces.urls")),  # V6.0: multi-space platform
     # V6.0: Web crawler feature removed. The crawler API is no longer exposed.
     # The apps.crawler Django app and its tables are retained inert for historical
     # data/migration safety, but no routes, tasks, or UI reference it.

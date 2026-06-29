@@ -64,12 +64,14 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "apps.core",
     "apps.users",
+    "apps.spaces",  # V6.0: multi-space platform (orgs, business lines, spaces)
     "apps.chat",
     "apps.knowledge",
     "apps.rag",
     "apps.audit",
     "apps.rbac",
-    "apps.crawler",  # V4.1: Web crawler module
+    # apps.crawler retained inert (V6.0): tables/migrations kept, no API/UI/tasks.
+    "apps.crawler",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

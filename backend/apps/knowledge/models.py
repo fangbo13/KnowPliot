@@ -49,6 +49,16 @@ class Document(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # V6.0: space isolation — every document belongs to one knowledge space.
+    # Nullable so the additive migration is safe; a data migration backfills
+    # existing rows to the default space, and the API always sets it on upload.
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
     title = models.CharField(max_length=255)
     file = models.FileField(upload_to="documents/%Y/%m/")
     file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES)
@@ -93,6 +103,15 @@ class DocumentChunk(models.Model):
     """A chunk of a document with its embedding vector."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # V6.0: denormalized space FK (mirrors document.space) so vector retrieval
+    # can filter by space directly without an extra join.
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="document_chunks",
+    )
     document = models.ForeignKey(
         Document,
         on_delete=models.CASCADE,

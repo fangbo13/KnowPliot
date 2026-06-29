@@ -130,6 +130,9 @@ class RAGPipeline:
 
             doc_chunk = DocumentChunk.objects.create(
                 document=document,
+                # V6.0: denormalize the document's space onto the chunk so the
+                # retriever can filter by space_id directly (isolation).
+                space_id=document.space_id,
                 content=chunk["text"],
                 chunk_index=i,
                 page_number=clean_metadata.get("page"),
@@ -161,8 +164,14 @@ class RAGPipeline:
         user_profile,
         conversation_history: list,
         language: str = "en",
+        space_id: str | None = None,
     ):
         """Full RAG: retrieve context, build prompt, call LLM, stream response.
+
+        Args:
+            space_id: V6.0 — restrict retrieval (and therefore citations) to the
+                active knowledge space. When ``None`` no space filter is applied
+                (used only by non-scoped callers / tests).
 
         Yields:
             Dicts with 'event' and 'data' keys for SSE streaming.
@@ -189,6 +198,7 @@ class RAGPipeline:
                 query=query,
                 top_k=TOP_K,
                 similarity_threshold=SIMILARITY_THRESHOLD,
+                space_id=space_id,  # V6.0 space isolation
             )
         except Exception as e:
             logger.error("Retrieval error: %s", e, exc_info=True)

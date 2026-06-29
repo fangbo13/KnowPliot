@@ -10,6 +10,14 @@ class ChatSession(models.Model):
     """A chat session between a user and the AI assistant."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # V6.0: space isolation — a session belongs to one knowledge space.
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="chat_sessions",
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -38,6 +46,14 @@ class Message(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # V6.0: denormalized space FK (mirrors session.space) for direct scoping.
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
     session = models.ForeignKey(
         ChatSession,
         on_delete=models.CASCADE,
@@ -63,6 +79,15 @@ class Citation(models.Model):
     """Source citation for an AI-generated answer."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # V6.0: denormalized space FK — a citation always belongs to the same space
+    # as its message; isolation guarantees citations never cross spaces.
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="citations",
+    )
     message = models.ForeignKey(
         Message,
         on_delete=models.CASCADE,
@@ -106,6 +131,14 @@ class Feedback(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # V6.0: denormalized space FK (mirrors message.space).
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="feedbacks",
+    )
     message = models.ForeignKey(
         Message,
         on_delete=models.CASCADE,

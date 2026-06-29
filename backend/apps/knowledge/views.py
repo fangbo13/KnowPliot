@@ -16,6 +16,7 @@ from rest_framework.response import Response
 
 from apps.core.permissions import IsHROrAdmin
 from apps.audit.views import create_audit_log
+from apps.spaces.permissions import resolve_request_space  # V6.0 space isolation
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
 from .serializers import (
     DocumentCategorySerializer,
@@ -28,6 +29,19 @@ from .serializers import (
 from .batch_views import DocumentUploadRateThrottle
 
 
+def _active_doc_space(request):
+    """Resolve the active space for document operations.
+
+    Uses the X-Space-Id header when present, else falls back to the default
+    'general' space so admin uploads without a header are still scoped.
+    """
+    space = resolve_request_space(request, required=False)
+    if space is not None:
+        return space
+    from apps.spaces.models import KnowledgeSpace
+    return KnowledgeSpace.objects.filter(code="general").first()
+
+
 class DocumentListCreateView(generics.ListCreateAPIView):
     """List and upload documents (admin only).
 
@@ -38,7 +52,11 @@ class DocumentListCreateView(generics.ListCreateAPIView):
     throttle_classes = [DocumentUploadRateThrottle]  # V4.2 BATCH-004
 
     def get_queryset(self):
+        # V6.0: scope the document list to the active space when a header is sent.
         qs = Document.objects.all()
+        space = resolve_request_space(self.request, required=False)
+        if space is not None:
+            qs = qs.filter(space=space)
         category = self.request.query_params.get("category")
         status_filter = self.request.query_params.get("status")
         if category:
@@ -53,13 +71,16 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         return DocumentDetailSerializer
 
     def perform_create(self, serializer):
-        doc = serializer.save(uploaded_by=self.request.user)
+        # V6.0: uploads land in the active space (header) or default 'general'.
+        space = _active_doc_space(self.request)
+        doc = serializer.save(uploaded_by=self.request.user, space=space)
         create_audit_log(
             user=self.request.user,
             action="document_upload",
             target_type="Document",
             target_id=str(doc.id),
-            details={"title": doc.title, "file_type": doc.file_type},
+            details={"title": doc.title, "file_type": doc.file_type,
+                     "space": str(space.id) if space else None},
             request=self.request,
         )
         # Trigger async ingestion
@@ -74,7 +95,12 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated, IsHROrAdmin]
 
     def get_queryset(self):
-        return Document.objects.all()
+        # V6.0: when a space is active, only that space's documents are reachable.
+        qs = Document.objects.all()
+        space = resolve_request_space(self.request, required=False)
+        if space is not None:
+            qs = qs.filter(space=space)
+        return qs
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -144,9 +170,11 @@ class DocumentChunksView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, IsHROrAdmin]
 
     def get_queryset(self):
-        return DocumentChunk.objects.filter(document_id=self.kwargs["document_id"]).order_by(
-            "chunk_index"
-        )
+        qs = DocumentChunk.objects.filter(document_id=self.kwargs["document_id"])
+        space = resolve_request_space(self.request, required=False)
+        if space is not None:
+            qs = qs.filter(space=space)  # V6.0 space isolation
+        return qs.order_by("chunk_index")
 
 
 class CategoryListView(generics.ListCreateAPIView):

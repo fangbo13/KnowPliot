@@ -41,6 +41,7 @@ class PgVectorRetriever:
         top_k: int | None = None,
         similarity_threshold: float | None = None,
         filters: dict | None = None,
+        space_id: str | None = None,
     ) -> list[dict]:
         """Search for relevant chunks.
 
@@ -49,6 +50,11 @@ class PgVectorRetriever:
             top_k: Number of results to return.
             similarity_threshold: Minimum similarity score.
             filters: Django ORM filters to apply before search.
+            space_id: V6.0 — restrict retrieval to a single knowledge space.
+                Enforces space isolation: answers can only cite documents in the
+                active space. Handled explicitly (not via ``filters``) so the
+                pgvector SQL qualifies the column as ``dc.space_id`` and avoids
+                ambiguity with the joined document table.
 
         Returns:
             List of dicts with 'content', 'document', 'score', 'page_number', 'metadata', 'id'.
@@ -63,9 +69,9 @@ class PgVectorRetriever:
         start_time = time.time()
 
         if is_postgres:
-            results = self._search_pgvector(query, top_k, threshold, filters)
+            results = self._search_pgvector(query, top_k, threshold, filters, space_id)
         else:
-            results = self._search_sqlite(query, top_k, threshold, filters)
+            results = self._search_sqlite(query, top_k, threshold, filters, space_id)
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         search_mode = "pgvector" if is_postgres else "sqlite"
@@ -77,13 +83,16 @@ class PgVectorRetriever:
         return results
 
     def _search_sqlite(
-        self, query: str, top_k: int, threshold: float, filters: dict | None
+        self, query: str, top_k: int, threshold: float, filters: dict | None,
+        space_id: str | None = None,
     ) -> list[dict]:
         """SQLite fallback: compute cosine similarity in Python."""
         embedder = EmbeddingService()
         query_embedding = embedder.embed(query)
 
         qs = DocumentChunk.objects.filter(embedding__isnull=False)
+        if space_id:
+            qs = qs.filter(space_id=space_id)  # V6.0 space isolation
         if filters:
             qs = qs.filter(**filters)
 
@@ -114,7 +123,8 @@ class PgVectorRetriever:
         ]
 
     def _search_pgvector(
-        self, query: str, top_k: int, threshold: float, filters: dict | None
+        self, query: str, top_k: int, threshold: float, filters: dict | None,
+        space_id: str | None = None,
     ) -> list[dict]:
         """PostgreSQL + pgvector: use native vector similarity.
 
@@ -145,6 +155,12 @@ class PgVectorRetriever:
                     filter_parts.append(f"{key} = %s")
                     filter_params.append(value)
                 filter_sql = " AND " + " AND ".join(filter_parts)
+
+            # V6.0 space isolation — qualified column (dc.space_id) avoids ambiguity
+            # with the joined knowledge_document.space_id. Always parameterized.
+            if space_id:
+                filter_sql += " AND dc.space_id = %s"
+                filter_params.append(str(space_id))
 
             # V3.7 P0.2: Query embedding_vector (vector column) with HNSW index
             # Cosine distance operator <=> provided by pgvector
