@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Haibo Fang.
+ * Licensed under the CC BY-NC-SA 4.0 License.
+ * See LICENSE file in the project root for full license details.
+ */
+
 // SpaceSwitcher — V6.0 workspace switcher (SPEC.MD §7.2/§7.3).
 // Shows the active knowledge space and lets the user switch, join by access
 // code, or (for platform admins) create a new space.

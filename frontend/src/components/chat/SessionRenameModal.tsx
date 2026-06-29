@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Haibo Fang.
+ * Licensed under the CC BY-NC-SA 4.0 License.
+ * See LICENSE file in the project root for full license details.
+ */
+
 import { Modal, Input, type InputRef } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 

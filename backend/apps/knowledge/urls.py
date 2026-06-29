@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """Knowledge URLs — V4.2: Added batch upload endpoints."""
 
 from django.urls import path

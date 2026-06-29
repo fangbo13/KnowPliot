@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """Knowledge views — V4.1 SYS-V4.1-006: Document reindex concurrency protection.
 
 Added select_for_update() + transaction.atomic() to prevent parallel

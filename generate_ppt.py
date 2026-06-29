@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """
 EY Onboarding AI — 用户体验审计报告 PPT 生成脚本
 使用 python-pptx 库生成中文版审计报告

@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """
 EY Onboarding AI - 浏览器自动化UI测评脚本 (v2)
 使用 Playwright 执行全面的 UI 测试并截图

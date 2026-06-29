@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """
 EY Onboarding AI V4.2 — 上线前最终功能测试脚本
 使用 Playwright 执行全面 UI + API 测试，截图取证，自动生成报告
