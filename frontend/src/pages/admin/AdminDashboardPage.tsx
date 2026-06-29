@@ -173,14 +173,14 @@ export default function AdminDashboardPage() {
   ];
 
   return (
-    <div style={{ display: 'flex', gap: 16, minHeight: 0 }}>
+    <div className="page"><div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
       {/* Left: User list table */}
       <Card
         style={{ flex: 2, minWidth: 0 }}
         title={
           <Space>
             <TeamOutlined />
-            <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500 }}>
               {t('admin_users') || 'User Management'}
             </span>
           </Space>
@@ -210,7 +210,7 @@ export default function AdminDashboardPage() {
         title={
           <Space>
             <DashboardOutlined />
-            <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500 }}>
               System Health
             </span>
           </Space>
@@ -267,6 +267,6 @@ export default function AdminDashboardPage() {
           </Space>
         </div>
       </Card>
-    </div>
+    </div></div>
   );
 }

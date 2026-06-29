@@ -40,7 +40,7 @@ export default function SessionRenameModal({
       cancelText={cancelText}
       onCancel={onCancel}
       onOk={() => onConfirm(value.trim())}
-      destroyOnClose
+      destroyOnHidden
     >
       <Input
         ref={inputRef}

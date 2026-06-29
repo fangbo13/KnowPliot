@@ -121,6 +121,7 @@
   "continue_chat": "继续对话",
   "knowledge_base": "知识库",
   "admin_dashboard": "管理仪表盘",
+  "admin_users": "用户管理",
   "switch_space": "切换空间",
   "select_space": "选择空间",
   "join_space": "用访问码加入",
@@ -197,5 +198,15 @@
   "kb_created": "创建时间",
   "kb_actions": "操作",
   "skip_for_now": "暂时跳过",
-  "skip_hint_loading": "跳过选项将在几秒后出现…"
+  "skip_hint_loading": "跳过选项将在几秒后出现…",
+  "cmdk_placeholder": "搜索对话或执行命令…",
+  "cmdk_actions": "操作",
+  "cmdk_recent": "最近对话",
+  "cmdk_spaces": "空间",
+  "cmdk_navigate": "前往",
+  "cmdk_empty": "无结果",
+  "cmdk_nav_hint": "切换",
+  "cmdk_select_hint": "选择",
+  "cmdk_close_hint": "关闭",
+  "active": "当前"
 }

@@ -15,6 +15,7 @@ function getSystemTheme(): 'light' | 'dark' {
 // Singleton: shared state across all hooks
 let sharedMode: ThemeMode = 'light';
 let sharedEffective: 'light' | 'dark' = 'light';
+let themeReady = false; // first application is synchronous (avoid initial flash)
 const listeners = new Set<(mode: ThemeMode, effective: 'light' | 'dark') => void>();
 
 try {
@@ -29,14 +30,30 @@ function computeEffective(mode: ThemeMode): 'light' | 'dark' {
   return mode;
 }
 
-function notifyAll() {
+function applyThemeNow() {
   sharedEffective = computeEffective(sharedMode);
   document.documentElement.setAttribute('data-theme', sharedEffective);
   listeners.forEach(fn => fn(sharedMode, sharedEffective));
 }
 
-// Initial theme application
+function notifyAll() {
+  // Progressive enhancement: cross-fade theme switches via the View Transitions
+  // API when available. First application (module load) and reduced-motion users
+  // apply synchronously. State logic is unchanged — only HOW the swap is painted.
+  const prefersReduced =
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const startVT = (document as any).startViewTransition?.bind(document);
+  if (themeReady && startVT && !prefersReduced) {
+    startVT(applyThemeNow);
+  } else {
+    applyThemeNow();
+  }
+}
+
+// Initial theme application (synchronous)
 notifyAll();
+themeReady = true;
 
 // System theme listener (singleton)
 if (typeof window !== 'undefined') {
@@ -68,202 +85,92 @@ export function useTheme() {
   return { mode, effective, setThemeMode };
 }
 
-// Ant Design theme config — Minimalist Modern (Electric Blue)
+/* ----------------------------------------------------------------------------
+   Ant Design theme — Claude warm "paper" palette.
+   Only token VALUES changed; consumed by ConfigProvider in main.tsx so the
+   admin/form pages (AntD) reskin in lockstep with the CSS-variable layer.
+   ---------------------------------------------------------------------------- */
+const sharedFont = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif";
+const sharedComponents = {
+  Button: { fontWeight: 500, controlHeight: 40, borderRadius: 12, borderRadiusLG: 14, primaryShadow: 'none' },
+  Card: { borderRadiusLG: 16, headerFontSize: 16 },
+  Input: { borderRadius: 12, controlHeight: 40 },
+  Select: { borderRadius: 12, controlHeight: 40 },
+  Menu: { itemBorderRadius: 10, subMenuItemBg: 'transparent', iconSize: 16, collapsedIconSize: 16 },
+  Typography: { titleMarginBottom: 12 },
+  Table: { borderRadiusLG: 12, headerBorderRadius: 12 },
+  Modal: { borderRadiusLG: 18 },
+  Drawer: {},
+  Alert: { borderRadiusLG: 12 },
+  Tag: { borderRadiusSM: 8 },
+  Segmented: { trackPadding: 3, borderRadius: 12 },
+  Spin: { dotSize: 10, dotSizeSM: 8, dotSizeLG: 16 },
+  Tooltip: { borderRadius: 8 },
+  Popover: { borderRadiusLG: 14 },
+};
+
 export const eyTheme = {
   light: {
     token: {
-      colorPrimary: '#0052FF',
-      colorText: '#0F172A',
-      colorTextSecondary: '#64748B',
-      colorTextTertiary: '#595959',
-      colorBgLayout: '#FAFAFA',
-      colorBgContainer: '#FFFFFF',
+      colorPrimary: '#C2693F',
+      colorInfo: '#C2693F',
+      colorText: '#29251F',
+      colorTextSecondary: '#6E675C',
+      colorTextTertiary: '#9A9384',
+      colorBgLayout: '#F5F4EE',
+      colorBgContainer: '#FCFBF7',
       colorBgElevated: '#FFFFFF',
-      colorBorder: '#E2E8F0',
-      colorBorderSecondary: '#F1F5F9',
-      colorError: '#EF4444',
-      colorSuccess: '#22C55E',
+      colorBorder: '#E4E0D5',
+      colorBorderSecondary: '#ECE9DF',
+      colorError: '#B23B30',
+      colorSuccess: '#4F7A4A',
+      colorWarning: '#B8801F',
       borderRadius: 12,
-      fontSize: 14,
-      lineHeight: 1.625,
-      controlHeight: 44,
+      fontSize: 15,
+      lineHeight: 1.65,
+      controlHeight: 40,
       wireframe: false,
-      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      fontFamily: sharedFont,
       fontFamilyCode: "'JetBrains Mono', monospace",
     },
     components: {
-      Button: {
-        fontWeight: 500,
-        primaryShadow: '0 2px 6px rgba(0, 82, 255, 0.2)',
-        controlHeight: 44,
-        borderRadius: 12,
-        borderRadiusLG: 14,
-      },
-      Card: {
-        borderRadiusLG: 12,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
-        boxShadowHover: '0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04)',
-        headerFontSize: 15,
-      },
-      Input: {
-        borderRadius: 10,
-        controlHeight: 44,
-        activeBorderColor: 'rgba(0, 82, 255, 0.5)',
-        hoverBorderColor: 'rgba(0, 82, 255, 0.3)',
-        activeShadow: '0 0 0 2px rgba(0, 82, 255, 0.1)',
-      },
-      Menu: {
-        itemBorderRadius: 10,
-        subMenuItemBg: 'transparent',
-        itemSelectedBg: 'rgba(0, 82, 255, 0.08)',
-        itemSelectedColor: '#0F172A',
-        itemActiveBg: 'rgba(0, 82, 255, 0.12)',
-        itemHoverBg: 'rgba(0, 0, 0, 0.02)',
-        itemHoverColor: '#0F172A',
-        iconSize: 16,
-        collapsedIconSize: 16,
-      },
-      Layout: {
-        siderBg: '#FFFFFF',
-        headerBg: '#FFFFFF',
-        bodyBg: '#FAFAFA',
-      },
-      Typography: {
-        titleMarginBottom: 12,
-      },
-      Table: {
-        borderRadiusLG: 10,
-        headerBorderRadius: 10,
-        headerBg: '#F8FAFC',
-        headerColor: '#475569',
-      },
-      Select: {
-        borderRadius: 10,
-        controlHeight: 44,
-        activeBorderColor: 'rgba(0, 82, 255, 0.5)',
-        hoverBorderColor: 'rgba(0, 82, 255, 0.3)',
-      },
-      Spin: {
-        dotColorPrimary: '#0052FF',
-        dotSize: 10,
-        dotSizeSM: 8,
-        dotSizeLG: 16,
-      },
-      Empty: {
-        fontSizeIcon: 48,
-      },
-      Alert: {
-        borderRadiusLG: 10,
-      },
-      Modal: {
-        borderRadiusLG: 16,
-      },
-      Tag: {
-        borderRadiusSM: 6,
-        defaultColor: '#475569',
-      },
-      Segmented: {
-        trackPadding: 3,
-        itemSelectedBg: '#0052FF',
-        itemSelectedColor: '#FFFFFF',
-        borderRadius: 10,
-      },
+      ...sharedComponents,
+      Menu: { ...sharedComponents.Menu, itemSelectedBg: 'rgba(194,105,63,0.10)', itemSelectedColor: '#29251F', itemActiveBg: 'rgba(194,105,63,0.14)', itemHoverBg: 'rgba(64,52,40,0.05)', itemHoverColor: '#29251F' },
+      Layout: { siderBg: '#FCFBF7', headerBg: '#FCFBF7', bodyBg: '#F5F4EE' },
+      Table: { ...sharedComponents.Table, headerBg: '#F0EEE6', headerColor: '#6E675C' },
+      Segmented: { ...sharedComponents.Segmented, itemSelectedBg: '#C2693F', itemSelectedColor: '#FFFFFF' },
     },
   },
   dark: {
     token: {
-      colorPrimary: '#4D7CFF',
-      colorText: '#E2E8F0',
-      colorTextSecondary: '#94A3B8',
-      colorTextTertiary: '#64748B',
-      colorBgLayout: '#0B1120',
-      colorBgContainer: '#1E293B',
-      colorBgElevated: '#253042',
-      colorBorder: '#334155',
-      colorBorderSecondary: '#2D3A4F',
-      colorError: '#F87171',
-      colorSuccess: '#4ADE80',
+      colorPrimary: '#D9805C',
+      colorInfo: '#D9805C',
+      colorText: '#ECE7DC',
+      colorTextSecondary: '#B0A998',
+      colorTextTertiary: '#847D6E',
+      colorBgLayout: '#1C1A17',
+      colorBgContainer: '#24221E',
+      colorBgElevated: '#2B2925',
+      colorBorder: '#38352F',
+      colorBorderSecondary: '#302D28',
+      colorError: '#E07B6B',
+      colorSuccess: '#7FB069',
+      colorWarning: '#E0B05C',
       borderRadius: 12,
-      fontSize: 14,
-      lineHeight: 1.625,
-      controlHeight: 44,
+      fontSize: 15,
+      lineHeight: 1.65,
+      controlHeight: 40,
       wireframe: false,
-      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      fontFamily: sharedFont,
+      fontFamilyCode: "'JetBrains Mono', monospace",
     },
     algorithm: antTheme.darkAlgorithm,
     components: {
-      Button: {
-        fontWeight: 500,
-        primaryShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-        controlHeight: 44,
-        borderRadius: 12,
-        borderRadiusLG: 14,
-      },
-      Card: {
-        borderRadiusLG: 12,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-        boxShadowHover: '0 4px 6px rgba(0,0,0,0.3)',
-        headerFontSize: 15,
-      },
-      Input: {
-        borderRadius: 10,
-        controlHeight: 44,
-        activeBorderColor: 'rgba(77, 124, 255, 0.5)',
-        hoverBorderColor: 'rgba(77, 124, 255, 0.3)',
-      },
-      Menu: {
-        itemBorderRadius: 10,
-        subMenuItemBg: 'transparent',
-        itemSelectedBg: 'rgba(77, 124, 255, 0.15)',
-        itemSelectedColor: '#E2E8F0',
-        itemActiveBg: 'rgba(77, 124, 255, 0.2)',
-        itemHoverBg: 'rgba(255, 255, 255, 0.04)',
-        itemHoverColor: '#E2E8F0',
-        iconSize: 16,
-        collapsedIconSize: 16,
-      },
-      Layout: {
-        siderBg: '#1E293B',
-        headerBg: '#1E293B',
-        bodyBg: '#0B1120',
-      },
-      Typography: {
-        titleMarginBottom: 12,
-      },
-      Table: {
-        borderRadiusLG: 10,
-        headerBorderRadius: 10,
-        headerBg: '#1A2535',
-        headerColor: '#94A3B8',
-      },
-      Select: {
-        borderRadius: 10,
-        controlHeight: 44,
-      },
-      Spin: {
-        dotColorPrimary: '#4D7CFF',
-        dotSize: 10,
-        dotSizeSM: 8,
-        dotSizeLG: 16,
-      },
-      Empty: {
-        fontSizeIcon: 48,
-      },
-      Alert: {
-        borderRadiusLG: 10,
-      },
-      Modal: {
-        borderRadiusLG: 16,
-      },
-      Tag: {
-        borderRadiusSM: 6,
-      },
-      Segmented: {
-        trackPadding: 3,
-        itemSelectedBg: '#4D7CFF',
-        itemSelectedColor: '#FFFFFF',
-        borderRadius: 10,
-      },
+      ...sharedComponents,
+      Menu: { ...sharedComponents.Menu, itemSelectedBg: 'rgba(217,128,92,0.18)', itemSelectedColor: '#ECE7DC', itemActiveBg: 'rgba(217,128,92,0.24)', itemHoverBg: 'rgba(236,231,220,0.06)', itemHoverColor: '#ECE7DC' },
+      Layout: { siderBg: '#24221E', headerBg: '#24221E', bodyBg: '#1C1A17' },
+      Table: { ...sharedComponents.Table, headerBg: '#2B2925', headerColor: '#B0A998' },
+      Segmented: { ...sharedComponents.Segmented, itemSelectedBg: '#D9805C', itemSelectedColor: '#1C140E' },
     },
   },
 };

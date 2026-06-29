@@ -47,5 +47,9 @@
   "rename_title_hint": "点击重命名",
   "rename_empty_warning": "请输入标题",
   "session_renamed_success": "修改成功",
-  "session_renamed_failed": "修改失败，请重试"
+  "session_renamed_failed": "修改失败，请重试",
+  "welcome_greeting": "今天想了解哪方面的入职信息？",
+  "welcome_suggest_hint": "随便问，或从下方选择一个主题",
+  "page_label": "第 {{n}} 页",
+  "load_older_messages": "加载更早的消息"
 }

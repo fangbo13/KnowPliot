@@ -6,7 +6,9 @@ import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { useTheme, eyTheme } from './hooks/useTheme';
 import './i18n';
+import './styles/tokens.css';
 import './styles/globals.css';
+import './styles/chat.css';
 
 function ThemeRoot({ children }: { children: React.ReactNode }) {
   const { effective } = useTheme();

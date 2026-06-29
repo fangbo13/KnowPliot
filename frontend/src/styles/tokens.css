@@ -1,0 +1,172 @@
+/* ============================================================================
+   KnowPilot — Design Tokens (Anthropic / Claude warm "paper" system)
+   Single source of truth. Variable NAMES are kept stable so every component
+   (incl. Ant Design pages) reskins by value-swap; chat-core uses bespoke CSS.
+   ============================================================================ */
+
+:root {
+  /* ---- Brand: terracotta / clay ---- */
+  --accent: #C2693F;          /* fills, marks, icons */
+  --accent-hover: #B05A33;
+  --accent-active: #9C4A26;
+  --accent-secondary: #D98C5A;
+  --accent-text: #9C4A26;     /* accent-as-text/links on paper — AA on light */
+  --accent-rgb: 194, 105, 63;
+  --accent-soft: rgba(194, 105, 63, 0.10);
+  --accent-soft-strong: rgba(194, 105, 63, 0.16);
+  --gradient-accent: linear-gradient(135deg, #C2693F 0%, #D98C5A 100%);
+
+  /* ---- Legacy aliases (kept for components not fully rewritten) ---- */
+  --foreground: #29251F;
+  --muted: #ECE8DD;
+  --muted-foreground: #6E675C;
+  --background: #F5F4EE;
+  --card: #FCFBF7;
+  --border: #E4E0D5;
+  --border-secondary: #ECE9DF;
+
+  /* ---- Semantic surfaces & text ---- */
+  --color-primary: var(--accent);
+  --color-primary-rgb: 194, 105, 63;
+  --color-text: #29251F;          /* warm espresso, not pure black */
+  --color-text-secondary: #6E675C;
+  --color-text-tertiary: #9A9384;
+  --color-bg-body: #F5F4EE;        /* warm ivory canvas */
+  --color-bg-sunken: #F0EEE6;      /* sidebar / rails — a touch deeper */
+  --color-bg-container: #FCFBF7;   /* cards / surfaces — subtle lift */
+  --color-bg-elevated: #FFFFFF;    /* popovers / modals / inputs */
+  --color-border: #E4E0D5;
+  --color-border-secondary: #ECE9DF;
+
+  --color-success: #4F7A4A;
+  --color-success-rgb: 79, 122, 74;
+  --color-error: #B23B30;
+  --color-error-rgb: 178, 59, 48;
+  --color-warning: #B8801F;
+  --color-warning-rgb: 184, 128, 31;
+
+  /* fill tints (hover / active backgrounds) */
+  --color-fill: rgba(64, 52, 40, 0.04);
+  --color-fill-secondary: rgba(64, 52, 40, 0.07);
+  --color-fill-strong: rgba(64, 52, 40, 0.10);
+
+  --color-text-on-accent: #FFFFFF;
+
+  /* ---- Typography ---- */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-family-display: 'Fraunces', 'Calistoga', Georgia, 'Songti SC', serif;
+  --font-family-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-size-base: 15px;
+  --line-height-base: 1.65;
+
+  /* ---- Spacing ---- */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 48px;
+
+  /* ---- Radius ---- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-3xl: 28px;
+
+  /* ---- Shadows (soft, warm-tinted, paper) ---- */
+  --shadow-xs: 0 1px 2px rgba(64, 52, 40, 0.05);
+  --shadow-sm: 0 1px 2px rgba(64, 52, 40, 0.05), 0 1px 3px rgba(64, 52, 40, 0.04);
+  --shadow-md: 0 2px 8px rgba(64, 52, 40, 0.06), 0 6px 18px rgba(64, 52, 40, 0.05);
+  --shadow-lg: 0 8px 30px rgba(54, 44, 32, 0.10), 0 2px 8px rgba(54, 44, 32, 0.05);
+  --shadow-xl: 0 18px 50px rgba(54, 44, 32, 0.14);
+  --shadow-accent: 0 4px 16px rgba(194, 105, 63, 0.28);
+  --shadow-accent-lg: 0 10px 28px rgba(194, 105, 63, 0.32);
+  --shadow-context-menu: 0 8px 28px rgba(54, 44, 32, 0.16), 0 2px 6px rgba(54, 44, 32, 0.08);
+  --shadow-floating-input: 0 6px 28px rgba(54, 44, 32, 0.10), 0 1px 3px rgba(54, 44, 32, 0.06);
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  --dur-fast: 140ms;
+  --dur: 220ms;
+  --dur-slow: 360ms;
+
+  /* ---- Chat-specific ---- */
+  --user-msg-bg: #EFEAE0;       /* warm sand bubble */
+  --user-msg-accent: var(--accent);
+  --msg-bubble-padding: 12px 16px;
+  --content-max: 768px;         /* reading column width */
+
+  /* ---- Layout ---- */
+  --sidebar-width-expanded: 272px;
+  --sidebar-width-collapsed: 0px;
+  --header-height: 56px;
+}
+
+/* ============================================================================
+   Dark — warm charcoal (not blue-black)
+   ============================================================================ */
+[data-theme="dark"] {
+  --accent: #D9805C;
+  --accent-hover: #E2906D;
+  --accent-active: #C56F4C;
+  --accent-secondary: #E5A07C;
+  --accent-text: #E8A483;
+  --accent-rgb: 217, 128, 92;
+  --accent-soft: rgba(217, 128, 92, 0.14);
+  --accent-soft-strong: rgba(217, 128, 92, 0.22);
+  --gradient-accent: linear-gradient(135deg, #D9805C 0%, #E5A07C 100%);
+
+  --foreground: #16140F;
+  --muted: #2B2925;
+  --muted-foreground: #B0A998;
+  --background: #1C1A17;
+  --card: #24221E;
+  --border: #38352F;
+  --border-secondary: #302D28;
+
+  --color-primary: var(--accent);
+  --color-primary-rgb: 217, 128, 92;
+  --color-text: #ECE7DC;
+  --color-text-secondary: #B0A998;
+  --color-text-tertiary: #847D6E;
+  --color-bg-body: #1C1A17;
+  --color-bg-sunken: #1A1714;
+  --color-bg-container: #24221E;
+  --color-bg-elevated: #2B2925;
+  --color-border: #38352F;
+  --color-border-secondary: #302D28;
+
+  --color-success: #7FB069;
+  --color-success-rgb: 127, 176, 105;
+  --color-error: #E07B6B;
+  --color-error-rgb: 224, 123, 107;
+  --color-warning: #E0B05C;
+  --color-warning-rgb: 224, 176, 92;
+
+  --color-fill: rgba(236, 231, 220, 0.05);
+  --color-fill-secondary: rgba(236, 231, 220, 0.09);
+  --color-fill-strong: rgba(236, 231, 220, 0.13);
+
+  --color-text-on-accent: #1C140E;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.40);
+  --shadow-lg: 0 12px 34px rgba(0, 0, 0, 0.50);
+  --shadow-xl: 0 22px 56px rgba(0, 0, 0, 0.60);
+  --shadow-accent: 0 4px 16px rgba(217, 128, 92, 0.24);
+  --shadow-accent-lg: 0 10px 28px rgba(217, 128, 92, 0.30);
+  --shadow-context-menu: 0 8px 28px rgba(0, 0, 0, 0.50);
+  --shadow-floating-input: 0 6px 28px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.30);
+
+  --user-msg-bg: #2F2C27;
+}

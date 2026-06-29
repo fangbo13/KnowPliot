@@ -38,11 +38,14 @@ export default function ProfilePage() {
   };
 
   return (
-    <div style={{ maxWidth: 'min(680px, 100%)', width: '100%', margin: '0 auto' }}>
+    <div className="page"><div className="page-inner" style={{ maxWidth: 680 }}>
+      <div className="page-head">
+        <h1 className="page-title">{t('account_info')}</h1>
+      </div>
       {/* P1-2: Account Info Card — display all user model fields */}
       <Card
         title={
-          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+          <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500 }}>
             {t('account_info')}
           </span>
         }
@@ -133,7 +136,7 @@ export default function ProfilePage() {
       {/* P1-2: Preferences Card — language preference (editable) */}
       <Card
         title={
-          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+          <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500 }}>
             {t('preferences')}
           </span>
         }
@@ -160,6 +163,6 @@ export default function ProfilePage() {
           </Form.Item>
         </Form>
       </Card>
-    </div>
+    </div></div>
   );
 }

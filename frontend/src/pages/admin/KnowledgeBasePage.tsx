@@ -145,9 +145,10 @@ export default function KnowledgeBasePage() {
   ];
 
   return (
-    <Card>
+    <div className="page"><div className="page-inner">
+      <Card>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400, margin: 0 }}>
+        <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, margin: 0 }}>
           {t('nav_knowledge')}
         </span>
         <Space>
@@ -192,5 +193,6 @@ export default function KnowledgeBasePage() {
         }}
       />
     </Card>
+    </div></div>
   );
 }

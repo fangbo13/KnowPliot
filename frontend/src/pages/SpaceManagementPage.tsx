@@ -178,7 +178,7 @@ export default function SpaceManagementPage() {
   ];
 
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: '0 auto', width: '100%', overflow: 'auto' }}>
+    <div className="page"><div className="page-inner">
       <Title level={3} style={{ marginTop: 0 }}>
         {t('space_management') || 'Space Management'} — {active.name}
       </Title>
@@ -306,6 +306,6 @@ export default function SpaceManagementPage() {
         </Paragraph>
         <Input.TextArea readOnly value={generatedCode ?? ''} autoSize />
       </Modal>
-    </div>
+    </div></div>
   );
 }

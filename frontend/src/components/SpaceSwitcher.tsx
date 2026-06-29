@@ -133,19 +133,23 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            maxWidth: collapsed ? 40 : 200,
+            gap: 8,
+            width: collapsed ? 40 : '100%',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            height: 38,
+            padding: '0 12px',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--color-fill)',
             color: 'var(--color-text)',
-            padding: '0 8px',
           }}
         >
-          <AppstoreOutlined />
+          <AppstoreOutlined style={{ color: 'var(--accent-text)', flexShrink: 0 }} />
           {!collapsed && (
-            <Text ellipsis style={{ maxWidth: 130, color: 'var(--color-text)' }}>
+            <Text ellipsis style={{ flex: 1, textAlign: 'left', color: 'var(--color-text)', fontSize: 13.5 }}>
               {active ? active.name : t('select_space') || 'Select space'}
             </Text>
           )}
-          {!collapsed && <DownOutlined style={{ fontSize: 10 }} />}
+          {!collapsed && <DownOutlined style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }} />}
         </Button>
       </Dropdown>
 

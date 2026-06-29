@@ -47,5 +47,9 @@
   "rename_title_hint": "Click to rename",
   "rename_empty_warning": "Please enter a title",
   "session_renamed_success": "Conversation renamed",
-  "session_renamed_failed": "Rename failed. Please try again"
+  "session_renamed_failed": "Rename failed. Please try again",
+  "welcome_greeting": "How can I help with your onboarding?",
+  "welcome_suggest_hint": "Ask anything, or pick a topic below",
+  "page_label": "Page {{n}}",
+  "load_older_messages": "Load earlier messages"
 }

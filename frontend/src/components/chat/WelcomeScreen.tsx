@@ -1,19 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { Row, Col, Typography, Card } from 'antd';
 import {
-  LaptopOutlined,
-  DollarOutlined,
-  CalendarOutlined,
-  BookOutlined,
-  EnvironmentOutlined,
-  TeamOutlined,
-  RocketOutlined,
+  LaptopOutlined, DollarOutlined, CalendarOutlined,
+  BookOutlined, EnvironmentOutlined, TeamOutlined,
 } from '@ant-design/icons';
 import { useChatStore } from '../../store/chatStore';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import ChatComposer from './ChatComposer';
-
-const { Title, Text } = Typography;
 
 interface WelcomeScreenProps {
   onQuickAction: (q: string) => void;
@@ -23,12 +15,12 @@ interface WelcomeScreenProps {
 export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeScreenProps) {
   const { t, i18n } = useTranslation('chat');
   const [inputValue, setInputValue] = useState('');
-  const inputRef = useRef<any>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const isChinese = i18n.language?.startsWith('zh');
-  const isSendLocked = useChatStore(state => state.isSendLocked);
-  const streamPhase = useChatStore(state => state.streamPhase);
-  const streamingSessionId = useChatStore(state => state.streamingSessionId);
-  const activeSessionId = useChatStore(state => state.activeSessionId);
+  const isSendLocked = useChatStore((s) => s.isSendLocked);
+  const streamPhase = useChatStore((s) => s.streamPhase);
+  const streamingSessionId = useChatStore((s) => s.streamingSessionId);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
   const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
 
   const quickActions = useMemo(() => (
@@ -51,140 +43,54 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
         ]
   ), [isChinese]);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  useEffect(() => { inputRef.current?.focus(); }, []);
 
   const handleSend = () => {
     if (!inputValue.trim() || isSendLocked || isStreaming) return;
-    if (onSendMessage) {
-      onSendMessage(inputValue.trim());
-    } else {
-      onQuickAction(inputValue.trim());
-    }
+    (onSendMessage ?? onQuickAction)(inputValue.trim());
     setInputValue('');
   };
 
   return (
-    <div style={{ animation: 'fadeInUp 0.4s ease-out' }}>
-      <div style={{
-        background: 'var(--color-fill)',
-        border: '1px solid var(--color-border-secondary)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '12px 20px',
-        marginBottom: 24,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        animation: 'fadeInUp 0.5s ease-out 0.1s both',
-      }}>
-        <RocketOutlined style={{ fontSize: 18, color: 'var(--accent)', flexShrink: 0 }} />
-        <Text style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
-          {t('welcome_tip')}
-        </Text>
+    <div className="welcome">
+      <div className="welcome-head">
+        <div className="welcome-mark">K</div>
+        <h1 className="welcome-greeting">{t('welcome_greeting', { defaultValue: 'How can I help with your onboarding?' })}</h1>
+        <p className="welcome-sub">{t('welcome_tip')}</p>
       </div>
 
-      <div style={{ textAlign: 'center', marginBottom: 32 }}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 72,
-          height: 72,
-          borderRadius: 18,
-          background: 'var(--gradient-accent)',
-          marginBottom: 20,
-          boxShadow: 'var(--shadow-accent-lg), var(--shadow-sm)',
-          animation: 'fadeInUp 0.5s ease-out',
-        }}>
-          <span style={{
-            fontSize: 32,
-            fontWeight: 800,
-            color: '#FFFFFF',
-            letterSpacing: -1,
-          }}>EY</span>
-        </div>
-        <Title level={3} style={{
-          fontWeight: 400,
-          color: 'var(--color-text, #0F172A)',
-          marginTop: 8,
-          fontFamily: "'Calistoga', Georgia, serif",
-        }}>
-          {t('title')}
-        </Title>
-      </div>
+      <ChatComposer
+        value={inputValue}
+        onChange={setInputValue}
+        onSubmit={handleSend}
+        placeholder={t('placeholder') || 'Type your question here...'}
+        ariaLabel={t('chat_input_label') || 'Type your message'}
+        isStreaming={isStreaming}
+        disabled={isSendLocked}
+        multiline
+        inputRef={inputRef}
+        autoFocus
+        maxRows={5}
+        showHint
+        hintText={t('welcome_suggest_hint', { defaultValue: 'Ask anything, or pick a topic below' }) as string}
+      />
 
-      <div style={{
-        maxWidth: 680,
-        margin: '0 auto',
-        animation: 'fadeInUp 0.4s ease-out 0.2s both',
-      }}>
-        <ChatComposer
-          value={inputValue}
-          onChange={setInputValue}
-          onSubmit={handleSend}
-          placeholder={t('placeholder') || 'Type your question here...'}
-          ariaLabel={t('chat_input_label') || 'Type your message'}
-          isStreaming={isStreaming}
-          disabled={isSendLocked}
-          multiline={false}
-          inputRef={inputRef}
-          autoFocus
-          maxRows={1}
-        />
+      <div className="welcome-suggest-grid">
+        {quickActions.map((action) => (
+          <button
+            key={action.label}
+            className="welcome-suggest"
+            onClick={() => onQuickAction(action.question)}
+            aria-label={`${action.label}: ${action.question}`}
+          >
+            <span className="welcome-suggest-top">
+              <span className="welcome-suggest-icon">{action.icon}</span>
+              <span className="welcome-suggest-label">{action.label}</span>
+            </span>
+            <span className="welcome-suggest-q">{action.question}</span>
+          </button>
+        ))}
       </div>
-
-      <Card
-        title={t('quick_actions_title') || 'Common questions'}
-        bordered={false}
-        style={{
-          background: 'var(--color-bg-container, white)',
-          borderColor: 'var(--color-border-secondary, #f0f0f0)',
-          borderRadius: 'var(--radius-lg)',
-          boxShadow: 'var(--shadow-sm)',
-          animation: 'fadeInUp 0.4s ease-out 0.3s both',
-          marginTop: 24,
-        }}
-      >
-        <Row gutter={[16, 16]}>
-          {quickActions.map((action) => (
-            <Col xs={24} sm={12} md={8} key={action.label}>
-              <div
-                className="welcome-card"
-                onClick={() => onQuickAction(action.question)}
-                role="button"
-                tabIndex={0}
-                aria-label={`${action.label}: ${action.question}`}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onQuickAction(action.question);
-                  }
-                }}
-                style={{
-                  background: 'var(--color-bg-container)',
-                  border: '1px solid var(--color-border-secondary)',
-                  borderRadius: 'var(--radius-lg)',
-                  padding: '16px',
-                  cursor: 'pointer',
-                  minHeight: 72,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'var(--accent)', fontSize: 16 }}>{action.icon}</span>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>{action.label}</span>
-                </div>
-                <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.4 }}>
-                  {action.question}
-                </Text>
-              </div>
-            </Col>
-          ))}
-        </Row>
-      </Card>
     </div>
   );
 }

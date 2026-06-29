@@ -121,6 +121,7 @@
   "continue_chat": "Continue Chat",
   "knowledge_base": "Knowledge Base",
   "admin_dashboard": "Admin Dashboard",
+  "admin_users": "User Management",
   "switch_space": "Switch space",
   "select_space": "Select space",
   "join_space": "Join with access code",
@@ -197,5 +198,15 @@
   "kb_created": "Created",
   "kb_actions": "Actions",
   "skip_for_now": "Skip for now",
-  "skip_hint_loading": "Skip option will appear in a moment…"
+  "skip_hint_loading": "Skip option will appear in a moment…",
+  "cmdk_placeholder": "Search conversations or run a command…",
+  "cmdk_actions": "Actions",
+  "cmdk_recent": "Recent conversations",
+  "cmdk_spaces": "Spaces",
+  "cmdk_navigate": "Go to",
+  "cmdk_empty": "No results",
+  "cmdk_nav_hint": "navigate",
+  "cmdk_select_hint": "select",
+  "cmdk_close_hint": "close",
+  "active": "Active"
 }
