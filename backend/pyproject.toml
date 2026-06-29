@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ey-onboarding_ai"
-version = "0.1.0"
-description = "EY Onboarding AI - RAG-powered chatbot for new employees"
+version = "6.1.0"
+description = "KnowPilot - RAG-powered multi-space knowledge Agent platform"
 requires-python = ">=3.12"
 dependencies = [
     "Django>=5.0,<5.1",

@@ -1,6 +1,6 @@
 # KnowPilot SPEC
 
-> Version: V6.1 draft
+> Version: V6.1
 > Source: `KnowPilot.md`, `README.md`, existing V4.x audit/planning reports
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 

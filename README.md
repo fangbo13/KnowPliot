@@ -2,7 +2,9 @@
 
 > RAG 驱动的知识库应用 Agent，面向专业服务团队沉淀、检索和复用组织知识。
 
-**当前版本：V6.0**
+**当前版本：V6.1**
+
+> **V6.1 更新**：在 V6.0 多空间基础上补全 —— 组织/业务线管理员角色（Org Admin / Business Admin）、文档管理改为空间级权限（空间 owner / knowledge_admin 管理本空间文档）、空间管理页（成员 + 访问码生成/吊销 + 设置），并产出 [V6 优化设计文档](audit_reports/KnowPilot_V6_Optimization_Design.md)。
 
 KnowPilot 原名 **EY Onboarding AI / onboardingai**。项目定位已从“新员工入职 Chatbot”升级为“组织级知识库应用 Agent”：用户可以上传文档、维护知识库、通过对话获取带来源引用的答案，并在同一平台覆盖入职培训、审计方法论、准则问答、项目经验沉淀、风险识别、底稿编制与合规检查等场景。
 
