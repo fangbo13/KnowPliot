@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """
 EY Onboarding AI - Comprehensive Functional Test Script
 Runs inside Docker backend container to access frontend via Docker network.

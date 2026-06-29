@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """Unpack Office files (DOCX, PPTX, XLSX) for editing.
 
 Extracts the ZIP archive, pretty-prints XML files, and optionally:

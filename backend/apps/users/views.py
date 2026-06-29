@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """User views — V4.0 RBAC extended with custom JWT token response.
 V4.1 SYS-V4.1-005: Added LoginRateThrottle (5/min per IP) to prevent brute force.
 V4.2 SYS-V4.2-020: Added BlacklistCheckingTokenRefreshView — checks if

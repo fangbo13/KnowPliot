@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """Crawler URL validators — SSRF protection for KB-V4.1-011/012/013.
 
 V4.2 SYS-V4.2-001: IPv6-mapped IPv4 address bypass — added ipv4_mapped check.

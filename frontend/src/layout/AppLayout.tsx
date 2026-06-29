@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Haibo Fang.
+ * Licensed under the CC BY-NC-SA 4.0 License.
+ * See LICENSE file in the project root for full license details.
+ */
+
 import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Dropdown, Drawer, Modal, Button, Tooltip, message as antMessage } from 'antd';

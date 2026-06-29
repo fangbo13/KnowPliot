@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """
 Local test settings - use SQLite instead of PostgreSQL for quick testing
 本地测试设置 - 使用SQLite替代PostgreSQL进行快速测试

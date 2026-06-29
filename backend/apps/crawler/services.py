@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """Crawler service — orchestrate URL crawl with SSRF/XSS protections.
 
 V4.2 SYS-V4.2-002: Added DNS rebinding re-validation before httpx fetch.

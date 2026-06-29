@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
 """Root URL Configuration — V4.0 RBAC dual-track + V4.1 KB-V4.1-007 media auth."""
 
 from django.contrib import admin

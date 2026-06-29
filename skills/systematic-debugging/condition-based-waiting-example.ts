@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Haibo Fang.
+ * Licensed under the CC BY-NC-SA 4.0 License.
+ * See LICENSE file in the project root for full license details.
+ */
+
 // Complete implementation of condition-based waiting utilities
 // From: Lace test infrastructure improvements (2025-10-03)
 // Context: Fixed 15 flaky tests by replacing arbitrary timeouts

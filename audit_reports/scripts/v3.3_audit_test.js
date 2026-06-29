@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Haibo Fang.
+ * Licensed under the CC BY-NC-SA 4.0 License.
+ * See LICENSE file in the project root for full license details.
+ */
+
 /**
  * EY Onboarding AI — V3.3 Audit Test Script (Revised)
  * Uses correct Ant Design selectors based on actual source code analysis

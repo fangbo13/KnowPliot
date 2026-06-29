@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Haibo Fang.
+ * Licensed under the CC BY-NC-SA 4.0 License.
+ * See LICENSE file in the project root for full license details.
+ */
+
 // SpaceManagementPage — V6.0 (SPEC.MD §7.6).
 // Owner/admin view for the active space: edit settings, view members, and
 // generate / revoke access (invite) codes. All actions are re-checked server-side.
