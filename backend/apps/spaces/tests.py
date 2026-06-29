@@ -14,7 +14,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
-from apps.chat.models import ChatSession
+from apps.chat.models import ChatSession, Citation, Message
 from apps.knowledge.models import Document, DocumentChunk
 from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -85,6 +85,27 @@ class DocumentIsolationTest(SpaceTestBase):
         # Request B's doc while the active space is A -> not found (isolated).
         resp = self.client.get(f"/api/v1/documents/{b_doc.id}/", HTTP_X_SPACE_ID=str(self.space_a.id))
         self.assertEqual(resp.status_code, 404)
+
+    def test_delete_cited_document_clears_citations_first(self):
+        doc = make_doc(self.space_a, "Cited-doc")
+        chunk = DocumentChunk.objects.create(
+            document=doc, space=self.space_a, content="cited content", chunk_index=0
+        )
+        session = ChatSession.objects.create(user=self.admin, space=self.space_a, title="cited session")
+        message = Message.objects.create(
+            session=session, role="assistant", content="answer with citation", space=self.space_a
+        )
+        Citation.objects.create(
+            message=message, document=doc, chunk=chunk, relevance_score=0.9, space=self.space_a
+        )
+
+        self.client.force_authenticate(self.admin)
+        resp = self.client.delete(f"/api/v1/documents/{doc.id}/", HTTP_X_SPACE_ID=str(self.space_a.id))
+
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(Document.objects.filter(id=doc.id).exists())
+        self.assertFalse(DocumentChunk.objects.filter(id=chunk.id).exists())
+        self.assertFalse(Citation.objects.filter(document_id=doc.id).exists())
 
 
 class SessionIsolationTest(SpaceTestBase):

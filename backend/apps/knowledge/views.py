@@ -130,7 +130,18 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
             details={"title": instance.title},
             request=request,
         )
-        return super().destroy(request, *args, **kwargs)
+
+        # Citations protect their source document/chunk so historical answers do
+        # not silently lose provenance. For an explicit document delete, remove
+        # those citation rows first, then let Document.delete cascade chunks.
+        # Without this, documents that have ever been cited fail with
+        # ProtectedError and the UI appears unable to delete them.
+        from apps.chat.models import Citation
+
+        with transaction.atomic():
+            Citation.objects.filter(document=instance).delete()
+            self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class DocumentReindexView(generics.GenericAPIView):
