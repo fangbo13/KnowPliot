@@ -7,7 +7,7 @@ const apiClient = axios.create({
   },
 });
 
-// Add auth token to requests
+// Add auth token + active space to requests
 apiClient.interceptors.request.use((config) => {
   try {
     const saved = localStorage.getItem('ey-auth');
@@ -19,6 +19,12 @@ apiClient.interceptors.request.use((config) => {
     }
   } catch {
     // ignore
+  }
+  // V6.0: scope every request to the active knowledge space. The backend reads
+  // X-Space-Id and isolates documents / sessions / retrieval to that space.
+  const spaceId = getActiveSpaceId();
+  if (spaceId) {
+    config.headers['X-Space-Id'] = spaceId;
   }
   return config;
 });
@@ -50,6 +56,22 @@ export function getAuthToken(): string {
     // ignore
   }
   return '';
+}
+
+/** localStorage key holding the active knowledge space id (V6.0). */
+export const ACTIVE_SPACE_KEY = 'ey-active-space';
+
+/**
+ * Current active space id, used to scope API requests. Returns '' when none is
+ * selected (the backend then falls back to the user's default space).
+ * Use this for non-axios requests (e.g. SSE fetch) which bypass the interceptor.
+ */
+export function getActiveSpaceId(): string {
+  try {
+    return localStorage.getItem(ACTIVE_SPACE_KEY) || '';
+  } catch {
+    return '';
+  }
 }
 
 export default apiClient;

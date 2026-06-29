@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { chatApi } from '../api/chat';
-import { getAuthToken } from '../api/client';
+import { getAuthToken, getActiveSpaceId } from '../api/client';
 import {
   createStreamAbortController,
   abortActiveStream,
@@ -434,12 +434,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
       try {
         // V3.5 CRIT-001: Pass AbortController signal to fetch
+        // V6.0: scope the SSE request to the active space (fetch bypasses the
+        // axios interceptor, so set the header explicitly here).
+        const spaceId = getActiveSpaceId();
+        const sendHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        };
+        if (spaceId) sendHeaders['X-Space-Id'] = spaceId;
         const response = await fetch(`/api/v1/chat/sessions/${sessionId}/send/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          headers: sendHeaders,
           body: JSON.stringify({ content }),
           signal: controller.signal, // V3.5: AbortController signal
         });

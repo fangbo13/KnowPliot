@@ -29,6 +29,8 @@ import { useBreakpoint } from '../hooks/useBreakpoint';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useDebounce } from '../hooks/useDebounce';
 import { useChatStore } from '../store/chatStore';
+import { useSpaceStore } from '../store/spaceStore';
+import SpaceSwitcher from '../components/SpaceSwitcher';
 import { chatApi } from '../api/chat';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
 import { abortActiveStream } from '../stream/StreamLifecycleManager';
@@ -114,9 +116,18 @@ export default function AppLayout() {
     };
   }, [onboardingVisible]);
 
-  // Load sessions on mount and periodically
+  // Load spaces, then sessions, on mount. V6.0: spaces load first so the active
+  // space is resolved before sessions are fetched (the session list is scoped to
+  // the active space via the X-Space-Id header).
   useEffect(() => {
-    loadSessions();
+    (async () => {
+      try {
+        await useSpaceStore.getState().loadSpaces();
+      } catch {
+        // ignore — session load still works via the default-space fallback
+      }
+      loadSessions();
+    })();
     initCrossTabSync(); // V4.0 DEFECT-008: start cross-tab listener
   }, [loadSessions]);
 
@@ -389,6 +400,7 @@ export default function AppLayout() {
 
   // Sidebar header content (reused in Drawer)
   const siderHeader = (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
     <div style={{
       padding: '16px 16px 8px',
       display: 'flex',
@@ -447,6 +459,11 @@ export default function AppLayout() {
             style={{ color: 'var(--color-text-secondary)' }}
           />
         </Tooltip>
+      </div>
+    </div>
+      {/* V6.0: workspace switcher — switch space / join by code / create space */}
+      <div style={{ padding: '0 12px 8px' }}>
+        <SpaceSwitcher collapsed={false} />
       </div>
     </div>
   );
