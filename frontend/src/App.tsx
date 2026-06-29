@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import AppLayout from './layout/AppLayout';
 import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
+import SpaceManagementPage from './pages/SpaceManagementPage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import LoginPage from './auth/LoginPage';
@@ -72,6 +73,8 @@ function App() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="profile" element={<ProfilePage />} />
+        {/* V6.0: space management (members, access codes, settings) */}
+        <Route path="spaces/manage" element={<SpaceManagementPage />} />
         {/* V4.0 RBAC: HR knowledge base — requires hr or admin role */}
         <Route
           path="admin/knowledge"

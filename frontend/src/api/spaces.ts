@@ -4,6 +4,8 @@ import apiClient from './client';
 
 export type SpaceRole =
   | 'super_admin'
+  | 'org_admin'
+  | 'business_admin'
   | 'owner'
   | 'knowledge_admin'
   | 'reviewer'

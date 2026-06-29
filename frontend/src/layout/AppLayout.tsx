@@ -22,6 +22,7 @@ import {
   AppstoreOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
@@ -60,6 +61,14 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const { sessions, activeSessionId, streamPhase, loadSessions, setActiveSession, resetSession } = useChatStore();
   const isStreaming = streamPhase !== 'idle'; // V3.5: Derived from streamPhase
+  // V6.0: active space role drives the "Space Management" menu visibility.
+  const activeSpaceRole = useSpaceStore((s) => {
+    const sp = s.spaces.find((x) => x.id === s.activeSpaceId);
+    return sp?.my_role ?? null;
+  });
+  const canManageSpace = ['owner', 'super_admin', 'org_admin', 'business_admin'].includes(
+    activeSpaceRole || ''
+  );
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
@@ -213,7 +222,18 @@ export default function AppLayout() {
       // V6.0: Web Crawler menu item removed (feature retired).
     }
 
-    if (hasHRAccess || hasAdminAccess) {
+    // V6.0: Space Management — visible to owners / org / business / super admins
+    // of the active space (server re-checks every action).
+    if (canManageSpace) {
+      items.push({
+        key: 'space-manage',
+        icon: <TeamOutlined />,
+        label: t('space_management') || 'Space Management',
+        onClick: () => navigate('/spaces/manage'),
+      });
+    }
+
+    if (hasHRAccess || hasAdminAccess || canManageSpace) {
       items.push({ type: 'divider' as const });
     }
 
@@ -241,7 +261,7 @@ export default function AppLayout() {
     });
 
     return { items };
-  }, [logout, navigate, t, user?.roles, user?.is_hr_admin]);
+  }, [logout, navigate, t, user?.roles, user?.is_hr_admin, user?.is_superuser, canManageSpace]);
 
   // V4.1 BUG-015: Theme toggle animation — 0.3s spin transition on icon change.
   // When user clicks the toggle, themeAnimating is set true for 300ms, applying
