@@ -1,4 +1,4 @@
-import { useTranslation } from 'react-i18next';
+﻿import { useTranslation } from 'react-i18next';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Alert, Button, Input, message as antMessage, type InputRef } from 'antd';
@@ -62,6 +62,7 @@ export default function ChatPageContainer() {
     streamContent,
     citations,
     activeSessionId,
+    streamingSessionId,
     isLoadingMessages,
     sendError,
     hasOlderMessages,
@@ -109,13 +110,17 @@ export default function ChatPageContainer() {
 
   useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
+      if (streamPhase !== 'idle' && streamingSessionId === activeSessionId) {
+        loadedSessionRef.current = activeSessionId;
+        return;
+      }
       setIsTransitioning(true);
       loadedSessionRef.current = activeSessionId;
       loadMessages(activeSessionId).finally(() => {
         setIsTransitioning(false);
       });
     }
-  }, [activeSessionId, loadMessages]);
+  }, [activeSessionId, loadMessages, streamPhase, streamingSessionId]);
 
   const throttledScroll = useRef(
     throttle((behavior: ScrollBehavior) => {
@@ -206,7 +211,7 @@ export default function ChatPageContainer() {
     if (!activeSessionId) return;
     const trimmed = nextTitle.trim();
     if (!trimmed) {
-      antMessage.warning(t('rename_title_hint') || 'Please enter a title');
+      antMessage.warning(t('rename_empty_warning', { defaultValue: 'Please enter a title' }));
       return;
     }
 
@@ -214,19 +219,12 @@ export default function ChatPageContainer() {
       await chatApi.renameSession(activeSessionId, trimmed);
       await loadSessions();
       setIsRenamingTitle(false);
-      antMessage.success(
-        t('session_renamed_success') ||
-          (navigator.language.startsWith('zh') ? '对话已重命名' : 'Conversation renamed')
-      );
+      antMessage.success(t('session_renamed_success', { defaultValue: 'Conversation renamed' }));
     } catch (error) {
       console.error('Failed to rename session:', error);
-      antMessage.error(
-        t('session_renamed_failed') ||
-          (navigator.language.startsWith('zh') ? '重命名失败，请重试' : 'Rename failed. Please try again')
-      );
+      antMessage.error(t('session_renamed_failed', { defaultValue: 'Rename failed. Please try again' }));
     }
   };
-
   const handleStop = () => {
     abortActiveStream();
   };

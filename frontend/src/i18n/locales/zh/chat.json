@@ -44,5 +44,8 @@
   "stop_generation": "停止生成",
   "copied": "已复制",
   "ai_disclaimer": "内容由AI生成，请仔细甄别",
-  "rename_title_hint": "点击重命名"
+  "rename_title_hint": "点击重命名",
+  "rename_empty_warning": "请输入标题",
+  "session_renamed_success": "修改成功",
+  "session_renamed_failed": "修改失败，请重试"
 }

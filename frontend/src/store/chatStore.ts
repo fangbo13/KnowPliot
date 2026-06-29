@@ -372,6 +372,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         sessionId = newSession.id;
         set({
           activeSessionId: sessionId,
+          streamingSessionId: sessionId,
           sessions: [newSession, ...get().sessions],
           // V3.6 HIGH-002: Mark that we need to refresh sessions after first message in new session
           _pendingSessionRefresh: true,

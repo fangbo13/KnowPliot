@@ -68,7 +68,7 @@ export default function VirtualizedMessageList({
     items.push(...messages);
 
     // V3.7 P2.1: Streaming placeholder — content is read from store in itemContent
-    if (isStreaming) {
+    if (isStreaming && streamContent) {
       items.push({
         id: 'streaming',
         role: 'assistant',
@@ -79,7 +79,7 @@ export default function VirtualizedMessageList({
     }
 
     return items;
-  }, [messages, hasOlderMessages, isStreaming]);
+  }, [messages, hasOlderMessages, isStreaming, streamContent]);
 
   // Item renderer — handles both regular messages and the "load older" marker
   const itemContent = useCallback((_index: number, item: Message | { id: string; role: string; content: string }) => {
