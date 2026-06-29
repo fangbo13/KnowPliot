@@ -650,6 +650,83 @@ body {
 }
 
 /* ---- Chat Input Container — Modern Capsule Style ---- */
+/* Chat title inline rename */
+.chat-title-rename {
+  animation: chatTitleSettle 180ms ease-out;
+}
+
+.chat-title-rename.is-editing {
+  animation: chatTitleEditIn 180ms ease-out;
+}
+
+.chat-title-rename-button {
+  border-radius: 10px;
+  transition: color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.chat-title-rename-button:hover {
+  color: var(--accent) !important;
+}
+
+.chat-title-rename-button:active {
+  transform: translateY(1px);
+}
+
+.chat-title-rename-icon {
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  opacity: 0;
+  transform: translateX(-4px) scale(0.94);
+  transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease;
+}
+
+.chat-title-rename-button:hover .chat-title-rename-icon,
+.chat-title-rename-button:focus-visible .chat-title-rename-icon {
+  color: var(--accent);
+  opacity: 1;
+  transform: translateX(0) scale(1);
+}
+
+.chat-title-rename-input {
+  animation: chatTitleInputIn 180ms ease-out;
+}
+
+.chat-title-rename-input input {
+  font-weight: 600;
+}
+
+@keyframes chatTitleSettle {
+  from {
+    opacity: 0.86;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chatTitleEditIn {
+  from {
+    opacity: 0.72;
+    transform: translateY(-2px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chatTitleInputIn {
+  from {
+    width: 160px;
+    opacity: 0.72;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Focus-within: subtle shadow only, no accent color ring */
 .chat-input-container:focus-within {
   border-color: var(--color-border) !important;

@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Row, Col, Typography, Card, Input } from 'antd';
+import { Row, Col, Typography, Card } from 'antd';
 import {
   LaptopOutlined,
   DollarOutlined,
@@ -7,67 +7,66 @@ import {
   BookOutlined,
   EnvironmentOutlined,
   TeamOutlined,
-  SendOutlined,
-  StopOutlined,
   RocketOutlined,
 } from '@ant-design/icons';
 import { useChatStore } from '../../store/chatStore';
-import { abortActiveStream } from '../../stream/StreamLifecycleManager';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import ChatComposer from './ChatComposer';
 
 const { Title, Text } = Typography;
 
-const quickActions = [
-  { icon: <LaptopOutlined />, question: "如何设置公司邮箱和电脑？", label: "IT 设置" },
-  { icon: <DollarOutlined />, question: "报销流程是什么？", label: "报销流程" },
-  { icon: <CalendarOutlined />, question: "我有多少天年假？", label: "年假天数" },
-  { icon: <BookOutlined />, question: "入职培训包含哪些课程？", label: "培训课程" },
-  { icon: <EnvironmentOutlined />, question: "办公室在哪里，怎么去？", label: "办公位置" },
-  { icon: <TeamOutlined />, question: "我的导师/搭档是谁？", label: "我的导师" },
-];
- 
 interface WelcomeScreenProps {
   onQuickAction: (q: string) => void;
   onSendMessage?: (msg: string) => void;
 }
 
 export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeScreenProps) {
-  const { t } = useTranslation('chat');
+  const { t, i18n } = useTranslation('chat');
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<any>(null);
-  // V3.5 HIGH-001: Read send lock from store to prevent double-send
+  const isChinese = i18n.language?.startsWith('zh');
   const isSendLocked = useChatStore(state => state.isSendLocked);
   const streamPhase = useChatStore(state => state.streamPhase);
   const streamingSessionId = useChatStore(state => state.streamingSessionId);
   const activeSessionId = useChatStore(state => state.activeSessionId);
-  // V4.6: Only show streaming UI when the stream belongs to the active session
   const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
 
-  // Auto-focus input on mount
+  const quickActions = useMemo(() => (
+    isChinese
+      ? [
+          { icon: <LaptopOutlined />, question: '如何设置公司邮箱和电脑？', label: 'IT 设置' },
+          { icon: <DollarOutlined />, question: '报销流程是什么？', label: '报销流程' },
+          { icon: <CalendarOutlined />, question: '我有多少年假？', label: '年假天数' },
+          { icon: <BookOutlined />, question: '入职培训包含哪些课程？', label: '培训课程' },
+          { icon: <EnvironmentOutlined />, question: '办公室在哪里，怎么去？', label: '办公位置' },
+          { icon: <TeamOutlined />, question: '我的导师或搭档是谁？', label: '我的导师' },
+        ]
+      : [
+          { icon: <LaptopOutlined />, question: 'How do I set up my company email and laptop?', label: 'IT setup' },
+          { icon: <DollarOutlined />, question: 'What is the expense reimbursement process?', label: 'Expenses' },
+          { icon: <CalendarOutlined />, question: 'How many annual leave days do I have?', label: 'Annual leave' },
+          { icon: <BookOutlined />, question: 'What courses are included in onboarding training?', label: 'Training' },
+          { icon: <EnvironmentOutlined />, question: 'Where is the office and how do I get there?', label: 'Office location' },
+          { icon: <TeamOutlined />, question: 'Who is my mentor or buddy?', label: 'Mentor' },
+        ]
+  ), [isChinese]);
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // V3.5 HIGH-001: handleSend checks isSendLocked
   const handleSend = () => {
     if (!inputValue.trim() || isSendLocked || isStreaming) return;
     if (onSendMessage) {
       onSendMessage(inputValue.trim());
     } else {
-      // Fallback: treat as quick action
       onQuickAction(inputValue.trim());
     }
     setInputValue('');
   };
 
-  // V4.0 UI-HIGH-001: Stop generation handler (same logic as ChatPage)
-  const handleStop = () => {
-    abortActiveStream();
-  };
-
   return (
     <div style={{ animation: 'fadeInUp 0.4s ease-out' }}>
-      {/* Onboarding tip for first-time users */}
       <div style={{
         background: 'var(--color-fill)',
         border: '1px solid var(--color-border-secondary)',
@@ -115,100 +114,28 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
         </Title>
       </div>
 
-      {/* Chat Input Box */}
       <div style={{
         maxWidth: 680,
         margin: '0 auto',
         animation: 'fadeInUp 0.4s ease-out 0.2s both',
       }}>
-        <div
-          className="chat-input-container"
-          style={{
-            background: 'var(--color-bg-container)',
-            border: '1.5px solid var(--color-border)',
-            borderRadius: 24,
-            padding: '12px 16px',
-            boxShadow: 'var(--shadow-md)',
-            transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
-          }}
-        >
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-          }}>
-            <Input
-              ref={inputRef}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onPressEnter={handleSend}
-              placeholder={t('placeholder') || "在此输入你的问题..."}
-              maxLength={4000}
-              disabled={isSendLocked || isStreaming}
-              className="chat-input-singleline"
-              aria-label={t('chat_input_label') || "输入你的问题"}
-              style={{
-                border: 'none',
-                boxShadow: 'none',
-                fontSize: 15,
-                padding: '4px 0',
-                background: 'transparent',
-              }}
-            />
-            {isStreaming ? (
-              <button
-                className="chat-input-stop-btn"
-                onClick={handleStop}
-                aria-label={t('stop_generation') || '停止生成'}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 20,
-                  border: '1.5px solid var(--color-error)',
-                  background: 'rgba(var(--color-error-rgb, 239, 68, 68), 0.08)',
-                  color: 'var(--color-error)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'all 0.2s ease',
-                  fontSize: 16,
-                }}
-              >
-                <StopOutlined />
-              </button>
-            ) : (
-              <button
-                className="chat-input-send-btn"
-                onClick={handleSend}
-                disabled={!inputValue.trim() || isSendLocked || isStreaming}
-                aria-label={t('send_message') || '发送'}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 20,
-                  border: 'none',
-                  background: inputValue.trim() ? 'var(--gradient-accent)' : 'var(--color-border)',
-                  color: inputValue.trim() ? '#fff' : 'var(--color-text-tertiary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: inputValue.trim() ? 'pointer' : 'default',
-                  flexShrink: 0,
-                  transition: 'all 0.2s ease',
-                  fontSize: 15,
-                }}
-              >
-                <SendOutlined />
-              </button>
-            )}
-          </div>
-        </div>
+        <ChatComposer
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={handleSend}
+          placeholder={t('placeholder') || 'Type your question here...'}
+          ariaLabel={t('chat_input_label') || 'Type your message'}
+          isStreaming={isStreaming}
+          disabled={isSendLocked}
+          multiline={false}
+          inputRef={inputRef}
+          autoFocus
+          maxRows={1}
+        />
       </div>
 
       <Card
-        title={t('quick_actions_title') || '常见问题'}
+        title={t('quick_actions_title') || 'Common questions'}
         bordered={false}
         style={{
           background: 'var(--color-bg-container, white)',

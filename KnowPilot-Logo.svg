@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" role="img" aria-labelledby="title desc">
+  <title id="title">KnowPilot logo</title>
+  <desc id="desc">A clean monogram logo for KnowPilot with a modular knowledge mark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="100%" stop-color="#F8FAFC"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="240" rx="36" fill="url(#bg)"/>
+
+  <g transform="translate(52 40)">
+    <rect x="0" y="0" width="160" height="160" rx="36" fill="#0B1120" opacity="0.92"/>
+    <path d="M34 118V42h26l42 52V42h24v76H100L58 66v52z" fill="url(#accent)"/>
+    <path d="M126 42h22l-34 38 38 38h-24l-36-38z" fill="#5EEAD4" opacity="0.95"/>
+    <circle cx="132" cy="42" r="8" fill="#F8FAFC"/>
+    <circle cx="132" cy="118" r="8" fill="#F8FAFC"/>
+    <circle cx="58" cy="66" r="6" fill="#5EEAD4"/>
+    <circle cx="58" cy="118" r="6" fill="#5EEAD4"/>
+  </g>
+
+  <g transform="translate(252 72)">
+    <text x="0" y="58" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="64" font-weight="700" fill="#F8FAFC">KnowPilot</text>
+    <text x="2" y="108" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="500" fill="#A7F3D0" letter-spacing="0">
+      Multi-space knowledge operations platform
+    </text>
+  </g>
+</svg>

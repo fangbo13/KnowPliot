@@ -23,6 +23,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   TeamOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
@@ -32,6 +33,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
 import SpaceSwitcher from '../components/SpaceSwitcher';
+import SessionRenameModal from '../components/chat/SessionRenameModal';
 import { chatApi } from '../api/chat';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
 import { abortActiveStream } from '../stream/StreamLifecycleManager';
@@ -82,6 +84,7 @@ export default function AppLayout() {
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sidebarActionMenu, setSidebarActionMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
   const sidebarActionMenuRef = useRef<HTMLDivElement>(null);
+  const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; title: string } | null>(null);
 
   // Debounced sidebar search
   const debouncedSidebarSearch = useDebounce(sidebarSearch, 300);
@@ -298,12 +301,6 @@ export default function AppLayout() {
     ],
   }), [currentLang, handleLangChange]);
 
-  // Focus sidebar search input when search icon is clicked
-  const handleSidebarSearchFocus = useCallback(() => {
-    const input = document.getElementById('sidebar-search-input');
-    if (input) input.focus();
-  }, []);
-
   // Onboarding handler
   const handleOnboardingClose = useCallback(() => {
     localStorage.setItem('ey-onboarding-seen', 'true');
@@ -416,6 +413,30 @@ export default function AppLayout() {
     setSidebarActionMenu(null);
   }, [activeSessionId, isStreaming, loadSessions, resetSession]);
 
+  const openRenameSession = useCallback((session: { id: string; title: string }) => {
+    setRenameSessionTarget(session);
+    setContextMenuSession(null);
+    setSidebarActionMenu(null);
+  }, []);
+
+  const handleRenameSession = useCallback(async (nextTitle: string) => {
+    if (!renameSessionTarget) return;
+    const trimmed = nextTitle.trim();
+    if (!trimmed) {
+      antMessage.warning(i18n.language?.startsWith('zh') ? '请输入对话标题' : 'Please enter a conversation title');
+      return;
+    }
+    try {
+      await chatApi.renameSession(renameSessionTarget.id, trimmed);
+      await loadSessions();
+      antMessage.success(i18n.language?.startsWith('zh') ? '对话已重命名' : 'Conversation renamed');
+      setRenameSessionTarget(null);
+    } catch (err) {
+      console.error('Failed to rename session:', err);
+      antMessage.error(i18n.language?.startsWith('zh') ? '重命名失败，请重试' : 'Rename failed. Please try again');
+    }
+  }, [loadSessions, renameSessionTarget]);
+
   // V3.5: Dynamic group labels with month-level i18n support
 
   // Sidebar header content (reused in Drawer)
@@ -450,23 +471,6 @@ export default function AppLayout() {
         }}>KnowPilot</h2>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Button
-          type="text"
-          size="small"
-          icon={<SearchOutlined style={{ fontSize: 14 }} />}
-          onClick={handleSidebarSearchFocus}
-          aria-label={t('sidebar_search')}
-          className="sidebar-header-icon"
-          style={{ color: 'var(--color-text-secondary)' }}
-        />
-        <Button
-          type="text"
-          size="small"
-          icon={<AppstoreOutlined style={{ fontSize: 14 }} />}
-          aria-label={t('sidebar_layout') || 'Layout'}
-          className="sidebar-header-icon"
-          style={{ color: 'var(--color-text-secondary)' }}
-        />
         {/* V5.0: collapse sidebar button */}
         <Tooltip title={t('collapse_sidebar') || '收起侧栏'} placement="bottom">
           <Button
@@ -878,25 +882,7 @@ export default function AppLayout() {
                 </div>
                 <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text)' }}>KnowPilot</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<SearchOutlined style={{ fontSize: 14 }} />}
-                  onClick={handleSidebarSearchFocus}
-                  aria-label={t('sidebar_search')}
-                  className="sidebar-header-icon"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                />
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<AppstoreOutlined style={{ fontSize: 14 }} />}
-                  aria-label={t('sidebar_layout') || 'Layout'}
-                  className="sidebar-header-icon"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                />
-              </div>
+              <div />
             </div>
           }
         >
@@ -1082,7 +1068,10 @@ export default function AppLayout() {
           </div>
           <div
             onClick={() => {
-              setContextMenuSession(null);
+              openRenameSession({
+                id: contextMenuSession.id,
+                title: contextMenuSession.title,
+              });
             }}
             style={{
               padding: '8px 16px',
@@ -1096,7 +1085,7 @@ export default function AppLayout() {
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <MoreOutlined /> {t('sidebar_rename')}
+            <EditOutlined /> {t('sidebar_rename')}
           </div>
           <Popconfirm
             title={t('sidebar_delete')}
@@ -1143,7 +1132,15 @@ export default function AppLayout() {
         >
           <div
             onClick={() => {
-              setSidebarActionMenu(null);
+              const session = sessions.find((item) => item.id === sidebarActionMenu.sessionId);
+              if (!session) {
+                setSidebarActionMenu(null);
+                return;
+              }
+              openRenameSession({
+                id: session.id,
+                title: session.title || t('new_conversation'),
+              });
             }}
             style={{
               padding: '8px 16px',
@@ -1157,7 +1154,7 @@ export default function AppLayout() {
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-fill-secondary)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <MoreOutlined /> {t('sidebar_rename')}
+            <EditOutlined /> {t('sidebar_rename')}
           </div>
           <Popconfirm
             title={t('sidebar_delete')}
@@ -1184,6 +1181,17 @@ export default function AppLayout() {
           </Popconfirm>
         </div>
       )}
+
+      <SessionRenameModal
+        open={!!renameSessionTarget}
+        initialTitle={renameSessionTarget?.title || ''}
+        title={i18n.language?.startsWith('zh') ? '重命名对话' : 'Rename conversation'}
+        okText={i18n.language?.startsWith('zh') ? '保存' : 'Save'}
+        cancelText={i18n.language?.startsWith('zh') ? '取消' : 'Cancel'}
+        placeholder={i18n.language?.startsWith('zh') ? '输入新的对话标题' : 'Enter a new conversation title'}
+        onCancel={() => setRenameSessionTarget(null)}
+        onConfirm={handleRenameSession}
+      />
     </div>
   );
 }
