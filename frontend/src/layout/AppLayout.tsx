@@ -199,13 +199,7 @@ export default function AppLayout() {
         label: t('admin_dashboard') || 'Admin Dashboard',
         onClick: () => navigate('/admin/dashboard'),
       });
-      // V4.1: Web Crawler — Admin only (crawler domain)
-      items.push({
-        key: 'web-crawler',
-        icon: <GlobalOutlined />,
-        label: t('web_crawler') || 'Web Crawler',
-        onClick: () => navigate('/admin/crawler'),
-      });
+      // V6.0: Web Crawler menu item removed (feature retired).
     }
 
     if (hasHRAccess || hasAdminAccess) {

@@ -161,12 +161,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Site framework
 SITE_ID = 1
 
-# Crawler Settings — V4.1 KB-V4.1-011~017
-CRAWL_MAX_URL_LENGTH = int(os.environ.get("CRAWL_MAX_URL_LENGTH", "2048"))
-CRAWL_MAX_REDIRECTS = int(os.environ.get("CRAWL_MAX_REDIRECTS", "3"))
-CRAWL_MAX_CONTENT_SIZE_KB = int(os.environ.get("CRAWL_MAX_CONTENT_SIZE_KB", "500"))
-CRAWL_RATE_LIMIT_PER_HOUR = int(os.environ.get("CRAWL_RATE_LIMIT_PER_HOUR", "10"))
-CRAWL_USER_AGENT = os.environ.get("CRAWL_USER_AGENT", "EY-Onboarding-AI-Crawler/1.0 (+https://ey.com/bot)")
+# V6.0: Web crawler settings removed — the crawler feature has been retired.
+# Knowledge is now sourced only from admin uploads and manually maintained
+# documents (see SPEC.MD M4 / M5).
 
 # Django REST Framework
 REST_FRAMEWORK = {
@@ -243,7 +240,7 @@ CELERY_TASK_MAX_RETRIES = 3
 # Two workers each handle 2 slots — total capacity unchanged (4 slots), but isolation prevents
 # slow ingest tasks from blocking critical crawl/reindex tasks.
 CELERY_TASK_ROUTES = {
-    "apps.crawler.tasks.crawl_and_ingest": {"queue": "critical"},
+    # V6.0: crawler queue route removed (Web crawler feature retired).
     "apps.knowledge.tasks.*": {"queue": "default"},
     "apps.rag.tasks.*": {"queue": "default"},
 }

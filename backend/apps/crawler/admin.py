@@ -1,19 +1,13 @@
-"""Crawler admin — V4.1 KB-V4.1-011~017."""
+"""Crawler admin — V6.0: Web crawler feature retired.
 
-from django.contrib import admin
-from .models import CrawledDocument, CrawlTaskLog
+The crawler models (CrawledDocument, CrawlTaskLog) are retained inert so that
+existing `crawler_*` tables and migration history remain valid, but the crawler
+feature is no longer part of the product: no API routes, no Celery tasks, no
+frontend, and no Django admin registration. Knowledge is sourced only from
+admin uploads and manually maintained documents.
 
+To fully drop the historical tables in a future release, add a migration that
+removes the models and then delete this app from INSTALLED_APPS.
+"""
 
-@admin.register(CrawledDocument)
-class CrawledDocumentAdmin(admin.ModelAdmin):
-    list_display = ["source_url", "crawl_status", "title_extracted", "submitted_by", "submitted_at"]
-    list_filter = ["crawl_status", "copyright_status", "internal_only"]
-    search_fields = ["source_url", "title_extracted"]
-    readonly_fields = ["id", "content_hash", "submitted_at", "crawled_at", "created_at", "updated_at"]
-
-
-@admin.register(CrawlTaskLog)
-class CrawlTaskLogAdmin(admin.ModelAdmin):
-    list_display = ["target_domain", "response_status_code", "processing_time_ms", "created_at"]
-    list_filter = ["target_domain"]
-    readonly_fields = ["id", "created_at"]
+# V6.0: Intentionally no admin registrations — crawler models are hidden.

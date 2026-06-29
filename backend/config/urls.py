@@ -11,7 +11,9 @@ urlpatterns = [
     path("api/v1/documents/", include("apps.knowledge.urls")),
     path("api/v1/audit/", include("apps.audit.urls")),
     path("api/v1/rbac/", include("apps.rbac.urls")),
-    path("api/v1/crawl/", include("apps.crawler.urls")),  # V4.1: Web crawler endpoints
+    # V6.0: Web crawler feature removed. The crawler API is no longer exposed.
+    # The apps.crawler Django app and its tables are retained inert for historical
+    # data/migration safety, but no routes, tasks, or UI reference it.
 ]
 
 # V4.1 KB-V4.1-007: Removed DEBUG-only media serving.
