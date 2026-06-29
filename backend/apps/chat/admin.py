@@ -1,6 +1,13 @@
-"""Chat admin."""
+"""Chat admin — V4.1 SYS-V4.1-008: HTML escape Message.content to prevent stored XSS.
+
+When Message.content contains malicious HTML (e.g., <img onerror=alert(1)>),
+the Django admin list_display previously rendered it raw without escaping.
+Now using format_html + escape to ensure safe display in admin panel.
+"""
 
 from django.contrib import admin
+from django.utils.html import format_html, escape
+
 from .models import ChatSession, Message, Citation, Feedback
 
 
@@ -14,13 +21,24 @@ class ChatSessionAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
+    # V4.1 SYS-V4.1-008: content_short now uses HTML escaping
     list_display = ["id", "session", "role", "content_short", "model_used", "response_time_ms", "created_at"]
     list_filter = ["role", "model_used"]
     search_fields = ["content"]
     readonly_fields = ["id", "created_at"]
 
     def content_short(self, obj):
-        return obj.content[:60] + "..." if len(obj.content) > 60 else obj.content
+        """V4.1 SYS-V4.1-008: Escape HTML to prevent stored XSS in admin panel.
+
+        Previously returned raw obj.content[:60] which could execute
+        malicious HTML/JS in the admin interface. Now uses Django's
+        escape() + format_html() to safely display text.
+        """
+        truncated = obj.content[:60]
+        escaped = escape(truncated)
+        if len(obj.content) > 60:
+            return format_html("{}…", escaped)
+        return format_html("{}", escaped)
     content_short.short_description = "Content"
 
 

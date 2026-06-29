@@ -1,0 +1,133 @@
+{
+  "version": "3.3",
+  "date": "2026-06-24",
+  "tool": "Playwright 1.61.1",
+  "tests": [
+    {
+      "id": "A01",
+      "module": "AUTH",
+      "name": "Login page renders",
+      "status": "pass",
+      "detail": "Form: true, Demo hint visible: true",
+      "screenshot": null
+    },
+    {
+      "id": "UX004",
+      "module": "AUTH",
+      "name": "Demo one-click fill works",
+      "status": "pass",
+      "detail": "Demo button found and clicked. Email field detected.",
+      "screenshot": null
+    },
+    {
+      "id": "A03",
+      "module": "AUTH",
+      "name": "Login and redirect to chat",
+      "status": "pass",
+      "detail": "URL: http://localhost:5173/chat",
+      "screenshot": null
+    },
+    {
+      "id": "BUG002",
+      "module": "CHAT",
+      "name": "Chat textarea not found",
+      "status": "fail",
+      "detail": "No textarea on chat page",
+      "screenshot": null
+    },
+    {
+      "id": "UX002",
+      "module": "PROF",
+      "name": "Profile two-card layout with avatar",
+      "status": "pass",
+      "detail": "Cards: 2, Avatar: true, AccountInfo: true, Preferences: true",
+      "screenshot": null
+    },
+    {
+      "id": "UX005",
+      "module": "SIDE",
+      "name": "Sidebar search found but small",
+      "status": "warnings",
+      "detail": "Height: 22.75px",
+      "screenshot": null
+    },
+    {
+      "id": "UX006",
+      "module": "ONB",
+      "name": "Onboarding modal with skip option",
+      "status": "pass",
+      "detail": "Buttons: , 开始使用, 暂时跳过, Has skip: true",
+      "screenshot": null
+    },
+    {
+      "id": "i18n-01",
+      "module": "I18N",
+      "name": "ZH missing keys from EN",
+      "status": "fail",
+      "detail": "Missing: error_title, user_menu",
+      "screenshot": null
+    },
+    {
+      "id": "i18n-03",
+      "module": "I18N",
+      "name": "ZH duplicate keys",
+      "status": "fail",
+      "detail": "Duplicates: error_network",
+      "screenshot": null
+    },
+    {
+      "id": "DARK-PROF",
+      "module": "THM",
+      "name": "Dark theme on Profile",
+      "status": "pass",
+      "detail": "data-theme: dark",
+      "screenshot": null
+    },
+    {
+      "id": "KB",
+      "module": "KB",
+      "name": "Knowledge base table renders",
+      "status": "pass",
+      "detail": "Table visible",
+      "screenshot": null
+    },
+    {
+      "id": "MOBILE-LOGIN",
+      "module": "AUTH",
+      "name": "Mobile login hides brand panel",
+      "status": "pass",
+      "detail": "Brand panel hidden: true",
+      "screenshot": null
+    },
+    {
+      "id": "UX003",
+      "module": "RSP",
+      "name": "Mobile hamburger button",
+      "status": "warnings",
+      "detail": "Hamburger button not found with expected selectors",
+      "screenshot": null
+    },
+    {
+      "id": "UX003-DRAWER",
+      "module": "RSP",
+      "name": "Drawer auto-open",
+      "status": "warnings",
+      "detail": "Auto-open may have completed before screenshot",
+      "screenshot": null
+    },
+    {
+      "id": "FLOW-02",
+      "module": "I18N",
+      "name": "Language button not found",
+      "status": "warnings",
+      "detail": "Selector may differ",
+      "screenshot": null
+    }
+  ],
+  "summary": {
+    "total": 15,
+    "passed": 8,
+    "failed": 3,
+    "warnings": 4
+  }
+}

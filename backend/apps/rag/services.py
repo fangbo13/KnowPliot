@@ -1,5 +1,10 @@
-"""Celery tasks for RAG document ingestion."""
+"""Celery tasks for RAG document ingestion.
 
+V4.2 KB-V4.2-BATCH-005: Extended task timeout for batch documents.
+V4.2 KB-V4.2-BATCH-010: Content hash computation for deduplication.
+"""
+
+import hashlib
 import logging
 
 from celery import shared_task
@@ -12,6 +17,9 @@ def ingest_document(self, document_id: str) -> dict:
     """Full document ingestion pipeline.
 
     Steps: parse -> chunk -> embed -> store -> update status.
+
+    V4.2 KB-V4.2-BATCH-010: Compute content_hash for deduplication.
+    V4.2 KB-V4.2-BATCH-005: Extended timeout for large documents.
 
     Args:
         document_id: UUID of the Document to ingest.
@@ -28,6 +36,17 @@ def ingest_document(self, document_id: str) -> dict:
         logger.error(f"Document {document_id} not found")
         return {"status": "error", "message": "Document not found"}
 
+    # V4.2 KB-V4.2-BATCH-010: Compute content hash for deduplication
+    if not doc.content_hash:
+        try:
+            with doc.file.open("rb") as f:
+                content_hash = hashlib.sha256(f.read()).hexdigest()
+            doc.content_hash = content_hash
+            doc.save(update_fields=["content_hash"])
+            logger.info(f"[BATCH-010] Content hash computed for document {document_id}: {content_hash[:16]}...")
+        except Exception as e:
+            logger.warning(f"[BATCH-010] Could not compute content hash: {e}")
+
     # Update status to processing
     doc.status = "processing"
     doc.save(update_fields=["status"])
@@ -37,9 +56,11 @@ def ingest_document(self, document_id: str) -> dict:
         chunks = pipeline.ingest(doc)
 
         # Update document
-        doc.status = "active"
-        doc.chunk_count = len(chunks)
-        doc.save(update_fields=["status", "chunk_count"])
+        if chunks:
+            doc.status = "active"
+            doc.chunk_count = len(chunks)
+            doc.save(update_fields=["status", "chunk_count"])
+        # If chunks is empty, pipeline already set status to "failed" (BATCH-012)
 
         logger.info(f"Successfully ingested {document_id}: {len(chunks)} chunks")
         return {"status": "success", "chunks": len(chunks)}

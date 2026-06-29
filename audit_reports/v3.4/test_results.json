@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-06-24T20:28:28.079Z",
+  "version": "V3.4",
+  "testType": "Deep Destructive Testing",
+  "results": {
+    "TC-4.3": {
+      "status": "ERROR",
+      "finding": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[class*=\"more\"], [class*=\"action\"]').first()\u001b[22m\n\u001b[2m    - locator resolved to <span role=\"img\" aria-label=\"more\" class=\"anticon anticon-more\">…</span>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div tabindex=\"-1\" class=\"ant-modal-wrap ant-modal-centered\">…</div> from <div>…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div tabindex=\"-1\" class=\"ant-modal-wrap ant-modal-centered\">…</div> from <div>…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    57 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m       - element is visible, enabled and stable\u001b[22m\n\u001b[2m       - scrolling into view if needed\u001b[22m\n\u001b[2m       - done scrolling\u001b[22m\n\u001b[2m       - <div tabindex=\"-1\" class=\"ant-modal-wrap ant-modal-centered\">…</div> from <div>…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m     - retrying click action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n"
+    },
+    "TC-1.1": {
+      "status": "SKIPPED",
+      "finding": "Textarea not visible"
+    },
+    "TC-6.2": {
+      "status": "CONFIRMED_NO_PAGINATION",
+      "finding": "Sessions API returns all 42 sessions in single 9993-byte payload. pagination_class=None. For 3000 concurrent users with 50+ sessions each, this creates severe scalability risk.",
+      "data": {
+        "status": 200,
+        "count": 42,
+        "payloadBytes": 9993,
+        "isArray": true,
+        "hasPagination": false,
+        "sampleTitles": [
+          "我有多少天年假",
+          "入职流程是什么",
+          "如何设置公司邮箱和电脑"
+        ]
+      }
+    },
+    "TC-7.3": {
+      "status": "CONFIRMED_NO_SYNC",
+      "finding": "Zustand state is per-tab. No BroadcastChannel or cross-tab sync. Each tab has independent session list and chat state."
+    }
+  },
+  "networkSummary": {
+    "totalRequests": 381,
+    "sendRequests": 0,
+    "sessionRequests": 15,
+    "consoleErrors": [
+      "Warning: [antd: Card] `bordered` is deprecated. Please use `variant` instead."
+    ]
+  }
+}

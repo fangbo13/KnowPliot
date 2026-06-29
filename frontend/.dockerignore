@@ -1,0 +1,15 @@
+node_modules
+# dist is NO longer excluded — the Dockerfile's primary stage (final) copies
+# locally pre-built dist/ directly into nginx.  This bypasses the BuildKit git
+# context bug on Windows where unstaged working-directory changes are ignored,
+# causing stale vite build output inside Docker.
+.git
+*.sqlite3
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.DS_Store
+audit_reports
+*.md
+!README.md

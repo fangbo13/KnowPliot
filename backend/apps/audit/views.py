@@ -35,8 +35,11 @@ class AuditLogListView(generics.ListAPIView):
         return qs
 
 
-def create_audit_log(user, action, target_type, target_id=None, details=None, request=None):
-    """Helper to create an audit log entry."""
+def create_audit_log(user, action, target_type, target_id=None, details=None, role_used=None, request=None):
+    """Helper to create an audit log entry.
+
+    V4.0: Added role_used parameter for dual-role audit tracing.
+    """
     return AuditLog.objects.create(
         user=user,
         action=action,
@@ -45,4 +48,5 @@ def create_audit_log(user, action, target_type, target_id=None, details=None, re
         details=details or {},
         ip_address=request.META.get("REMOTE_ADDR") if request else None,
         user_agent=request.META.get("HTTP_USER_AGENT", "") if request else "",
+        role_used=role_used or "",
     )

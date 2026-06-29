@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 
 # Load .env file
@@ -14,8 +15,25 @@ except ImportError:
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Core settings
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "change-me-to-a-random-string")
+# Core settings — V4.1 SYS-V4.1-003: SECRET_KEY must be >= 32 bytes for HMAC security
+# Old default "change-me-to-a-random-string" was only 26 bytes (InsecureKeyLengthWarning).
+# Now: if env var is set and >= 32 bytes → use it; if unset → auto-generate (dev safe);
+# if set but < 32 bytes → warn but still use it (dev friendly, not blocking startup).
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    warnings.warn(
+        "DJANGO_SECRET_KEY not set — using auto-generated temporary key. "
+        "Set DJANGO_SECRET_KEY in .env for persistent security (sessions/JWT survive restarts).",
+        RuntimeWarning,
+    )
+    import secrets
+    SECRET_KEY = secrets.token_urlsafe(50)
+elif len(SECRET_KEY) < 32:
+    warnings.warn(
+        "DJANGO_SECRET_KEY is %d bytes — minimum 32 bytes recommended for HMAC security. "
+        "Current key may be vulnerable to brute-force attacks." % len(SECRET_KEY),
+        RuntimeWarning,
+    )
 DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -46,21 +64,28 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "apps.core",
     "apps.users",
+    "apps.spaces",  # V6.0: multi-space platform (orgs, business lines, spaces)
     "apps.chat",
     "apps.knowledge",
     "apps.rag",
     "apps.audit",
+    "apps.rbac",
+    # apps.crawler retained inert (V6.0): tables/migrations kept, no API/UI/tasks.
+    "apps.crawler",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.core.middleware.SafeErrorResponseMiddleware",  # V4.1 SYS-V4.1-002: intercept ALL 500 errors
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.middleware.RbacCacheMiddleware",  # V4.2 SYS-V4.2-006: RBAC request-level cache
+    "apps.core.middleware.AuthenticatedMediaMiddleware",  # V4.1 KB-V4.1-007: auth required for /media/
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
@@ -96,6 +121,14 @@ DATABASES = {
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "ey_password"),
         "HOST": os.environ.get("POSTGRES_HOST", "db"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        # V4.2 SYS-V4.2-012: Connection pool — persistent DB connections
+        # Previous: CONN_MAX_AGE=0 (Django default) → new TCP connection per request
+        # ~8-10ms overhead per connection (TCP+auth handshake). At 50 QPS that's
+        # 400-500ms/sec wasted on connection setup alone.
+        # Now: CONN_MAX_AGE=60 → connections reused for 60 seconds, ~90% reuse rate
+        # CONN_HEALTH_CHECKS=True → Django validates stale connections before use
+        "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
@@ -130,10 +163,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Site framework
 SITE_ID = 1
 
+# V6.0: Web crawler settings removed — the crawler feature has been retired.
+# Knowledge is now sourced only from admin uploads and manually maintained
+# documents (see SPEC.MD M4 / M5).
+
 # Django REST Framework
 REST_FRAMEWORK = {
+    # V4.2 SYS-V4.2-020: Use custom auth class that checks blacklist table.
+    # Default JWTAuthentication only validates signature + expiry, ignoring
+    # blacklisted_tokens — meaning blacklisted access tokens remain valid
+    # for their full 15-minute lifetime after logout.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.users.authentication.BlacklistCheckingJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -143,11 +184,17 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
+    # V4.1 SYS-V4.1-004: Added AnonRateThrottle (100/min per IP) alongside UserRateThrottle
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "user": "30/minute",
+        "anon": "100/minute",  # Per IP — prevents mass registration + API abuse
+        # V4.2 KB-V4.2-BATCH-004: Dedicated upload throttle rates
+        "document_upload": "10/minute",  # Per user — prevents API resource exhaustion
+        "batch_upload": "3/minute",  # Per user — stricter limit for batch ZIP uploads
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
 }
@@ -177,13 +224,28 @@ ACCOUNT_EMAIL_VERIFICATION = "optional"
 # CORS
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
-# Celery
-CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+# Celery — V4.1 SYS-V4.1-010: Redis now requires password
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+# V4.1 SYS-V4.1-009: Task timeout — prevents worker slot exhaustion from large PDFs
+# V4.2 KB-V4.2-BATCH-005: Extended timeout for batch ingestion (large ZIP with many docs)
+CELERY_TASK_TIME_LIMIT = 1800  # 30 min hard timeout (was 300/5min) — batch docs need more time
+CELERY_TASK_SOFT_TIME_LIMIT = 1500  # 25 min soft timeout (was 240/4min)
+CELERY_TASK_MAX_RETRIES = 3
+# V4.2 SYS-V4.2-013: Queue routing — critical tasks get dedicated slots
+# Previous: all tasks in single default queue, competing for 4 slots equally.
+# Now: critical queue for fast/important tasks (crawl, reindex), default for slow tasks (ingest).
+# Two workers each handle 2 slots — total capacity unchanged (4 slots), but isolation prevents
+# slow ingest tasks from blocking critical crawl/reindex tasks.
+CELERY_TASK_ROUTES = {
+    # V6.0: crawler queue route removed (Web crawler feature retired).
+    "apps.knowledge.tasks.*": {"queue": "default"},
+    "apps.rag.tasks.*": {"queue": "default"},
+}
 
 # pgvector
 PGVECTOR_DIMENSION = 1024  # Qwen text-embedding-v4
@@ -204,6 +266,13 @@ LITELLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # File Upload
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
+
+# V4.2 KB-V4.2-BATCH-004/005/006: Batch upload settings
+BULK_UPLOAD_MAX_DOCUMENTS = int(os.environ.get("BULK_UPLOAD_MAX_DOCUMENTS", "100"))  # Max files per ZIP
+BULK_UPLOAD_TOTAL_SIZE_MB = int(os.environ.get("BULK_UPLOAD_TOTAL_SIZE_MB", "500"))  # Max ZIP total size MB
+MAX_EXTRACTED_TEXT_SIZE = 10_000_000  # 10MB — max extracted text size per document (BATCH-006)
+MAX_CHUNKS_PER_DOCUMENT = 500  # Max chunks per document (BATCH-006)
+MAX_CHUNKS_PER_BATCH = 5000  # Max total chunks per batch (BATCH-005)
 
 # SSL Verification (for LLM API calls)
 SSL_VERIFY = os.environ.get("SSL_VERIFY", "true").lower() == "true"

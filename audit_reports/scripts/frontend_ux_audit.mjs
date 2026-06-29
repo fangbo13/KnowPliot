@@ -1,0 +1,257 @@
+﻿import { chromium } from "playwright";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+
+const BASE = "http://127.0.0.1:3030";
+const DIR = join("D:\\Github\\Onborading-AI\\audit_reports\\screenshots\\edge_cases");
+mkdirSync(DIR, { recursive: true });
+const TE = "admin@ey.com", TP = "admin123";
+const issues = [], cErr = [], nErr = [];
+let iid = 0;
+function iss(sev, t) {
+  iid++;
+  issues.push({id:iid, sev, t});
+  const tag = sev==="critical"?"[CRITICAL]":sev==="medium"?"[MEDIUM]":"[MINOR]";
+  console.log("  "+tag+" #"+iid+": "+t);
+}
+async function shot(p, n) { await p.screenshot({path:join(DIR,n+".png"),fullPage:true}); }
+const sl = ms => new Promise(r=>setTimeout(r,ms));
+
+async function login(page) {
+  await page.goto(BASE+"/login", {waitUntil:"networkidle",timeout:15000});
+  await sl(800);
+  if (page.url().includes("/chat")) { console.log("  [auth] already logged in"); await dism(page); return true; }
+  const demo = page.locator("button").filter({hasText:/demo|Demo/i}).first();
+  if (await demo.count() > 0) { await demo.click(); await sl(600); }
+  const fi = page.locator("input").first();
+  if (await fi.count() > 0) {
+    const v = await fi.inputValue().catch(()=>"");
+    if (!v || !v.includes("@")) {
+      await fi.click(); await sl(100); await fi.fill(TE);
+      const all = await page.locator("input").all();
+      if (all.length >= 2) { await all[1].click(); await all[1].fill(TP); }
+    }
+  }
+  await page.locator("button[type=submit]").first().click();
+  try { await page.waitForURL(/chat/,{timeout:10000}); console.log("  [auth] login ok"); }
+  catch { console.log("  [auth] login failed: "+page.url()); return false; }
+  await sl(1000);
+  await dism(page);
+  return true;
+}
+async function dism(page) {
+  // Try ESC key first (fix: onboarding ESC close)
+  try { await page.keyboard.press("Escape"); await sl(500); } catch {}
+  // Wait for 5s delayed skip hint to appear
+  await sl(6000);
+  // Try clicking any dismiss button
+  for (let i=0;i<5;i++) {
+    const btn = page.locator("button").filter({hasText:/Skip|跳过|Close|close|Got it|知道了|Start|开始|Next|Finish|完成|skip/i}).first();
+    if (await btn.count()>0 && await btn.isVisible().catch(()=>false)) { try{await btn.click({timeout:2000});await sl(500);}catch{} } else break;
+  }
+  // Try ESC again if modal still present
+  const modal = page.locator(".ant-modal-wrap").first();
+  if (await modal.count()>0 && await modal.isVisible().catch(()=>false)) {
+    try { await page.keyboard.press("Escape"); await sl(500); } catch {}
+  }
+}
+async function doLogout(page) {
+  await page.evaluate(() => { localStorage.removeItem("ey-auth"); localStorage.removeItem("token"); });
+  await page.goto(BASE+"/login", {waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+  await sl(500);
+}
+
+async function run() {
+  console.log("=== EY Onboarding AI - Frontend UX Deep Audit ===");
+  const browser = await chromium.launch({headless:false,args:["--start-maximized"]});
+  const ctx = await browser.newContext({viewport:{width:1280,height:800},locale:"en-US"});
+  const pg = await ctx.newPage();
+  pg.on("console", m => { if(m.type()==="error") cErr.push({t:m.text().substring(0,200),u:pg.url()}); });
+  pg.on("requestfailed", r => nErr.push({u:r.url(),f:r.failure()?.errorText}));
+
+  // TEST 1: Login Edge Cases
+  console.log("\n=== TEST 1: Login Edge Cases ===");
+  await pg.goto(BASE+"/login",{waitUntil:"networkidle",timeout:15000}); await sl(800);
+  // 1a: Empty submit
+  await pg.locator("button[type=submit]").first().click(); await sl(800);
+  const ec = await pg.locator(".ant-form-item-explain").count();
+  if (ec===0) iss("medium","Login: empty submit shows no validation feedback");
+  else console.log("  OK: "+ec+" validation errors");
+  await shot(pg,"01a_empty_submit");
+  // 1b: SQL injection
+  const allInp = pg.locator("input");
+  await allInp.first().fill("admin; OR 1=1 --");
+  try { await allInp.nth(1).fill("admin; DROP TABLE users"); } catch { await allInp.last().fill("admin; DROP TABLE users"); }
+  await pg.locator("button[type=submit]").first().click(); await sl(2000);
+  const bt = await pg.locator("body").textContent();
+  if ((bt.includes("SQL")||bt.includes("Exception")||bt.includes("Traceback"))&&!bt.includes("login_failed"))
+    iss("critical","Login: server error details leaked on SQL injection attempt");
+  else console.log("  OK: SQL injection handled safely");
+  await shot(pg,"01b_sql_injection");
+  // 1c: Rapid submit x8
+  await pg.goto(BASE+"/login",{waitUntil:"networkidle",timeout:15000}); await sl(500);
+  const d2 = pg.locator("button").filter({hasText:/demo|Demo/i}).first();
+  if (await d2.count()>0) { await d2.click(); await sl(400); }
+  else { await pg.locator("input").first().fill(TE); try{await pg.locator("input").nth(1).fill(TP);}catch{} }
+  let tr = 0;
+  pg.on("request", r => { if(r.url().includes("/auth/token")) tr++; });
+  for (let i=0;i<8;i++) await pg.locator("button[type=submit]").first().click({delay:25}).catch(()=>{});
+  await sl(5000);
+  console.log("  Rapid submit: "+tr+" token request(s)");
+  if (tr > 2) iss("medium","Login: "+tr+" duplicate API calls on rapid click (debounce missing)");
+  else console.log("  OK: "+tr+" request(s)");
+  await shot(pg,"01c_rapid_submit");
+
+  // TEST 2: Login -> Chat
+  console.log("\n=== TEST 2: Login -> Chat ===");
+  await doLogout(pg);
+  const loginOk = await login(pg);
+  if (!loginOk) { console.log("  SKIP: login failed"); }
+  else {
+    console.log("  Chat URL: "+pg.url()); await shot(pg,"02_chat_page");
+
+    // TEST 3: Chat Input
+    console.log("\n=== TEST 3: Chat Input Edge Cases ===");
+    const ta = pg.locator("textarea").first();
+    if (await ta.count()===0) {
+      iss("critical","Chat: no textarea found on /chat page after login");
+      await shot(pg,"03_no_textarea");
+    } else {
+      await ta.fill("     "); await sl(300);
+      const sb = pg.locator("button").filter({has:pg.locator(".anticon-send")}).first();
+      const dis = await sb.isDisabled().catch(()=>"unknown");
+      if (dis!==true) iss("medium","Chat: whitespace-only input does not disable send button");
+      else console.log("  OK: whitespace disabled send");
+      await ta.fill("B".repeat(4000)); await sl(300);
+      await shot(pg,"03b_4000_chars");
+      const cnt = await pg.locator("[role=status]").textContent().catch(()=>"");
+      console.log("  4000 char counter: "+cnt.trim());
+      await ta.fill("<img src=x onerror=alert(1)>"); await sl(200);
+      await shot(pg,"03c_html_inject");
+      await ta.fill("Hello from frontend UX audit"); await sl(200);
+      await pg.keyboard.press("Enter");
+      console.log("  Message sent, waiting for response...");
+      await sl(10000);
+      await shot(pg,"03d_after_send_10s");
+      await sl(5000);
+      await shot(pg,"03e_after_15s");
+    }
+  }
+
+  // TEST 4: API 500
+  console.log("\n=== TEST 4: API 500 Simulation ===");
+  await pg.route("**/api/v1/chat/**", r => r.fulfill({status:500,contentType:"application/json",body:JSON.stringify({detail:"ISE"})}));
+  const ta4 = pg.locator("textarea").first();
+  if (await ta4.count()>0) {
+    await ta4.fill("This triggers 500"); await sl(100);
+    await pg.keyboard.press("Enter"); await sl(3000);
+    const ea = await pg.locator(".ant-alert-error,.ant-message-error").count();
+    if (ea===0) iss("critical","Chat: no error UI when API returns 500");
+    else console.log("  OK: error alert shown for 500");
+    await shot(pg,"04_api_500");
+  }
+  await pg.unroute("**/api/v1/chat/**");
+
+  // TEST 5: Responsive
+  console.log("\n=== TEST 5: Responsive Layout ===");
+  await pg.goto(BASE+"/chat",{waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+  await sl(500);
+  for (const v of [{n:"m320",w:320,h:568},{n:"m375",w:375,h:812},{n:"t768",w:768,h:1024},{n:"d1440",w:1440,h:900},{n:"u2560",w:2560,h:1440}]) {
+    await pg.setViewportSize({width:v.w,height:v.h}); await sl(500);
+    await shot(pg,"05_"+v.n);
+    const ov = await pg.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth);
+    if (ov) iss("medium","Responsive: horizontal overflow at "+v.n+" viewport");
+    else console.log("  OK: "+v.n);
+  }
+  await pg.setViewportSize({width:1280,height:800});
+
+  // TEST 6: Dark Mode
+  console.log("\n=== TEST 6: Dark Mode ===");
+  await pg.goto(BASE+"/chat",{waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+  await sl(500);
+  const tb = pg.locator("button").filter({has:pg.locator(".anticon-sun,.anticon-moon")}).first();
+  if (await tb.count()>0) {
+    await tb.click(); await sl(600);
+    await shot(pg,"06_dark_mode");
+    const wc = await pg.evaluate(()=>{let c=0;document.querySelectorAll("*").forEach(e=>{if(getComputedStyle(e).backgroundColor==="rgb(255, 255, 255)"&&e.offsetWidth>100&&e.offsetHeight>50&&["HTML","BODY"].indexOf(e.tagName)<0)c++;});return c;});
+    if (wc>3) iss("medium","Dark mode: "+wc+" elements with hardcoded white backgrounds");
+    else console.log("  OK: "+wc+" hardcoded whites");
+    const si = pg.locator("[class*=sidebar] [class*=item]").first();
+    if (await si.count()>0) { await si.hover(); await sl(300); await shot(pg,"06_dark_hover"); }
+    await tb.click(); await sl(300);
+  } else console.log("  SKIP: no theme toggle");
+
+  // TEST 7: Profile
+  console.log("\n=== TEST 7: Profile ===");
+  await pg.goto(BASE+"/profile",{waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+  await sl(500); await shot(pg,"07_profile");
+  const em = await pg.locator("text="+TE).count();
+  console.log("  Email visible: "+(em>0));
+
+  // TEST 8: Admin RBAC
+  console.log("\n=== TEST 8: Admin RBAC ===");
+  for (const p of ["/admin/knowledge","/admin/dashboard","/admin/crawler"]) {
+    await pg.goto(BASE+p,{waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+    await sl(500);
+    const u = pg.url(); const ok2 = u.includes(p);
+    console.log("  "+(ok2?"OK":"RBAC redirect")+": "+p+" -> "+u);
+    await shot(pg,"08_"+p.split("/").pop());
+    if (!ok2) iss("medium","RBAC: "+p+" not accessible for admin (redirected to "+u+")");
+  }
+
+  // TEST 9: Tab Focus
+  console.log("\n=== TEST 9: Tab Focus ===");
+  await pg.goto(BASE+"/login",{waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+  await sl(300);
+  let nf = 0;
+  for (let i=0;i<15;i++) {
+    await pg.keyboard.press("Tab"); await sl(120);
+    const ok3 = await pg.evaluate(()=>{const e=document.activeElement;if(!e||e.tagName==="BODY")return true;const s=getComputedStyle(e);return s.outlineStyle!=="none"||s.outlineWidth!=="0px"||s.boxShadow!=="none";});
+    if (!ok3) nf++;
+  }
+  if (nf>3) iss("medium","Accessibility: "+nf+" focused elements lack visible focus indicator");
+  else console.log("  OK: "+nf+" missing");
+  await shot(pg,"09_tab_focus");
+
+  // TEST 10: 404
+  console.log("\n=== TEST 10: 404 Route ===");
+  await pg.goto(BASE+"/nonexistent-xyz-42",{waitUntil:"domcontentloaded",timeout:10000}).catch(()=>{});
+  await sl(800); await shot(pg,"10_404");
+  if (pg.url().includes("nonexistent")) iss("medium","No 404 page for invalid routes");
+  else console.log("  OK: redirected -> "+pg.url());
+
+  // TEST 11: Logout
+  console.log("\n=== TEST 11: Logout ===");
+  await login(pg);
+  const av = pg.locator(".ant-avatar,[class*=avatar]").first();
+  if (await av.count()>0) {
+    await av.click(); await sl(500);
+    const lb = pg.locator("button,a,.ant-dropdown-menu-item,span").filter({hasText:/logout|退出|登出|Sign out/i}).first();
+    if (await lb.count()>0) { await lb.click(); await sl(1500); console.log("  Post-logout: "+pg.url()); }
+    else iss("medium","No logout button found in avatar dropdown");
+  }
+  await shot(pg,"11_logout");
+
+  // TEST 12: i18n
+  console.log("\n=== TEST 12: i18n ===");
+  await login(pg);
+  await pg.goto(BASE+"/profile",{waitUntil:"networkidle",timeout:10000}).catch(()=>{});
+  await sl(500);
+  const ls = pg.locator(".ant-select").filter({hasText:/English|Chinese|language|Language/i}).first();
+  if (await ls.count()>0) {
+    await ls.click(); await sl(300);
+    const zh = pg.locator(".ant-select-item-option").filter({hasText:/Chinese/i}).first();
+    if (await zh.count()>0) { await zh.click(); await sl(500); console.log("  OK: switched language"); }
+    await shot(pg,"12_i18n_zh");
+  } else console.log("  SKIP: no lang selector");
+
+  // RESULTS
+  console.log("\n=== AUDIT COMPLETE ===");
+  console.log("Issues: "+issues.length+", Console errors: "+cErr.length+", Network errors: "+nErr.length);
+  issues.forEach(i => console.log("  #"+i.id+" ["+i.sev+"]: "+i.t));
+  await browser.close();
+  writeFileSync(join(DIR,"..","audit_results.json"), JSON.stringify({issues,consoleErrors:cErr,networkErrors:nErr},null,2));
+  console.log("Results saved.");
+}
+run().catch(e=>{console.error("FATAL:",e.message);process.exit(1);});
+

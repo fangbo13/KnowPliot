@@ -12,91 +12,114 @@ function getSystemTheme(): 'light' | 'dark' {
   return 'light';
 }
 
-function getEffectiveTheme(mode: ThemeMode): 'light' | 'dark' {
+// Singleton: shared state across all hooks
+let sharedMode: ThemeMode = 'light';
+let sharedEffective: 'light' | 'dark' = 'light';
+const listeners = new Set<(mode: ThemeMode, effective: 'light' | 'dark') => void>();
+
+try {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+    sharedMode = stored;
+  }
+} catch {}
+
+function computeEffective(mode: ThemeMode): 'light' | 'dark' {
   if (mode === 'system') return getSystemTheme();
   return mode;
 }
 
-export function useTheme() {
-  const [mode, setMode] = useState<ThemeMode>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return (stored as ThemeMode) || 'light';
+function notifyAll() {
+  sharedEffective = computeEffective(sharedMode);
+  document.documentElement.setAttribute('data-theme', sharedEffective);
+  listeners.forEach(fn => fn(sharedMode, sharedEffective));
+}
+
+// Initial theme application
+notifyAll();
+
+// System theme listener (singleton)
+if (typeof window !== 'undefined') {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  mq.addEventListener('change', () => {
+    if (sharedMode === 'system') notifyAll();
   });
+}
 
-  const effective = getEffectiveTheme(mode);
+export function useTheme() {
+  const [mode, setMode] = useState<ThemeMode>(sharedMode);
+  const [effective, setEffective] = useState<'light' | 'dark'>(sharedEffective);
 
-  // Apply data-theme attribute for CSS variables
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', effective);
-  }, [effective]);
-
-  // Listen for system theme changes when mode is 'system'
-  useEffect(() => {
-    if (mode !== 'system') return;
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => {
-      document.documentElement.setAttribute('data-theme', getSystemTheme());
+    const handler = (newMode: ThemeMode, newEffective: 'light' | 'dark') => {
+      setMode(newMode);
+      setEffective(newEffective);
     };
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, [mode]);
+    listeners.add(handler);
+    return () => { listeners.delete(handler); };
+  }, []);
 
   const setThemeMode = useCallback((newMode: ThemeMode) => {
-    setMode(newMode);
+    sharedMode = newMode;
     localStorage.setItem(STORAGE_KEY, newMode);
+    notifyAll();
   }, []);
 
   return { mode, effective, setThemeMode };
 }
 
-// Ant Design theme config for EY brand (Premium)
+// Ant Design theme config — Minimalist Modern (Electric Blue)
 export const eyTheme = {
   light: {
     token: {
-      colorPrimary: '#FFE500',
-      colorText: '#262626',
-      colorTextSecondary: '#595959',
-      colorTextTertiary: '#8C8C8C',
+      colorPrimary: '#0052FF',
+      colorText: '#0F172A',
+      colorTextSecondary: '#64748B',
+      colorTextTertiary: '#595959',
       colorBgLayout: '#FAFAFA',
       colorBgContainer: '#FFFFFF',
       colorBgElevated: '#FFFFFF',
-      colorBorder: '#D9D9D9',
-      colorBorderSecondary: '#F0F0F0',
-      colorError: '#FF4D4F',
-      colorSuccess: '#52C41A',
-      borderRadius: 10,
+      colorBorder: '#E2E8F0',
+      colorBorderSecondary: '#F1F5F9',
+      colorError: '#EF4444',
+      colorSuccess: '#22C55E',
+      borderRadius: 12,
       fontSize: 14,
-      lineHeight: 1.6,
-      controlHeight: 42,
+      lineHeight: 1.625,
+      controlHeight: 44,
       wireframe: false,
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      fontFamilyCode: "'JetBrains Mono', monospace",
     },
     components: {
       Button: {
-        fontWeight: 600,
-        primaryShadow: '0 2px 6px rgba(255, 229, 0, 0.2)',
-        controlHeight: 42,
-        borderRadius: 10,
+        fontWeight: 500,
+        primaryShadow: '0 2px 6px rgba(0, 82, 255, 0.2)',
+        controlHeight: 44,
+        borderRadius: 12,
+        borderRadiusLG: 14,
       },
       Card: {
-        borderRadiusLG: 14,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06)',
-        boxShadowHover: '0 4px 6px rgba(0,0,0,0.03), 0 2px 4px rgba(0,0,0,0.04)',
+        borderRadiusLG: 12,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+        boxShadowHover: '0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04)',
         headerFontSize: 15,
       },
       Input: {
         borderRadius: 10,
-        controlHeight: 42,
-        activeBorderColor: 'rgba(255, 229, 0, 0.5)',
-        hoverBorderColor: 'rgba(255, 229, 0, 0.3)',
+        controlHeight: 44,
+        activeBorderColor: 'rgba(0, 82, 255, 0.5)',
+        hoverBorderColor: 'rgba(0, 82, 255, 0.3)',
+        activeShadow: '0 0 0 2px rgba(0, 82, 255, 0.1)',
       },
       Menu: {
         itemBorderRadius: 10,
         subMenuItemBg: 'transparent',
-        itemSelectedBg: 'rgba(255, 229, 0, 0.10)',
-        itemSelectedColor: '#262626',
-        itemActiveBg: 'rgba(255, 229, 0, 0.15)',
+        itemSelectedBg: 'rgba(0, 82, 255, 0.08)',
+        itemSelectedColor: '#0F172A',
+        itemActiveBg: 'rgba(0, 82, 255, 0.12)',
         itemHoverBg: 'rgba(0, 0, 0, 0.02)',
-        itemHoverColor: '#262626',
+        itemHoverColor: '#0F172A',
         iconSize: 16,
         collapsedIconSize: 16,
       },
@@ -111,12 +134,17 @@ export const eyTheme = {
       Table: {
         borderRadiusLG: 10,
         headerBorderRadius: 10,
+        headerBg: '#F8FAFC',
+        headerColor: '#475569',
       },
       Select: {
         borderRadius: 10,
-        controlHeight: 42,
+        controlHeight: 44,
+        activeBorderColor: 'rgba(0, 82, 255, 0.5)',
+        hoverBorderColor: 'rgba(0, 82, 255, 0.3)',
       },
       Spin: {
+        dotColorPrimary: '#0052FF',
         dotSize: 10,
         dotSizeSM: 8,
         dotSizeLG: 16,
@@ -124,60 +152,80 @@ export const eyTheme = {
       Empty: {
         fontSizeIcon: 48,
       },
+      Alert: {
+        borderRadiusLG: 10,
+      },
+      Modal: {
+        borderRadiusLG: 16,
+      },
+      Tag: {
+        borderRadiusSM: 6,
+        defaultColor: '#475569',
+      },
+      Segmented: {
+        trackPadding: 3,
+        itemSelectedBg: '#0052FF',
+        itemSelectedColor: '#FFFFFF',
+        borderRadius: 10,
+      },
     },
   },
   dark: {
     token: {
-      colorPrimary: '#FFE500',
-      colorText: '#E0E0E0',
-      colorTextSecondary: '#A6A6A6',
-      colorTextTertiary: '#737373',
-      colorBgLayout: '#141414',
-      colorBgContainer: '#1F1F1F',
-      colorBgElevated: '#2A2A2A',
-      colorBorder: '#434343',
-      colorBorderSecondary: '#303030',
-      colorError: '#FF4D4F',
-      colorSuccess: '#52C41A',
-      borderRadius: 10,
+      colorPrimary: '#4D7CFF',
+      colorText: '#E2E8F0',
+      colorTextSecondary: '#94A3B8',
+      colorTextTertiary: '#64748B',
+      colorBgLayout: '#0B1120',
+      colorBgContainer: '#1E293B',
+      colorBgElevated: '#253042',
+      colorBorder: '#334155',
+      colorBorderSecondary: '#2D3A4F',
+      colorError: '#F87171',
+      colorSuccess: '#4ADE80',
+      borderRadius: 12,
       fontSize: 14,
-      lineHeight: 1.6,
-      controlHeight: 42,
+      lineHeight: 1.625,
+      controlHeight: 44,
       wireframe: false,
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     },
     algorithm: antTheme.darkAlgorithm,
     components: {
       Button: {
-        fontWeight: 600,
-        primaryShadow: '0 2px 8px rgba(0,0,0,0.3)',
-        controlHeight: 42,
-        borderRadius: 10,
+        fontWeight: 500,
+        primaryShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+        controlHeight: 44,
+        borderRadius: 12,
+        borderRadiusLG: 14,
       },
       Card: {
-        borderRadiusLG: 14,
+        borderRadiusLG: 12,
         boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
         boxShadowHover: '0 4px 6px rgba(0,0,0,0.3)',
         headerFontSize: 15,
       },
       Input: {
         borderRadius: 10,
-        controlHeight: 42,
+        controlHeight: 44,
+        activeBorderColor: 'rgba(77, 124, 255, 0.5)',
+        hoverBorderColor: 'rgba(77, 124, 255, 0.3)',
       },
       Menu: {
         itemBorderRadius: 10,
         subMenuItemBg: 'transparent',
-        itemSelectedBg: 'rgba(255, 229, 0, 0.15)',
-        itemSelectedColor: '#E0E0E0',
-        itemActiveBg: 'rgba(255, 229, 0, 0.2)',
+        itemSelectedBg: 'rgba(77, 124, 255, 0.15)',
+        itemSelectedColor: '#E2E8F0',
+        itemActiveBg: 'rgba(77, 124, 255, 0.2)',
         itemHoverBg: 'rgba(255, 255, 255, 0.04)',
-        itemHoverColor: '#E0E0E0',
+        itemHoverColor: '#E2E8F0',
         iconSize: 16,
         collapsedIconSize: 16,
       },
       Layout: {
-        siderBg: '#1F1F1F',
-        headerBg: '#1F1F1F',
-        bodyBg: '#141414',
+        siderBg: '#1E293B',
+        headerBg: '#1E293B',
+        bodyBg: '#0B1120',
       },
       Typography: {
         titleMarginBottom: 12,
@@ -185,18 +233,36 @@ export const eyTheme = {
       Table: {
         borderRadiusLG: 10,
         headerBorderRadius: 10,
+        headerBg: '#1A2535',
+        headerColor: '#94A3B8',
       },
       Select: {
         borderRadius: 10,
-        controlHeight: 42,
+        controlHeight: 44,
       },
       Spin: {
+        dotColorPrimary: '#4D7CFF',
         dotSize: 10,
         dotSizeSM: 8,
         dotSizeLG: 16,
       },
       Empty: {
         fontSizeIcon: 48,
+      },
+      Alert: {
+        borderRadiusLG: 10,
+      },
+      Modal: {
+        borderRadiusLG: 16,
+      },
+      Tag: {
+        borderRadiusSM: 6,
+      },
+      Segmented: {
+        trackPadding: 3,
+        itemSelectedBg: '#4D7CFF',
+        itemSelectedColor: '#FFFFFF',
+        borderRadius: 10,
       },
     },
   },

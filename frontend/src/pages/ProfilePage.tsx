@@ -1,22 +1,21 @@
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
-import { Card, Form, Input, Select, Button, Typography, message, Segmented } from 'antd';
-import { SunOutlined, MoonOutlined, DesktopOutlined } from '@ant-design/icons';
+import { Card, Form, Select, Button, message, Typography, Avatar, Divider, Row, Col } from 'antd';
+import { UserOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
-import { useTheme } from '../hooks/useTheme';
 import apiClient from '../api/client';
-
-const { Title } = Typography;
+import i18n from '../i18n';
 
 export default function ProfilePage() {
+  const { t } = useTranslation('common');
   const { user, login } = useAuth();
-  const { mode, setThemeMode } = useTheme();
   const [loading, setLoading] = useState(false);
 
   const handleFinish = async (values: { language_preference: string }) => {
     setLoading(true);
     try {
       const response = await apiClient.patch('/auth/me/preferences/', values);
-      message.success('Profile updated successfully');
+      message.success(t('save_success'));
       if (user) {
         const saved = localStorage.getItem('ey-auth');
         const token = saved ? JSON.parse(saved).token : null;
@@ -25,8 +24,14 @@ export default function ProfilePage() {
           user: { ...user, ...response.data },
         });
       }
+      // Sync i18n language
+      const newLang = values.language_preference;
+      if (newLang === 'en' || newLang === 'zh') {
+        i18n.changeLanguage(newLang);
+        localStorage.setItem('ey-language', newLang);
+      }
     } catch {
-      message.error('Failed to update profile');
+      message.error(t('save_error'));
     } finally {
       setLoading(false);
     }
@@ -34,22 +39,114 @@ export default function ProfilePage() {
 
   return (
     <div style={{ maxWidth: 'min(680px, 100%)', width: '100%', margin: '0 auto' }}>
-      <Card style={{ marginBottom: 16 }}>
-        <Title level={4}>Profile Settings</Title>
+      {/* P1-2: Account Info Card — display all user model fields */}
+      <Card
+        title={
+          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            {t('account_info')}
+          </span>
+        }
+        style={{ marginBottom: 16 }}
+      >
+        {/* Avatar + Username header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
+          <Avatar
+            size={64}
+            icon={<UserOutlined />}
+            style={{
+              background: 'var(--gradient-accent)',
+              fontSize: 28,
+              color: '#FFFFFF',
+            }}
+          >
+            {user?.username?.charAt(0)?.toUpperCase()}
+          </Avatar>
+          <div>
+            <Typography.Text strong style={{ fontSize: 16 }}>
+              {user?.username || user?.email}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {user?.email}
+            </Typography.Text>
+          </div>
+        </div>
+
+        <Divider style={{ margin: '0 0 16px' }} />
+
+        {/* Detail fields in a responsive grid */}
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('service_line')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.service_line || (
+                  <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
+                    {t('field_not_set')}
+                  </span>
+                )}
+              </div>
+            </div>
+          </Col>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('office_location')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.office_location || (
+                  <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
+                    {t('field_not_set')}
+                  </span>
+                )}
+              </div>
+            </div>
+          </Col>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('role_level')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.role_level || (
+                  <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
+                    {t('field_not_set')}
+                  </span>
+                )}
+              </div>
+            </div>
+          </Col>
+          <Col xs={24} sm={12}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+                {t('email')}
+              </Typography.Text>
+              <div style={{ fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                {user?.email || '—'}
+              </div>
+            </div>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* P1-2: Preferences Card — language preference (editable) */}
+      <Card
+        title={
+          <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
+            {t('preferences')}
+          </span>
+        }
+        style={{ marginBottom: 16 }}
+      >
         <Form
           layout="vertical"
           initialValues={{
-            email: user?.email,
-            username: user?.username,
             language_preference: user?.language_preference || 'en',
           }}
           onFinish={handleFinish}
         >
-          <Form.Item label="Email" name="email">
-            <Input disabled />
-          </Form.Item>
-
-          <Form.Item label="Language Preference" name="language_preference">
+          <Form.Item label={t('language_pref')} name="language_preference">
             <Select>
               <Select.Option value="en">English</Select.Option>
               <Select.Option value="zh">中文</Select.Option>
@@ -58,27 +155,10 @@ export default function ProfilePage() {
 
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={loading}>
-              Save Changes
+              {t('save_changes')}
             </Button>
           </Form.Item>
         </Form>
-      </Card>
-
-      <Card>
-        <Title level={4}>Appearance</Title>
-        <p style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>
-          Choose your preferred theme. The dark mode applies to all pages.
-        </p>
-        <Segmented
-          size="large"
-          value={mode}
-          onChange={(val) => setThemeMode(val as 'light' | 'dark' | 'system')}
-          options={[
-            { label: 'Light', value: 'light', icon: <SunOutlined /> },
-            { label: 'Dark', value: 'dark', icon: <MoonOutlined /> },
-            { label: 'System', value: 'system', icon: <DesktopOutlined /> },
-          ]}
-        />
       </Card>
     </div>
   );

@@ -1,0 +1,11 @@
+*.sqlite3
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.DS_Store
+.git
+audit_reports
+*.md
+!README.md
+media

@@ -1,0 +1,352 @@
+{
+  "startTime": "2026-06-24T16:16:37.724Z",
+  "env": {
+    "baseUrl": "http://localhost:3000",
+    "apiUrl": "http://localhost:8000/api/v1"
+  },
+  "total": 44,
+  "pass": 38,
+  "fail": 2,
+  "warn": 4,
+  "bugs": [
+    {
+      "id": "BUG-001",
+      "module": "CHAT",
+      "title": "Chat input textarea not found",
+      "severity": "P0",
+      "category": "Functional",
+      "steps": "Navigate to /chat after login",
+      "expected": "Textarea input at bottom of chat page",
+      "actual": "No textarea found",
+      "screenshot": null
+    },
+    {
+      "id": "BUG-002",
+      "module": "CHAT",
+      "title": "No AI response after 15s wait",
+      "severity": "P1",
+      "category": "Functional",
+      "steps": [
+        "Send chat message",
+        "Wait 15 seconds"
+      ],
+      "expected": "Streaming indicator or AI response visible",
+      "actual": "No assistant content visible",
+      "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-streaming_response-desktop-light.png"
+    }
+  ],
+  "ux": [],
+  "modules": {
+    "AUTH": {
+      "tests": [
+        {
+          "id": "AUTH-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-page_view-desktop-light.png"
+        },
+        {
+          "id": "AUTH-02",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-demo_hint-desktop-light.png",
+          "details": "Demo credentials visible"
+        },
+        {
+          "id": "AUTH-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-empty_validation-desktop-light.png"
+        },
+        {
+          "id": "AUTH-04",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-invalid_email-desktop-light.png"
+        },
+        {
+          "id": "AUTH-05",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-error_state-desktop-light.png"
+        },
+        {
+          "id": "AUTH-06",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-page_view-mobile-light.png",
+          "note": "Brand panel hidden on mobile ✓"
+        },
+        {
+          "id": "AUTH-07",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\login-page_view-desktop-dark.png",
+          "note": "Dark theme applied"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "CHAT": {
+      "tests": [
+        {
+          "id": "CHAT-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-initial_view-desktop-light.png",
+          "details": "Welcome screen"
+        },
+        {
+          "id": "CHAT-02",
+          "status": "fail"
+        },
+        {
+          "id": "CHAT-03",
+          "status": "fail",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-streaming_response-desktop-light.png"
+        },
+        {
+          "id": "CHAT-04",
+          "status": "warn",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-response_complete-desktop-light.png",
+          "note": "No citations visible (non-RAG query or different UI pattern)"
+        },
+        {
+          "id": "CHAT-05",
+          "status": "warn",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-new_session-desktop-light.png",
+          "note": "New session created but quick action cards may have different selectors"
+        },
+        {
+          "id": "CHAT-06",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-page_view-desktop-dark.png"
+        },
+        {
+          "id": "CHAT-07",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\chat-page_view-mobile-light.png",
+          "note": "Hamburger menu visible on mobile"
+        }
+      ],
+      "bugs": [
+        "BUG-001",
+        "BUG-002"
+      ],
+      "ux": []
+    },
+    "SIDE": {
+      "tests": [
+        {
+          "id": "SIDE-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\sidebar-full_view-desktop-light.png",
+          "details": "Sidebar: true, Sessions: 0, Search: true"
+        },
+        {
+          "id": "SIDE-02",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\sidebar-search_filtered-desktop-light.png"
+        },
+        {
+          "id": "SIDE-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\sidebar-user_area-desktop-light.png"
+        },
+        {
+          "id": "SIDE-04",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\sidebar-header_bar-desktop-light.png"
+        },
+        {
+          "id": "SIDE-05",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\sidebar-mobile_layout-mobile.png",
+          "note": "Mobile layout captured"
+        },
+        {
+          "id": "SIDE-05b",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\sidebar-mobile_drawer-open-mobile.png",
+          "note": "Drawer opened on mobile"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "PROF": {
+      "tests": [
+        {
+          "id": "PROF-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\profile-page_view-desktop-light.png",
+          "details": "3 form items, 4 inputs"
+        },
+        {
+          "id": "PROF-02",
+          "status": "warn",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\profile-email_readonly-desktop-light.png",
+          "note": "Email field may be editable or not found"
+        },
+        {
+          "id": "PROF-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\profile-lang_dropdown-desktop-light.png"
+        },
+        {
+          "id": "PROF-04",
+          "status": "warn",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\profile-page_view-desktop-light.png",
+          "note": "Minimal profile page noted as UX issue"
+        },
+        {
+          "id": "PROF-05",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\profile-page_view-mobile-light.png"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "KB": {
+      "tests": [
+        {
+          "id": "KB-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\knowledge-page_view-desktop-light.png",
+          "details": "Table: true, Upload: true"
+        },
+        {
+          "id": "KB-02",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\knowledge-status_tags-desktop-light.png",
+          "details": "8 status tags visible"
+        },
+        {
+          "id": "KB-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\knowledge-page_view-mobile-light.png"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "ONB": {
+      "tests": [
+        {
+          "id": "ONB-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\onboarding-modal_view-desktop-light.png",
+          "details": "3 feature cards in modal"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "THM": {
+      "tests": [
+        {
+          "id": "THM-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\theme-light_chat-desktop-light.png"
+        },
+        {
+          "id": "THM-02",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\theme-dark_chat-desktop-dark.png"
+        },
+        {
+          "id": "THM-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\theme-dark_sidebar-desktop-dark.png"
+        },
+        {
+          "id": "THM-04",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\theme-light_chat-desktop-light-2.png"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "I18N": {
+      "tests": [
+        {
+          "id": "I18N-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\i18n-chat_en-desktop-light.png",
+          "details": "Placeholder: \"\""
+        },
+        {
+          "id": "I18N-02",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\i18n-chat_zh-desktop-light.png",
+          "details": "Placeholder: \"\""
+        },
+        {
+          "id": "I18N-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\i18n-sidebar_zh-desktop-light.png"
+        },
+        {
+          "id": "I18N-04",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\i18n-chat_en-desktop-light-2.png"
+        },
+        {
+          "id": "I18N-05",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\i18n-login_zh-desktop-light.png"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "RSP": {
+      "tests": [
+        {
+          "id": "RSP-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\responsive-layout-desktop.png"
+        },
+        {
+          "id": "RSP-02",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\responsive-layout-tablet.png"
+        },
+        {
+          "id": "RSP-03",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\responsive-chat-mobile.png"
+        },
+        {
+          "id": "RSP-04",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\responsive-login-mobile.png"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    },
+    "ERR": {
+      "tests": [
+        {
+          "id": "ERR-01",
+          "status": "pass",
+          "screenshot": "d:\\Github\\Onborading-AI\\project_audit_output\\screenshots\\error-401_redirect-desktop-light.png",
+          "note": "Redirected to /login on invalid token ✓"
+        },
+        {
+          "id": "ERR-02",
+          "status": "pass",
+          "note": "No error alerts (normal state — no errors currently)"
+        }
+      ],
+      "bugs": [],
+      "ux": []
+    }
+  },
+  "endTime": "2026-06-24T16:20:05.039Z",
+  "summary": {
+    "total": 44,
+    "passed": 38,
+    "failed": 2,
+    "warnings": 4,
+    "passRate": "86.4%",
+    "bugCount": 2,
+    "uxIssueCount": 0
+  }
+}

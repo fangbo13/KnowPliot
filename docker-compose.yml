@@ -29,9 +29,16 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: >
-      sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.docker
+    # V4.6: gunicorn with threaded workers replaces runserver so concurrent SSE chat
+    # streams don't block each other (each reply holds a worker thread for its whole
+    # duration). 2 workers x 8 threads = 16 concurrent streams. --reload keeps dev
+    # auto-reload. --timeout 120 > the app-level 60s SSE limit so long replies aren't killed.
+    command:
+      - sh
+      - -c
+      - "python manage.py migrate --no-input && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 8 --worker-class gthread --timeout 120 --graceful-timeout 30 --reload"
     volumes:
       - ./backend:/app
       - media_volume:/app/media
@@ -49,6 +56,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.docker
     command: celery -A config worker -l info -c 4
     volumes:
       - ./backend:/app
@@ -65,12 +74,14 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    command: npm run dev -- --host 0.0.0.0
+      target: final
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
     ports:
-      - "3000:3000"
+      - "3003:80"
     depends_on:
       - backend
 

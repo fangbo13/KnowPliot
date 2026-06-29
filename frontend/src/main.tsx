@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React, { useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
@@ -8,13 +8,16 @@ import { useTheme, eyTheme } from './hooks/useTheme';
 import './i18n';
 import './styles/globals.css';
 
-function ThemedApp() {
+function ThemeRoot({ children }: { children: React.ReactNode }) {
   const { effective } = useTheme();
-  const themeConfig = effective === 'dark' ? eyTheme.dark : eyTheme.light;
+  const themeConfig = useMemo(
+    () => (effective === 'dark' ? eyTheme.dark : eyTheme.light),
+    [effective]
+  );
 
   return (
     <ConfigProvider theme={themeConfig}>
-      <App />
+      {children}
     </ConfigProvider>
   );
 }
@@ -23,7 +26,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <ThemedApp />
+        <ThemeRoot>
+          <App />
+        </ThemeRoot>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>

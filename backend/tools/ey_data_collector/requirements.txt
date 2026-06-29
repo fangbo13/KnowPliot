@@ -1,0 +1,40 @@
+# ──────────────────────────────────────────────────────────────────
+# EY Data Collector — 独立依赖列表（无 Django 依赖）
+# ──────────────────────────────────────────────────────────────────
+#
+# 所有依赖对齐 backend/pyproject.toml 中的版本约束，
+# 新增依赖（pyyaml/pdfplumber/python-docx/pypdf）为独立脚本专用。
+#
+# 安装方式:
+#   pip install -r requirements.txt
+# ──────────────────────────────────────────────────────────────────
+
+# HTTP 客户端 — 对齐 pyproject.toml httpx[http2]>=0.27
+httpx[http2]>=0.27
+
+# HTML 内容提取 — 对齐 pyproject.toml trafilatura>=1.8
+trafilatura>=1.8
+
+# XSS 内容清洗 — 对齐 pyproject.toml bleach>=6.1
+bleach>=6.1
+
+# PDF/Word 文档提取 — 对齐 pyproject.toml docling>=2.5
+docling>=2.5
+
+# PDF 备选提取（独立脚本新增）
+pdfplumber>=0.11
+
+# Word 备选提取（独立脚本新增）
+python-docx>=1.1
+
+# PDF 最后手段提取（独立脚本新增）
+pypdf>=5.0
+
+# Magic number 检测 — 对齐 pyproject.toml filetype>=1.2
+filetype>=1.2
+
+# Schema 验证 — 对齐 pyproject.toml pydantic>=2.0
+pydantic>=2.0
+
+# YAML 配置加载（独立脚本新增）
+pyyaml>=6.0

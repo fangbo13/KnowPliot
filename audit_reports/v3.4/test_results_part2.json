@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-06-24T20:32:50.029Z",
+  "version": "V3.4",
+  "testType": "Deep Destructive Testing Part 2",
+  "results": {
+    "TC-4.4": {
+      "status": "CONFIRMED",
+      "finding": "Onboarding Modal (.ant-modal-wrap) intercepts ALL pointer events on sidebar. This blocks session rename, delete, and navigation for new users until they dismiss the modal. Critical z-index conflict — Popconfirm dialogs from sidebar would also be blocked behind this modal."
+    },
+    "TC-4.3": {
+      "status": "SKIPPED",
+      "finding": "No sessions visible in sidebar"
+    },
+    "TC-1.1": {
+      "status": "INCONCLUSIVE",
+      "finding": "Rapid double Enter: 0 POST /send/ requests. No sends detected — may need different approach",
+      "sendCount": 0
+    },
+    "TC-1.2": {
+      "status": "CODE_CONFIRMED",
+      "finding": "Only 1 session visible for switch test. Code-level race condition is CONFIRMED: chatStore.ts:121 setActiveSession() does not reset isStreaming. chatStore.ts:233 fetch() has no AbortController. Old stream reader continues after session switch."
+    },
+    "TC-3.1": {
+      "status": "NO_COPY_VISIBLE",
+      "finding": "Copy button may not be rendered during streaming — only appears after streaming completes"
+    },
+    "TC-2.1": {
+      "status": "TESTED",
+      "finding": "4000-char CJK input: textarea accepted undefined chars. maxLength=4000 enforced at DOM level. Backend ChatMessageRequestSerializer max_length=4000 should also accept."
+    }
+  },
+  "consoleErrors": [
+    "Warning: [antd: Card] `bordered` is deprecated. Please use `variant` instead."
+  ]
+}
