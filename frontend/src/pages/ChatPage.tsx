@@ -11,6 +11,7 @@ import { message as antMessage } from 'antd';
 import { CheckOutlined, CloseOutlined, ArrowDownOutlined, EditOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useChatStore } from '../store/chatStore';
+import { useSpaceStore } from '../store/spaceStore';
 import { abortActiveStream } from '../stream/StreamLifecycleManager';
 import { cleanupTokenBatcher } from '../stream/TokenBatchRenderer';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
@@ -54,6 +55,9 @@ export default function ChatPageContainer() {
   const streamPhase = useChatStore((s) => s.streamPhase);
   const isSendLocked = useChatStore((s) => s.isSendLocked);
   const isStreaming = streamPhase !== 'idle';
+
+  const activeSpace = useSpaceStore((s) => s.getActiveSpace());
+  const templateQuickQuestions = activeSpace?.settings?.quick_questions;
 
   const [inputValue, setInputValue] = useState('');
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -158,7 +162,11 @@ export default function ChatPageContainer() {
   if (!activeSessionId && messages.length === 0) {
     return (
       <div className="chat-view">
-        <WelcomeScreen onQuickAction={handleQuickAction} onSendMessage={(m) => sendMessage(m)} />
+        <WelcomeScreen
+          onQuickAction={handleQuickAction}
+          onSendMessage={(m) => sendMessage(m)}
+          templateQuickQuestions={templateQuickQuestions}
+        />
         <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
           <div style={{
             opacity: aiStatusText ? 1 : 0,

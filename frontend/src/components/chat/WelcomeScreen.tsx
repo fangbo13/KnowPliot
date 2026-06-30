@@ -16,9 +16,10 @@ import ChatComposer from './ChatComposer';
 interface WelcomeScreenProps {
   onQuickAction: (q: string) => void;
   onSendMessage?: (msg: string) => void;
+  templateQuickQuestions?: string[];
 }
 
-export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeScreenProps) {
+export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQuickQuestions }: WelcomeScreenProps) {
   const { t, i18n } = useTranslation('chat');
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -29,7 +30,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
 
-  const quickActions = useMemo(() => (
+  const defaultQuickActions = useMemo(() => (
     isChinese
       ? [
           { icon: <LaptopOutlined />, question: '如何设置公司邮箱和电脑？', label: 'IT 设置' },
@@ -48,6 +49,17 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
           { icon: <TeamOutlined />, question: 'Who is my mentor or buddy?', label: 'Mentor' },
         ]
   ), [isChinese]);
+
+  const activeQuickActions = useMemo(() => {
+    if (templateQuickQuestions && templateQuickQuestions.length > 0) {
+      return templateQuickQuestions.map((q, idx) => ({
+        icon: <BookOutlined />,
+        question: q,
+        label: isChinese ? `问题 ${idx + 1}` : `Question ${idx + 1}`,
+      }));
+    }
+    return defaultQuickActions;
+  }, [templateQuickQuestions, defaultQuickActions, isChinese]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -82,7 +94,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
       />
 
       <div className="welcome-suggest-grid">
-        {quickActions.map((action) => (
+        {activeQuickActions.map((action) => (
           <button
             key={action.label}
             className="welcome-suggest"

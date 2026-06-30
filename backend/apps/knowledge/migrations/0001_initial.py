@@ -8,6 +8,19 @@ import uuid
 from django.db import migrations, models
 
 
+def enable_pgvector_extension(apps, schema_editor):
+    """Enable pgvector only when the migration is running on PostgreSQL."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
+
+def disable_pgvector_extension(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("DROP EXTENSION IF EXISTS vector;")
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -17,12 +30,8 @@ class Migration(migrations.Migration):
 
     operations = [
         # V3.7 fix: Create pgvector extension BEFORE CreateModel references VectorField.
-        # In SQLite this is a no-op (RunSQL reverse_sql handles graceful fallback).
-        migrations.RunSQL(
-            sql="CREATE EXTENSION IF NOT EXISTS vector;",
-            reverse_sql="DROP EXTENSION IF EXISTS vector;",
-            state_operations=[],  # No model state change — this is DB-level only
-        ),
+        # In SQLite/local tests this is skipped by the conditional function.
+        migrations.RunPython(enable_pgvector_extension, disable_pgvector_extension),
         migrations.CreateModel(
             name='AnswerTemplate',
             fields=[

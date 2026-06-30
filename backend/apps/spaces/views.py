@@ -21,7 +21,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from .models import InviteCode, KnowledgeSpace, Organization, SpaceMembership
+from .models import (
+    InviteCode,
+    KnowledgeSpace,
+    Organization,
+    SpaceEmailInvite,
+    SpaceMembership,
+)
 from .permissions import (
     SPACE_ARCHIVE,
     SPACE_INVITE,
@@ -36,12 +42,14 @@ from .permissions import (
     is_platform_admin,
 )
 from .serializers import (
+    AddMemberByEmailSerializer,
     InviteCodeCreateSerializer,
     InviteCodeSerializer,
     JoinByCodeSerializer,
     KnowledgeSpaceSerializer,
     SpaceCreateSerializer,
     SpaceMembershipSerializer,
+    UpdateMemberRoleSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -240,8 +248,14 @@ def space_join(request):
     )
 
 
-class SpaceMembersView(generics.ListAPIView):
-    """List members of a space (requires space.view)."""
+class SpaceMembersView(generics.ListCreateAPIView):
+    """GET: list members (space.view). POST: add a member by email (space.manage_members).
+
+    V7.0: adding by email is the admin path that lets a teammate maintain the
+    knowledge base. If the email already has an account, an active membership is
+    created and the user is notified; otherwise a pending SpaceEmailInvite is
+    created and redeemed automatically when that email registers.
+    """
 
     serializer_class = SpaceMembershipSerializer
     permission_classes = [IsAuthenticated]
@@ -253,6 +267,108 @@ class SpaceMembersView(generics.ListAPIView):
             from rest_framework.exceptions import NotFound
             raise NotFound("Space not found.")
         return SpaceMembership.objects.filter(space=space).select_related("user")
+
+    def create(self, request, *args, **kwargs):
+        space = get_space_or_404(self.kwargs["pk"])
+        if not has_space_permission(request.user, space, SPACE_MANAGE_MEMBERS):
+            _audit(request.user, "permission_denied", target_id=space.id,
+                   details={"action": SPACE_MANAGE_MEMBERS}, request=request)
+            raise PermissionDenied("You cannot manage members of this space.")
+
+        serializer = AddMemberByEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].lower()
+        role = serializer.validated_data["role"]
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        target = User.objects.filter(email__iexact=email).first()
+
+        if target is not None:
+            membership, created = SpaceMembership.objects.get_or_create(
+                space=space, user=target,
+                defaults={"role": role, "status": "active",
+                          "invited_by": request.user, "last_accessed_at": timezone.now()},
+            )
+            if not created:
+                membership.role = role
+                membership.status = "active"
+                membership.save(update_fields=["role", "status", "updated_at"])
+            _audit(request.user, "space_member_add", target_id=space.id,
+                   details={"member": email, "role": role, "pending": False}, request=request)
+            try:
+                from apps.notifications.services import notify
+                notify(target, "space_invite",
+                       title=f"You were added to {space.name}",
+                       body=f"Your role: {role}.", link="/chat",
+                       metadata={"space_id": str(space.id), "role": role})
+            except Exception:
+                pass
+            return Response(
+                {"pending": False, "member": SpaceMembershipSerializer(membership).data},
+                status=status.HTTP_201_CREATED,
+            )
+
+        # No account yet — create/refresh a pending email invite.
+        invite, _ = SpaceEmailInvite.objects.update_or_create(
+            space=space, email=email,
+            defaults={"role": role, "status": "pending", "invited_by": request.user},
+        )
+        _audit(request.user, "space_email_invite", target_id=space.id,
+               details={"member": email, "role": role, "pending": True}, request=request)
+        return Response(
+            {"pending": True, "email": email, "role": role},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def space_member_detail(request, pk, user_id):
+    """PATCH: change a member's role. DELETE: remove (revoke) a member.
+
+    Both require space.manage_members. A space must always keep at least one
+    active owner, so the last owner cannot be downgraded or removed.
+    """
+    space = get_space_or_404(pk)
+    if not has_space_permission(request.user, space, SPACE_MANAGE_MEMBERS):
+        _audit(request.user, "permission_denied", target_id=space.id,
+               details={"action": SPACE_MANAGE_MEMBERS}, request=request)
+        raise PermissionDenied("You cannot manage members of this space.")
+
+    membership = SpaceMembership.objects.filter(space=space, user_id=user_id).first()
+    if membership is None:
+        from rest_framework.exceptions import NotFound
+        raise NotFound("Member not found.")
+
+    def _is_last_owner() -> bool:
+        if membership.role != SpaceMembership.ROLE_OWNER:
+            return False
+        owners = SpaceMembership.objects.filter(
+            space=space, role=SpaceMembership.ROLE_OWNER, status="active"
+        ).exclude(pk=membership.pk).exists()
+        return not owners
+
+    if request.method == "DELETE":
+        if _is_last_owner():
+            raise ValidationError({"detail": "Cannot remove the last owner of a space."})
+        membership.status = "revoked"
+        membership.save(update_fields=["status", "updated_at"])
+        _audit(request.user, "space_member_remove", target_id=space.id,
+               details={"member_user_id": str(user_id)}, request=request)
+        return Response({"removed": True})
+
+    # PATCH — change role
+    serializer = UpdateMemberRoleSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    new_role = serializer.validated_data["role"]
+    if _is_last_owner() and new_role != SpaceMembership.ROLE_OWNER:
+        raise ValidationError({"detail": "Cannot downgrade the last owner of a space."})
+    membership.role = new_role
+    membership.save(update_fields=["role", "updated_at"])
+    _audit(request.user, "space_member_update", target_id=space.id,
+           details={"member_user_id": str(user_id), "role": new_role}, request=request)
+    return Response(SpaceMembershipSerializer(membership).data)
 
 
 class InviteCodeListCreateView(generics.ListCreateAPIView):

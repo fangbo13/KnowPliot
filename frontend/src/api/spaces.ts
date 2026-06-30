@@ -33,6 +33,13 @@ export interface KnowledgeSpace {
   business_line_name: string | null;
   my_role: SpaceRole | null;
   member_count: number | null;
+  settings?: {
+    template_id?: string;
+    template_code?: string;
+    scenario_type?: string;
+    quick_questions?: string[];
+    [key: string]: unknown;
+  };
   created_at: string;
   updated_at: string;
 }
@@ -53,11 +60,19 @@ export interface InviteCode {
 
 export interface SpaceMember {
   id: string;
+  user: string;
   user_email: string;
   role: SpaceRole;
   status: string;
   last_accessed_at: string | null;
   created_at: string;
+}
+
+export interface AddMemberResult {
+  pending: boolean;
+  email?: string;
+  role?: SpaceRole;
+  member?: SpaceMember;
 }
 
 export const spacesApi = {
@@ -99,6 +114,22 @@ export const spacesApi = {
   async members(id: string): Promise<SpaceMember[]> {
     const { data } = await apiClient.get(`/spaces/${id}/members/`);
     return Array.isArray(data) ? data : data.results ?? [];
+  },
+
+  // V7.0: add a member by email. Existing accounts become active members and
+  // are notified; unknown emails become a pending invite redeemed on signup.
+  async addMember(id: string, body: { email: string; role: SpaceRole }): Promise<AddMemberResult> {
+    const { data } = await apiClient.post(`/spaces/${id}/members/`, body);
+    return data;
+  },
+
+  async updateMember(id: string, userId: string, role: SpaceRole): Promise<SpaceMember> {
+    const { data } = await apiClient.patch(`/spaces/${id}/members/${userId}/`, { role });
+    return data;
+  },
+
+  async removeMember(id: string, userId: string): Promise<void> {
+    await apiClient.delete(`/spaces/${id}/members/${userId}/`);
   },
 
   async listInvites(id: string): Promise<InviteCode[]> {

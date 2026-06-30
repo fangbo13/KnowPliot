@@ -6,7 +6,15 @@
 
 from rest_framework import serializers
 
-from .models import BusinessLine, InviteCode, KnowledgeSpace, Organization, SpaceMembership
+from .models import (
+    AdminRegistrationCode,
+    BusinessLine,
+    InviteCode,
+    KnowledgeSpace,
+    Organization,
+    SpaceEmailInvite,
+    SpaceMembership,
+)
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -37,7 +45,7 @@ class KnowledgeSpaceSerializer(serializers.ModelSerializer):
             "id", "name", "code", "description", "icon", "language",
             "visibility", "status", "organization", "organization_name",
             "business_line", "business_line_name",
-            "my_role", "member_count", "created_at", "updated_at",
+            "my_role", "member_count", "settings", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
@@ -110,3 +118,71 @@ class InviteCodeCreateSerializer(serializers.Serializer):
 
 class JoinByCodeSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=64, trim_whitespace=True)
+
+
+# ── V7.0 Admin registration codes ────────────────────────────────────
+
+class AdminRegistrationCodeSerializer(serializers.ModelSerializer):
+    """Read serializer — never exposes the hash; only the display prefix."""
+
+    organization_name = serializers.CharField(source="organization.name", read_only=True)
+    business_line_name = serializers.CharField(
+        source="business_line.name", read_only=True, default=None
+    )
+
+    class Meta:
+        model = AdminRegistrationCode
+        fields = [
+            "id", "code_prefix", "grants_role", "organization", "organization_name",
+            "business_line", "business_line_name", "expires_at", "max_uses",
+            "used_count", "status", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class AdminRegistrationCodeCreateSerializer(serializers.Serializer):
+    grants_role = serializers.ChoiceField(choices=[c[0] for c in AdminRegistrationCode.GRANT_CHOICES])
+    organization = serializers.PrimaryKeyRelatedField(queryset=Organization.objects.all())
+    business_line = serializers.PrimaryKeyRelatedField(
+        queryset=BusinessLine.objects.all(), required=False, allow_null=True
+    )
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    max_uses = serializers.IntegerField(required=False, min_value=0, default=0)
+
+    def validate(self, attrs):
+        role = attrs["grants_role"]
+        bl = attrs.get("business_line")
+        org = attrs["organization"]
+        if role == AdminRegistrationCode.GRANT_CHOICES[1][0]:  # business_admin
+            if bl is None:
+                raise serializers.ValidationError(
+                    {"business_line": "Required when granting business_admin."}
+                )
+            if bl.organization_id != org.id:
+                raise serializers.ValidationError(
+                    {"business_line": "Business line must belong to the organization."}
+                )
+        else:
+            attrs["business_line"] = None  # org_admin ignores business_line
+        return attrs
+
+
+# ── V7.0 Space email invites ─────────────────────────────────────────
+
+class SpaceEmailInviteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SpaceEmailInvite
+        fields = ["id", "email", "space", "role", "status", "expires_at", "created_at"]
+        read_only_fields = ["id", "space", "status", "created_at"]
+
+
+class AddMemberByEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    role = serializers.ChoiceField(
+        choices=[c[0] for c in SpaceMembership.ROLE_CHOICES],
+        default=SpaceMembership.ROLE_MEMBER,
+    )
+
+
+class UpdateMemberRoleSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=[c[0] for c in SpaceMembership.ROLE_CHOICES])

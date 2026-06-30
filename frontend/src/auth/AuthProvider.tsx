@@ -7,6 +7,11 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import apiClient from '../api/client';
 
+interface AdminScope {
+  org_ids: string[];
+  business_line_ids: string[];
+}
+
 interface User {
   id: string;
   email: string;
@@ -19,6 +24,20 @@ interface User {
   service_line?: string;
   office_location?: string;
   role_level?: string;
+  // V7.0 platform/organization admin scope (axis one — who you are in the org).
+  is_super_admin?: boolean;
+  is_org_admin?: boolean;
+  is_business_admin?: boolean;
+  admin_scope?: AdminScope;
+}
+
+/** V7.0: is this user any kind of admin (platform / org / business line)? */
+export function isAnyAdmin(user?: User | null): boolean {
+  if (!user) return false;
+  return Boolean(
+    user.is_super_admin || user.is_org_admin || user.is_business_admin ||
+    user.is_superuser || user.roles?.includes('admin')
+  );
 }
 
 interface AuthState {
@@ -28,10 +47,8 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  // P1-1: login accepts Partial<User> for roles/permissions because the login
-  // function enriches the user object by deriving roles from role_level if needed.
-  // LoginPage.tsx may not always include roles/permissions from the profile API,
-  // but the enrichment logic in login() fills in the gaps.
+  // Login accepts Partial<User> because auth responses may omit optional profile fields.
+  // V7.0 authorization comes from backend roles/permissions and admin-scope flags only.
   login: (data: { token: string; user: Partial<User> & { id: string; email: string } }) => void;
   logout: () => Promise<boolean>;
 }
@@ -46,20 +63,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         // V4.0 migration: if old format lacks roles/permissions, derive from is_hr_admin
-        // P1-1: Also derive from role_level if roles are empty (admin role_level → roles=['admin'])
+        // V7.0: role_level is display metadata only and must not grant access.
         if (parsed.user && !parsed.user.roles) {
           parsed.user.roles = parsed.user.is_hr_admin ? ['hr'] : [];
           parsed.user.permissions = []; // Will be populated on next login
-        }
-        // P1-1: If roles array is empty but role_level exists, derive roles from it
-        if (parsed.user && parsed.user.roles?.length === 0 && parsed.user.role_level) {
-          const roleLevelMap: Record<string, string[]> = {
-            'admin': ['admin'],
-            'superadmin': ['admin', 'superadmin'],
-            'hr': ['hr'],
-            'employee': [],
-          };
-          parsed.user.roles = roleLevelMap[parsed.user.role_level] || [parsed.user.role_level];
         }
         if (parsed.user && parsed.user.roles?.length === 0 && parsed.user.is_hr_admin) {
           parsed.user.roles = ['hr'];
@@ -74,20 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(({ token, user }: { token: string; user: Partial<User> & { id: string; email: string } }) => {
     // V4.0: Ensure roles/permissions are present (backend now provides them)
-    // P1-1: Also derive roles from role_level if roles array is empty.
-    // Some backend responses return role_level='admin' but roles=[], which
-    // causes RoleGuard to deny access. Map role_level to roles as fallback.
+    // V7.0: Never derive authorization from role_level; it is only org metadata.
     let derivedRoles = user.roles || [];
-    if (derivedRoles.length === 0 && user.role_level) {
-      // Map role_level to roles array for RoleGuard compatibility
-      const roleLevelMap: Record<string, string[]> = {
-        'admin': ['admin'],
-        'superadmin': ['admin', 'superadmin'],
-        'hr': ['hr'],
-        'employee': [],
-      };
-      derivedRoles = roleLevelMap[user.role_level] || [user.role_level];
-    }
     // If still empty but is_hr_admin, add 'hr' role
     if (derivedRoles.length === 0 && user.is_hr_admin) {
       derivedRoles = ['hr'];
@@ -105,6 +100,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       service_line: user.service_line,
       office_location: user.office_location,
       role_level: user.role_level,
+      // V7.0 admin scope flags (carried through for the admin console gate)
+      is_super_admin: user.is_super_admin ?? false,
+      is_org_admin: user.is_org_admin ?? false,
+      is_business_admin: user.is_business_admin ?? false,
+      admin_scope: user.admin_scope ?? { org_ids: [], business_line_ids: [] },
     };
     const newState: AuthState = { isAuthenticated: true, user: enrichedUser, token };
     setState(newState);

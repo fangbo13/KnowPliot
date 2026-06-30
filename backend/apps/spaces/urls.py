@@ -14,6 +14,7 @@ from .views import (
     invite_revoke,
     space_archive,
     space_join,
+    space_member_detail,
     space_switch,
 )
 
@@ -24,6 +25,7 @@ urlpatterns = [
     path("<uuid:pk>/archive/", space_archive, name="space-archive"),
     path("<uuid:pk>/switch/", space_switch, name="space-switch"),
     path("<uuid:pk>/members/", SpaceMembersView.as_view(), name="space-members"),
+    path("<uuid:pk>/members/<uuid:user_id>/", space_member_detail, name="space-member-detail"),
     path("<uuid:pk>/invites/", InviteCodeListCreateView.as_view(), name="space-invite-list"),
     path("<uuid:pk>/invites/<uuid:invite_id>/revoke/", invite_revoke, name="space-invite-revoke"),
 ]

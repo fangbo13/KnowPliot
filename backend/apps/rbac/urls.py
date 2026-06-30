@@ -14,6 +14,7 @@ from .views import (
     AdminUserListView,
     AdminUserCreateView,
     AdminUserUpdateView,
+    admin_user_activate,
     admin_user_deactivate,
 )
 
@@ -29,5 +30,6 @@ urlpatterns = [
     path("users/", AdminUserListView.as_view(), name="admin-users-list"),
     path("users/create/", AdminUserCreateView.as_view(), name="admin-users-create"),
     path("users/<uuid:pk>/", AdminUserUpdateView.as_view(), name="admin-users-update"),
+    path("users/<uuid:pk>/activate/", admin_user_activate, name="admin-users-activate"),
     path("users/<uuid:pk>/deactivate/", admin_user_deactivate, name="admin-users-deactivate"),
 ]
