@@ -11,7 +11,6 @@ import {
 } from '@ant-design/icons';
 import { useChatStore } from '../../store/chatStore';
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { useAuth } from '../../auth/AuthProvider';
 import ChatComposer from './ChatComposer';
 
 interface WelcomeScreenProps {
@@ -21,7 +20,6 @@ interface WelcomeScreenProps {
 
 export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeScreenProps) {
   const { t, i18n } = useTranslation('chat');
-  const { user } = useAuth();
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isChinese = i18n.language?.startsWith('zh');
@@ -30,18 +28,6 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
   const streamingSessionId = useChatStore((s) => s.streamingSessionId);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
-
-  const greetingName = useMemo(() => {
-    if (!user) return 'User';
-    const name = user.username || user.email.split('@')[0];
-    return name.charAt(0).toUpperCase() + name.slice(1);
-  }, [user]);
-
-  const welcomeGreeting = useMemo(() => {
-    return isChinese 
-      ? `${greetingName}，接下来想聊点什么？` 
-      : `${greetingName}, what would you like to chat about today?`;
-  }, [isChinese, greetingName]);
 
   const quickActions = useMemo(() => (
     isChinese
@@ -72,10 +58,10 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage }: WelcomeS
   };
 
   return (
-    <div className="welcome gemini-ambient-bg">
+    <div className="welcome">
       <div className="welcome-head">
         <div className="welcome-mark">K</div>
-        <h1 className="welcome-greeting">{welcomeGreeting}</h1>
+        <h1 className="welcome-greeting">{t('welcome_greeting', { defaultValue: 'How can I help with your onboarding?' })}</h1>
         <p className="welcome-sub">{t('welcome_tip')}</p>
       </div>
 
