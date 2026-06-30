@@ -10,8 +10,10 @@ V4.2 SYS-V4.2-020: Added BlacklistCheckingTokenRefreshView — checks if
   refresh tokens to obtain new valid access+refresh pairs.
 """
 
+from django.db import transaction
 from rest_framework import generics, permissions, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
@@ -49,29 +51,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
-        # Add user info to response body (not in JWT, but in API response)
-        user = self.user
-        roles = []
-        if user.is_superuser or user.has_role("admin"):
-            roles.append("admin")
-        if user.has_role("hr"):
-            roles.append("hr")
-        # Phase 2 dual-authorization: is_hr_admin fallback
-        if user.is_hr_admin and "hr" not in roles:
-            roles.append("hr")
-
-        data["user"] = {
-            "id": str(user.id),
-            "email": user.email,
-            "username": user.username,
-            "is_hr_admin": user.is_hr_admin,
-            "roles": roles,
-            "permissions": list(user.get_permissions()),
-            "language_preference": user.language_preference,
-            "service_line": user.service_line,
-            "office_location": user.office_location,
-            "role_level": user.role_level,
-        }
+        # V7.0: single source of truth for the user payload (adds admin scope flags)
+        from .identity import identity_payload
+        data["user"] = identity_payload(self.user)
         return data
 
 
@@ -241,3 +223,121 @@ def logout(request):
         {"detail": "Logged out successfully."},
         status=status.HTTP_200_OK,
     )
+
+
+# ── V7.0 Registration ────────────────────────────────────────────────
+
+class SignupRateThrottle(AnonRateThrottle):
+    """Per-IP throttle for registration / admin-code endpoints (5/min)."""
+    scope = "signup"
+
+
+def _auth_response(user):
+    """Mint a JWT pair and the identity payload — mirrors the login response."""
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from .identity import identity_payload
+
+    refresh = RefreshToken.for_user(user)
+    return {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": identity_payload(user),
+    }
+
+
+def _audit_register(user, action, request, details=None):
+    try:
+        from apps.audit.views import create_audit_log
+        create_audit_log(
+            user=user, action=action, target_type="User",
+            target_id=getattr(user, "id", None), details=details or {}, request=request,
+        )
+    except Exception:  # pragma: no cover - audit must not block registration
+        pass
+
+
+def _provision_new_user(user, request):
+    """Default-space placement + email-invite redemption + welcome notifications."""
+    from apps.spaces.services import join_default_space, redeem_email_invites
+    from apps.notifications.services import notify
+
+    space = join_default_space(user)
+    granted = redeem_email_invites(user)
+
+    notify(
+        user, "welcome",
+        title="Welcome to KnowPilot",
+        body="Your account is ready. Ask questions in your knowledge space anytime.",
+        level="success", link="/chat",
+    )
+    for sp, role in granted:
+        notify(
+            user, "space_invite",
+            title=f"You were added to {sp.name}",
+            body=f"Your role: {role}.",
+            link="/chat", metadata={"space_id": str(sp.id), "role": role},
+        )
+    return space
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([SignupRateThrottle])
+def register(request):
+    """Regular self-registration (Service Line required)."""
+    from .serializers import RegisterSerializer
+
+    serializer = RegisterSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
+    _audit_register(user, "user_register", request,
+                    details={"service_line": user.service_line})
+
+    if not user.is_active:
+        # REQUIRE_SIGNUP_APPROVAL is on — no tokens until an admin approves.
+        return Response(
+            {"detail": "Your account is pending administrator approval.", "pending": True},
+            status=status.HTTP_201_CREATED,
+        )
+
+    _provision_new_user(user, request)
+    return Response(_auth_response(user), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([SignupRateThrottle])
+def register_admin(request):
+    """Admin registration via a tiered Admin Registration Code.
+
+    The code is consumed inside a transaction so an invalid/expired code never
+    leaves an orphan account behind. Super Admin is NOT obtainable here.
+    """
+    from .serializers import AdminRegisterSerializer
+    from apps.spaces.services import redeem_admin_code
+    from apps.notifications.services import notify
+
+    serializer = AdminRegisterSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    raw_code = serializer.validated_data["code"]
+
+    with transaction.atomic():
+        user = serializer.save()
+        membership, code = redeem_admin_code(raw_code, user)
+        if membership is None:
+            # Rolls back the just-created user.
+            raise ValidationError({"code": "Invalid, expired, or exhausted admin code."})
+
+    _audit_register(
+        user, "admin_code_register", request,
+        details={"grants_role": code.grants_role, "code_prefix": code.code_prefix},
+    )
+    scope = code.business_line.code if code.business_line else code.organization.slug
+    notify(
+        user, "role_granted",
+        title="Administrator access granted",
+        body=f"You are now {code.grants_role} for {scope}.",
+        level="success", link="/admin/dashboard",
+        metadata={"role": code.grants_role, "scope": scope},
+    )
+    return Response(_auth_response(user), status=status.HTTP_201_CREATED)

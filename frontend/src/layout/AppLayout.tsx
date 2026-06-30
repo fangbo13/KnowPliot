@@ -15,7 +15,7 @@ import {
   CloseOutlined,
 } from '@ant-design/icons';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
 import { useTheme } from '../hooks/useTheme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { useDebounce } from '../hooks/useDebounce';
@@ -23,6 +23,7 @@ import { useHotkeys } from '../hooks/useHotkeys';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
 import SpaceSwitcher from '../components/SpaceSwitcher';
+import NotificationBell from '../components/NotificationBell';
 import SessionRenameModal from '../components/chat/SessionRenameModal';
 import CommandPalette from '../components/CommandPalette';
 import { chatApi } from '../api/chat';
@@ -123,12 +124,11 @@ export default function AppLayout() {
 
   const userMenu = useMemo(() => {
     const items: any[] = [];
-    const hasHRAccess = user?.roles?.includes('hr') || user?.roles?.includes('admin') || user?.is_hr_admin;
-    if (hasHRAccess) items.push({ key: 'knowledge', icon: <BookOutlined />, label: t('knowledge_base'), onClick: () => navigate('/admin/knowledge') });
-    const hasAdminAccess = user?.roles?.includes('admin') || (user?.is_hr_admin && user?.is_superuser);
-    if (hasAdminAccess) items.push({ key: 'admin-dashboard', icon: <AppstoreOutlined />, label: t('admin_dashboard') || 'Admin Dashboard', onClick: () => navigate('/admin/dashboard') });
+    // V7.0: a single entry into the dedicated admin console for any admin.
+    const showAdminConsole = isAnyAdmin(user);
+    if (showAdminConsole) items.push({ key: 'admin-console', icon: <AppstoreOutlined />, label: t('admin_console'), onClick: () => navigate('/admin') });
     if (canManageSpace) items.push({ key: 'space-manage', icon: <TeamOutlined />, label: t('space_management') || 'Space Management', onClick: () => navigate('/spaces/manage') });
-    if (hasHRAccess || hasAdminAccess || canManageSpace) items.push({ type: 'divider' as const });
+    if (showAdminConsole || canManageSpace) items.push({ type: 'divider' as const });
     items.push({ key: 'profile', icon: <SettingOutlined />, label: t('user_settings'), onClick: () => navigate('/profile') });
     items.push({ type: 'divider' as const });
     items.push({
@@ -140,7 +140,7 @@ export default function AppLayout() {
       },
     });
     return { items };
-  }, [logout, navigate, t, user?.roles, user?.is_hr_admin, user?.is_superuser, canManageSpace]);
+  }, [logout, navigate, t, user, canManageSpace]);
 
   const currentLang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const handleLangChange = useCallback((lang: 'zh' | 'en') => { i18n.changeLanguage(lang); localStorage.setItem('ey-language', lang); }, []);
@@ -389,6 +389,7 @@ export default function AppLayout() {
           <button className="icon-btn" onClick={() => setThemeMode(isDark ? 'light' : 'dark')} aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')} title={isDark ? t('switch_to_light') : t('switch_to_dark')}>
             {isDark ? <SunOutlined /> : <MoonOutlined />}
           </button>
+          <NotificationBell />
           <Dropdown menu={userMenu} placement="bottomRight">
             <button className="icon-btn" aria-label={t('user_menu') || 'User menu'} style={{ width: 'auto', gap: 8, padding: '0 8px' }}>
               <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>

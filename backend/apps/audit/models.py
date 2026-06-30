@@ -62,6 +62,17 @@ class AuditLog(models.Model):
         ("space_member_add", "Space Member Add"),
         ("space_member_update", "Space Member Update"),
         ("permission_denied", "Permission Denied"),
+        # ── Identity / Governance domain (V7.0 new) ──
+        ("user_register", "User Register"),
+        ("admin_code_register", "Admin Code Register"),
+        ("admin_code_create", "Admin Code Create"),
+        ("admin_code_revoke", "Admin Code Revoke"),
+        ("space_member_remove", "Space Member Remove"),
+        ("space_email_invite", "Space Email Invite"),
+        ("notification_broadcast", "Notification Broadcast"),
+        ("signup_approved", "Signup Approved"),
+        ("signup_rejected", "Signup Rejected"),
+        ("user_promote_superadmin", "User Promote Super Admin"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -74,6 +74,8 @@ LOCAL_APPS = [
     "apps.rag",
     "apps.audit",
     "apps.rbac",
+    "apps.notifications",  # V7.0: in-app notifications + announcements
+    "apps.scenario_templates",  # V7.1: Scenario templates center
     # apps.crawler retained inert (V6.0): tables/migrations kept, no API/UI/tasks.
     "apps.crawler",
 ]
@@ -199,6 +201,9 @@ REST_FRAMEWORK = {
         # V4.2 KB-V4.2-BATCH-004: Dedicated upload throttle rates
         "document_upload": "10/minute",  # Per user — prevents API resource exhaustion
         "batch_upload": "3/minute",  # Per user — stricter limit for batch ZIP uploads
+        # V7.0: registration / admin-code throttle — stricter than anon to deter
+        # account-farming and admin-code brute force.
+        "signup": "5/minute",
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
 }
@@ -257,6 +262,25 @@ PGVECTOR_DIMENSION = 1024  # Qwen text-embedding-v4
 # RAG Settings
 RAG_CHUNK_SIZE = int(os.environ.get("RAG_CHUNK_SIZE", "500"))
 RAG_CHUNK_OVERLAP = int(os.environ.get("RAG_CHUNK_OVERLAP", "50"))
+
+# ── V7.0 Identity & Governance ───────────────────────────────────────
+# When True, self-registered regular users land in a "pending" state and must
+# be approved by an admin in the console before they can sign in.
+REQUIRE_SIGNUP_APPROVAL = os.environ.get("REQUIRE_SIGNUP_APPROVAL", "false").lower() == "true"
+
+# When False, public_demo spaces are NOT auto-joinable as guest — the space
+# switcher then lists only spaces the user joined / was invited to / administers.
+ENABLE_PUBLIC_DEMO_SPACES = os.environ.get("ENABLE_PUBLIC_DEMO_SPACES", "true").lower() == "true"
+
+# Default knowledge-space code a new user is placed in, keyed by Service Line.
+# Falls back to DEFAULT_SPACE_CODE ("general") when the line has no mapping.
+SERVICE_LINE_DEFAULT_SPACE = {
+    "assurance": "assurance-onboarding",
+    "consulting": "consulting-onboarding",
+    "tax": "tax-onboarding",
+    "strategy_transactions": "sat-onboarding",
+    "core": "general",
+}
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "8"))
 RAG_SIMILARITY_THRESHOLD = float(os.environ.get("RAG_SIMILARITY_THRESHOLD", "0.55"))
 RAG_LLM_MODEL = os.environ.get("QWEN_CHAT_MODEL", "qwen-plus")

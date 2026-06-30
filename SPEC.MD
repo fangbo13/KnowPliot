@@ -494,7 +494,7 @@ Minimum hard rule: `Document`, `DocumentChunk`, `ChatSession`, `ChatMessage`, `C
 | --- | --- | --- |
 | GET | `/api/v1/templates/` | list scenario templates |
 | POST | `/api/v1/templates/` | create template |
-| POST | `/api/v1/templates/{id}/apply/` | create space from template |
+| POST | `/api/v1/templates/{id}/create-space/` | create space from template |
 | GET | `/api/v1/templates/{id}/versions/` | list template versions |
 
 ### 6.3 Knowledge APIs
@@ -709,3 +709,70 @@ Recommended production path:
 KnowPilot should feel like **one product** to the user and **many isolated knowledge brains** to the organization.
 
 The platform should not multiply deployments for every business line. It should multiply spaces, templates, permissions, and knowledge bases inside one governed system. That is the architecture that best matches the product promise: one deployment, unlimited replication, full-scenario reuse.
+
+## 14. V7 Identity & Governance (extension)
+
+V7 extends §M1 / §M2 / §M8 / §M9 with the identity-access layer that was missing
+in V6.x: self-registration (regular users pick a Service Line; admins use tiered
+**Admin Registration Codes**), email-based space invitations, an in-app
+**notification + announcement** system, a separate admin console vs employee UI,
+and a frontend RBAC cleanup that stops treating organizational `role_level` as an
+authorization role.
+
+Full design, role matrix, and logic diagrams: **`docs/KnowPilot_V7_Identity_RBAC_Spec.md`**.
+
+Key invariants:
+
+- Permission = "who you are in the org" (Super/Org/Business Admin / Employee) ×
+  "what you can do in this space" (Owner / Knowledge Admin / Reviewer / Member / Guest).
+- A "project group" is a `KnowledgeSpace`; its lead is the Space **Owner**.
+- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` —
+  **Super Admin is never obtainable through any registration entry point** (CLI /
+  console promotion only).
+- The access/admin code is an *entry* mechanism; it never bypasses RBAC.
+
+Implementation status as of 2026-07-01:
+
+- V7 identity, admin-code registration, email space invites, notification feed,
+  scoped announcements, admin console entry, and frontend RBAC cleanup are
+  implemented.
+- Optional signup approval is operational via
+  `/api/v1/rbac/users/{id}/activate/`, audited as `signup_approved`.
+- Frontend authorization no longer derives access from `role_level`; it uses
+  backend roles/permissions plus V7 admin-scope flags.
+- Verified with `python manage.py test apps.users.tests_v7_identity
+  --settings=config.settings.local_test` and `npm run build`.
+
+## 15. Phase 2A: Scenario Template Center MVP
+
+Phase 2A delivers the Scenario Template Center MVP, enabling fast replication of domain-specific knowledge brains (onboarding, audit, tax, consulting, core_services).
+
+Full design, fields, API definitions, and Phase 2B filter status: **`docs/KnowPilot_Phase2A_Template_Center_Spec.md`**.
+
+Key features:
+- `ScenarioTemplate` model carrying defaults (default_language, default_visibility, icon, quick_questions, prompt_policy, retrieval_policy).
+- CRUD APIs for templates, scoped to platform, organization, or business-line administrators.
+- `POST /api/v1/templates/{id}/create-space/` endpoint enabling admins to instantiate a space pre-configured with template settings.
+- Admin template UI with create, edit, clone, archive, restore, application history, revision history, and create-space actions.
+- Chat welcome quick questions sourced from template-created space settings.
+- Idempotent `seed_scenario_templates` management command seeding 5 default templates.
+- Fully verified via unit test suite `apps.scenario_templates.tests_phase2a`.
+
+## 16. Phase 2B: Template Discovery & Operations
+
+Phase 2B extends the template center from CRUD into day-to-day operations and discovery.
+
+Implementation status as of 2026-07-01:
+
+- Scope-safe list filters are implemented on `GET /api/v1/templates/`: `q`, `scenario_type`, `is_active`, `scope`, `organization`, and `business_line`.
+- RBAC/scope visibility is applied before query filters, so filters only narrow visible templates.
+- Admin Template UI exposes search, scenario type, status, scope, organization, and business-line filters.
+- Lifecycle operations remain available from the filtered table: clone, archive, restore, applications, revisions, and create-space.
+- Verified with backend template regression tests, i18n checks, and frontend production build.
+
+Remaining later Phase 2B/2C work:
+
+- Template tags/categories and recommended ordering.
+- Saved filter state in URL query params.
+- Pagination, sorting, and larger-list ergonomics.
+- Template marketplace/sharing, revision diff/rollback, analytics charts, and automatic document binding.

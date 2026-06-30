@@ -7,14 +7,20 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import AppLayout from './layout/AppLayout';
+import AdminLayout from './layout/AdminLayout';
 import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
 import SpaceManagementPage from './pages/SpaceManagementPage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
+import AdminUsersPage from './pages/admin/AdminUsersPage';
+import AdminCodesPage from './pages/admin/AdminCodesPage';
+import AdminAnnouncementsPage from './pages/admin/AdminAnnouncementsPage';
+import AdminBusinessLinesPage from './pages/admin/AdminBusinessLinesPage';
+import AdminAuditPage from './pages/admin/AdminAuditPage';
+import AdminTemplatesPage from './pages/admin/AdminTemplatesPage';
 import LoginPage from './auth/LoginPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
-import { RoleGuard } from './auth/RoleGuard';
 import { useAuth } from './auth/AuthProvider';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -79,27 +85,28 @@ function App() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="profile" element={<ProfilePage />} />
-        {/* V6.0: space management (members, access codes, settings) */}
+        {/* V6.0: space management (members, email invites, access codes, settings) */}
         <Route path="spaces/manage" element={<SpaceManagementPage />} />
-        {/* V4.0 RBAC: HR knowledge base — requires hr or admin role */}
-        <Route
-          path="admin/knowledge"
-          element={
-            <RoleGuard requiredRole="hr">
-              <KnowledgeBasePage />
-            </RoleGuard>
-          }
-        />
-        {/* V4.0 RBAC: Admin dashboard — requires admin role */}
-        <Route
-          path="admin/dashboard"
-          element={
-            <RoleGuard requiredRole="admin">
-              <AdminDashboardPage />
-            </RoleGuard>
-          }
-        />
-        {/* V6.0: Web crawler admin route removed (feature retired). */}
+      </Route>
+
+      {/* V7.0: dedicated admin console — AdminLayout self-gates to admins. */}
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboardPage />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="codes" element={<AdminCodesPage />} />
+        <Route path="announcements" element={<AdminAnnouncementsPage />} />
+        <Route path="business-lines" element={<AdminBusinessLinesPage />} />
+        <Route path="audit" element={<AdminAuditPage />} />
+        <Route path="templates" element={<AdminTemplatesPage />} />
+        <Route path="knowledge" element={<KnowledgeBasePage />} />
       </Route>
     </Routes>
     </ErrorBoundary>

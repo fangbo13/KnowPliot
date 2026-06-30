@@ -15,6 +15,8 @@ from .views import (
     user_me,
     update_preference,
     logout,
+    register,  # V7.0
+    register_admin,  # V7.0
 )
 
 urlpatterns = [
@@ -23,4 +25,7 @@ urlpatterns = [
     path("token/", CustomTokenObtainPairView.as_view(), name="token-obtain"),
     path("token/refresh/", BlacklistCheckingTokenRefreshView.as_view(), name="token-refresh"),  # V4.2 SYS-V4.2-020
     path("logout/", logout, name="logout"),
+    # V7.0 self-registration
+    path("register/", register, name="register"),
+    path("register-admin/", register_admin, name="register-admin"),
 ]

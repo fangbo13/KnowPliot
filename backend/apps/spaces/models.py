@@ -297,3 +297,120 @@ class InviteCode(models.Model):
         if self.max_uses and self.used_count >= self.max_uses:
             return False
         return True
+
+
+class AdminRegistrationCode(models.Model):
+    """A tiered admin-provisioning code — V7.0 (docs/KnowPilot_V7_Identity_RBAC_Spec.md §8).
+
+    Reuses the InviteCode security pattern (SHA-256 hash, plaintext shown once,
+    expiry / max-uses / revoke). On registration it grants an
+    ``OrganizationMembership`` of ``grants_role`` within the bound scope.
+
+    Security invariant: ``grants_role`` can ONLY be ``org_admin`` or
+    ``business_admin``. Super Admin is intentionally absent — the platform's
+    highest privilege is never obtainable through any registration entry point
+    (CLI ``createsuperuser`` / console promotion only).
+    """
+
+    GRANT_CHOICES = [
+        (OrganizationMembership.ROLE_ORG_ADMIN, "Organization Admin"),
+        (OrganizationMembership.ROLE_BUSINESS_ADMIN, "Business Admin"),
+    ]
+    STATUS_CHOICES = [("active", "Active"), ("revoked", "Revoked")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code_hash = models.CharField(
+        max_length=64, unique=True, help_text="SHA-256 hex of the admin code"
+    )
+    code_prefix = models.CharField(max_length=12, blank=True, default="")
+    grants_role = models.CharField(max_length=20, choices=GRANT_CHOICES)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="admin_codes"
+    )
+    business_line = models.ForeignKey(
+        BusinessLine,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="admin_codes",
+        help_text="Required for business_admin; ignored for org_admin.",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    max_uses = models.IntegerField(default=0, help_text="0 = unlimited")
+    used_count = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    created_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="admin_codes_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spaces_adminregistrationcode"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        scope = self.business_line.code if self.business_line else self.organization.slug
+        return f"AdminCode {self.code_prefix}*** -> {self.grants_role} @ {scope}"
+
+    def is_valid(self) -> bool:
+        if self.status != "active":
+            return False
+        if self.expires_at and self.expires_at < timezone.now():
+            return False
+        if self.max_uses and self.used_count >= self.max_uses:
+            return False
+        return True
+
+
+class SpaceEmailInvite(models.Model):
+    """A pending invitation addressed to an email that may not be registered yet.
+
+    When an admin invites someone by email (SPEC §M2 / V7 §7.4): if the user
+    already exists, a SpaceMembership is created directly; otherwise this row is
+    created and *redeemed* on registration — the new account is auto-added to the
+    space with ``role`` and notified.
+    """
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("accepted", "Accepted"),
+        ("revoked", "Revoked"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField()
+    space = models.ForeignKey(
+        KnowledgeSpace, on_delete=models.CASCADE, related_name="email_invites"
+    )
+    role = models.CharField(
+        max_length=20, choices=SpaceMembership.ROLE_CHOICES, default=SpaceMembership.ROLE_MEMBER
+    )
+    invited_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_invites_sent",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spaces_spaceemailinvite"
+        unique_together = [("space", "email")]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"EmailInvite {self.email} -> {self.space} ({self.role}, {self.status})"
+
+    def is_valid(self) -> bool:
+        if self.status != "pending":
+            return False
+        if self.expires_at and self.expires_at < timezone.now():
+            return False
+        return True

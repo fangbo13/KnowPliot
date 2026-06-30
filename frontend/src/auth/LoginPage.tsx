@@ -5,12 +5,31 @@
  */
 
 import { useState } from 'react';
-import { Form, Input, Button, Alert } from 'antd';
-import { MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Alert, Tabs, Select } from 'antd';
+import {
+  MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined,
+  SunOutlined, MoonOutlined, UserAddOutlined, SafetyCertificateOutlined, TeamOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { useTheme } from '../hooks/useTheme';
+
+// Service Line options — values match backend User.SERVICE_LINE_CHOICES.
+const SERVICE_LINES = ['assurance', 'consulting', 'tax', 'strategy_transactions', 'core'] as const;
+
+/** Pull a human-readable message out of a DRF error body. */
+function firstError(data: any): string {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  if (data.detail) return String(data.detail);
+  for (const key of Object.keys(data)) {
+    const v = data[key];
+    if (Array.isArray(v) && v.length) return `${v[0]}`;
+    if (typeof v === 'string') return v;
+  }
+  return '';
+}
 
 export default function LoginPage() {
   const { t, i18n } = useTranslation('common');
@@ -21,6 +40,8 @@ export default function LoginPage() {
   const isDark = effective === 'dark';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [activeTab, setActiveTab] = useState('signin');
   const [form] = Form.useForm();
 
   const toggleLanguage = () => {
@@ -29,7 +50,12 @@ export default function LoginPage() {
     localStorage.setItem('ey-language', nextLang);
   };
 
-  // NOTE: auth data-flow preserved verbatim from the hardened V4.3 implementation.
+  const syncLanguage = async (pref?: string) => {
+    const { default: i18nModule } = await import('../i18n');
+    if (pref && pref !== i18nModule.language) i18nModule.changeLanguage(pref);
+  };
+
+  // NOTE: login auth data-flow preserved verbatim from the hardened V4.3 implementation.
   const handleLogin = async (values: { email: string; password: string }) => {
     setLoading(true);
     setError('');
@@ -48,34 +74,194 @@ export default function LoginPage() {
       if (!profileResponse.ok) throw new Error('profile_load_failed');
       const user = await profileResponse.json();
 
-      login({
-        token: tokenData.access,
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          is_hr_admin: user.is_hr_admin,
-          is_superuser: user.is_superuser ?? false,
-          roles: user.roles,
-          permissions: user.permissions,
-          language_preference: user.language_preference,
-          service_line: user.service_line,
-          office_location: user.office_location,
-          role_level: user.role_level,
-        },
-      });
-
-      const { default: i18n } = await import('../i18n');
-      if (user.language_preference && user.language_preference !== i18n.language) {
-        i18n.changeLanguage(user.language_preference);
-      }
+      login({ token: tokenData.access, user });
+      await syncLanguage(user.language_preference);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'login_failed';
-      setError(t(message) || t('login_failed'));
+      const messageKey = err instanceof Error ? err.message : 'login_failed';
+      setError(t(messageKey) || t('login_failed'));
     } finally {
       setLoading(false);
     }
   };
+
+  // V7.0: regular self-registration (Service Line required).
+  const handleRegister = async (values: { email: string; password: string; service_line: string }) => {
+    setLoading(true);
+    setError('');
+    setInfo('');
+    try {
+      const resp = await fetch('/api/v1/auth/register/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: values.email, password: values.password, service_line: values.service_line,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setError(firstError(data) || t('register_failed'));
+        return;
+      }
+      if (data.pending) {
+        setInfo(t('register_success_pending'));
+        setActiveTab('signin');
+        return;
+      }
+      login({ token: data.access, user: data.user });
+      await syncLanguage(data.user?.language_preference);
+    } catch {
+      setError(t('register_failed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // V7.0: admin registration via a tiered admin registration code.
+  const handleAdminRegister = async (values: { email: string; password: string; code: string }) => {
+    setLoading(true);
+    setError('');
+    setInfo('');
+    try {
+      const resp = await fetch('/api/v1/auth/register-admin/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: values.email, password: values.password, code: values.code }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setError(firstError(data) || t('admin_code_invalid'));
+        return;
+      }
+      login({ token: data.access, user: data.user });
+      await syncLanguage(data.user?.language_preference);
+    } catch {
+      setError(t('register_failed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const passwordRules = [
+    { required: true, message: t('validation_password_required') },
+    { min: 8, message: t('validation_password_min') },
+  ];
+
+  const confirmPasswordField = (
+    <Form.Item
+      name="confirm"
+      label={t('confirm_password_label')}
+      dependencies={['password']}
+      rules={[
+        { required: true, message: t('validation_password_required') },
+        ({ getFieldValue }) => ({
+          validator(_, value) {
+            if (!value || getFieldValue('password') === value) return Promise.resolve();
+            return Promise.reject(new Error(t('validation_password_mismatch')));
+          },
+        }),
+      ]}
+    >
+      <Input.Password prefix={<LockOutlined />} placeholder={t('confirm_password_placeholder')} autoComplete="new-password" />
+    </Form.Item>
+  );
+
+  const tabItems = [
+    {
+      key: 'signin',
+      label: <span><LoginOutlined /> {t('auth_tab_signin')}</span>,
+      children: (
+        <div className="login-input-wrapper">
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              marginBottom: 24, padding: '10px 14px', background: 'var(--accent-soft)',
+              border: '1px solid var(--color-border-secondary)', borderRadius: 12,
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{t('demo_hint')}</span>
+            <Button type="text" size="small" icon={<UserSwitchOutlined />}
+              onClick={() => form.setFieldsValue({ email: 'admin@test.ey.com', password: 'admin123' })}
+              style={{ color: 'var(--accent-text)', fontWeight: 600, flexShrink: 0 }}>
+              {t('demo_fill_btn')}
+            </Button>
+          </div>
+          <Form form={form} layout="vertical" size="large" onFinish={handleLogin} requiredMark={false} validateTrigger="onChange">
+            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" />
+            </Form.Item>
+            <Form.Item name="password" label={t('password_label')} rules={[{ required: true, message: t('validation_password_required') }]}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="current-password" />
+            </Form.Item>
+            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
+              <Button type="primary" htmlType="submit" icon={<LoginOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+                {t('sign_in')}
+              </Button>
+            </Form.Item>
+          </Form>
+        </div>
+      ),
+    },
+    {
+      key: 'register',
+      label: <span><UserAddOutlined /> {t('auth_tab_register')}</span>,
+      children: (
+        <div className="login-input-wrapper">
+          <Form layout="vertical" size="large" onFinish={handleRegister} requiredMark={false} validateTrigger="onBlur">
+            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" />
+            </Form.Item>
+            <Form.Item name="service_line" label={t('service_line_label')} rules={[{ required: true, message: t('validation_service_line_required') }]}>
+              <Select
+                placeholder={t('service_line_placeholder')}
+                suffixIcon={<TeamOutlined />}
+                options={SERVICE_LINES.map((sl) => ({ value: sl, label: t(`sl_${sl}`) }))}
+              />
+            </Form.Item>
+            <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" />
+            </Form.Item>
+            {confirmPasswordField}
+            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
+              <Button type="primary" htmlType="submit" icon={<UserAddOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+                {t('create_account')}
+              </Button>
+            </Form.Item>
+          </Form>
+        </div>
+      ),
+    },
+    {
+      key: 'admin',
+      label: <span><SafetyCertificateOutlined /> {t('auth_tab_admin')}</span>,
+      children: (
+        <div className="login-input-wrapper">
+          <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 18px', fontSize: 13 }}>{t('admin_register_subtitle')}</p>
+          <Form layout="vertical" size="large" onFinish={handleAdminRegister} requiredMark={false} validateTrigger="onBlur">
+            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" />
+            </Form.Item>
+            <Form.Item name="code" label={t('admin_code_label')} rules={[{ required: true, message: t('validation_code_required') }]}>
+              <Input prefix={<SafetyCertificateOutlined />} placeholder={t('admin_code_placeholder')} autoComplete="off" />
+            </Form.Item>
+            <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" />
+            </Form.Item>
+            {confirmPasswordField}
+            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
+              <Button type="primary" htmlType="submit" icon={<SafetyCertificateOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+                {t('register_admin_btn')}
+              </Button>
+            </Form.Item>
+          </Form>
+        </div>
+      ),
+    },
+  ];
+
+  const headerTitle = activeTab === 'signin' ? t('login_title')
+    : activeTab === 'register' ? t('register_title') : t('admin_register_title');
+  const headerSubtitle = activeTab === 'signin' ? t('login_subtitle')
+    : activeTab === 'register' ? t('register_subtitle') : t('admin_register_subtitle');
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--color-bg-body)', position: 'relative' }}>
@@ -149,52 +335,24 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Form */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: isNarrow ? '40px 24px' : '60px 48px', minWidth: isNarrow ? 'auto' : 340 }}>
-          <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 500, fontSize: 26, margin: '0 0 8px' }}>{t('login_title')}</h2>
-          <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 36px', fontSize: 14 }}>{t('login_subtitle')}</p>
+        {/* Form column */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: isNarrow ? '32px 24px' : '48px 48px', minWidth: isNarrow ? 'auto' : 340 }}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 500, fontSize: 26, margin: '0 0 6px' }}>{headerTitle}</h2>
+          <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 20px', fontSize: 14 }}>{headerSubtitle}</p>
 
           {error && (
-            <Alert message={t('login_error')} description={error} type="error" showIcon closable style={{ marginBottom: 20, borderRadius: 12 }} onClose={() => setError('')} />
+            <Alert message={t('login_error')} description={error} type="error" showIcon closable style={{ marginBottom: 16, borderRadius: 12 }} onClose={() => setError('')} />
+          )}
+          {info && (
+            <Alert message={info} type="success" showIcon closable style={{ marginBottom: 16, borderRadius: 12 }} onClose={() => setInfo('')} />
           )}
 
-          <div
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-              marginBottom: 28, padding: '10px 14px', background: 'var(--accent-soft)',
-              border: '1px solid var(--color-border-secondary)', borderRadius: 12,
-              transition: 'transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-1px)';
-              e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'none';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          >
-            <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{t('demo_hint')}</span>
-            <Button type="text" size="small" icon={<UserSwitchOutlined />} onClick={() => form.setFieldsValue({ email: 'admin@test.ey.com', password: 'admin123' })} style={{ color: 'var(--accent-text)', fontWeight: 600, flexShrink: 0 }}>
-              {t('demo_fill_btn')}
-            </Button>
-          </div>
-
-          <div className="login-input-wrapper">
-            <Form form={form} layout="vertical" size="large" initialValues={{ email: '', password: '' }} onFinish={handleLogin} requiredMark={false} validateTrigger="onChange">
-              <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
-                <Input prefix={<MailOutlined style={{ transition: 'transform var(--dur) var(--ease-out)' }} />} placeholder={t('email_placeholder')} autoComplete="email" />
-              </Form.Item>
-              <Form.Item name="password" label={t('password_label')} rules={[{ required: true, message: t('validation_password_required') }]}>
-                <Input.Password prefix={<LockOutlined style={{ transition: 'transform var(--dur) var(--ease-out)' }} />} placeholder={t('password_placeholder')} autoComplete="current-password" />
-              </Form.Item>
-              <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
-                <Button type="primary" htmlType="submit" icon={<LoginOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
-                  {t('sign_in')}
-                </Button>
-              </Form.Item>
-            </Form>
-          </div>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(k) => { setActiveTab(k); setError(''); setInfo(''); }}
+            items={tabItems}
+            destroyOnHidden
+          />
         </div>
       </div>
     </div>

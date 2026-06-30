@@ -269,6 +269,63 @@ class AdminUserUpdateView(generics.UpdateAPIView):
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
+@throttle_classes([DeactivateUserRateThrottle])
+def admin_user_activate(request, pk):
+    """Activate a pending/inactive user account.
+
+    V7.0: Completes the optional REQUIRE_SIGNUP_APPROVAL flow. Regular
+    registration can create inactive users; admins with user.update can approve
+    them from the console without granting any role implicitly.
+    """
+
+    if not request.user.has_permission("user.update"):
+        return Response(
+            {"detail": "You do not have permission to activate users."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        user = User.objects.get(pk=pk)
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "User not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if user.is_active:
+        return Response({"detail": f"User {user.email} is already active."})
+
+    user.is_active = True
+    user.save(update_fields=["is_active"])
+
+    create_audit_log(
+        user=request.user,
+        action="signup_approved",
+        target_type="User",
+        target_id=str(user.id),
+        details={"approved_user": user.email},
+        role_used="admin",
+        request=request,
+    )
+
+    try:
+        from apps.notifications.services import notify
+        notify(
+            user,
+            "account",
+            title="Account approved",
+            body="Your KnowPilot account has been approved. You can now sign in.",
+            level="success",
+            link="/login",
+        )
+    except Exception:
+        pass
+
+    return Response({"detail": f"User {user.email} activated successfully."})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
 @throttle_classes([DeactivateUserRateThrottle])  # V4.2 SYS-V4.2-008: 5/min per user
 def admin_user_deactivate(request, pk):
     """Deactivate a user account — requires user.deactivate (Admin only).

@@ -61,6 +61,11 @@ export default function SpaceManagementPage() {
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
 
+  // V7.0: add member by email
+  const [memberEmail, setMemberEmail] = useState('');
+  const [memberRole, setMemberRole] = useState<SpaceRole>('member');
+  const [addingMember, setAddingMember] = useState(false);
+
   const refresh = useCallback(async () => {
     if (!activeSpaceId) return;
     setLoading(true);
@@ -128,6 +133,52 @@ export default function SpaceManagementPage() {
     }
   };
 
+  // V7.0: add a member by email (existing account -> active member + notified;
+  // unknown email -> pending invite redeemed on signup).
+  const addMember = async () => {
+    if (!activeSpaceId || !memberEmail.trim()) return;
+    setAddingMember(true);
+    try {
+      const res = await spacesApi.addMember(activeSpaceId, { email: memberEmail.trim(), role: memberRole });
+      setMemberEmail('');
+      await refresh();
+      antdMessage.success(
+        res.pending
+          ? (t('member_invited_pending') || 'Invitation sent — they will join after registering')
+          : (t('member_added') || 'Member added')
+      );
+    } catch {
+      antdMessage.error(t('member_add_failed') || 'Failed to add member');
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  const changeMemberRole = async (userId: string, role: SpaceRole) => {
+    if (!activeSpaceId) return;
+    try {
+      await spacesApi.updateMember(activeSpaceId, userId, role);
+      await refresh();
+      antdMessage.success(t('member_role_updated') || 'Member role updated');
+    } catch {
+      antdMessage.error(t('member_update_failed') || 'Failed to update member');
+    }
+  };
+
+  const removeMember = async (userId: string) => {
+    if (!activeSpaceId) return;
+    try {
+      await spacesApi.removeMember(activeSpaceId, userId);
+      await refresh();
+      antdMessage.success(t('member_removed') || 'Member removed');
+    } catch {
+      antdMessage.error(t('member_remove_failed') || 'Failed to remove member');
+    }
+  };
+
+  // Roles assignable to a space member from this page.
+  const MEMBER_ROLE_OPTIONS = ['knowledge_admin', 'reviewer', 'member', 'guest', 'owner'];
+
   if (!active) {
     return (
       <div style={{ padding: 24 }}>
@@ -142,7 +193,19 @@ export default function SpaceManagementPage() {
       title: t('member_role') || 'Role',
       dataIndex: 'role',
       key: 'role',
-      render: (r: string) => <Tag>{r}</Tag>,
+      render: (r: SpaceRole, rec: SpaceMember) =>
+        canManage && rec.status === 'active' ? (
+          <Select
+            size="small"
+            value={r}
+            style={{ width: 160 }}
+            popupClassName="menu-pop-dropdown"
+            onChange={(v) => changeMemberRole(rec.user, v as SpaceRole)}
+            options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+          />
+        ) : (
+          <Tag>{r}</Tag>
+        ),
     },
     {
       title: t('member_status') || 'Status',
@@ -150,6 +213,21 @@ export default function SpaceManagementPage() {
       key: 'status',
       render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag>,
     },
+    ...(canManage
+      ? [{
+          title: '',
+          key: 'member_actions',
+          render: (_: any, rec: SpaceMember) =>
+            rec.status === 'active' ? (
+              <Popconfirm
+                title={t('member_remove_confirm') || 'Remove this member?'}
+                onConfirm={() => removeMember(rec.user)}
+              >
+                <Button type="link" danger size="small">{t('remove') || 'Remove'}</Button>
+              </Popconfirm>
+            ) : null,
+        }]
+      : []),
   ];
 
   const inviteColumns = [
@@ -250,6 +328,35 @@ export default function SpaceManagementPage() {
           style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
           extra={<Button icon={<ReloadOutlined />} size="middle" onClick={refresh} style={{ borderRadius: 8 }} />}
         >
+          {canManage && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              <Input
+                placeholder={t('member_email_placeholder') || 'Add member by email…'}
+                value={memberEmail}
+                onChange={(e) => setMemberEmail(e.target.value)}
+                onPressEnter={addMember}
+                style={{ flex: 1, minWidth: 220, borderRadius: 10 }}
+                allowClear
+              />
+              <Select
+                value={memberRole}
+                onChange={(v) => setMemberRole(v as SpaceRole)}
+                style={{ width: 170 }}
+                popupClassName="menu-pop-dropdown"
+                options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+              />
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                loading={addingMember}
+                onClick={addMember}
+                disabled={!memberEmail.trim()}
+                style={{ borderRadius: 10 }}
+              >
+                {t('add_member') || 'Add'}
+              </Button>
+            </div>
+          )}
           <Table
             rowKey="id"
             loading={loading}
