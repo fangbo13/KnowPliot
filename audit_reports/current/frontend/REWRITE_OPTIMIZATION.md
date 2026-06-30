@@ -108,4 +108,4 @@
 
 ---
 
-*交付物：`frontend/REWRITE_PLAN.md`（计划）+ 本文（优化说明）。本地预览 `npm run dev`（:5199，代理 :8000）；线上 `:3003` 已更新。*
+*交付物：`audit_reports/current/frontend/REWRITE_PLAN.md`（计划）+ 本文（优化说明）。本地预览 `npm run dev`（:5199，代理 :8000）；线上 `:3003` 已更新。*

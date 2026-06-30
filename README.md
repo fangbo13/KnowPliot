@@ -4,8 +4,8 @@
 
 ### Multi-space knowledge operations platform for professional teams
 
-[![Status](https://img.shields.io/badge/Status-Beta-yellow)](README.md)
-[![Version](https://img.shields.io/badge/Version-6.1-blue)](README.md)
+[![Status](https://img.shields.io/badge/Status-Phase%202B%20Discovery-blue)](README.md)
+[![Version](https://img.shields.io/badge/Version-7.2-blue)](README.md)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
 **Languages**: [English](README.md) / [中文](README_ZH.md)
@@ -141,23 +141,74 @@ These work in **any** organization:
 
 ## Architecture
 
-KnowPilot uses a shared application core with logical isolation. The product scales by spaces, not by duplicating the stack per team.
+KnowPilot uses one shared platform core with logical isolation. It scales by adding organizations, business lines, spaces, templates, policies, and knowledge stores, not by cloning deployments for every team.
 
 ```mermaid
 flowchart TB
-    U[User] --> A[Auth / JWT]
-    A --> S[Space Resolver]
-    S --> C[Chat / RAG]
-    S --> D[Document Management]
-    S --> M[Space Membership & Roles]
-    C --> V[Vector Search / pgvector]
-    C --> L[LLM / DashScope]
-    D --> I[Ingestion Pipeline]
-    I --> V
-    C --> T[Citations]
-    D --> G[Audit Log]
-    M --> G
-    C --> G
+    subgraph Client["Client Applications"]
+        Web["React Web App"]
+        Admin["Admin Console"]
+    end
+
+    subgraph Identity["Identity & Governance"]
+        Auth["Auth / JWT"]
+        RBAC["RBAC + Admin Scope"]
+        Notify["Notifications + Announcements"]
+    end
+
+    subgraph Tenant["Logical Isolation Layer"]
+        Org["Organization"]
+        Line["Business Line"]
+        Space["Knowledge Space"]
+        Member["Space Membership"]
+    end
+
+    subgraph Replication["Template Replication Layer"]
+        Template["Scenario Templates"]
+        Filter["Discovery Filters"]
+        CreateSpace["Create Space From Template"]
+        QuickQ["Quick Questions + Policies"]
+    end
+
+    subgraph Knowledge["Knowledge Runtime"]
+        Docs["Document Management"]
+        Ingest["Celery Ingestion"]
+        Vector["PostgreSQL + pgvector"]
+        Chat["Chat / RAG Orchestrator"]
+        LLM["Qwen / DashScope"]
+        Citations["Citations"]
+    end
+
+    subgraph Operations["Operations & Extension Points"]
+        Audit["Audit Logs"]
+        Metrics["Metrics / Quality Dashboards"]
+        Feedback["Feedback Loop"]
+        Media["Authenticated Media Access"]
+    end
+
+    Web --> Auth
+    Admin --> Auth
+    Auth --> RBAC
+    RBAC --> Tenant
+    Org --> Line --> Space
+    Space --> Member
+    RBAC --> Template
+    Template --> Filter
+    Template --> CreateSpace
+    CreateSpace --> Space
+    CreateSpace --> QuickQ
+    Space --> Docs
+    Docs --> Ingest --> Vector
+    Space --> Chat
+    Chat --> Vector
+    Chat --> LLM
+    Chat --> Citations
+    RBAC --> Audit
+    Docs --> Audit
+    Chat --> Audit
+    Audit --> Metrics
+    Chat --> Feedback
+    Docs --> Media
 ```
 
 

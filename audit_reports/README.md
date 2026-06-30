@@ -1,3 +1,20 @@
+# KnowPilot Audit Reports and Engineering Progress
+
+## Current Entry Points
+
+- `current/SPEC_IMPLEMENTATION_PROGRESS.md` - current SPEC implementation progress and next-stage plan.
+- `current/KnowPilot_V7_Identity_RBAC_Spec.md` - V7 identity, RBAC, and governance specification.
+- `current/KnowPilot_V7_Release_Validation_Report.md` - V7 release validation report.
+- `current/KnowPilot_V7_Functional_Smoke_Report.md` - V7 functional smoke report.
+- `current/KnowPilot_Phase2A_Template_Center_Spec.md` - Phase 2A template center spec plus Phase 2B filter slice notes.
+- `current/KnowPilot_Phase2A_Validation_Report.md` - Phase 2A/2B validation report.
+- `current/smoke_results.json` - latest captured API smoke result payload.
+- `current/frontend/REWRITE_PLAN.md` and `current/frontend/REWRITE_OPTIMIZATION.md` - frontend rewrite planning and optimization notes.
+
+Historical reports remain under versioned folders such as `v3.1`, `v4.3`, `v6.0`, and `v6.6`.
+
+---
+
 # KnowPilot — 项目审计与功能文档
 
 > 📅 最近更新：2026-06-28 | 🏷️ 当前版本：V6.0

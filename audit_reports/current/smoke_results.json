@@ -1,0 +1,142 @@
+[
+  [
+    "A1: Unauthenticated /auth/me/ \u2192 401",
+    "PASS",
+    "got 401"
+  ],
+  [
+    "B1: Register without service_line \u2192 400",
+    "PASS",
+    "got 400"
+  ],
+  [
+    "B2: Register with service_line \u2192 201",
+    "PASS",
+    "got 201"
+  ],
+  [
+    "B3: Access token returned",
+    "PASS",
+    "token=yes"
+  ],
+  [
+    "B4: User identity has email",
+    "PASS",
+    "email=smoke_hvoh22@test.com"
+  ],
+  [
+    "B5: User is not super_admin",
+    "PASS",
+    "is_super_admin=False"
+  ],
+  [
+    "B6: /auth/me/ with token \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "C1: Admin login \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "C2: Admin has access token",
+    "PASS",
+    ""
+  ],
+  [
+    "C3: Admin is super_admin",
+    "PASS",
+    "is_super_admin=True"
+  ],
+  [
+    "D0: Got org_id and bl_id",
+    "PASS",
+    "org=0b88a749-9483-4b25-96d1-576fa032960d, bl=2e516eb6-4906-435e-b4ca-ae4f22d7558c"
+  ],
+  [
+    "D1: super_admin code \u2192 400",
+    "PASS",
+    "got 400"
+  ],
+  [
+    "D2: business_admin code \u2192 201",
+    "PASS",
+    "got 201"
+  ],
+  [
+    "D3: Code plaintext returned",
+    "PASS",
+    "code=yes"
+  ],
+  [
+    "D4: Admin-code registration \u2192 201",
+    "PASS",
+    "got 201"
+  ],
+  [
+    "D5: Registered user is_business_admin",
+    "PASS",
+    "is_business_admin=True"
+  ],
+  [
+    "E1: Announcement audience=all \u2192 201",
+    "PASS",
+    "got 201"
+  ],
+  [
+    "E2: Scoped announcement without ref \u2192 400",
+    "PASS",
+    "got 400"
+  ],
+  [
+    "E3: Scoped announcement with ref \u2192 201",
+    "PASS",
+    "got 201"
+  ],
+  [
+    "F1: Notification feed \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "F2: Unread count \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "F3: Unread count \u2265 1 (welcome notif)",
+    "PASS",
+    "count=3"
+  ],
+  [
+    "F4: Mark all read \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "F5: Unread count after mark-all \u2192 0",
+    "PASS",
+    "count=0"
+  ],
+  [
+    "G1: Space list \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "G2: User sees \u2265 1 space",
+    "PASS",
+    "count=1"
+  ],
+  [
+    "H1: RBAC user list \u2192 200",
+    "PASS",
+    "got 200"
+  ],
+  [
+    "H2: Regular user RBAC \u2192 403",
+    "PASS",
+    "got 403"
+  ]
+]
