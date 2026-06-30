@@ -20,30 +20,6 @@
 
 ---
 
-## Current Implementation Status
-
-KnowPilot is not yet a complete implementation of every item in [SPEC.MD](SPEC.MD). The current codebase has completed the identity/governance foundation and the first template-driven replication stages.
-
-| SPEC area | Status | Notes |
-| --- | --- | --- |
-| Phase 1: Multi-Space Foundation | Mostly implemented | Organizations, business lines, spaces, memberships, access codes, space switching, and scoped permissions are present. |
-| V7 Identity & Governance | Implemented and verified | Email registration, admin registration codes, optional signup approval, email space invites, notifications, scoped announcements, admin console, and frontend RBAC cleanup. |
-| Phase 2A: Scenario Template Center MVP | Implemented and verified | Template CRUD, scope permissions, seed templates, create-space from template, quick questions, applications, revisions, clone, archive, restore, and admin UI. |
-| Phase 2B: Template Discovery & Operations | Filter slice complete | Scope-safe filters for search, scenario type, active status, scope, organization, and business line are implemented in the API and admin UI. |
-| Phase 3: Knowledge Governance Hardening | Not complete | MIME/magic-number validation, authenticated media hardening, stale knowledge controls, and allowlisted retrieval filters still need a dedicated pass. |
-| Phase 4: Audit & Admin Center | Partially implemented | Audit/admin foundations exist, but usage metrics, quality dashboards, failed job visibility, and stale knowledge dashboards remain. |
-| Phase 5: Knowledge Improvement Loop | Not complete | Answer feedback workflow, flagged-answer review queue, knowledge gap analytics, and compliance exports remain future work. |
-
-Latest verified baseline:
-
-- Backend: `makemigrations --check --dry-run`, `manage.py check`, and 50 V7 + template regression tests pass.
-- Frontend: `npm run check:i18n` and `npm run build` pass.
-- Known non-blocking warnings: django-allauth deprecation settings and Vite chunk/dynamic import warnings.
-
-Next recommended stage: start **Phase 3 Knowledge Governance Hardening**, with priority on authenticated document/media access, MIME validation, safe retrieval filters, and stale/failed document states.
-
----
-
 ## The Problem We Solve
 
 ### 1. Project Continuity Issues: Knowledge Leaves with Key Staff (Professional Services)
@@ -165,23 +141,74 @@ These work in **any** organization:
 
 ## Architecture
 
-KnowPilot uses a shared application core with logical isolation. The product scales by spaces, not by duplicating the stack per team.
+KnowPilot uses one shared platform core with logical isolation. It scales by adding organizations, business lines, spaces, templates, policies, and knowledge stores, not by cloning deployments for every team.
 
 ```mermaid
 flowchart TB
-    U[User] --> A[Auth / JWT]
-    A --> S[Space Resolver]
-    S --> C[Chat / RAG]
-    S --> D[Document Management]
-    S --> M[Space Membership & Roles]
-    C --> V[Vector Search / pgvector]
-    C --> L[LLM / DashScope]
-    D --> I[Ingestion Pipeline]
-    I --> V
-    C --> T[Citations]
-    D --> G[Audit Log]
-    M --> G
-    C --> G
+    subgraph Client["Client Applications"]
+        Web["React Web App"]
+        Admin["Admin Console"]
+    end
+
+    subgraph Identity["Identity & Governance"]
+        Auth["Auth / JWT"]
+        RBAC["RBAC + Admin Scope"]
+        Notify["Notifications + Announcements"]
+    end
+
+    subgraph Tenant["Logical Isolation Layer"]
+        Org["Organization"]
+        Line["Business Line"]
+        Space["Knowledge Space"]
+        Member["Space Membership"]
+    end
+
+    subgraph Replication["Template Replication Layer"]
+        Template["Scenario Templates"]
+        Filter["Discovery Filters"]
+        CreateSpace["Create Space From Template"]
+        QuickQ["Quick Questions + Policies"]
+    end
+
+    subgraph Knowledge["Knowledge Runtime"]
+        Docs["Document Management"]
+        Ingest["Celery Ingestion"]
+        Vector["PostgreSQL + pgvector"]
+        Chat["Chat / RAG Orchestrator"]
+        LLM["Qwen / DashScope"]
+        Citations["Citations"]
+    end
+
+    subgraph Operations["Operations & Extension Points"]
+        Audit["Audit Logs"]
+        Metrics["Metrics / Quality Dashboards"]
+        Feedback["Feedback Loop"]
+        Media["Authenticated Media Access"]
+    end
+
+    Web --> Auth
+    Admin --> Auth
+    Auth --> RBAC
+    RBAC --> Tenant
+    Org --> Line --> Space
+    Space --> Member
+    RBAC --> Template
+    Template --> Filter
+    Template --> CreateSpace
+    CreateSpace --> Space
+    CreateSpace --> QuickQ
+    Space --> Docs
+    Docs --> Ingest --> Vector
+    Space --> Chat
+    Chat --> Vector
+    Chat --> LLM
+    Chat --> Citations
+    RBAC --> Audit
+    Docs --> Audit
+    Chat --> Audit
+    Audit --> Metrics
+    Chat --> Feedback
+    Docs --> Media
 ```
 
 

@@ -14,32 +14,6 @@
 
 ---
 
-
-
-## Current Implementation Status
-
-KnowPilot has not implemented every item in `SPEC.MD` yet. Current project status:
-
-| SPEC stage | Status | Notes |
-| --- | --- | --- |
-| Phase 1: Multi-Space Foundation | Mostly implemented | Organizations, business lines, spaces, memberships, access codes, space switching, and scoped permissions are present. |
-| V7 Identity & Governance | Implemented and verified | Email registration, admin registration codes, optional signup approval, email space invites, notifications, scoped announcements, Admin Console, and frontend RBAC cleanup. |
-| Phase 2A: Scenario Template Center MVP | Implemented and verified | Template CRUD, scope permissions, seed templates, create-space from template, quick questions, applications, revisions, clone, archive/restore, and admin UI. |
-| Phase 2B: Template Discovery & Operations | Filter slice complete | Template list supports safe filters for search, scenario type, active status, scope, organization, and business line. |
-| Phase 3: Knowledge Governance Hardening | Not complete | MIME/magic-number validation, authenticated media access, stale knowledge controls, and allowlisted retrieval filters still need dedicated work. |
-| Phase 4: Audit & Admin Center | Partially implemented | Audit/admin foundations exist, but usage metrics, quality dashboards, failed job visibility, and stale dashboards remain. |
-| Phase 5: Knowledge Improvement Loop | Not complete | Answer feedback, flagged-answer review, knowledge gap analytics, and compliance exports remain future work. |
-
-Latest verified baseline:
-
-- Backend: migration dry-run, Django check, and 50 V7 + template regression tests pass.
-- Frontend: `npm run check:i18n` and `npm run build` pass.
-- Known non-blocking warnings: django-allauth deprecation settings and Vite chunk/dynamic import warnings.
-
-Next recommended stage: start **Phase 3 Knowledge Governance Hardening**, especially authenticated document/media access, file type validation, safe retrieval filters, and stale/failed document states.
-
----
-
 > **一套平台，无限空间，让组织的每一个作战单元都长出自己的大脑。**
 >
 > KnowPilot 是一个 RAG 驱动的知识 Agent，将散落在文档、方法论、项目记忆与合规规则中的知识，构建成可治理、可复用的组织级知识产品——一次提问、多次复用，把组织知识留在组织内部。

@@ -719,7 +719,7 @@ in V6.x: self-registration (regular users pick a Service Line; admins use tiered
 and a frontend RBAC cleanup that stops treating organizational `role_level` as an
 authorization role.
 
-Full design, role matrix, and logic diagrams: **`docs/KnowPilot_V7_Identity_RBAC_Spec.md`**.
+Full design, role matrix, and logic diagrams: **`audit_reports/current/KnowPilot_V7_Identity_RBAC_Spec.md`**.
 
 Key invariants:
 
@@ -747,7 +747,7 @@ Implementation status as of 2026-07-01:
 
 Phase 2A delivers the Scenario Template Center MVP, enabling fast replication of domain-specific knowledge brains (onboarding, audit, tax, consulting, core_services).
 
-Full design, fields, API definitions, and Phase 2B filter status: **`docs/KnowPilot_Phase2A_Template_Center_Spec.md`**.
+Full design, fields, API definitions, and Phase 2B filter status: **`audit_reports/current/KnowPilot_Phase2A_Template_Center_Spec.md`**.
 
 Key features:
 - `ScenarioTemplate` model carrying defaults (default_language, default_visibility, icon, quick_questions, prompt_policy, retrieval_policy).
