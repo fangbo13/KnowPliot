@@ -120,9 +120,9 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "ey_onboarding"),
-        "USER": os.environ.get("POSTGRES_USER", "ey_onboarding"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "ey_password"),
+        "NAME": os.environ.get("POSTGRES_DB", "knowpilot"),
+        "USER": os.environ.get("POSTGRES_USER", "knowpilot"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "knowpilot_password"),
         "HOST": os.environ.get("POSTGRES_HOST", "db"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         # V4.2 SYS-V4.2-012: Connection pool — persistent DB connections

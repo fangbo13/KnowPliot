@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Typography, Spin, message, Descriptions } from 'antd';
+import { Card, Table, Button, Space, Typography, Spin, message, Descriptions } from 'antd';
 import {
   ReloadOutlined, TeamOutlined,
   DashboardOutlined, SafetyCertificateOutlined,
@@ -37,10 +37,7 @@ interface SystemStatus {
   total_documents: number;
 }
 
-const roleColors: Record<string, string> = {
-  admin: 'red',
-  hr: 'blue',
-};
+
 
 export default function AdminDashboardPage() {
   const { t } = useTranslation('common');
@@ -119,6 +116,53 @@ export default function AdminDashboardPage() {
     }
   }, [users.length]);
 
+  const roleStyleMap: Record<string, { bg: string; text: string; border: string }> = {
+    admin: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
+    hr: { bg: '#EAF2FD', text: '#1A56DB', border: '#D0E1FD' },
+    employee: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
+  };
+
+  const healthStyleMap: Record<string, { bg: string; text: string; border: string }> = {
+    running: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    connected: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    degraded: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
+    unknown: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
+    down: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
+    disconnected: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
+  };
+
+  const renderHealthTag = (status: string) => {
+    const style = healthStyleMap[status] || { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' };
+    const isGood = status === 'running' || status === 'connected';
+    return (
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '4px 12px',
+        borderRadius: '999px',
+        fontSize: '11.5px',
+        fontWeight: 600,
+        background: style.bg,
+        color: style.text,
+        border: `1px solid ${style.border}`,
+        lineHeight: 1,
+      }}>
+        {isGood && (
+          <span style={{
+            display: 'inline-block',
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            backgroundColor: style.text,
+            marginRight: 6,
+            animation: 'pulseDot 1.6s infinite ease-in-out'
+          }} />
+        )}
+        {status.toUpperCase()}
+      </span>
+    );
+  };
+
   const userColumns: ColumnsType<UserRecord> = [
     {
       title: t('kb_title') === 'Title' ? 'Email' : '邮箱',
@@ -137,23 +181,48 @@ export default function AdminDashboardPage() {
       title: 'Role',
       dataIndex: 'roles',
       key: 'roles',
-      width: 100,
+      width: 120,
       render: (roles: string[], record: UserRecord) => {
         const displayRoles = [...roles];
-        // V4.0 Phase 2: is_hr_admin fallback → show as 'hr' role
         if (record.is_hr_admin && !roles.includes('hr')) {
           displayRoles.push('hr');
         }
         if (displayRoles.length === 0 && !record.is_hr_admin) {
-          return <Tag color="default">Employee</Tag>;
+          const style = roleStyleMap.employee;
+          return (
+            <span style={{
+              display: 'inline-flex',
+              padding: '3px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 500,
+              background: style.bg,
+              color: style.text,
+              border: `1px solid ${style.border}`
+            }}>
+              EMPLOYEE
+            </span>
+          );
         }
         return (
-          <Space size={4}>
-            {displayRoles.map(role => (
-              <Tag key={role} color={roleColors[role] || 'default'}>
-                {role.toUpperCase()}
-              </Tag>
-            ))}
+          <Space size={6}>
+            {displayRoles.map(role => {
+              const style = roleStyleMap[role] || roleStyleMap.employee;
+              return (
+                <span key={role} style={{
+                  display: 'inline-flex',
+                  padding: '3px 10px',
+                  borderRadius: '999px',
+                  fontSize: '11.5px',
+                  fontWeight: 500,
+                  background: style.bg,
+                  color: style.text,
+                  border: `1px solid ${style.border}`
+                }}>
+                  {role.toUpperCase()}
+                </span>
+              );
+            })}
           </Space>
         );
       },
@@ -169,110 +238,115 @@ export default function AdminDashboardPage() {
       title: t('kb_status') === 'Status' ? 'Active' : '状态',
       dataIndex: 'is_active',
       key: 'is_active',
-      width: 80,
-      render: (isActive: boolean) => (
-        <Tag color={isActive ? 'green' : 'red'}>
-          {isActive ? 'Active' : 'Inactive'}
-        </Tag>
-      ),
+      width: 100,
+      render: (isActive: boolean) => {
+        const style = isActive ? { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' } : { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' };
+        return (
+          <span style={{
+            display: 'inline-flex',
+            padding: '3px 10px',
+            borderRadius: '999px',
+            fontSize: '11.5px',
+            fontWeight: 500,
+            background: style.bg,
+            color: style.text,
+            border: `1px solid ${style.border}`
+          }}>
+            {isActive ? 'Active' : 'Inactive'}
+          </span>
+        );
+      },
     },
   ];
 
   return (
-    <div className="page"><div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-      {/* Left: User list table */}
-      <Card
-        style={{ flex: 2, minWidth: 0 }}
-        title={
-          <Space>
-            <TeamOutlined />
-            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500 }}>
-              {t('admin_users') || 'User Management'}
-            </span>
-          </Space>
-        }
-        extra={
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={loadUsers}>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-head" style={{ marginBottom: 32 }}>
+        <h1 className="page-title">{t('admin_dashboard') || 'Admin Dashboard'}</h1>
+      </div>
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        {/* Left: User list table */}
+        <Card
+          style={{ flex: 2, minWidth: 320, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          styles={{ body: { padding: '24px' } }}
+          title={
+            <Space size="middle">
+              <TeamOutlined style={{ color: 'var(--accent)' }} />
+              <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
+                {t('admin_users') || 'User Management'}
+              </span>
+            </Space>
+          }
+          extra={
+            <Button icon={<ReloadOutlined />} onClick={loadUsers} style={{ borderRadius: 8 }}>
               {t('refresh') || 'Refresh'}
             </Button>
-          </Space>
-        }
-      >
-        <Table
-          columns={userColumns}
-          dataSource={users}
-          loading={loading}
-          rowKey="id"
-          pagination={{ pageSize: 10 }}
-          scroll={{ x: 'max-content' }}
-          size="middle"
-        />
-      </Card>
+          }
+        >
+          <Table
+            columns={userColumns}
+            dataSource={users}
+            loading={loading}
+            rowKey="id"
+            pagination={{ pageSize: 10 }}
+            scroll={{ x: 'max-content' }}
+            size="middle"
+          />
+        </Card>
 
-      {/* Right: System status panel */}
-      <Card
-        style={{ flex: 1, minWidth: 240 }}
-        title={
-          <Space>
-            <DashboardOutlined />
-            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500 }}>
-              System Health
-            </span>
-          </Space>
-        }
-      >
-        {statusLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin />
-          </div>
-        ) : systemStatus ? (
-          <Descriptions column={1} size="small" bordered>
-            {/* V4.2 UI-V4.2-011: Dynamic status tag colors reflecting real health data.
-            * Previously all tags were hardcoded color="green" regardless of actual status.
-            * [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-011] */}
-            <Descriptions.Item label="Backend">
-              <Tag color={systemStatus.backend_status === 'running' ? 'green' : systemStatus.backend_status === 'degraded' ? 'orange' : 'red'}>
-                {systemStatus.backend_status}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Celery">
-              <Tag color={systemStatus.celery_status === 'running' ? 'green' : systemStatus.celery_status === 'unknown' ? 'orange' : 'red'}>
-                {systemStatus.celery_status}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Database">
-              <Tag color={systemStatus.db_status === 'connected' ? 'green' : systemStatus.db_status === 'unknown' ? 'orange' : 'red'}>
-                {systemStatus.db_status}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Total Users">
-              <Text strong>{systemStatus.total_users}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="Active Users">
-              {/* V4.2 UI-V4.2-005: Replace hardcoded #52c41a with CSS variable
-              * for dark mode contrast. #52c41a is too dark on #1E293B backgrounds.
-              * [Source: V4.2/ui_ux/ui_bug_list_V4.2.md §UI-V4.2-005] */}
-              <Text strong style={{ color: 'var(--color-success)' }}>{systemStatus.active_users}</Text>
-            </Descriptions.Item>
-          </Descriptions>
-        ) : (
-          <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
-            No status data available
-          </div>
-        )}
+        {/* Right: System status panel */}
+        <Card
+          style={{ flex: 1, minWidth: 280, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          styles={{ body: { padding: '24px' } }}
+          title={
+            <Space size="middle">
+              <DashboardOutlined style={{ color: 'var(--accent)' }} />
+              <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
+                System Health
+              </span>
+            </Space>
+          }
+        >
+          {statusLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin />
+            </div>
+          ) : systemStatus ? (
+            <Descriptions column={1} size="small" bordered={false} style={{ marginBottom: 12 }}>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Backend</span>}>
+                {renderHealthTag(systemStatus.backend_status)}
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Celery</span>}>
+                {renderHealthTag(systemStatus.celery_status)}
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Database</span>}>
+                {renderHealthTag(systemStatus.db_status)}
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Total Users</span>}>
+                <Text strong style={{ color: 'var(--color-text)' }}>{systemStatus.total_users}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Active Users</span>}>
+                <Text strong style={{ color: 'var(--color-success)' }}>{systemStatus.active_users}</Text>
+              </Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
+              No status data available
+            </div>
+          )}
 
-        <div style={{ marginTop: 16, padding: 12, background: 'var(--color-fill-secondary)', borderRadius: 8 }}>
-          <Space direction="vertical" size={4}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              <SafetyCertificateOutlined /> V4.0 Dual-Track RBAC Active
-            </Text>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              HR: Content domain (22 perms) · Admin: System domain (35 perms)
-            </Text>
-          </Space>
-        </div>
-      </Card>
-    </div></div>
+          <div style={{ marginTop: 20, padding: 16, background: 'var(--color-fill)', border: '1px solid var(--color-border-secondary)', borderRadius: 12 }}>
+            <Space direction="vertical" size={6}>
+              <Text style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)' }}>
+                <SafetyCertificateOutlined style={{ color: 'var(--accent)', marginRight: 6 }} /> V4.0 Dual-Track RBAC Active
+              </Text>
+              <Text type="secondary" style={{ fontSize: 11.5, lineHeight: 1.4 }}>
+                HR: Content domain (22 perms) · Admin: System domain (35 perms)
+              </Text>
+            </Space>
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }

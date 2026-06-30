@@ -33,7 +33,7 @@ import {
   type SpaceRole,
 } from '../api/spaces';
 
-const { Title, Text, Paragraph } = Typography;
+const { Text, Paragraph } = Typography;
 
 const MANAGE_ROLES: (SpaceRole | null)[] = ['owner', 'super_admin', 'org_admin', 'business_admin'];
 
@@ -182,136 +182,173 @@ export default function SpaceManagementPage() {
         ) : null,
     },
   ];
-
   return (
-    <div className="page"><div className="page-inner">
-      <Title level={3} style={{ marginTop: 0 }}>
-        {t('space_management') || 'Space Management'} — {active.name}
-      </Title>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 32 }}>
+          <h1 className="page-title">
+            {t('space_management') || 'Space Management'} — {active.name}
+          </h1>
+        </div>
 
-      <Card title={t('space_settings') || 'Space settings'} style={{ marginBottom: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <div>
-            <Text type="secondary">{t('space_name') || 'Space name'}</Text>
-            <Input value={name} onChange={(e) => setName(e.target.value)} disabled={!canManage} />
-          </div>
-          <div>
-            <Text type="secondary">{t('space_description') || 'Description'}</Text>
-            <Input.TextArea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={!canManage}
-              rows={2}
-            />
-          </div>
-          <div>
-            <Text type="secondary">{t('space_visibility') || 'Visibility'}</Text>
-            <Select
-              value={visibility}
-              onChange={setVisibility}
-              disabled={!canManage}
-              style={{ width: 240, display: 'block' }}
-              options={[
-                { value: 'private', label: t('visibility_private') || 'Private' },
-                { value: 'business_line', label: t('visibility_business_line') || 'Business line' },
-                { value: 'organization', label: t('visibility_organization') || 'Organization' },
-                { value: 'public_demo', label: t('visibility_public_demo') || 'Public demo' },
-              ]}
-            />
-          </div>
-          {canManage && (
-            <Button type="primary" loading={savingSettings} onClick={saveSettings}>
-              {t('save') || 'Save'}
-            </Button>
-          )}
-        </Space>
-      </Card>
-
-      <Card
-        title={t('space_members') || 'Members'}
-        style={{ marginBottom: 16 }}
-        extra={<Button icon={<ReloadOutlined />} size="small" onClick={refresh} />}
-      >
-        <Table
-          rowKey="id"
-          loading={loading}
-          dataSource={members}
-          columns={memberColumns}
-          pagination={false}
-          size="small"
-        />
-      </Card>
-
-      {canManage && (
         <Card
-          title={t('invite_codes') || 'Access codes'}
-          extra={
-            <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => setInviteOpen(true)}>
-              {t('generate_code') || 'Generate code'}
-            </Button>
+          title={
+            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
+              {t('space_settings') || 'Space settings'}
+            </span>
           }
+          styles={{ body: { padding: '28px' } }}
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('space_name') || 'Space name'}</Text>
+              <Input size="large" value={name} onChange={(e) => setName(e.target.value)} disabled={!canManage} style={{ marginTop: 6, borderRadius: 10 }} />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('space_description') || 'Description'}</Text>
+              <Input.TextArea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={!canManage}
+                rows={3}
+                style={{ marginTop: 6, borderRadius: 10 }}
+              />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('space_visibility') || 'Visibility'}</Text>
+              <Select
+                size="large"
+                value={visibility}
+                onChange={setVisibility}
+                disabled={!canManage}
+                style={{ width: 260, display: 'block', marginTop: 6 }}
+                popupClassName="menu-pop-dropdown"
+                options={[
+                  { value: 'private', label: t('visibility_private') || 'Private' },
+                  { value: 'business_line', label: t('visibility_business_line') || 'Business line' },
+                  { value: 'organization', label: t('visibility_organization') || 'Organization' },
+                  { value: 'public_demo', label: t('visibility_public_demo') || 'Public demo' },
+                ]}
+              />
+            </div>
+            {canManage && (
+              <Button type="primary" loading={savingSettings} onClick={saveSettings} size="large" style={{ height: 44, borderRadius: 12, fontWeight: 600, padding: '0 24px', marginTop: 8 }}>
+                {t('save') || 'Save'}
+              </Button>
+            )}
+          </Space>
+        </Card>
+
+        <Card
+          title={
+            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
+              {t('space_members') || 'Members'}
+            </span>
+          }
+          styles={{ body: { padding: '24px' } }}
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          extra={<Button icon={<ReloadOutlined />} size="middle" onClick={refresh} style={{ borderRadius: 8 }} />}
         >
           <Table
             rowKey="id"
             loading={loading}
-            dataSource={invites}
-            columns={inviteColumns}
+            dataSource={members}
+            columns={memberColumns}
             pagination={false}
-            size="small"
+            size="middle"
           />
         </Card>
-      )}
 
-      <Modal
-        title={t('generate_code') || 'Generate access code'}
-        open={inviteOpen}
-        onOk={createInvite}
-        confirmLoading={creatingInvite}
-        onCancel={() => setInviteOpen(false)}
-        okText={t('create') || 'Create'}
-      >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <div>
-            <Text type="secondary">{t('member_role') || 'Role granted on join'}</Text>
-            <Select
-              value={inviteRole}
-              onChange={(v) => setInviteRole(v as SpaceRole)}
-              style={{ width: '100%' }}
-              options={[
-                { value: 'member', label: 'member' },
-                { value: 'guest', label: 'guest' },
-                { value: 'reviewer', label: 'reviewer' },
-                { value: 'knowledge_admin', label: 'knowledge_admin' },
-              ]}
+        {canManage && (
+          <Card
+            title={
+              <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
+                {t('invite_codes') || 'Access codes'}
+              </span>
+            }
+            styles={{ body: { padding: '24px' } }}
+            style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+            extra={
+              <Button type="primary" icon={<PlusOutlined />} size="middle" onClick={() => setInviteOpen(true)} style={{ borderRadius: 8 }}>
+                {t('generate_code') || 'Generate code'}
+              </Button>
+            }
+          >
+            <Table
+              rowKey="id"
+              loading={loading}
+              dataSource={invites}
+              columns={inviteColumns}
+              pagination={false}
+              size="middle"
             />
-          </div>
-          <div>
-            <Text type="secondary">{t('invite_max_uses') || 'Max uses (0 = unlimited)'}</Text>
-            <Input
-              type="number"
-              min={0}
-              value={inviteMaxUses}
-              onChange={(e) => setInviteMaxUses(Number(e.target.value) || 0)}
-            />
-          </div>
-        </Space>
-      </Modal>
+          </Card>
+        )}
 
-      <Modal
-        title={t('code_generated') || 'Access code generated'}
-        open={!!generatedCode}
-        onCancel={() => setGeneratedCode(null)}
-        footer={[
-          <Button key="ok" type="primary" onClick={() => setGeneratedCode(null)}>
-            {t('done') || 'Done'}
-          </Button>,
-        ]}
-      >
-        <Paragraph type="warning">
-          {t('code_generated_hint') || 'Copy this code now — it is shown only once.'}
-        </Paragraph>
-        <Input.TextArea readOnly value={generatedCode ?? ''} autoSize />
-      </Modal>
-    </div></div>
+        <Modal
+          title={t('generate_code') || 'Generate access code'}
+          open={inviteOpen}
+          onOk={createInvite}
+          confirmLoading={creatingInvite}
+          onCancel={() => setInviteOpen(false)}
+          okText={t('create') || 'Create'}
+          styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+          transitionName="fade"
+          style={{ top: 120 }}
+        >
+          <Space direction="vertical" style={{ width: '100%', padding: '16px 0' }} size="large">
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('member_role') || 'Role granted on join'}</Text>
+              <Select
+                size="large"
+                value={inviteRole}
+                onChange={(v) => setInviteRole(v as SpaceRole)}
+                style={{ width: '100%', marginTop: 6 }}
+                popupClassName="menu-pop-dropdown"
+                options={[
+                  { value: 'member', label: 'member' },
+                  { value: 'guest', label: 'guest' },
+                  { value: 'reviewer', label: 'reviewer' },
+                  { value: 'knowledge_admin', label: 'knowledge_admin' },
+                ]}
+              />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('invite_max_uses') || 'Max uses (0 = unlimited)'}</Text>
+              <Input
+                size="large"
+                type="number"
+                min={0}
+                value={inviteMaxUses}
+                onChange={(e) => setInviteMaxUses(Number(e.target.value) || 0)}
+                style={{ width: '100%', marginTop: 6, borderRadius: 10 }}
+              />
+            </div>
+          </Space>
+        </Modal>
+
+        <Modal
+          title={t('code_generated') || 'Access code generated'}
+          open={!!generatedCode}
+          onCancel={() => setGeneratedCode(null)}
+          footer={[
+            <Button key="ok" type="primary" onClick={() => setGeneratedCode(null)} size="large" style={{ borderRadius: 10 }}>
+              {t('done') || 'Done'}
+            </Button>,
+          ]}
+          styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+          transitionName="fade"
+          style={{ top: 120 }}
+        >
+          <div style={{ padding: '16px 0' }}>
+            <Paragraph type="warning" style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 12 }}>
+              {t('code_generated_hint') || 'Copy this code now — it is shown only once.'}
+            </Paragraph>
+            <Input.TextArea readOnly value={generatedCode ?? ''} autoSize style={{ borderRadius: 10, fontFamily: 'var(--font-family-mono)', padding: 12 }} />
+          </div>
+        </Modal>
+      </div>
+    </div>
   );
 }

@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Upload, message, Modal, Empty } from 'antd';
+import { Card, Table, Button, Space, Upload, message, Modal, Empty } from 'antd';
 import { ReloadOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -22,13 +22,13 @@ interface Document {
   created_at: string;
 }
 
-const statusColors: Record<string, string> = {
-  active: 'green',
-  processing: 'blue',
-  failed: 'red',
-  draft: 'default',
-  uploading: 'orange',
-  expired: 'gray',
+const tagStyleMap: Record<string, { bg: string; text: string; border: string }> = {
+  active: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+  processing: { bg: '#EAF2FD', text: '#1A56DB', border: '#D0E1FD' },
+  failed: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
+  draft: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
+  uploading: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
+  expired: { bg: '#F3F4F6', text: '#9CA3AF', border: '#E5E7EB' },
 };
 
 export default function KnowledgeBasePage() {
@@ -112,19 +112,35 @@ export default function KnowledgeBasePage() {
 
   const columns: ColumnsType<Document> = [
     { title: t('kb_title'), dataIndex: 'title', key: 'title', ellipsis: true },
-    { title: t('kb_category'), dataIndex: 'category_name', key: 'category', width: 120 },
-    { title: t('kb_type'), dataIndex: 'file_type', key: 'file_type', width: 80 },
-    { title: t('kb_chunks'), dataIndex: 'chunk_count', key: 'chunk_count', width: 80 },
+    { title: t('kb_category'), dataIndex: 'category_name', key: 'category', width: 140 },
+    { title: t('kb_type'), dataIndex: 'file_type', key: 'file_type', width: 90 },
+    { title: t('kb_chunks'), dataIndex: 'chunk_count', key: 'chunk_count', width: 90 },
     {
       title: t('kb_status'),
       dataIndex: 'status',
       key: 'status',
-      width: 120,
-      render: (status: string) => (
-        <Tag color={statusColors[status] || 'default'}>
-          {statusLabels[status] || status}
-        </Tag>
-      ),
+      width: 130,
+      render: (status: string) => {
+        const style = tagStyleMap[status] || { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' };
+        return (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '4px 12px',
+            borderRadius: '999px',
+            fontSize: '12px',
+            fontWeight: 500,
+            background: style.bg,
+            color: style.text,
+            border: `1px solid ${style.border}`,
+            lineHeight: 1,
+            whiteSpace: 'nowrap'
+          }}>
+            {statusLabels[status] || status}
+          </span>
+        );
+      },
     },
     { title: t('kb_created'), dataIndex: 'created_at', key: 'created_at', width: 180 },
     {
@@ -132,18 +148,20 @@ export default function KnowledgeBasePage() {
       key: 'actions',
       width: 150,
       render: (_: unknown, record: Document) => (
-        <Space>
+        <Space size="middle">
           <Button
             size="small"
             icon={<ReloadOutlined />}
             onClick={() => handleReindex(record.id)}
             disabled={record.status === 'processing'}
+            style={{ borderRadius: 6 }}
           />
           <Button
             size="small"
             danger
             icon={<DeleteOutlined />}
             onClick={() => confirmDelete(record.id, record.title)}
+            style={{ borderRadius: 6 }}
           />
         </Space>
       ),
@@ -151,13 +169,20 @@ export default function KnowledgeBasePage() {
   ];
 
   return (
-    <div className="page"><div className="page-inner">
-      <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, margin: 0 }}>
-          {t('nav_knowledge')}
-        </span>
-        <Space>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 32 }}>
+          <h1 className="page-title">{t('nav_knowledge')}</h1>
+        </div>
+        <Card
+          styles={{ body: { padding: '28px 28px 24px' } }}
+          style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
+            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
+              {t('document_list') || 'Document List'}
+            </span>
+            <Space size="middle">
           <Upload
             action="/api/v1/documents/"
             headers={{

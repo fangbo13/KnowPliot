@@ -58,7 +58,7 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 # Database: Use PostgreSQL from Docker Compose (with pgvector support)
 # This is inherited from base.py — no override needed!
 # The base.py DATABASES config uses env vars that docker-compose provides:
-#   POSTGRES_DB=ey_onboarding, POSTGRES_USER=ey_onboarding, etc.
+#   POSTGRES_DB=knowpilot, POSTGRES_USER=knowpilot, etc.
 # The pgvector migration (0004) will now run successfully.
 
 # V4.1 SYS-V4.1-011: Removed SSL_VERIFY = False override.

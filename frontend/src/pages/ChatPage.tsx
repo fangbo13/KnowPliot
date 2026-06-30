@@ -48,7 +48,7 @@ export default function ChatPageContainer() {
   const {
     sessions, messages, streamContent, citations, activeSessionId, streamingSessionId,
     isLoadingMessages, sendError, hasOlderMessages, setSendError, sendMessage,
-    loadSessions, loadMessages, loadOlderRounds,
+    loadSessions, loadMessages, loadOlderRounds, aiStatusText,
   } = useChatStore();
 
   const streamPhase = useChatStore((s) => s.streamPhase);
@@ -159,6 +159,22 @@ export default function ChatPageContainer() {
     return (
       <div className="chat-view">
         <WelcomeScreen onQuickAction={handleQuickAction} onSendMessage={(m) => sendMessage(m)} />
+        <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
+          <div style={{
+            opacity: aiStatusText ? 1 : 0,
+            transform: aiStatusText ? 'translateY(0)' : 'translateY(8px)',
+            transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            marginBottom: 10,
+            display: 'flex',
+            justifyContent: 'center',
+            pointerEvents: aiStatusText ? 'auto' : 'none'
+          }}>
+            <div className="gemini-status-indicator">
+              <span className="gemini-status-spinner" />
+              <span>{aiStatusText}</span>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -256,7 +272,22 @@ export default function ChatPageContainer() {
         </div>
       </div>
 
-      <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 100, pointerEvents: 'none' }}>
+      <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
+        <div style={{
+          opacity: aiStatusText ? 1 : 0,
+          transform: aiStatusText ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+          marginBottom: 10,
+          display: 'flex',
+          justifyContent: 'center',
+          pointerEvents: aiStatusText ? 'auto' : 'none'
+        }}>
+          <div className="gemini-status-indicator">
+            <span className="gemini-status-spinner" />
+            <span>{aiStatusText}</span>
+          </div>
+        </div>
+
         <div style={{ width: '100%', maxWidth: 'calc(var(--content-max) - 16px)', padding: '0 24px', pointerEvents: 'auto' }}>
           <ChatComposer
             value={inputValue}

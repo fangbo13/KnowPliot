@@ -121,8 +121,8 @@ interface ChatState {
   // V4.1 BUG-003: Flag to differentiate timeout abort from user-intentional abort.
   // Set by abortInterval before controller.abort(), checked by AbortError handler.
   // When true: show timeout error toast + preserve truncated content.
-  // When false (user abort / Stop button): preserve content silently, no error toast.
   _isTimeoutAbort: boolean;
+  aiStatusText: string | null;
 
   // Actions
   setActiveSession: (id: string) => void;
@@ -139,6 +139,7 @@ interface ChatState {
   sendMessage: (content: string) => Promise<void>;
   finishStreamingMessage: (messageId: string, sessionId: string) => void;
   loadOlderRounds: (count: number) => void;
+  setAIStatusText: (text: string | null) => void;
 }
 
 // V3.5: Sliding window helpers
@@ -196,6 +197,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   isSendLocked: false,
   _pendingSessionRefresh: false,
   _isTimeoutAbort: false,
+  aiStatusText: null,
 
   // V3.5 CRIT-002: setActiveSession resets UI state but does NOT abort the stream.
   // V4.6: Stream continues in background; when it completes, finishStreamingMessage handles
@@ -251,6 +253,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       _isTimeoutAbort: false,
     });
   },
+
+  setAIStatusText: (text) => set({ aiStatusText: text }),
 
   // V3.6 MED-001 / V3.7 P1.3: addMessage now prunes allMessages when exceeding MAX cap
   // V4.2 SYS-V4.2-016: Removed computeRounds() from addMessage — it was redundant
@@ -733,3 +737,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
   },
 }));
+
+export function setAIStatus(text: string | null) {
+  useChatStore.getState().setAIStatusText(text);
+}
+
+if (typeof window !== 'undefined') {
+  (window as any).setAIStatus = setAIStatus;
+}
+
