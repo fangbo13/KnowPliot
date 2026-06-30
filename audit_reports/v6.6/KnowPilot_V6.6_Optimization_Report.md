@@ -1,112 +1,65 @@
-# KnowPilot V6.6 设计格调优化与全页面升级计划
+# KnowPilot V6.6 设计格调优化与全页面重构落地报告
 
-> 📅 日期：2026-06-30 | 🏷️ 当前版本：V6.6 | 📂 分支：`Version_6.6`
+> 📅 日期：2026-06-30 | 🏷️ 当前版本：V6.6 | 📂 分支：`Version_6.6` | 👤 负责人：Principal Full-Stack Engineer
 
 ---
 
 ## 🎨 第一部分：V6.6 已完成的重构与视觉升级
 
-在本次更新中，我们启动了代号为 **“人文书卷意趣 (Tactile & Editorial Milano Paper v2)”** 的视觉重构。主要对项目的通用底座样式、物理阻尼、全局呼吸感与登录仪式感进行了升级。
+在本次更新中，我们全方位落地了代号为 **“人文书卷意趣 (Tactile & Editorial Milano Paper v2)”** 的视觉与交互重构，全面覆盖了登录页、聊天页、个人中心、知识库、空间管理和管理仪表盘。
 
 ### 1. 设计 Token 系统升级 (`tokens.css`)
-*   **主色与字色**：主色升级为高阶、低饱和度且温暖的 **陶土褐 (Terracotta, `#B85B35`)**，文字色采用黑曜墨水色 **墨羽黑 (Ebony Black, `#231F1B`)**。
-*   **纸张背景底色**：背景采用高级纤维艺术纸色 **米兰纸白 (Milano Paper White, `#F7F6F0`)** 与 **灰泥粘土 (Sunken Clay, `#F1EFE8`)**，暗色模式升级为 ** Obsidian 暖灰 (`#161513`)**。
-*   **物理阴影**：引入了多层柔化阴影（如：`--shadow-md`, `--shadow-lg` 等），取消了强硬的物理边框，转而利用极浅的背景差和发散的环境光斑进行自然分级。
-*   **阻尼曲线**：定义了物理弹性阻尼曲线 `--ease-spring` 与 `--ease-soft-spring`（基于超调弹簧公式 `cubic-bezier(0.34, 1.56, 0.64, 1)`），提供生动的按压回弹手感。
+*   **主色与字色**：主色升级为高阶、低饱和度且温暖的 **陶土褐 (Terracotta, `#B85B35`)**，字色采用黑曜墨水色 **墨羽黑 (Ebony Black, `#231F1B`)**。
+*   **纸张背景底色**：背景采用高级纤维艺术纸色 **米兰纸白 (Milano Paper White, `#F7F6F0`)** 与 **灰泥粘土 (Sunken Clay, `#F1EFE8`)**，暗色模式下平滑过渡到 **Obsidian 暖灰 (`#161513`)**。
+*   **物理阴影**：引入多层柔化阴影，取消生硬的边框，以浅色背景差和发散的环境光斑进行自然视觉分级。
+*   **阻尼曲线**：定义物理弹性阻尼曲线 `--ease-spring` 与 `--ease-soft-spring`（基于超调弹簧公式 `cubic-bezier(0.34, 1.56, 0.64, 1)`），提供生动的手感回弹。
 
 ### 2. 全局样式与微动效 (`globals.css` / `chat.css`)
-*   **软弹性淡入**：新增 `softFadeInUp` keyframe。所有页面在路由切换时，内容块将从底部 `8px` 平滑淡入并伴随轻微缩放。
-*   **聚焦指示环**：重设聚焦环样式为 35% 不透明度的陶土色半透明光环，贴合圆角曲线。
-*   **不规则消息圆角**：用户气泡调整为非对称的 `18px 18px 4px 18px`，更具现代对话的流式动感。
-*   **流式打字脉冲 caret**：打字机 caret 动效改用渐变的 `pulseCaret` 呼吸脉冲（1.2s），降低视力疲劳。
-*   **动作栏滑入微动效**：消息上方的复制、分享等动作栏在 hover 时加入 `translateY(4px -> 0)` 的微滑入淡显，交互极具亲和力。
-
-### 3. 登录页极致升级 (`LoginPage.tsx`)
-*   右侧表单面板 padding 由 `52px` 扩大为 `60px 48px`，输入框聚焦时引入陶土色柔和环境阴影扩展。
-*   左侧暗色背景的 `ambientGlow` 环境光斑放慢至 `18s` 的超慢速呼吸流转，提供深沉且克制的品牌质感。
+*   **路由过渡**：内容块在加载或切换时从底部 `8px` 平滑淡入并伴随轻微缩放。
+*   **聚焦指示环**：聚焦环重设为 35% 不透明度的陶土色半透明光环，平滑贴合各组件圆角。
+*   **不规则圆角**：非对称的用户气泡圆角更具现代流式对话动感。
+*   **打字机 Caret 脉冲**：打字机 Caret 动效采用慢速渐变呼吸脉冲（1.2s），降低视力疲劳。
 
 ---
 
-## 🛠️ 第二部分：其他未优化页面的全量升级计划 (Upgrade Plan)
+## 🛠️ 第二部分：全功能页面重构执行细节
 
-为了实现 KnowPilot 全站设计格调、呼吸感、反馈亲和力和物理阻尼的连贯统一，接下来的升级工作将对**聊天页、历史记录页、个人设置页、空间管理页及侧边栏**等剩余界面进行全量优化。
+### 1. 登录页中英文与主题切换 (`LoginPage.tsx`)
+*   **右上控制工具栏**：在登录界面右上方，绝对定位注入了中/英文切换（`GlobalOutlined`）与主题切换（`SunOutlined`/`MoonOutlined`）控制按钮，自动将用户首选项写入 `localStorage` 并执行多语言与深色主题的热加载渲染。
+*   **版面呼吸感**：右侧表单面板 padding 扩大为 `60px 48px`，输入框聚焦时引入半透明陶土色环境阴影扩展。
 
-### 1. 聊天页与输入框 (`ChatPage.tsx` / `ChatComposer.tsx`)
+### 2. 智能状态指示器 (AI Status Indicator) 与 WelcomeScreen 重塑 (`ChatPage.tsx` / `WelcomeScreen.tsx` / `chatStore.ts`)
+*   **Welcome 页面视觉复原**：去除了过渡性质的幻彩径向渐变背景，使 Welcome 页面完全回归系统原有的干净格调。
+*   **Material 3 状态指示器**：集成了 Google Material 3 "Thinking/Status Indicator" 规范的浮动状态药丸。使用柔和浅灰背景（`#f0f4f9`，暗色模式 `#1e1f20`）和中性灰字，内置优雅旋转的 loading 圈。
+*   **全局控制方法**：在 `window` 及 `chatStore` 级导出了 `setAIStatus(text)`，支持应用程序在运行工具链（如 "Pinpointing Relevant YouTube..."）时，以平滑的 translateY 和 opacity 淡入淡出触发状态显示。
 
-#### A. 视觉留白与呼吸感
-*   **对话列宽与两侧留白**：保持聊天主视窗内容宽度 `--content-max: 640px`。当视窗处于 Empty State（WelcomeScreen）时，输入框和建议卡片应具备完全一致的宽度，两侧保留至少 `48px` 的空气流动区。
-*   **对话间距优化**：将相邻两条消息气泡的纵向间距从 `10px` 调整为 `16px`，不同会话角色（User 与 Assistant）的分组间距增加至 `24px`，避免段落堆叠感。
+### 3. 个人设置页升级 (`ProfilePage.tsx`)
+*   **信息展示卡片**：圆角统一为 `16px`，内边距设为 `32px`。
+*   **去线条化设计**：彻底删去了表单之间生硬的 `Divider` 分割线，改用纵向 `20px` 呼吸留白进行自然分区。
+*   **保存按钮反馈**：保存按钮采用陶土色填充并增加 hover 微提升反馈。
 
-#### B. 微动效与反馈亲和力
-*   **输入框聚焦扩展 (Composer Glow)**：
-    *   `.composer` 在聚焦时边框色过渡至 `--accent`，同时注入 `0 0 0 4px var(--accent-soft)` 的发散光晕，带来“粘性聚焦”的亲和力。
-    *   当用户在文本框中键入首个字符时，发送按钮（`.composer-send`）从不可用的浅色态平滑过渡为激活态，建议伴随微小的弹簧缩放 `scale(1.05)` 淡入。
-*   **引文卡片渐进淡入 (Citation Sequence)**：
-    *   AI 消息的引用来源列表（`.citation-list`）在展开时，引文条目（`.citation-item`）应使用 staggered (错落) 延迟淡入，每个条目的延迟递增 `60ms`。
-*   **Scroll-to-Bottom 悬浮球 (Scroll FAB)**：
-    *   `.scroll-fab` 的出现与隐藏引入 `scale` 和 `translateY` 的双重阻尼淡入淡出（180ms，使用 `--ease-soft-spring`）。
+### 4. 知识库管理页重构 (`KnowledgeBasePage.tsx`)
+*   **空气感表格**：行高拉伸并移除了表头深色底，使用透明渐变板式。
+*   **状态标牌柔化**：将亮绿/亮红等原始 Tag 标牌，重构为低饱和度、淡背景的定制 Span 胶囊标签。
+*   **虚线上传边框**：文档上传卡片边框调整为精细的虚线陶土配色，极富人文亲和力。
 
----
+### 5. 管理仪表盘优化 (`AdminDashboardPage.tsx`)
+*   **系统健康慢速呼吸闪烁**：对正常运行的 Celery、Backend 及 DB 系统节点，设计了绿色的 `pulseDot` 发散点动效，每 `1.6s` 周期性发散闪烁，极具业务活跃的安全确定性。
+*   **列表微滑移**：用户管理表格行在 hover 时引入平滑滑移，提供细微的物理阻尼阻隔。
 
-### 2. 会话历史记录页 (`HistoryPage.tsx`)
-
-#### A. Spacing & Rhythm
-*   **卡片网格留白**：将会话历史卡片和分页区域内边距拉大，标题区域下边界留白（`margin-bottom`）提升至 `32px`。
-*   **列表空气感**：会话行列表的每项高度与间距拉大，将会话列表行之间的间距设为 `8px`，背景默认使用微弱底色。
-
-#### B. 悬停与物理阻尼
-*   **列表悬停软弹手感**：
-    *   会话列表项在 hover 时，背景颜色平滑过渡到 `var(--color-fill)`，且卡片整体向右微滑移 `4px`，增加指向感。
-    *   点击列表项时，运用物理阻尼按压动效 `transform: scale(0.98)`。
-*   **搜索与过滤条**：
-    *   顶部搜索框（`Input.Search`）及时间维度分段控制器（`Segmented`）均增加 `transition: all var(--dur) var(--ease-out)`。
-    *   点击分段选项卡时，选中背景滑块应平滑过渡移动，而非闪烁切换。
+### 6. 空间管理页重构 (`SpaceManagementPage.tsx`)
+*   **毛玻璃背景遮罩**：空间设置与访问码生成弹窗（`Modal`）的 mask 引入 `backdrop-filter: blur(6px)` 的高斯模糊遮罩，增加层级景深。
+*   **弹窗弹簧进入**：弹窗打开动作绑定了阻尼弹簧动画，增强触感阻尼。
 
 ---
 
-### 3. 个人设置页 (`ProfilePage.tsx`)
+## 📅 里程碑与上线验证
 
-#### A. 视觉格调与分级
-*   **信息展示卡片**：将个人头像、用户账号基础信息和首选项配置合并为大气的两级板式。两块 AntD `Card` 容器的圆角统一采用 `var(--radius-lg)` (16px)，内边距设为 `32px`。
-*   **移除冗余线框**：只保留大版面之间的逻辑线，表单字段之间取消分割线，改用纵向 `20px` 留白。
-
-#### B. Feedback Affinity
-*   **保存按钮回弹反馈**：
-    *   “保存修改”按钮（`.ant-btn-primary`）增加 `box-shadow` 在 hover 时的扩散和 translateY 微提升（-1.5px）。
-    *   按钮在 `loading` 状态（保存中）到 `success` 状态（保存成功）过渡时，加入微小的震动反馈和轻微的弹性勾选动效。
-*   **输入框聚焦微交互**：
-    *   语言首选项下拉框在展开时，选项菜单（Dropdown Menu）平滑向下展开（`transform-origin: top; animation: slideDown var(--dur-fast) var(--ease-out)`）。
-
----
-
-### 4. 空间管理页 (`SpaceManagementPage.tsx`)
-
-#### A. 列表与表格的克制与连贯
-*   **无缝表格**：空间成员列表表格（`Table`）取消表头深色底，采用与 Milano Paper 融合的透明渐变。行高拉大至 `48px`，提供充裕的行间呼吸。
-*   **状态标牌 (Access Code Tags)**：
-    *   激活、失效状态 Tag 一律使用温润、低饱和度的柔和配色（Success 配淡绿底深绿字，Revoked 配淡咖底深咖字）。
-*   **模态弹窗 (Invite Code Modal)**：
-    *   生成访问码弹窗在弹出时，背景遮罩使用 `backdrop-filter: blur(4px)` 缓缓蒙上。
-    *   弹窗面板从屏幕中央以 `scale(0.97) -> scale(1)` 结合 `var(--ease-spring)` 弹簧效果快速缩放进入，突出“加载确定性”。
-
----
-
-### 5. 侧边栏与空间切换器 (`AppLayout.tsx` / `SpaceSwitcher.tsx`)
-
-#### A. 物理收折与连贯叙事
-*   **侧边栏推拉感**：
-    *   侧边栏在收缩/展开时，右侧主视窗内容区域应当平滑自适应，过渡时间使用阻尼适中的 `var(--dur-slow)`，配合 `--ease-out`。
-    *   侧边栏内部会话组（如“今天”、“过去7天”）在折叠和展开时，折叠箭头 `.sidebar-group-caret` 的旋转执行平滑的 90 度旋转动画。
-*   **空间切换器悬停反馈**：
-    *   点击顶部空间选择器时，下拉列表项淡入，并以级联 (Cascade) 延迟淡出，带来流畅的叙事连续性。
-
----
-
-## 📅 实施路线图 (Implementation Roadmap)
-
-| 阶段 | 优化目标 | 关联文件 | 验证要点 |
-|---|---|---|---|
-| **Phase 1** | 聊天页呼吸留白与引文、Composer 微交互升级 | `ChatPage.tsx`, `ChatComposer.tsx`, `MessageBubble.tsx` | 输入聚焦阴影、AI打字脉冲光标、操作条滑入微动效。 |
-| **Phase 2** | 会话历史与个人中心列表悬停阻尼手感优化 | `HistoryPage.tsx`, `ProfilePage.tsx` | 卡片内边距拉大、分段滑块平滑过渡、保存按钮点击缩放。 |
-| **Phase 3** | 空间管理无缝表格及模态弹窗弹性动效升级 | `SpaceManagementPage.tsx` | 表格行间空气感、状态 Tag 软配色、模态弹窗弹簧缩放。 |
-| **Phase 4** | 侧边栏推拉、空间切换器级联效果整体校对 | `AppLayout.tsx`, `SpaceSwitcher.tsx` | 侧边栏折叠平滑过渡、切换器展开阻尼。 |
+| 阶段 | 重构模块 | 涉及主要文件 | 验证要点 | 状态 |
+|---|---|---|---|---|
+| **Phase 1** | 设计 Token 与全局微动效 | `tokens.css`, `globals.css` | 阻尼回弹曲线、软弹性淡入、聚焦陶土光环。 | **已通过 (Passed)** |
+| **Phase 2** | 登录页面多语言与主题切换 | `LoginPage.tsx` | 语言切换热重载、浅色/深色主题一键变换。 | **已通过 (Passed)** |
+| **Phase 3** | Material 3 指示器与 WelcomeScreen | `ChatPage.tsx`, `chatStore.ts` | 悬浮指示器 `setAIStatus` 全局动态控制与动画。 | **已通过 (Passed)** |
+| **Phase 4** | 个人设置与知识库重构 | `ProfilePage.tsx`, `KnowledgeBasePage.tsx` | 去分隔线、软色 Tag 标签、虚线上传边框。 | **已通过 (Passed)** |
+| **Phase 5** | 空间管理与仪表盘呼吸点 | `SpaceManagementPage.tsx`, `AdminDashboardPage.tsx` | 慢速绿闪点动效、模态窗毛玻璃遮罩。 | **已通过 (Passed)** |
+| **Phase 6** | 编译、打包与 Docker 部署 | `dist/`, Dockerfile | `npm run build` 打包无警告，容器滚动重启无故障。 | **已通过 (Passed)** |
