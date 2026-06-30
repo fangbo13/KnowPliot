@@ -4,8 +4,8 @@
 
 ### Multi-space knowledge operations platform for professional teams
 
-[![Status](https://img.shields.io/badge/Status-Beta-yellow)](README.md)
-[![Version](https://img.shields.io/badge/Version-6.1-blue)](README.md)
+[![Status](https://img.shields.io/badge/Status-Phase%202B%20Discovery-blue)](README.md)
+[![Version](https://img.shields.io/badge/Version-7.2-blue)](README.md)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
 **Languages**: [English](README.md) / [中文](README_ZH.md)
@@ -17,6 +17,30 @@
 > **One platform. Infinite knowledge spaces. Every team grows its own brain.**
 >
 > KnowPilot is a RAG-powered knowledge agent that turns scattered documents, methodologies, project memory, and compliance rules into a governed, reusable knowledge product — so teams ask once, reuse everywhere, and keep institutional knowledge inside the organization.
+
+---
+
+## Current Implementation Status
+
+KnowPilot is not yet a complete implementation of every item in [SPEC.MD](SPEC.MD). The current codebase has completed the identity/governance foundation and the first template-driven replication stages.
+
+| SPEC area | Status | Notes |
+| --- | --- | --- |
+| Phase 1: Multi-Space Foundation | Mostly implemented | Organizations, business lines, spaces, memberships, access codes, space switching, and scoped permissions are present. |
+| V7 Identity & Governance | Implemented and verified | Email registration, admin registration codes, optional signup approval, email space invites, notifications, scoped announcements, admin console, and frontend RBAC cleanup. |
+| Phase 2A: Scenario Template Center MVP | Implemented and verified | Template CRUD, scope permissions, seed templates, create-space from template, quick questions, applications, revisions, clone, archive, restore, and admin UI. |
+| Phase 2B: Template Discovery & Operations | Filter slice complete | Scope-safe filters for search, scenario type, active status, scope, organization, and business line are implemented in the API and admin UI. |
+| Phase 3: Knowledge Governance Hardening | Not complete | MIME/magic-number validation, authenticated media hardening, stale knowledge controls, and allowlisted retrieval filters still need a dedicated pass. |
+| Phase 4: Audit & Admin Center | Partially implemented | Audit/admin foundations exist, but usage metrics, quality dashboards, failed job visibility, and stale knowledge dashboards remain. |
+| Phase 5: Knowledge Improvement Loop | Not complete | Answer feedback workflow, flagged-answer review queue, knowledge gap analytics, and compliance exports remain future work. |
+
+Latest verified baseline:
+
+- Backend: `makemigrations --check --dry-run`, `manage.py check`, and 50 V7 + template regression tests pass.
+- Frontend: `npm run check:i18n` and `npm run build` pass.
+- Known non-blocking warnings: django-allauth deprecation settings and Vite chunk/dynamic import warnings.
+
+Next recommended stage: start **Phase 3 Knowledge Governance Hardening**, with priority on authenticated document/media access, MIME validation, safe retrieval filters, and stale/failed document states.
 
 ---
 
