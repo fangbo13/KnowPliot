@@ -167,15 +167,16 @@ class RAGPipeline:
         query: str,
         user_profile,
         conversation_history: list,
+        *,
+        space_id: str,
         language: str = "en",
-        space_id: str | None = None,
     ):
         """Full RAG: retrieve context, build prompt, call LLM, stream response.
 
         Args:
             space_id: V6.0 — restrict retrieval (and therefore citations) to the
-                active knowledge space. When ``None`` no space filter is applied
-                (used only by non-scoped callers / tests).
+                active knowledge space. The pipeline no longer supports
+                unscoped callers.
 
         Yields:
             Dicts with 'event' and 'data' keys for SSE streaming.

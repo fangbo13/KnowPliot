@@ -12,6 +12,9 @@ V3.7 P0.2: Added retrieval timing logs for pgvector performance verification.
 import time
 import math
 import logging
+from dataclasses import dataclass
+from uuid import UUID
+
 from django.db import connection
 from django.conf import settings
 
@@ -20,6 +23,34 @@ from .embedding import EmbeddingService
 from .config import TOP_K, SIMILARITY_THRESHOLD
 
 logger = logging.getLogger(__name__)
+
+
+def _validated_uuid(value, *, field_name: str) -> str:
+    """Return one canonical UUID string or fail before database access."""
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(f"{field_name} must contain valid UUID values") from exc
+
+
+@dataclass(frozen=True)
+class RetrievalFilters:
+    """The complete allowlist of caller-controlled retrieval filters."""
+
+    document_ids: tuple[str, ...] = ()
+    category_ids: tuple[str, ...] = ()
+
+    def normalized(self) -> "RetrievalFilters":
+        return RetrievalFilters(
+            document_ids=tuple(
+                _validated_uuid(value, field_name="document_ids")
+                for value in self.document_ids
+            ),
+            category_ids=tuple(
+                _validated_uuid(value, field_name="category_ids")
+                for value in self.category_ids
+            ),
+        )
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -42,10 +73,11 @@ class PgVectorRetriever:
     def search(
         self,
         query: str,
+        *,
+        space_id: str,
         top_k: int | None = None,
         similarity_threshold: float | None = None,
-        filters: dict | None = None,
-        space_id: str | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[dict]:
         """Search for relevant chunks.
 
@@ -63,8 +95,17 @@ class PgVectorRetriever:
         Returns:
             List of dicts with 'content', 'document', 'score', 'page_number', 'metadata', 'id'.
         """
-        top_k = top_k or TOP_K
-        threshold = similarity_threshold or SIMILARITY_THRESHOLD
+        normalized_space_id = _validated_uuid(space_id, field_name="space_id")
+        if filters is not None and not isinstance(filters, RetrievalFilters):
+            raise ValueError("filters must be a RetrievalFilters instance")
+        normalized_filters = filters.normalized() if filters else RetrievalFilters()
+
+        top_k = TOP_K if top_k is None else top_k
+        threshold = (
+            SIMILARITY_THRESHOLD
+            if similarity_threshold is None
+            else similarity_threshold
+        )
 
         # Check if we're using pgvector (PostgreSQL) or JSON (SQLite)
         is_postgres = "postgresql" in settings.DATABASES["default"]["ENGINE"]
@@ -73,9 +114,13 @@ class PgVectorRetriever:
         start_time = time.time()
 
         if is_postgres:
-            results = self._search_pgvector(query, top_k, threshold, filters, space_id)
+            results = self._search_pgvector(
+                query, top_k, threshold, normalized_filters, normalized_space_id
+            )
         else:
-            results = self._search_sqlite(query, top_k, threshold, filters, space_id)
+            results = self._search_sqlite(
+                query, top_k, threshold, normalized_filters, normalized_space_id
+            )
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         search_mode = "pgvector" if is_postgres else "sqlite"
@@ -87,18 +132,23 @@ class PgVectorRetriever:
         return results
 
     def _search_sqlite(
-        self, query: str, top_k: int, threshold: float, filters: dict | None,
-        space_id: str | None = None,
+        self, query: str, top_k: int, threshold: float,
+        filters: RetrievalFilters | None, space_id: str,
     ) -> list[dict]:
         """SQLite fallback: compute cosine similarity in Python."""
         embedder = EmbeddingService()
         query_embedding = embedder.embed(query)
 
-        qs = DocumentChunk.objects.filter(embedding__isnull=False)
-        if space_id:
-            qs = qs.filter(space_id=space_id)  # V6.0 space isolation
-        if filters:
-            qs = qs.filter(**filters)
+        normalized_filters = (filters or RetrievalFilters()).normalized()
+        qs = DocumentChunk.objects.filter(
+            embedding__isnull=False,
+            space_id=space_id,
+            document__status="active",
+        )
+        if normalized_filters.document_ids:
+            qs = qs.filter(document_id__in=normalized_filters.document_ids)
+        if normalized_filters.category_ids:
+            qs = qs.filter(document__category_id__in=normalized_filters.category_ids)
 
         # Compute similarity for all chunks
         scored = []
@@ -127,8 +177,8 @@ class PgVectorRetriever:
         ]
 
     def _search_pgvector(
-        self, query: str, top_k: int, threshold: float, filters: dict | None,
-        space_id: str | None = None,
+        self, query: str, top_k: int, threshold: float,
+        filters: RetrievalFilters | None, space_id: str,
     ) -> list[dict]:
         """PostgreSQL + pgvector: use native vector similarity.
 
@@ -136,7 +186,6 @@ class PgVectorRetriever:
         cosine similarity search. This column is populated by migration 0004
         from the JSON embedding data, and has an HNSW index for fast retrieval.
         """
-        from pgvector.django import CosineDistance
 
         # V3.7 P0.2: Use EmbeddingService singleton — reuses global httpx.Client
         embedder = EmbeddingService()
@@ -148,23 +197,21 @@ class PgVectorRetriever:
             # Build WHERE clause for filters
             # V4.1 KB-V4.1-004: Whitelist allowed filter keys to prevent SQL column name injection.
             # Only allow known column names that are safe to interpolate into raw SQL.
-            ALLOWED_FILTER_KEYS = {"document_id", "category_id", "document__status"}
-            filter_sql = ""
-            filter_params: list = []
-            if filters:
-                filter_parts = []
-                for key, value in filters.items():
-                    if key not in ALLOWED_FILTER_KEYS:
-                        raise ValueError(f"Invalid filter key: '{key}'. Allowed keys: {sorted(ALLOWED_FILTER_KEYS)}")
-                    filter_parts.append(f"{key} = %s")
-                    filter_params.append(value)
-                filter_sql = " AND " + " AND ".join(filter_parts)
+            normalized_filters = (filters or RetrievalFilters()).normalized()
+            filter_parts = ["dc.space_id = %s", "d.status = %s"]
+            filter_params: list = [space_id, "active"]
+            if normalized_filters.document_ids:
+                placeholders = ", ".join(["%s"] * len(normalized_filters.document_ids))
+                filter_parts.append(f"dc.document_id IN ({placeholders})")
+                filter_params.extend(normalized_filters.document_ids)
+            if normalized_filters.category_ids:
+                placeholders = ", ".join(["%s"] * len(normalized_filters.category_ids))
+                filter_parts.append(f"d.category_id IN ({placeholders})")
+                filter_params.extend(normalized_filters.category_ids)
+            filter_sql = " AND " + " AND ".join(filter_parts)
 
             # V6.0 space isolation — qualified column (dc.space_id) avoids ambiguity
             # with the joined knowledge_document.space_id. Always parameterized.
-            if space_id:
-                filter_sql += " AND dc.space_id = %s"
-                filter_params.append(str(space_id))
 
             # V3.7 P0.2: Query embedding_vector (vector column) with HNSW index
             # Cosine distance operator <=> provided by pgvector

@@ -1,6 +1,6 @@
 # KnowPilot SPEC Implementation Progress
 
-Date: 2026-07-01
+Date: 2026-07-02
 
 This file is the current engineering progress tracker for `SPEC.MD`.
 It records what has been implemented, what is partially complete, and what should be built next.
@@ -17,13 +17,14 @@ Current stage:
 - Phase 2B Template Discovery & Operations: filter slice complete.
 - Phase 3A authenticated document access: implemented and verified.
 - Phase 3B file-validation consistency: implemented and verified.
-- Phase 3C retrieval safety: next recommended stage.
+- Phase 3C retrieval safety: implemented and verified.
+- Phase 4A scoped audit governance: next recommended stage.
 
 Latest verified baseline:
 
 - Backend migration dry-run: no changes detected.
 - Django system check: passes with 3 known django-allauth deprecation warnings.
-- Backend Phase 3A/3B + space + V7 + template regression suite: 85 tests OK.
+- Backend Phase 3A/3B/3C + space + V7 + template regression suite: 100 tests OK.
 - Frontend i18n check: OK.
 - Frontend test suite: 42 tests OK.
 - Frontend production build: OK with known Vite chunk/dynamic import warnings.
@@ -40,7 +41,7 @@ Latest verified baseline:
 | M3 Scenario Templates | Implemented through Phase 2B filter slice | `ScenarioTemplate`, create-space, quick questions, prompt/retrieval policy fields, clone, archive/restore, revisions, applications, filters | Tags/categories, recommendation ordering, URL-saved filters, marketplace/sharing |
 | M4 Knowledge Base and Document Lifecycle | Partially implemented | Upload/re-index/delete/archive, object-authorized delivery, and one server-enforced PDF/DOCX/HTML/TXT/Markdown validation policy | Stale/expired states, duplicate UX, quality score |
 | M5 External Collection | Explicitly out of scope | SPEC says crawler collection is not supported in current version | No immediate work unless scope changes |
-| M6 RAG Retrieval and Answer Engine | Partially implemented | Space-scoped chat/RAG baseline exists | Allowlisted retrieval filters, hybrid retrieval, reranking, confidence markers, stronger insufficient-evidence behavior |
+| M6 RAG Retrieval and Answer Engine | Partially implemented | Mandatory space-scoped, active-only retrieval with typed document/category filter allowlist across SQLite and PostgreSQL | Hybrid retrieval, reranking, confidence markers, stronger insufficient-evidence behavior |
 | M7 Chat and Session Experience | Partially implemented | Space-scoped chat, session list, quick questions from template-created spaces | Citation drawer polish, feedback controls, export, mobile verification, stream cancellation hardening |
 | M8 RBAC and Object-Level Permission | Mostly implemented | Backend RBAC/admin scopes, frontend RoleGuard cleanup, scoped template permissions | Permission matrix coverage expansion and cache/performance hardening |
 | M9 Audit, Compliance, and Governance | Partially implemented | Audit log model/actions, admin audit page, V7 governance events | Compliance export, deeper audit coverage, bad-answer traceability |
@@ -51,7 +52,7 @@ Latest verified baseline:
 | 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, audit/admin foundations, protected document download API | Metrics APIs, feedback APIs, citation-inspection APIs |
 | 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, knowledge admin, template admin, governance admin | Metrics dashboards, feedback controls, source/citation inspection polish |
 | 8. Deployment Model | Partially implemented | Current `docker-compose.yml`, backend Dockerfile, frontend Dockerfile | Production deployment guide, secrets handling, observability, scaling guidance |
-| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, Phase 3A, and Phase 3B delivered | Phase 3C, Phase 4, Phase 5 remain |
+| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, and Phase 3A-3C delivered | Phase 4 and Phase 5 remain |
 | 10. Non-Functional Requirements | Partially implemented | Auth required for APIs, scoped permissions, tests | Performance targets, retry visibility, stale-source compliance, caching strategy |
 | 11. Success Metrics | Not complete | Metrics listed in SPEC | Instrumentation and dashboard work required |
 | 12. Open Decisions | Open | Recommendations documented in SPEC | Product decisions still need confirmation before later phases |
@@ -91,18 +92,18 @@ Latest verified baseline:
 
 ## Next Recommended Stage
 
-Continue Phase 3C: retrieval safety.
+Continue Phase 4A: scoped audit governance.
 
 Suggested order:
 
-1. Retrieval safety:
-   - Add allowlisted retrieval filter keys.
-   - Ensure all retrieval paths are scoped by `space_id` and document status.
+1. Audit scope:
+   - Add explicit organization, business-line, and space scope to audit records.
+   - Restrict audit visibility to each administrator's authorized scope.
 2. Document states:
    - Make stale/expired/failed states explicit and visible in admin UI.
    - Exclude archived/stale documents from retrieval by default or warn clearly.
 3. Verification:
-   - Add backend regression tests for file validation, retrieval filters, and stale/failed states.
+   - Add backend regression tests for audit scope and stale/failed states.
    - Add frontend validation for admin document error states.
 
 ## Deferred Later Work
