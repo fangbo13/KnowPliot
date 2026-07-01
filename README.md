@@ -218,22 +218,9 @@ flowchart TB
 
 ![KnowPilot login page](./docs/images/login-page.png)
 
-### Space Access
-
-![KnowPilot space access](./docs/images/space-access.png)
-
 ### Dashboard
 
 ![KnowPilot dashboard](./docs/images/dashboard.png)
-
-### Module Isolation
-
-![KnowPilot module isolation](./docs/images/module-isolation.png)
-![KnowPilot module isolation detail](./docs/images/module-isolation-detail.png)
-
-### Knowledge Base
-
-![KnowPilot knowledge base](./docs/images/knowledge-base.png)
 
 ### Chat
 

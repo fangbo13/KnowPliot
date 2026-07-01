@@ -167,22 +167,9 @@ flowchart TB
 
 ![KnowPilot 登录页](./docs/images/login-page.png)
 
-### 空间访问
-
-![KnowPilot 空间访问](./docs/images/space-access.png)
-
 ### 主页
 
 ![KnowPilot 主页](./docs/images/dashboard.png)
-
-### 模块隔离
-
-![KnowPilot 模块隔离](./docs/images/module-isolation.png)
-![KnowPilot 模块隔离详情](./docs/images/module-isolation-detail.png)
-
-### 知识库
-
-![KnowPilot 知识库](./docs/images/knowledge-base.png)
 
 ### 对话页
 
