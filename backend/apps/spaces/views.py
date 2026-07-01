@@ -64,7 +64,11 @@ def _audit(user, action, target_id=None, details=None, request=None, role_used=N
         create_audit_log(
             user=user,
             action=action,
-            target_type="KnowledgeSpace",
+            target_type=(
+                "ScenarioTemplate"
+                if action.startswith("template_")
+                else "KnowledgeSpace"
+            ),
             target_id=target_id,
             details=details or {},
             role_used=role_used or "",

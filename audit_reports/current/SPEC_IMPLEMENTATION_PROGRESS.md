@@ -18,15 +18,16 @@ Current stage:
 - Phase 3A authenticated document access: implemented and verified.
 - Phase 3B file-validation consistency: implemented and verified.
 - Phase 3C retrieval safety: implemented and verified.
-- Phase 4A scoped audit governance: next recommended stage.
+- Phase 4A scoped audit governance: implemented and verified.
+- Phase 4B operations, metrics, and document lifecycle MVP: next recommended stage.
 
 Latest verified baseline:
 
 - Backend migration dry-run: no changes detected.
 - Django system check: passes with 3 known django-allauth deprecation warnings.
-- Backend Phase 3A/3B/3C + space + V7 + template regression suite: 100 tests OK.
+- Backend Phase 3A/3B/3C + Phase 4A + space + V7 + template regression suite: 107 tests OK.
 - Frontend i18n check: OK.
-- Frontend test suite: 42 tests OK.
+- Frontend test suite: 43 tests OK.
 - Frontend production build: OK with known Vite chunk/dynamic import warnings.
 
 ## SPEC Coverage Matrix
@@ -44,7 +45,7 @@ Latest verified baseline:
 | M6 RAG Retrieval and Answer Engine | Partially implemented | Mandatory space-scoped, active-only retrieval with typed document/category filter allowlist across SQLite and PostgreSQL | Hybrid retrieval, reranking, confidence markers, stronger insufficient-evidence behavior |
 | M7 Chat and Session Experience | Partially implemented | Space-scoped chat, session list, quick questions from template-created spaces | Citation drawer polish, feedback controls, export, mobile verification, stream cancellation hardening |
 | M8 RBAC and Object-Level Permission | Mostly implemented | Backend RBAC/admin scopes, frontend RoleGuard cleanup, scoped template permissions | Permission matrix coverage expansion and cache/performance hardening |
-| M9 Audit, Compliance, and Governance | Partially implemented | Audit log model/actions, admin audit page, V7 governance events | Compliance export, deeper audit coverage, bad-answer traceability |
+| M9 Audit, Compliance, and Governance | Partially implemented | Immutable read-only audit API, explicit org/business-line/space scope, scoped admin visibility, result tracking, filters, and admin viewer | Compliance export, retention policy, bad-answer traceability |
 | M10 Metrics, Monitoring, and Quality Dashboard | Not complete | Basic admin foundation only | Usage metrics, RAG quality metrics, ingestion queue visibility, model/API/token dashboards, stale knowledge dashboard |
 | M11 User Feedback and Knowledge Improvement Loop | Not complete | No completed feedback/review workflow evidence | Helpful/unhelpful feedback, flagged-answer review queue, gap tickets, reviewer resolution workflow |
 | M12 Frontend UX and Accessibility | Partially implemented | React/AntD app, admin console, responsive foundations | Formal accessibility pass, keyboard flow verification, mobile citation inspection |
@@ -52,7 +53,7 @@ Latest verified baseline:
 | 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, audit/admin foundations, protected document download API | Metrics APIs, feedback APIs, citation-inspection APIs |
 | 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, knowledge admin, template admin, governance admin | Metrics dashboards, feedback controls, source/citation inspection polish |
 | 8. Deployment Model | Partially implemented | Current `docker-compose.yml`, backend Dockerfile, frontend Dockerfile | Production deployment guide, secrets handling, observability, scaling guidance |
-| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, and Phase 3A-3C delivered | Phase 4 and Phase 5 remain |
+| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, Phase 3A-3C, and Phase 4A delivered | Phase 4B/4C and Phase 5 remain |
 | 10. Non-Functional Requirements | Partially implemented | Auth required for APIs, scoped permissions, tests | Performance targets, retry visibility, stale-source compliance, caching strategy |
 | 11. Success Metrics | Not complete | Metrics listed in SPEC | Instrumentation and dashboard work required |
 | 12. Open Decisions | Open | Recommendations documented in SPEC | Product decisions still need confirmation before later phases |
@@ -92,18 +93,18 @@ Latest verified baseline:
 
 ## Next Recommended Stage
 
-Continue Phase 4A: scoped audit governance.
+Continue Phase 4B: operations, metrics, and document lifecycle MVP.
 
 Suggested order:
 
-1. Audit scope:
-   - Add explicit organization, business-line, and space scope to audit records.
-   - Restrict audit visibility to each administrator's authorized scope.
+1. Operations visibility:
+   - Add real bounded health checks and scoped metrics APIs.
+   - Replace inferred frontend health with server-reported states.
 2. Document states:
    - Make stale/expired/failed states explicit and visible in admin UI.
    - Exclude archived/stale documents from retrieval by default or warn clearly.
 3. Verification:
-   - Add backend regression tests for audit scope and stale/failed states.
+   - Add backend regression tests for health, metrics, archive, and stale states.
    - Add frontend validation for admin document error states.
 
 ## Deferred Later Work

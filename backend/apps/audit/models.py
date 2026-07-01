@@ -91,6 +91,20 @@ class AuditLog(models.Model):
     # V4.0: role_used tracks which role was active during the operation
     # (hr/admin/superuser/employee) — critical for dual-role audit tracing
     role_used = models.CharField(max_length=20, blank=True, default="", help_text="Role used for this action")
+    organization_id = models.UUIDField(null=True, blank=True, db_index=True)
+    business_line_id = models.UUIDField(null=True, blank=True, db_index=True)
+    space_id = models.UUIDField(null=True, blank=True, db_index=True)
+    RESULT_CHOICES = [
+        ("success", "Success"),
+        ("denied", "Denied"),
+        ("failure", "Failure"),
+    ]
+    result = models.CharField(
+        max_length=10,
+        choices=RESULT_CHOICES,
+        default="success",
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -61,7 +61,21 @@ export interface AuditLog {
   target_id: string | null;
   details: Record<string, unknown>;
   role_used: string;
+  organization_id: string | null;
+  business_line_id: string | null;
+  space_id: string | null;
+  result: 'success' | 'denied' | 'failure';
   created_at: string;
+}
+
+export interface AuditLogQuery {
+  action?: string;
+  result?: 'success' | 'denied' | 'failure';
+  organization?: string;
+  business_line?: string;
+  space?: string;
+  date_from?: string;
+  date_to?: string;
 }
 
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
@@ -142,7 +156,7 @@ export const adminApi = {
   },
 
   // ── Audit logs (existing endpoint) ──
-  async auditLogs(params?: { action?: string }): Promise<AuditLog[]> {
+  async auditLogs(params?: AuditLogQuery): Promise<AuditLog[]> {
     const { data } = await apiClient.get('/audit/logs/', { params });
     return unwrap(data);
   },

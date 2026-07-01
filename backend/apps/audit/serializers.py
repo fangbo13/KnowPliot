@@ -15,6 +15,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
         model = AuditLog
         fields = [
             "id", "user", "user_email", "action", "target_type",
-            "target_id", "details", "ip_address", "created_at",
+            "target_id", "details", "ip_address", "role_used",
+            "organization_id", "business_line_id", "space_id", "result",
+            "created_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = fields
