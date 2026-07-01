@@ -143,74 +143,13 @@ These work in **any** organization:
 
 KnowPilot uses one shared platform core with logical isolation. It scales by adding organizations, business lines, spaces, templates, policies, and knowledge stores, not by cloning deployments for every team.
 
-```mermaid
-flowchart TB
-    subgraph Client["Client Applications"]
-        Web["React Web App"]
-        Admin["Admin Console"]
-    end
+<p align="center">
+  <a href="./Architecture.png">
+    <img src="./Architecture.png" alt="KnowPilot architecture diagram" width="100%" />
+  </a>
+</p>
 
-    subgraph Identity["Identity & Governance"]
-        Auth["Auth / JWT"]
-        RBAC["RBAC + Admin Scope"]
-        Notify["Notifications + Announcements"]
-    end
-
-    subgraph Tenant["Logical Isolation Layer"]
-        Org["Organization"]
-        Line["Business Line"]
-        Space["Knowledge Space"]
-        Member["Space Membership"]
-    end
-
-    subgraph Replication["Template Replication Layer"]
-        Template["Scenario Templates"]
-        Filter["Discovery Filters"]
-        CreateSpace["Create Space From Template"]
-        QuickQ["Quick Questions + Policies"]
-    end
-
-    subgraph Knowledge["Knowledge Runtime"]
-        Docs["Document Management"]
-        Ingest["Celery Ingestion"]
-        Vector["PostgreSQL + pgvector"]
-        Chat["Chat / RAG Orchestrator"]
-        LLM["Qwen / DashScope"]
-        Citations["Citations"]
-    end
-
-    subgraph Operations["Operations & Extension Points"]
-        Audit["Audit Logs"]
-        Metrics["Metrics / Quality Dashboards"]
-        Feedback["Feedback Loop"]
-        Media["Authenticated Media Access"]
-    end
-
-    Web --> Auth
-    Admin --> Auth
-    Auth --> RBAC
-    RBAC --> Tenant
-    Org --> Line --> Space
-    Space --> Member
-    RBAC --> Template
-    Template --> Filter
-    Template --> CreateSpace
-    CreateSpace --> Space
-    CreateSpace --> QuickQ
-    Space --> Docs
-    Docs --> Ingest --> Vector
-    Space --> Chat
-    Chat --> Vector
-    Chat --> LLM
-    Chat --> Citations
-    RBAC --> Audit
-    Docs --> Audit
-    Chat --> Audit
-    Audit --> Metrics
-    Chat --> Feedback
-    Docs --> Media
-```
-
+<p align="center"><sub>Click the architecture diagram to open the full-size image for zooming.</sub></p>
 
 ## Screenshots
 
