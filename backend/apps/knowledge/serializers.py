@@ -2,19 +2,18 @@
 # Licensed under the CC BY-NC-SA 4.0 License.
 # See LICENSE file in the project root for full license details.
 
-"""Knowledge serializers — V4.1 KB-V4.1-006/008: Magic number + file size validation.
+"""Knowledge serializers with canonical file policy and safe API fields."""
 
-DocumentSerializer now validates:
-- V4.1 SYS-V4.1-012: File size against settings.MAX_UPLOAD_SIZE_MB (existing)
-- V4.1 KB-V4.1-006: File content type matches declared file_type (magic number)
-- V4.1 KB-V4.1-008: Min/max file size enforcement
-- V4.2 KB-V4.2-BATCH-008: Title sanitization to prevent stored XSS
-"""
+from pathlib import Path
 
-from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-from apps.core.validators import validate_file_content_type, validate_file_size, MIN_FILE_SIZE
 from apps.knowledge.batch import sanitize_title  # V4.2 BATCH-008
+from apps.knowledge.file_policy import (
+    derive_document_type,
+    validate_document_content,
+    validate_document_size,
+)
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
 
 
@@ -26,36 +25,74 @@ class DocumentCategorySerializer(serializers.ModelSerializer):
 
 
 class DocumentSerializer(serializers.ModelSerializer):
+    file = serializers.FileField(write_only=True)
+    title = serializers.CharField(required=False)
+    file_type = serializers.ChoiceField(
+        choices=Document.FILE_TYPE_CHOICES,
+        required=False,
+    )
+    file_size = serializers.IntegerField(required=False, min_value=0)
+    download_url = serializers.HyperlinkedIdentityField(
+        view_name="document-download",
+        read_only=True,
+    )
     category_name = serializers.CharField(source="category.name", read_only=True)
 
     def validate_file(self, value):
-        """Validate uploaded file: size limits + magic number content type check.
-
-        V4.1 SYS-V4.1-012: Max file size against MAX_UPLOAD_SIZE_MB setting.
-        V4.1 KB-V4.1-006: Magic number validation — content must match declared type.
-        V4.1 KB-V4.1-008: Min file size — reject empty/near-empty files.
-        """
-        # V4.1 SYS-V4.1-012: Max file size check (existing, preserved)
-        max_size_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
-        if value.size > max_size_bytes:
-            raise serializers.ValidationError(
-                "File size exceeds the limit of %dMB. "
-                "Your file is %.1fMB."
-                % (settings.MAX_UPLOAD_SIZE_MB, value.size / 1024 / 1024)
-            )
-
-        # V4.1 KB-V4.1-008: Min file size check
-        if value.size < MIN_FILE_SIZE:
-            raise serializers.ValidationError(
-                f"File is too small ({value.size} bytes). Minimum size is 1KB."
-            )
-
-        # V4.1 KB-V4.1-006: Magic number content type validation
-        declared_type = self.initial_data.get("file_type")
-        if declared_type:
-            validate_file_content_type(value, declared_type)
-
+        """Validate upload size before cross-field content checks."""
+        validate_document_size(value.size)
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        uploaded_file = attrs.get("file")
+        if uploaded_file is None:
+            immutable_errors = {}
+            if "file_type" in attrs:
+                immutable_errors["file_type"] = (
+                    "File type can only change when replacing the file."
+                )
+            if "file_size" in attrs:
+                immutable_errors["file_size"] = (
+                    "File size can only change when replacing the file."
+                )
+            if immutable_errors:
+                raise serializers.ValidationError(immutable_errors)
+            return attrs
+
+        try:
+            derived_type = derive_document_type(uploaded_file.name)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"file": exc.messages}) from exc
+
+        declared_type = self.initial_data.get("file_type")
+        if declared_type and declared_type != derived_type:
+            raise serializers.ValidationError(
+                {
+                    "file_type": (
+                        f"Declared file type '{declared_type}' does not match "
+                        f"filename type '{derived_type}'."
+                    )
+                }
+            )
+
+        original_position = uploaded_file.tell()
+        try:
+            uploaded_file.seek(0)
+            content = uploaded_file.read()
+        finally:
+            uploaded_file.seek(original_position)
+
+        try:
+            validate_document_content(content, derived_type)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"file": exc.messages}) from exc
+
+        attrs["file_type"] = derived_type
+        attrs["file_size"] = uploaded_file.size
+        if not attrs.get("title"):
+            attrs["title"] = sanitize_title(Path(uploaded_file.name).stem)
+        return attrs
 
     def validate_title(self, value):
         """V4.2 KB-V4.2-BATCH-008: Sanitize title to prevent stored XSS."""
@@ -67,7 +104,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = [
-            "id", "title", "file", "file_type", "file_size",
+            "id", "title", "file", "download_url", "file_type", "file_size",
             "category", "category_name", "tags", "status",
             "version", "effective_from", "effective_to",
             "chunk_count", "processing_error", "content_hash", "created_at", "updated_at",

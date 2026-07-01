@@ -10,19 +10,25 @@ ingest_document tasks from running simultaneously on the same document.
 V4.2 KB-V4.2-BATCH-004: Added DocumentUploadRateThrottle to all upload views.
 """
 
+import mimetypes
 import os
 
 from django.conf import settings
 from django.db import transaction
+from django.http import FileResponse
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.core.permissions import IsHROrAdmin
 from apps.audit.views import create_audit_log
 from apps.spaces.permissions import (  # V6.0 space isolation
     DOCUMENT_DELETE,
+    DOCUMENT_DOWNLOAD,
     SpaceDocumentPermission,
+    effective_space_role,
     has_space_permission,
     is_platform_admin,
     resolve_request_space,
@@ -146,6 +152,96 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
             Citation.objects.filter(document=instance).delete()
             self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DocumentDownloadView(APIView):
+    """Stream a document after object-level space authorization.
+
+    Raw storage URLs only establish possession of a path. This endpoint binds
+    delivery to the Document object so ``document.download`` and audit policy
+    are enforced for every request.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _audit_denial(self, request, document, reason):
+        create_audit_log(
+            user=request.user,
+            action="permission_denied",
+            target_type="Document",
+            target_id=str(document.id),
+            details={
+                "permission": DOCUMENT_DOWNLOAD,
+                "result": "denied",
+                "reason": reason,
+                "space_id": str(document.space_id) if document.space_id else None,
+            },
+            request=request,
+        )
+
+    def get(self, request, pk):
+        try:
+            document = Document.objects.select_related("space").get(pk=pk)
+        except Document.DoesNotExist as exc:
+            raise NotFound("Document not found.") from exc
+
+        active_space_id = request.headers.get("X-Space-Id")
+        if (
+            active_space_id
+            and document.space_id
+            and active_space_id != str(document.space_id)
+        ):
+            self._audit_denial(request, document, "active_space_mismatch")
+            raise NotFound("Document not found.")
+
+        if document.space_id is None:
+            if not is_platform_admin(request.user):
+                self._audit_denial(request, document, "unscoped_document")
+                raise NotFound("Document not found.")
+        else:
+            role = effective_space_role(request.user, document.space)
+            if role is None:
+                self._audit_denial(request, document, "space_not_accessible")
+                raise NotFound("Document not found.")
+            if not has_space_permission(
+                request.user,
+                document.space,
+                DOCUMENT_DOWNLOAD,
+            ):
+                self._audit_denial(request, document, "permission_missing")
+                raise PermissionDenied(
+                    "You do not have permission to download this document."
+                )
+
+        try:
+            file_handle = document.file.open("rb")
+        except (FileNotFoundError, OSError) as exc:
+            raise NotFound("Document file not found.") from exc
+
+        filename = os.path.basename(document.file.name)
+        content_type, _ = mimetypes.guess_type(filename)
+        response = FileResponse(
+            file_handle,
+            as_attachment=True,
+            filename=filename,
+            content_type=content_type or "application/octet-stream",
+        )
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+
+        create_audit_log(
+            user=request.user,
+            action="document_download",
+            target_type="Document",
+            target_id=str(document.id),
+            details={
+                "result": "success",
+                "space_id": str(document.space_id) if document.space_id else None,
+                "filename": filename,
+            },
+            request=request,
+        )
+        return response
 
 
 class DocumentReindexView(generics.GenericAPIView):

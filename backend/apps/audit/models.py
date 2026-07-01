@@ -24,6 +24,7 @@ class AuditLog(models.Model):
     ACTION_CHOICES = [
         # ── Content domain (V3.8 original) ──
         ("document_upload", "Document Upload"),
+        ("document_download", "Document Download"),
         ("document_delete", "Document Delete"),
         ("document_reindex", "Document Reindex"),
         ("document_status_change", "Document Status Change"),

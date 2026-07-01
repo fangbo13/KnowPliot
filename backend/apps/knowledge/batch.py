@@ -29,7 +29,6 @@ from datetime import date
 from io import BytesIO
 
 import bleach
-import filetype
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
@@ -187,22 +186,23 @@ def validate_zip_content(zip_file_obj) -> dict:
             })
             continue
 
-        # BATCH-003: Magic Number type validation
+        # Phase 3B: Unknown extensions are rejected explicitly. Previously an
+        # unmapped extension skipped validation and was later persisted as TXT.
         declared_ext = get_extension_from_filename(sanitized_name)
-        if declared_ext:
-            type_valid, detected_mime = validate_inner_file_type(content, declared_ext)
-            if not type_valid:
-                rejected_files.append({
-                    "filename": filename,
-                    "reason": f"Content type mismatch: detected {detected_mime}, expected {declared_ext}.",
-                })
-                continue
-
-        # BATCH-001: Check for nested ZIPs (depth limit)
-        if declared_ext == "zip" or (content[:4] == b"PK\x03\x04"):
+        if declared_ext is None:
             rejected_files.append({
                 "filename": filename,
-                "reason": "Nested ZIP files are not allowed (depth limit).",
+                "reason": "Unsupported file extension.",
+            })
+            continue
+
+        from apps.knowledge.file_policy import validate_document_bytes
+        try:
+            validate_document_bytes(content, sanitized_name, declared_ext)
+        except ValidationError as exc:
+            rejected_files.append({
+                "filename": filename,
+                "reason": exc.messages[0],
             })
             continue
 
@@ -365,13 +365,11 @@ def get_extension_from_filename(filename: str) -> str | None:
     ext_map = {
         "pdf": "pdf",
         "docx": "docx",
-        "doc": "doc",
         "txt": "txt",
-        "csv": "csv",
-        "xlsx": "xlsx",
-        "pptx": "pptx",
         "html": "html",
         "htm": "html",
+        "md": "md",
+        "markdown": "md",
     }
     return ext_map.get(ext)
 
@@ -380,32 +378,29 @@ def validate_inner_file_type(content: bytes, declared_type: str) -> tuple[bool, 
     """BATCH-003: Validate inner file content type using Magic Number detection.
 
     Args:
-        content: File content bytes (at least 261 bytes needed for filetype).
+        content: Complete file content bytes.
         declared_type: Expected file type ('pdf', 'docx', etc.).
 
     Returns:
         Tuple of (is_valid, detected_mime).
     """
-    from apps.core.validators import ALLOWED_MIME_TYPES
+    from apps.knowledge.file_policy import (
+        EXTENSIONS_BY_DOCUMENT_TYPE,
+        validate_document_bytes,
+    )
 
-    # Read at least 261 bytes for magic number detection
-    header = content[:261]
-    kind = filetype.guess(header)
-
-    if kind is None:
-        # No magic number detected — allow text-only formats
-        if declared_type in ("txt", "csv", "html"):
-            return True, None
-        return False, "unknown"
-
-    allowed_mimes = ALLOWED_MIME_TYPES.get(declared_type, [])
-    if not allowed_mimes:
-        return False, kind.mime
-
-    if kind.mime in allowed_mimes:
-        return True, kind.mime
-
-    return False, kind.mime
+    extensions = EXTENSIONS_BY_DOCUMENT_TYPE.get(declared_type)
+    if not extensions:
+        return False, "unsupported"
+    try:
+        validate_document_bytes(
+            content,
+            f"document{extensions[0]}",
+            declared_type,
+        )
+    except ValidationError as exc:
+        return False, exc.messages[0]
+    return True, declared_type
 
 
 # ── Batch Metadata Tagging ──

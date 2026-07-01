@@ -610,6 +610,10 @@ Recommended production path:
 
 ## 9. Implementation Phases
 
+This section is the canonical roadmap. Detailed implementation evidence for
+delivered extensions and phase slices is collected in
+`## 14. Implementation Appendix: Delivered Extensions and Phase Details`.
+
 ### Phase 1: Multi-Space Foundation
 
 - add Organization, BusinessLine, KnowledgeSpace, SpaceMembership, InviteCode;
@@ -624,12 +628,23 @@ Recommended production path:
 - add scenario quick questions and prompt/retrieval policy;
 - seed templates for the nine KnowPilot scenarios.
 
+Delivered slices:
+
+- Phase 2A: Scenario Template Center MVP.
+- Phase 2B: Template Discovery & Operations filter slice.
+
 ### Phase 3: Knowledge Governance Hardening
 
 - magic number/MIME validation;
 - authenticated media/document access;
 - object-level document permissions;
 - allowlisted retrieval filters.
+
+Delivered and planned slices:
+
+- Phase 3A: Authenticated Document Access.
+- Phase 3B: File Validation Consistency.
+- Phase 3C: Retrieval Safety.
 
 ### Phase 4: Audit And Admin Center
 
@@ -710,7 +725,13 @@ KnowPilot should feel like **one product** to the user and **many isolated knowl
 
 The platform should not multiply deployments for every business line. It should multiply spaces, templates, permissions, and knowledge bases inside one governed system. That is the architecture that best matches the product promise: one deployment, unlimited replication, full-scenario reuse.
 
-## 14. V7 Identity & Governance (extension)
+## 14. Implementation Appendix: Delivered Extensions and Phase Details
+
+This appendix preserves implementation details that were added after the core
+SPEC was written. It should be read as evidence and clarification for the
+roadmap in `## 9. Implementation Phases`, not as separate product phases.
+
+### 14.1 V7 Identity & Governance (extension)
 
 V7 extends §M1 / §M2 / §M8 / §M9 with the identity-access layer that was missing
 in V6.x: self-registration (regular users pick a Service Line; admins use tiered
@@ -726,8 +747,7 @@ Key invariants:
 - Permission = "who you are in the org" (Super/Org/Business Admin / Employee) ×
   "what you can do in this space" (Owner / Knowledge Admin / Reviewer / Member / Guest).
 - A "project group" is a `KnowledgeSpace`; its lead is the Space **Owner**.
-- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` —
-  **Super Admin is never obtainable through any registration entry point** (CLI /
+- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` �?  **Super Admin is never obtainable through any registration entry point** (CLI /
   console promotion only).
 - The access/admin code is an *entry* mechanism; it never bypasses RBAC.
 
@@ -743,7 +763,7 @@ Implementation status as of 2026-07-01:
 - Verified with `python manage.py test apps.users.tests_v7_identity
   --settings=config.settings.local_test` and `npm run build`.
 
-## 15. Phase 2A: Scenario Template Center MVP
+### 14.2 Phase 2A: Scenario Template Center MVP
 
 Phase 2A delivers the Scenario Template Center MVP, enabling fast replication of domain-specific knowledge brains (onboarding, audit, tax, consulting, core_services).
 
@@ -758,7 +778,7 @@ Key features:
 - Idempotent `seed_scenario_templates` management command seeding 5 default templates.
 - Fully verified via unit test suite `apps.scenario_templates.tests_phase2a`.
 
-## 16. Phase 2B: Template Discovery & Operations
+### 14.3 Phase 2B: Template Discovery & Operations
 
 Phase 2B extends the template center from CRUD into day-to-day operations and discovery.
 
@@ -776,3 +796,52 @@ Remaining later Phase 2B/2C work:
 - Saved filter state in URL query params.
 - Pagination, sorting, and larger-list ergonomics.
 - Template marketplace/sharing, revision diff/rollback, analytics charts, and automatic document binding.
+
+### 14.4 Phase 3A: Authenticated Document Access
+
+Implementation status as of 2026-07-01:
+
+- Added object-authorized
+  `GET /api/v1/documents/{id}/download/` delivery.
+- The endpoint enforces the document space's `document.download` permission,
+  conceals cross-space objects, and handles missing storage safely.
+- Document API responses no longer expose raw storage-backed media URLs; the
+  upload field is write-only and responses provide a protected `download_url`.
+- Successful downloads are audited as `document_download`; denied same-space
+  attempts are audited as `permission_denied`.
+- Responses use attachment disposition, `X-Content-Type-Options: nosniff`, and
+  `Cache-Control: private, no-store`.
+- The Knowledge Base UI downloads through the authenticated Axios client and
+  safely releases temporary Blob URLs.
+- Verified by 68 backend regression tests, 39 frontend tests, i18n validation,
+  migration checks, Django system checks, and a production frontend build.
+
+Audit evidence:
+`audit_reports/v7.3/Phase3A_Document_Access_Test_Audit_Report_V7.3.md`.
+
+Next Phase 3 slice: reconcile file-type policy and harden extension, MIME,
+magic-number, and safe-text validation across manual upload, batch upload, and
+the frontend.
+
+### 14.5 Phase 3B: File Validation Consistency
+
+Implementation status as of 2026-07-01:
+
+- The current-version policy accepts PDF, DOCX, HTML/HTM, TXT, and
+  Markdown; DOC/CSV/XLSX/PPTX remain unsupported.
+- Manual and batch upload use one canonical backend policy for extension,
+  structure/signature, UTF-8 text, minimum/maximum size, and type derivation.
+- `file_type`, `file_size`, and a missing safe title are derived by the server;
+  clients cannot mutate type/size without replacing the file.
+- Unknown batch extensions are rejected rather than silently persisted as TXT.
+- Valid DOCX batch files are distinguished from prohibited nested ZIP inputs.
+- The frontend accept list matches the backend and uploads through the shared
+  Axios client so JWT and active-space headers are present.
+- Verified by 85 backend regression tests, 42 frontend tests, Python
+  compilation, i18n validation, migrations/system checks, and production build.
+
+Audit evidence:
+`audit_reports/v7.3/Phase3B_File_Validation_Test_Audit_Report_V7.3.md`.
+
+Next Phase 3 slice: allowlisted retrieval filters, mandatory space scoping, and
+active-document status enforcement across every retrieval path.

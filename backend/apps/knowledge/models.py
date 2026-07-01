@@ -50,6 +50,7 @@ class Document(models.Model):
         ("docx", "Word Document"),
         ("html", "HTML"),
         ("txt", "Plain Text"),
+        ("md", "Markdown"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

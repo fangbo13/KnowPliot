@@ -6,11 +6,19 @@
 
 import { useEffect, useState } from 'react';
 import { Card, Table, Button, Space, Upload, message, Modal, Empty } from 'antd';
-import { ReloadOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  DownloadOutlined,
+  ReloadOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
-import { documentApi } from '../../api/documents';
-import { getAuthToken } from '../../api/client';
+import {
+  ALLOWED_DOCUMENT_EXTENSIONS,
+  documentApi,
+  isSupportedDocumentFile,
+} from '../../api/documents';
 
 interface Document {
   id: string;
@@ -72,6 +80,29 @@ export default function KnowledgeBasePage() {
     }
   };
 
+  const handleDownload = async (record: Document) => {
+    try {
+      const { blob, filename } = await documentApi.downloadDocument(
+        record.id,
+        record.title,
+      );
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const anchor = window.document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = filename;
+        window.document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+      message.success(t('download_success'));
+    } catch {
+      message.error(t('download_error'));
+    }
+  };
+
   const confirmDelete = (id: string, title: string) => {
     Modal.confirm({
       title: t('delete_confirm'),
@@ -83,13 +114,10 @@ export default function KnowledgeBasePage() {
     });
   };
 
-  const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.csv', '.xlsx', '.pptx'];
   const MAX_FILE_SIZE_MB = 50;
 
   const beforeUpload = (file: File) => {
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-    const isValidType = ALLOWED_EXTENSIONS.includes(ext);
-    if (!isValidType) {
+    if (!isSupportedDocumentFile(file.name)) {
       message.error(t('file_type_error'));
       return Upload.LIST_IGNORE;
     }
@@ -146,9 +174,17 @@ export default function KnowledgeBasePage() {
     {
       title: t('kb_actions'),
       key: 'actions',
-      width: 150,
+      width: 190,
       render: (_: unknown, record: Document) => (
         <Space size="middle">
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            aria-label={t('download')}
+            title={t('download')}
+            onClick={() => handleDownload(record)}
+            style={{ borderRadius: 6 }}
+          />
           <Button
             size="small"
             icon={<ReloadOutlined />}
@@ -184,11 +220,19 @@ export default function KnowledgeBasePage() {
             </span>
             <Space size="middle">
           <Upload
-            action="/api/v1/documents/"
-            headers={{
-              Authorization: `Bearer ${getAuthToken()}`,
+            customRequest={async ({ file, onError, onSuccess }) => {
+              try {
+                const result = await documentApi.uploadDocument(file as File);
+                onSuccess?.(result);
+              } catch (error) {
+                onError?.(
+                  error instanceof Error
+                    ? error
+                    : new Error('Document upload failed'),
+                );
+              }
             }}
-            accept={ALLOWED_EXTENSIONS.join(',')}
+            accept={ALLOWED_DOCUMENT_EXTENSIONS.join(',')}
             beforeUpload={beforeUpload}
             onChange={(info) => {
               if (info.file.status === 'done') {

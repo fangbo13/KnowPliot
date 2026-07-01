@@ -15,14 +15,17 @@ Current stage:
 - V7 Identity & Governance extension: implemented and verified.
 - Phase 2A Scenario Template Center MVP: implemented and verified.
 - Phase 2B Template Discovery & Operations: filter slice complete.
-- Phase 3 Knowledge Governance Hardening: next recommended stage.
+- Phase 3A authenticated document access: implemented and verified.
+- Phase 3B file-validation consistency: implemented and verified.
+- Phase 3C retrieval safety: next recommended stage.
 
 Latest verified baseline:
 
 - Backend migration dry-run: no changes detected.
 - Django system check: passes with 3 known django-allauth deprecation warnings.
-- Backend V7 + template regression suite: 50 tests OK.
+- Backend Phase 3A/3B + space + V7 + template regression suite: 85 tests OK.
 - Frontend i18n check: OK.
+- Frontend test suite: 42 tests OK.
 - Frontend production build: OK with known Vite chunk/dynamic import warnings.
 
 ## SPEC Coverage Matrix
@@ -35,7 +38,7 @@ Latest verified baseline:
 | M1 Authentication and Identity | Implemented | Email/password registration, admin-code registration, optional signup approval, `/auth/me` identity payload | SSO remains a placeholder/future integration |
 | M2 Organization, Business Line, and Space Management | Mostly implemented | Organization, business line, KnowledgeSpace, membership, invite/access-code flows | Transfer/archive polish and broader admin ergonomics |
 | M3 Scenario Templates | Implemented through Phase 2B filter slice | `ScenarioTemplate`, create-space, quick questions, prompt/retrieval policy fields, clone, archive/restore, revisions, applications, filters | Tags/categories, recommendation ordering, URL-saved filters, marketplace/sharing |
-| M4 Knowledge Base and Document Lifecycle | Partially implemented | Upload/re-index/delete/archive foundations exist from earlier phases | MIME/magic-number validation, authenticated media hardening, stale/expired states, duplicate detection, quality score |
+| M4 Knowledge Base and Document Lifecycle | Partially implemented | Upload/re-index/delete/archive, object-authorized delivery, and one server-enforced PDF/DOCX/HTML/TXT/Markdown validation policy | Stale/expired states, duplicate UX, quality score |
 | M5 External Collection | Explicitly out of scope | SPEC says crawler collection is not supported in current version | No immediate work unless scope changes |
 | M6 RAG Retrieval and Answer Engine | Partially implemented | Space-scoped chat/RAG baseline exists | Allowlisted retrieval filters, hybrid retrieval, reranking, confidence markers, stronger insufficient-evidence behavior |
 | M7 Chat and Session Experience | Partially implemented | Space-scoped chat, session list, quick questions from template-created spaces | Citation drawer polish, feedback controls, export, mobile verification, stream cancellation hardening |
@@ -45,10 +48,10 @@ Latest verified baseline:
 | M11 User Feedback and Knowledge Improvement Loop | Not complete | No completed feedback/review workflow evidence | Helpful/unhelpful feedback, flagged-answer review queue, gap tickets, reviewer resolution workflow |
 | M12 Frontend UX and Accessibility | Partially implemented | React/AntD app, admin console, responsive foundations | Formal accessibility pass, keyboard flow verification, mobile citation inspection |
 | 5. Data Model Draft | Partially implemented | Core space, identity, audit, notification, and template models exist | Citation/feedback model completion and quality metrics schema |
-| 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, audit/admin foundations | Metrics APIs, feedback APIs, citation-inspection APIs, hardened media APIs |
+| 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, audit/admin foundations, protected document download API | Metrics APIs, feedback APIs, citation-inspection APIs |
 | 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, knowledge admin, template admin, governance admin | Metrics dashboards, feedback controls, source/citation inspection polish |
 | 8. Deployment Model | Partially implemented | Current `docker-compose.yml`, backend Dockerfile, frontend Dockerfile | Production deployment guide, secrets handling, observability, scaling guidance |
-| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, and Phase 2B filter slice delivered | Phase 3, Phase 4, Phase 5 remain |
+| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, Phase 3A, and Phase 3B delivered | Phase 3C, Phase 4, Phase 5 remain |
 | 10. Non-Functional Requirements | Partially implemented | Auth required for APIs, scoped permissions, tests | Performance targets, retry visibility, stale-source compliance, caching strategy |
 | 11. Success Metrics | Not complete | Metrics listed in SPEC | Instrumentation and dashboard work required |
 | 12. Open Decisions | Open | Recommendations documented in SPEC | Product decisions still need confirmation before later phases |
@@ -73,27 +76,33 @@ Latest verified baseline:
   - Clone, archive, restore lifecycle actions.
   - Scope-safe list filters: `q`, `scenario_type`, `is_active`, `scope`, `organization`, `business_line`.
   - Admin UI for the full template lifecycle and filters.
+- Phase 3A document access:
+  - Object-authorized `GET /api/v1/documents/{id}/download/`.
+  - Raw storage URLs removed from document API responses.
+  - `document.download` permission enforcement with cross-space concealment.
+  - Success and denial audit events.
+  - Frontend Blob download with safe filename parsing.
+- Phase 3B file validation:
+  - Canonical PDF/DOCX/HTML/TXT/Markdown policy shared by manual and batch upload.
+  - Server-derived type, size, and safe default title.
+  - Binary-text, signature mismatch, unknown extension, and unsupported-format rejection.
+  - Batch DOCX support and unknown-extension fallback closure.
+  - Frontend accept-list alignment and interceptor-aware upload.
 
 ## Next Recommended Stage
 
-Start Phase 3: Knowledge Governance Hardening.
+Continue Phase 3C: retrieval safety.
 
 Suggested order:
 
-1. Authenticated document/media access:
-   - Replace any unauthenticated media URL exposure.
-   - Enforce space membership and object permission checks on downloads/previews.
-2. File validation:
-   - Add MIME validation and magic-number checks.
-   - Reject mismatched or unsupported files before ingestion.
-3. Retrieval safety:
+1. Retrieval safety:
    - Add allowlisted retrieval filter keys.
    - Ensure all retrieval paths are scoped by `space_id` and document status.
-4. Document states:
+2. Document states:
    - Make stale/expired/failed states explicit and visible in admin UI.
    - Exclude archived/stale documents from retrieval by default or warn clearly.
-5. Verification:
-   - Add backend regression tests for media auth, file validation, retrieval filters, and stale/failed states.
+3. Verification:
+   - Add backend regression tests for file validation, retrieval filters, and stale/failed states.
    - Add frontend validation for admin document error states.
 
 ## Deferred Later Work
