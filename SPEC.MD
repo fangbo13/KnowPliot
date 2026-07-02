@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V7.5 implementation baseline
+> Version: V8.0 Phase 5A actual-pass baseline
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -941,4 +941,33 @@ Implementation status as of 2026-07-02:
 Audit evidence:
 `audit_reports/v7.5/Phase4C_Knowledge_Quality_Test_Audit_Report_V7.5.md`.
 
-Next stage: Phase 5 knowledge-improvement feedback and review workflows.
+### 14.10 Phase 5A: Answer Feedback Foundation
+
+Implementation status as of 2026-07-03:
+
+- Answer feedback is now keyed by `(user, message)` so each user can maintain
+  one idempotently updated feedback record per assistant answer.
+- Feedback supports `helpful`, `unhelpful`, `incorrect`, `outdated`, and
+  `missing_source`, with optional comment, suggested source, explicit review
+  flag, lifecycle status, reviewer/resolution metadata, safe review snapshot,
+  and `updated_at`.
+- Legacy thumbs feedback is migrated to the new type model and associated with
+  the owning chat-session user.
+- `ModelInvocation` stores `question_message` so successful, failed, timed-out,
+  and cancelled model calls can be tied back to the originating user question
+  without storing prompts or raw exceptions.
+- Feedback APIs support current-user GET, legacy-compatible POST upsert, PUT
+  upsert, and soft-withdraw DELETE. Only assistant messages owned by the
+  caller's session are accepted.
+- Feedback submit, update, and withdraw operations write scoped audit logs with
+  safe metadata and without complete answers or sensitive comments.
+- The chat message UI exposes bilingual helpful/not-helpful controls, optional
+  issue type/comment/source/review fields, withdrawal, keyboard operation, and
+  ARIA labels. Feedback is disabled for streaming or non-persisted messages.
+- Verified by 131 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md`.
+
+Next stage: Phase 5B scoped answer review queue and knowledge-gap workflow.

@@ -342,9 +342,49 @@
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .msg-action-btn:hover { background: var(--color-fill); color: var(--color-text); }
+.msg-action-btn.active { background: var(--accent-soft); color: var(--accent); }
 .msg-action-btn:disabled { opacity: 0.5; cursor: default; }
 .msg-action-btn .anticon { font-size: 13px; }
 @media (hover: none) and (pointer: coarse) { .msg-actions { opacity: 1; } }
+
+.msg-feedback-panel {
+  margin-top: 8px;
+  width: min(520px, 100%);
+  padding: 12px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-container);
+  display: grid;
+  gap: 10px;
+  animation: fadeInUp var(--dur-fast) var(--ease-out);
+}
+.msg-feedback-panel label {
+  display: grid;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+}
+.msg-feedback-panel select,
+.msg-feedback-panel textarea,
+.msg-feedback-panel input[type="text"],
+.msg-feedback-panel input:not([type]) {
+  width: 100%;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  padding: 7px 9px;
+  font-size: 13px;
+}
+.msg-feedback-panel textarea { min-height: 72px; resize: vertical; }
+.msg-feedback-check {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+}
+.msg-feedback-check input { width: auto; }
+.msg-feedback-actions { display: flex; align-items: center; gap: 6px; }
 
 /* citations */
 .msg-citations { margin-top: 10px; }

@@ -10,7 +10,7 @@ import time
 
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
@@ -240,7 +240,9 @@ def send_message(request, session_id):
         session.save(update_fields=["title"])
 
     # Save user message
-    Message.objects.create(session=session, role="user", content=content, space=space)
+    question_message = Message.objects.create(
+        session=session, role="user", content=content, space=space
+    )
 
     # V3.5 HIGH-006: Sliding window aligned with frontend — 10 rounds (20 messages)
     # (was fixed 16 messages = 8 rounds, misaligned with frontend's 10-round default)
@@ -280,6 +282,7 @@ def send_message(request, session_id):
                 ModelInvocation.objects.create(
                     session=session,
                     message=message,
+                    question_message=question_message,
                     space=space,
                     model=pipeline.model_name,
                     status=invocation_status,
@@ -385,17 +388,115 @@ def send_message(request, session_id):
     return response
 
 
-@api_view(["POST"])
+def _feedback_question_for(message):
+    return (
+        Message.objects.filter(
+            session=message.session,
+            role="user",
+            created_at__lt=message.created_at,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _feedback_review_context(message):
+    citations = [
+        {
+            "document_id": str(c.document_id),
+            "document_title": c.document.title,
+            "page_number": c.page_number,
+            "relevance_score": c.relevance_score,
+            "quoted_text": c.quoted_text,
+        }
+        for c in message.citations.select_related("document").all()
+    ]
+    question = _feedback_question_for(message)
+    return {
+        "question_message_id": str(question.id) if question else "",
+        "question": question.content if question else "",
+        "answer_message_id": str(message.id),
+        "answer": message.content,
+        "citations": citations,
+        "retrieval_count": message.retrieval_count,
+        "model": message.model_used or "",
+        "answered_at": message.created_at.isoformat(),
+    }
+
+
+def _audit_feedback(request, feedback, action, *, result="success", reason=""):
+    try:
+        from apps.audit.views import create_audit_log
+
+        create_audit_log(
+            user=request.user,
+            action=action,
+            target_type="Feedback",
+            target_id=feedback.id,
+            request=request,
+            organization_id=feedback.space.organization_id if feedback.space_id else None,
+            business_line_id=feedback.space.business_line_id if feedback.space_id else None,
+            space_id=feedback.space_id,
+            result=result,
+            details={
+                "message_id": str(feedback.message_id),
+                "feedback_type": feedback.feedback_type,
+                "status": feedback.status,
+                "flag_for_review": feedback.flag_for_review,
+                "reason": reason,
+            },
+        )
+    except Exception:
+        logger.exception("Could not persist feedback audit event %s", action)
+
+
+@api_view(["GET", "POST", "PUT", "DELETE"])
 @permission_classes([permissions.IsAuthenticated])
 def submit_feedback(request, message_id):
-    """Submit feedback on a message."""
+    """Create, read, update, or withdraw feedback on an assistant message."""
     message = get_object_or_404(Message, id=message_id, session__user=request.user)
-    serializer = FeedbackSerializer(
-        data={**request.data, "message": str(message.id)}
-    )
+    if message.role != "assistant":
+        return Response(
+            {"detail": "Feedback can only be submitted for assistant messages."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if request.method == "GET":
+        feedback = Feedback.objects.filter(message=message, user=request.user).first()
+        return Response(
+            {"feedback": FeedbackSerializer(feedback).data if feedback else None}
+        )
+
+    if request.method == "DELETE":
+        feedback = get_object_or_404(Feedback, message=message, user=request.user)
+        feedback.status = Feedback.STATUS_WITHDRAWN
+        feedback.save(update_fields=["status", "updated_at"])
+        _audit_feedback(request, feedback, "feedback_withdraw")
+        return Response(FeedbackSerializer(feedback).data)
+
+    serializer = FeedbackSerializer(data={**request.data, "message": str(message.id)})
     serializer.is_valid(raise_exception=True)
-    serializer.save(space_id=message.space_id)  # V6.0: inherit message's space
-    return Response(serializer.data)
+    data = dict(serializer.validated_data)
+    data.pop("message", None)
+    feedback_type = data.pop("feedback_type")
+    flag_for_review = data.get("flag_for_review", False)
+    status_value = (
+        Feedback.STATUS_PENDING_REVIEW if flag_for_review else Feedback.STATUS_SUBMITTED
+    )
+    feedback, created = Feedback.objects.update_or_create(
+        message=message,
+        user=request.user,
+        defaults={
+            **data,
+            "feedback_type": feedback_type,
+            "status": status_value,
+            "space_id": message.space_id,
+            "review_context": _feedback_review_context(message),
+        },
+    )
+    action = "feedback_submit" if created else "feedback_update"
+    _audit_feedback(request, feedback, action)
+    return Response(FeedbackSerializer(feedback).data)
 
 
 @api_view(["GET"])

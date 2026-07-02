@@ -121,6 +121,34 @@ class Citation(models.Model):
 class Feedback(models.Model):
     """User feedback on an AI response."""
 
+    FEEDBACK_TYPE_HELPFUL = "helpful"
+    FEEDBACK_TYPE_UNHELPFUL = "unhelpful"
+    FEEDBACK_TYPE_INCORRECT = "incorrect"
+    FEEDBACK_TYPE_OUTDATED = "outdated"
+    FEEDBACK_TYPE_MISSING_SOURCE = "missing_source"
+    FEEDBACK_TYPE_CHOICES = [
+        (FEEDBACK_TYPE_HELPFUL, "Helpful"),
+        (FEEDBACK_TYPE_UNHELPFUL, "Unhelpful"),
+        (FEEDBACK_TYPE_INCORRECT, "Incorrect"),
+        (FEEDBACK_TYPE_OUTDATED, "Outdated"),
+        (FEEDBACK_TYPE_MISSING_SOURCE, "Missing Source"),
+    ]
+
+    STATUS_SUBMITTED = "submitted"
+    STATUS_PENDING_REVIEW = "pending_review"
+    STATUS_IN_REVIEW = "in_review"
+    STATUS_RESOLVED = "resolved"
+    STATUS_DISMISSED = "dismissed"
+    STATUS_WITHDRAWN = "withdrawn"
+    STATUS_CHOICES = [
+        (STATUS_SUBMITTED, "Submitted"),
+        (STATUS_PENDING_REVIEW, "Pending Review"),
+        (STATUS_IN_REVIEW, "In Review"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_DISMISSED, "Dismissed"),
+        (STATUS_WITHDRAWN, "Withdrawn"),
+    ]
+
     RATING_CHOICES = [
         (1, "Thumbs Down"),
         (2, "Thumbs Up"),
@@ -148,16 +176,46 @@ class Feedback(models.Model):
         on_delete=models.CASCADE,
         related_name="feedbacks",
     )
-    rating = models.IntegerField(choices=RATING_CHOICES)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="message_feedbacks",
+    )
+    feedback_type = models.CharField(
+        max_length=30,
+        choices=FEEDBACK_TYPE_CHOICES,
+        default=FEEDBACK_TYPE_HELPFUL,
+    )
+    rating = models.IntegerField(choices=RATING_CHOICES, null=True, blank=True)
     reason = models.CharField(
         max_length=20, choices=REASON_CHOICES, null=True, blank=True
     )
     comment = models.TextField(blank=True, default="")
+    suggested_source = models.TextField(blank=True, default="")
+    flag_for_review = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_SUBMITTED,
+        db_index=True,
+    )
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_feedbacks",
+    )
+    resolution_code = models.CharField(max_length=50, blank=True, default="")
+    resolution_notes = models.TextField(blank=True, default="")
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    review_context = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "chat_feedback"
-        unique_together = ["message"]
+        unique_together = ["user", "message"]
 
     def __str__(self):
         return f"Feedback {self.rating} for message {self.message.id}"
@@ -198,6 +256,13 @@ class ModelInvocation(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="model_invocation",
+    )
+    question_message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="model_invocations_as_question",
     )
     model = models.CharField(max_length=100, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)

@@ -9,9 +9,11 @@ import { message as antdMessage } from 'antd';
 import {
   CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined,
   DownOutlined, RightOutlined, PaperClipOutlined,
+  LikeOutlined, DislikeOutlined, FlagOutlined, CloseOutlined,
 } from '@ant-design/icons';
-import { useState, memo } from 'react';
+import { useEffect, useState, memo } from 'react';
 import type { Message, Citation } from '../../store/chatStore';
+import { chatApi } from '../../api/chat';
 import ErrorBoundary from '../ErrorBoundary';
 import { MarkdownView } from './markdown';
 import StreamingMarkdown from './StreamingMarkdown';
@@ -34,6 +36,12 @@ interface Props {
   onRegenerate?: () => void;
 }
 
+type FeedbackType = 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
+
+function isPersistedUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 /**
  * Claude-style message row.
  *  - user: warm sand bubble, right-aligned.
@@ -48,6 +56,33 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [issueType, setIssueType] = useState<FeedbackType>('incorrect');
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [suggestedSource, setSuggestedSource] = useState('');
+  const [flagForReview, setFlagForReview] = useState(false);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const canGiveFeedback = !isStreaming && !disableActions && isPersistedUuid(message.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canGiveFeedback) return undefined;
+    chatApi.getFeedback(message.id)
+      .then((feedback) => {
+        if (cancelled || !feedback || feedback.status === 'withdrawn') return;
+        const currentType = feedback.type || feedback.feedback_type;
+        setFeedbackType(currentType);
+        if (currentType && currentType !== 'helpful') {
+          setIssueType(currentType);
+          setFeedbackComment(feedback.comment || '');
+          setSuggestedSource(feedback.suggested_source || '');
+          setFlagForReview(Boolean(feedback.flag_for_review));
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [canGiveFeedback, message.id]);
 
   const handleCopy = async () => {
     try {
@@ -75,6 +110,59 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
       } catch { /* cancelled → fall through to copy */ }
     }
     handleCopy();
+  };
+
+  const submitSimpleFeedback = async (type: FeedbackType) => {
+    if (!canGiveFeedback) return;
+    setFeedbackBusy(true);
+    try {
+      await chatApi.updateFeedback(message.id, { type, flag_for_review: false });
+      setFeedbackType(type);
+      setFeedbackOpen(false);
+      antdMessage.success(t('feedback_saved') || 'Feedback saved');
+    } catch {
+      antdMessage.error(t('feedback_failed') || 'Feedback failed');
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
+  const submitDetailedFeedback = async () => {
+    if (!canGiveFeedback) return;
+    setFeedbackBusy(true);
+    try {
+      await chatApi.updateFeedback(message.id, {
+        type: issueType,
+        comment: feedbackComment,
+        suggested_source: suggestedSource,
+        flag_for_review: flagForReview,
+      });
+      setFeedbackType(issueType);
+      setFeedbackOpen(false);
+      antdMessage.success(t('feedback_saved') || 'Feedback saved');
+    } catch {
+      antdMessage.error(t('feedback_failed') || 'Feedback failed');
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
+  const withdrawFeedback = async () => {
+    if (!canGiveFeedback) return;
+    setFeedbackBusy(true);
+    try {
+      await chatApi.withdrawFeedback(message.id);
+      setFeedbackType(null);
+      setFeedbackOpen(false);
+      setFeedbackComment('');
+      setSuggestedSource('');
+      setFlagForReview(false);
+      antdMessage.success(t('feedback_withdrawn') || 'Feedback withdrawn');
+    } catch {
+      antdMessage.error(t('feedback_failed') || 'Feedback failed');
+    } finally {
+      setFeedbackBusy(false);
+    }
   };
 
   if (isUser) {
@@ -125,6 +213,91 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
               <ReloadOutlined />{t('regenerate') || 'Retry'}
             </button>
           )}
+          {canGiveFeedback && (
+            <>
+              <button
+                className={`msg-action-btn ${feedbackType === 'helpful' ? 'active' : ''}`}
+                onClick={() => submitSimpleFeedback('helpful')}
+                disabled={feedbackBusy}
+                aria-pressed={feedbackType === 'helpful'}
+                aria-label={t('feedback_helpful')}
+              >
+                <LikeOutlined />{t('feedback_helpful') || 'Helpful'}
+              </button>
+              <button
+                className={`msg-action-btn ${feedbackType && feedbackType !== 'helpful' ? 'active' : ''}`}
+                onClick={() => setFeedbackOpen((v) => !v)}
+                disabled={feedbackBusy}
+                aria-expanded={feedbackOpen}
+                aria-label={t('feedback_unhelpful')}
+              >
+                <DislikeOutlined />{t('feedback_unhelpful') || 'Not helpful'}
+              </button>
+              {feedbackType && (
+                <button
+                  className="msg-action-btn"
+                  onClick={withdrawFeedback}
+                  disabled={feedbackBusy}
+                  aria-label={t('feedback_withdraw')}
+                >
+                  <CloseOutlined />{t('feedback_withdraw') || 'Withdraw'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {feedbackOpen && canGiveFeedback && (
+        <div className="msg-feedback-panel" role="form" aria-label={t('feedback_panel_label')}>
+          <label>
+            <span>{t('feedback_issue_type')}</span>
+            <select
+              value={issueType}
+              onChange={(event) => setIssueType(event.target.value as FeedbackType)}
+              disabled={feedbackBusy}
+            >
+              <option value="unhelpful">{t('feedback_type_unhelpful')}</option>
+              <option value="incorrect">{t('feedback_type_incorrect')}</option>
+              <option value="outdated">{t('feedback_type_outdated')}</option>
+              <option value="missing_source">{t('feedback_type_missing_source')}</option>
+            </select>
+          </label>
+          <label>
+            <span>{t('feedback_comment')}</span>
+            <textarea
+              value={feedbackComment}
+              onChange={(event) => setFeedbackComment(event.target.value)}
+              placeholder={t('feedback_comment_placeholder') || ''}
+              disabled={feedbackBusy}
+            />
+          </label>
+          <label>
+            <span>{t('feedback_source')}</span>
+            <input
+              value={suggestedSource}
+              onChange={(event) => setSuggestedSource(event.target.value)}
+              placeholder={t('feedback_source_placeholder') || ''}
+              disabled={feedbackBusy}
+            />
+          </label>
+          <label className="msg-feedback-check">
+            <input
+              type="checkbox"
+              checked={flagForReview}
+              onChange={(event) => setFlagForReview(event.target.checked)}
+              disabled={feedbackBusy}
+            />
+            <span><FlagOutlined /> {t('feedback_flag_for_review')}</span>
+          </label>
+          <div className="msg-feedback-actions">
+            <button className="msg-action-btn" onClick={submitDetailedFeedback} disabled={feedbackBusy}>
+              {t('feedback_submit') || 'Submit'}
+            </button>
+            <button className="msg-action-btn" onClick={() => setFeedbackOpen(false)} disabled={feedbackBusy}>
+              {t('feedback_cancel') || 'Cancel'}
+            </button>
+          </div>
         </div>
       )}
 

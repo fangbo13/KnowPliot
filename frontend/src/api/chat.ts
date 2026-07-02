@@ -60,15 +60,38 @@ export const chatApi = {
     throw new Error('Unexpected messages response format');
   },
 
+  async getFeedback(messageId: string): Promise<any> {
+    const { data } = await apiClient.get(`/chat/messages/${messageId}/feedback/`);
+    return data.feedback;
+  },
+
   async submitFeedback(messageId: string, data: {
-    rating: number;
+    type?: 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
+    rating?: number;
     reason?: string;
     comment?: string;
+    suggested_source?: string;
+    flag_for_review?: boolean;
   }): Promise<any> {
     const response = await apiClient.post(
       `/chat/messages/${messageId}/feedback/`,
       data
     );
+    return response.data;
+  },
+
+  async updateFeedback(messageId: string, data: {
+    type: 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
+    comment?: string;
+    suggested_source?: string;
+    flag_for_review?: boolean;
+  }): Promise<any> {
+    const response = await apiClient.put(`/chat/messages/${messageId}/feedback/`, data);
+    return response.data;
+  },
+
+  async withdrawFeedback(messageId: string): Promise<any> {
+    const response = await apiClient.delete(`/chat/messages/${messageId}/feedback/`);
     return response.data;
   },
 

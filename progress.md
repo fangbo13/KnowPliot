@@ -1,5 +1,31 @@
 # Progress Log
 
+## 2026-07-03
+
+- Loaded the V8 objective from
+  `C:\Users\方海波\.codex\attachments\358147c8-c17e-4277-bdb6-a29b5750f80f\goal-objective.md`.
+- Confirmed the baseline branch and commit: `Version_7.5` at `f2a1237`.
+- Preserved existing user worktree files and untracked assets, including
+  `backend/db.sqlite3`, `frontend/tsconfig.tsbuildinfo`, deleted token files,
+  screenshots, videos, and other untracked resources.
+- Created local branch `Version_8.0` for Phase 5A.
+- Added Phase 5A failing backend tests for answer feedback upsert, ownership,
+  assistant-only enforcement, soft withdrawal, safe audit metadata, and
+  `ModelInvocation.question_message`.
+- Implemented the answer-feedback foundation: expanded `Feedback`, legacy data
+  migration, per-user uniqueness, safe snapshots, scoped audit actions,
+  GET/PUT/DELETE feedback API support, POST compatibility, and model invocation
+  question linkage.
+- Added chat MessageBubble helpful/not-helpful controls, detailed feedback
+  fields, withdrawal, persisted-message gating, styles, and English/Chinese
+  i18n keys.
+- Completed Phase 5A V8.0 gates: 131/131 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, and production
+  build passed with known Vite chunking warnings.
+- Saved the Phase 5A audit report at
+  `audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md`.
+
 ## 2026-07-01
 
 - Activated the existing goal for the five-hour planning task.

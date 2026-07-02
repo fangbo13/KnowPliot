@@ -75,6 +75,10 @@ class AuditLog(models.Model):
         ("signup_approved", "Signup Approved"),
         ("signup_rejected", "Signup Rejected"),
         ("user_promote_superadmin", "User Promote Super Admin"),
+        # Phase 5A / V8.0 answer feedback actions.
+        ("feedback_submit", "Feedback Submit"),
+        ("feedback_update", "Feedback Update"),
+        ("feedback_withdraw", "Feedback Withdraw"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
