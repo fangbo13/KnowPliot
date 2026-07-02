@@ -15,6 +15,8 @@ import type { ColumnsType } from 'antd/es/table';
 import apiClient from '../../api/client';
 import {
   adminApi,
+  type DocumentQuality,
+  type IngestionJob,
   type SystemHealth,
   type SystemMetrics,
 } from '../../api/admin';
@@ -39,6 +41,9 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(false);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
+  const [ingestionJobs, setIngestionJobs] = useState<IngestionJob[]>([]);
+  const [documentQuality, setDocumentQuality] = useState<DocumentQuality[]>([]);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
 
   const loadUsers = async () => {
@@ -62,18 +67,37 @@ export default function AdminDashboardPage() {
   const loadSystemStatus = async () => {
     setStatusLoading(true);
     try {
-      const [health, metrics] = await Promise.all([
+      const [health, metrics, jobs, quality] = await Promise.all([
         adminApi.health(),
         adminApi.metrics(),
+        adminApi.ingestionJobs(),
+        adminApi.documentQuality(),
       ]);
       setSystemHealth(health);
       setSystemMetrics(metrics);
+      setIngestionJobs(jobs);
+      setDocumentQuality(quality);
     } catch {
       setSystemHealth(null);
       setSystemMetrics(null);
+      setIngestionJobs([]);
+      setDocumentQuality([]);
       message.error('Failed to load system operations data');
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  const retryIngestion = async (jobId: string) => {
+    setRetryingJobId(jobId);
+    try {
+      await adminApi.retryIngestionJob(jobId);
+      message.success('Ingestion retry queued');
+      await loadSystemStatus();
+    } catch {
+      message.error('Failed to retry ingestion job');
+    } finally {
+      setRetryingJobId(null);
     }
   };
 
@@ -315,6 +339,15 @@ export default function AdminDashboardPage() {
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>No-evidence rate</span>}>
                 <Text strong>{(systemMetrics.quality.no_evidence_rate * 100).toFixed(1)}%</Text>
               </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Model API errors</span>}>
+                <Text strong>{(systemMetrics.model_api.error_rate * 100).toFixed(1)}%</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Generated tokens</span>}>
+                <Text strong>{systemMetrics.model_api.total_tokens}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Unused / high-use docs</span>}>
+                <Text strong>{systemMetrics.knowledge_quality.unused_documents} / {systemMetrics.knowledge_quality.high_usage_documents}</Text>
+              </Descriptions.Item>
             </Descriptions>
           ) : (
             <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
@@ -332,6 +365,77 @@ export default function AdminDashboardPage() {
               </Text>
             </Space>
           </div>
+        </Card>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24 }}>
+        <Card
+          title="Ingestion queue"
+          extra={<Button icon={<ReloadOutlined />} onClick={loadSystemStatus}>Refresh</Button>}
+          style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)' }}
+        >
+          <Table<IngestionJob>
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 5 }}
+            dataSource={ingestionJobs}
+            columns={[
+              { title: 'Document', dataIndex: 'document_title', key: 'document_title', ellipsis: true },
+              { title: 'Space', dataIndex: 'space_name', key: 'space_name', ellipsis: true },
+              {
+                title: 'Status',
+                dataIndex: 'status',
+                key: 'status',
+                render: (value: string) => renderHealthTag(value === 'succeeded' ? 'up' : value === 'failed' ? 'down' : 'degraded'),
+              },
+              {
+                title: 'Action',
+                key: 'action',
+                render: (_value, record) => record.status === 'failed' ? (
+                  <Button
+                    size="small"
+                    loading={retryingJobId === record.id}
+                    onClick={() => retryIngestion(record.id)}
+                  >
+                    Retry
+                  </Button>
+                ) : null,
+              },
+            ]}
+          />
+        </Card>
+
+        <Card
+          title="Knowledge quality"
+          style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)' }}
+        >
+          <Table<DocumentQuality>
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 5 }}
+            dataSource={documentQuality}
+            columns={[
+              { title: 'Document', dataIndex: 'title', key: 'title', ellipsis: true },
+              { title: 'Status', dataIndex: 'status', key: 'status' },
+              { title: 'Citations', dataIndex: 'citation_count', key: 'citation_count' },
+              {
+                title: 'Avg relevance',
+                dataIndex: 'average_relevance',
+                key: 'average_relevance',
+                render: (value: number | null) => value == null ? '-' : value.toFixed(2),
+              },
+              {
+                title: 'Risk',
+                key: 'risk',
+                render: (_value, record) => (
+                  record.flags.stale_source ? 'Stale source'
+                    : record.flags.unused ? 'Unused'
+                      : record.flags.high_usage ? 'High use'
+                        : '-'
+                ),
+              },
+            ]}
+          />
         </Card>
       </div>
     </div>

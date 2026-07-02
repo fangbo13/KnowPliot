@@ -113,7 +113,63 @@ export interface SystemMetrics {
     no_evidence_rate: number;
     citation_coverage_rate: number;
   };
+  model_api: {
+    calls: number;
+    failures: number;
+    error_rate: number;
+    total_tokens: number;
+    average_tokens: number;
+    by_model: Array<{ model: string; calls: number }>;
+  };
+  knowledge_quality: {
+    unused_documents: number;
+    high_usage_documents: number;
+    stale_cited_documents: number;
+  };
   security: { permission_denied: number };
+}
+
+export type IngestionJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'retrying'
+  | 'succeeded'
+  | 'failed';
+
+export interface IngestionJob {
+  id: string;
+  document: string;
+  document_title: string;
+  space: string;
+  space_name: string;
+  requested_by_email: string | null;
+  trigger: 'upload' | 'batch' | 'crawler' | 'reindex' | 'admin_retry';
+  status: IngestionJobStatus;
+  celery_task_id: string;
+  attempt: number;
+  max_attempts: number;
+  last_error: string;
+  retry_of: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface DocumentQuality {
+  id: string;
+  title: string;
+  space: string;
+  status: 'active' | 'stale';
+  effective_to: string | null;
+  chunk_count: number;
+  citation_count: number;
+  average_relevance: number | null;
+  last_cited_at: string | null;
+  flags: {
+    unused: boolean;
+    high_usage: boolean;
+    stale_source: boolean;
+  };
 }
 
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
@@ -205,5 +261,25 @@ export const adminApi = {
   async metrics(): Promise<SystemMetrics> {
     const { data } = await apiClient.get('/admin/metrics/');
     return data;
+  },
+  async ingestionJobs(params?: {
+    status?: IngestionJobStatus;
+  }): Promise<IngestionJob[]> {
+    const { data } = await apiClient.get('/admin/ingestion-jobs/', { params });
+    return unwrap(data);
+  },
+  async retryIngestionJob(jobId: string): Promise<IngestionJob> {
+    const { data } = await apiClient.post(
+      `/admin/ingestion-jobs/${jobId}/retry/`,
+      {},
+    );
+    return data;
+  },
+  async documentQuality(params?: {
+    status?: 'active' | 'stale';
+    flag?: 'unused' | 'high_usage' | 'stale_source';
+  }): Promise<DocumentQuality[]> {
+    const { data } = await apiClient.get('/admin/quality/documents/', { params });
+    return unwrap(data);
   },
 };

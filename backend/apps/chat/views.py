@@ -266,6 +266,33 @@ def send_message(request, session_id):
         citations_data = []
         client_disconnected = False
 
+        def record_invocation(
+            invocation_status,
+            *,
+            error_code="",
+            message=None,
+            token_count=None,
+        ):
+            """Persist safe operational telemetry without breaking the stream."""
+            try:
+                from apps.chat.models import ModelInvocation
+
+                ModelInvocation.objects.create(
+                    session=session,
+                    message=message,
+                    space=space,
+                    model=pipeline.model_name,
+                    status=invocation_status,
+                    token_count=token_count,
+                    latency_ms=int((time.time() - start_time) * 1000),
+                    error_code=error_code,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not persist model invocation telemetry for session %s",
+                    session_id,
+                )
+
         try:
             for event in pipeline.retrieve_and_generate(
                 query=content,
@@ -292,6 +319,7 @@ def send_message(request, session_id):
                             "SSE timeout for session %s — stream exceeded %ds",
                             session_id, SSE_TIMEOUT_SECONDS,
                         )
+                        record_invocation("timeout", error_code="stream_timeout")
                         yield "event: error\n"
                         yield f"data: {json.dumps({'error': 'stream_timeout'}, ensure_ascii=False)}\n\n"
                         return
@@ -305,10 +333,12 @@ def send_message(request, session_id):
             # H-04: Client disconnected during streaming
             client_disconnected = True
             logger.info("Client disconnected during stream for session %s", session_id)
+            record_invocation("cancelled", error_code="client_disconnected")
             return
         except Exception as e:
             # V4.0 DEFECT-013: SSE error event must NOT leak str(e) to frontend
             logger.error("Stream error for session %s: %s", session_id, e, exc_info=True)
+            record_invocation("failure", error_code="stream_error")
             yield "event: error\n"
             yield f"data: {json.dumps({'error': 'stream_error'}, ensure_ascii=False)}\n\n"
             return
@@ -338,6 +368,11 @@ def send_message(request, session_id):
 
         # Save citations
         _save_citations(assistant_message, citations_data, space)
+        record_invocation(
+            "success",
+            message=assistant_message,
+            token_count=token_count,
+        )
 
         yield "event: done\n"
         yield f"data: {json.dumps({'message_id': str(assistant_message.id), 'session_id': str(session.id), 'model': pipeline.model_name}, ensure_ascii=False)}\n\n"

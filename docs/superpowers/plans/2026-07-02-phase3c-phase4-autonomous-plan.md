@@ -15,7 +15,7 @@
 - [ ] Preserve all pre-existing working-tree changes and stage only named phase files.
 - [ ] Run a real backend baseline from the `backend` working directory and the frontend test/i18n/typecheck/build gates.
 - [ ] Use red-green-refactor for every behavior change.
-- [ ] Generate the matching report under `audit_reports/v7.4`, `v8.0`, or `v8.1` before marking a phase complete.
+- [x] Generate the matching report under `audit_reports/v7.4` or `audit_reports/v7.5` before marking a phase complete.
 - [ ] Create one local commit per passing phase; do not push.
 - [ ] Stop at the current phase if its focused or regression gate fails.
 
@@ -28,7 +28,7 @@
 - [ ] Run focused and full backend regression gates.
 - [ ] Write `audit_reports/v7.4/Phase3C_Retrieval_Safety_Test_Audit_Report_V7.4.md`, update the SPEC progress, and commit `feat(rag): enforce safe space-scoped retrieval`.
 
-## Phase 4A — Scoped audit governance (V8.0)
+## Phase 4A — Scoped audit governance (V7.5)
 
 - [ ] Add failing tests for organization/business-line isolation, platform visibility, denied access, filters, pagination, immutable API behavior, and serialized role/scope/result fields.
 - [ ] Add nullable immutable scope identifiers and a success/denied/failure result to audit records without guessing historical scope.
@@ -36,9 +36,9 @@
 - [ ] Propagate scope/result through sensitive space, invite, document, role, admin-code, and template events.
 - [ ] Add server-side filters and update the admin audit UI with visible errors.
 - [ ] Run migration, focused, backend regression, frontend, i18n, typecheck, and build gates.
-- [ ] Write `audit_reports/v8.0/Phase4A_Audit_Governance_Test_Audit_Report_V8.0.md`, update progress, and commit `feat(audit): add scoped governance audit`.
+- [x] Write `audit_reports/v7.5/Phase4A_Audit_Governance_Test_Audit_Report_V7.5.md`, update progress, and commit `feat(audit): add scoped governance audit`.
 
-## Phase 4B — Operations, metrics, and lifecycle MVP (V8.1)
+## Phase 4B — Operations, metrics, and lifecycle MVP (V7.5)
 
 - [ ] Add failing tests for real health states, dependency degradation, admin scope, metric calculations, archive behavior, hard-delete restrictions, and idempotent stale transitions.
 - [ ] Add authenticated `/api/v1/admin/health/` and `/api/v1/admin/metrics/` endpoints.
@@ -47,11 +47,11 @@
 - [ ] Add stale/archived states, archive-by-default deletion, protected super-admin hard deletion, and an idempotent stale-document command.
 - [ ] Replace inferred frontend health with the real endpoints and expose lifecycle states/actions.
 - [ ] Run all backend/frontend/migration/system/build gates.
-- [ ] Write `audit_reports/v8.1/Phase4B_Operations_Metrics_Test_Audit_Report_V8.1.md`, update SPEC/progress/roadmap, and commit `feat(admin): add health metrics and document lifecycle`.
+- [x] Write `audit_reports/v7.5/Phase4B_Operations_Metrics_Test_Audit_Report_V7.5.md`, update SPEC/progress/roadmap, and commit `feat(admin): add health metrics and document lifecycle`.
 
 ## Deferred roadmap
 
-- Phase 4C/V8.2: failed Celery job visibility and retry, token/error metrics, quality scoring, and exports.
-- Phase 5A/V9.0: user-owned feedback, flagged-answer review queue, reviewer status and resolution.
-- Phase 5B/V9.1: knowledge-gap tickets and usage-driven knowledge analytics.
-- Production hardening/V9.2: PostgreSQL/pgvector/Redis/Celery integration, load, recovery, retention, and release audit.
+- Phase 4C/V7.5: failed Celery job visibility and retry, token/error metrics, and quality drill-down.
+- Phase 5A/V8.0: user-owned feedback, flagged-answer review queue, reviewer status and resolution.
+- Phase 5B/V8.1: knowledge-gap tickets and usage-driven knowledge analytics.
+- Production hardening/V9.0: PostgreSQL/pgvector/Redis/Celery integration, load, recovery, retention, and release audit.

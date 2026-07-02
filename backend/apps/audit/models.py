@@ -43,6 +43,7 @@ class AuditLog(models.Model):
         ("user_deactivate", "User Deactivate"),
         ("config_change", "Config Change"),
         ("system_health_view", "System Health View"),
+        ("ingestion_retry", "Ingestion Retry"),
         ("audit_export", "Audit Export"),
         ("role_change_log", "Role Change Log"),
         # ── Crawler domain (V4.1) — retained for historical log compatibility.

@@ -9,6 +9,9 @@ from django.urls import path
 from .admin_views import (
     AdminRegistrationCodeListCreateView,
     BusinessLineListCreateView,
+    DocumentQualityListView,
+    IngestionJobListView,
+    IngestionJobRetryView,
     OrganizationListView,
     SystemHealthView,
     SystemMetricsView,
@@ -24,4 +27,15 @@ urlpatterns = [
     path("business-lines/", BusinessLineListCreateView.as_view(), name="admin-bl-list"),
     path("health/", SystemHealthView.as_view(), name="admin-health"),
     path("metrics/", SystemMetricsView.as_view(), name="admin-metrics"),
+    path("ingestion-jobs/", IngestionJobListView.as_view(), name="admin-ingestion-jobs"),
+    path(
+        "ingestion-jobs/<uuid:pk>/retry/",
+        IngestionJobRetryView.as_view(),
+        name="admin-ingestion-job-retry",
+    ),
+    path(
+        "quality/documents/",
+        DocumentQualityListView.as_view(),
+        name="admin-document-quality",
+    ),
 ]

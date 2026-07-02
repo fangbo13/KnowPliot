@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V8.1 implementation baseline
+> Version: V7.5 implementation baseline
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -661,11 +661,7 @@ Delivered slices:
 
 - Phase 4A: Scoped Audit Governance.
 - Phase 4B: Operations, Metrics, and Document Lifecycle MVP.
-
-Remaining slice:
-
-- Phase 4C: ingestion queue/retry, model/API/token metrics, and deeper
-  knowledge-quality analytics.
+- Phase 4C: Ingestion Operations and Knowledge Quality.
 
 ### Phase 5: Knowledge Improvement Loop
 
@@ -895,7 +891,7 @@ Implementation status as of 2026-07-02:
   system checks, i18n validation, TypeScript, and production build.
 
 Audit evidence:
-`audit_reports/v8.0/Phase4A_Audit_Governance_Test_Audit_Report_V8.0.md`.
+`audit_reports/v7.5/Phase4A_Audit_Governance_Test_Audit_Report_V7.5.md`.
 
 ### 14.8 Phase 4B: Operations, Metrics, and Document Lifecycle MVP
 
@@ -919,7 +915,30 @@ Implementation status as of 2026-07-02:
   Python compilation, i18n validation, TypeScript, and production build.
 
 Audit evidence:
-`audit_reports/v8.1/Phase4B_Operations_Metrics_Test_Audit_Report_V8.1.md`.
+`audit_reports/v7.5/Phase4B_Operations_Metrics_Test_Audit_Report_V7.5.md`.
 
-Next stage: Phase 4C ingestion visibility, safe retry, model/API/token metrics,
-and deeper knowledge-quality analytics.
+### 14.9 Phase 4C: Ingestion Operations and Knowledge Quality
+
+Implementation status as of 2026-07-02:
+
+- Added durable, space-scoped ingestion jobs for upload, batch, re-index, and
+  administrator retry operations.
+- Added administrator-scoped queue visibility and safe retry. Only failed
+  jobs may be retried; archived documents, cross-scope jobs, and duplicate
+  active work are rejected while the original job history remains immutable.
+- Model invocations record safe operational metadata for success, failure,
+  timeout, and cancellation without storing prompts, answers, credentials, or
+  raw exception messages.
+- Scoped metrics now expose model/API calls, failures, error rate, total and
+  average token use, per-model calls, and knowledge-quality aggregates.
+- Added document-quality drill-down for unused, high-use, and stale cited
+  documents, including citation count, average relevance, and last-use time.
+- The admin dashboard exposes queue state, governed retry, model/token/error
+  metrics, and document-quality rows from dedicated APIs.
+- Verified by 126 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v7.5/Phase4C_Knowledge_Quality_Test_Audit_Report_V7.5.md`.
+
+Next stage: Phase 5 knowledge-improvement feedback and review workflows.

@@ -15,7 +15,8 @@ Authorization model (docs/KnowPilot_V7_Identity_RBAC_Spec.md §4.1):
 
 import logging
 
-from rest_framework import generics, status
+from django.db.models import Avg, Count, Max
+from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -31,7 +32,12 @@ from .serializers import (
     OrganizationSerializer,
 )
 from .services import generate_admin_code, hash_code
-from .admin_operations import collect_scoped_metrics, collect_system_health
+from .admin_operations import (
+    collect_scoped_metrics,
+    collect_system_health,
+    scoped_space_ids,
+)
+from apps.knowledge.models import Document, IngestionJob
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,203 @@ class SystemMetricsView(APIView):
         payload = collect_scoped_metrics(request.user)
         _audit_operations_view(request, "metrics")
         return Response(payload)
+
+
+class IngestionJobSerializer(serializers.ModelSerializer):
+    document_title = serializers.CharField(source="document.title", read_only=True)
+    space_name = serializers.CharField(source="space.name", read_only=True)
+    requested_by_email = serializers.EmailField(
+        source="requested_by.email", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = IngestionJob
+        fields = [
+            "id",
+            "document",
+            "document_title",
+            "space",
+            "space_name",
+            "requested_by_email",
+            "trigger",
+            "status",
+            "celery_task_id",
+            "attempt",
+            "max_attempts",
+            "last_error",
+            "retry_of",
+            "started_at",
+            "completed_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class IngestionJobListView(generics.ListAPIView):
+    serializer_class = IngestionJobSerializer
+    permission_classes = [CanViewAdminOperations]
+
+    def get_queryset(self):
+        qs = IngestionJob.objects.select_related(
+            "document", "space", "requested_by"
+        )
+        space_ids = scoped_space_ids(self.request.user)
+        if space_ids is not None:
+            qs = qs.filter(space_id__in=space_ids)
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            if status_filter not in dict(IngestionJob.STATUS_CHOICES):
+                raise serializers.ValidationError({"status": "Unknown job status."})
+            qs = qs.filter(status=status_filter)
+        return qs
+
+
+class IngestionJobRetryView(APIView):
+    permission_classes = [CanViewAdminOperations]
+
+    def post(self, request, pk):
+        qs = IngestionJob.objects.select_related("document", "space")
+        space_ids = scoped_space_ids(request.user)
+        if space_ids is not None:
+            qs = qs.filter(space_id__in=space_ids)
+        try:
+            failed_job = qs.get(pk=pk)
+        except IngestionJob.DoesNotExist as exc:
+            raise NotFound("Ingestion job not found.") from exc
+
+        if failed_job.status != "failed":
+            return Response(
+                {"detail": "Only failed ingestion jobs can be retried."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if failed_job.document.status == "archived":
+            return Response(
+                {"detail": "Archived documents cannot be retried."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        from apps.knowledge.ingestion import (
+            IngestionAlreadyActive,
+            enqueue_document_ingestion,
+        )
+
+        try:
+            retry_job = enqueue_document_ingestion(
+                failed_job.document,
+                requested_by=request.user,
+                trigger="admin_retry",
+                retry_of=failed_job,
+                prevent_duplicate=True,
+            )
+        except IngestionAlreadyActive:
+            return Response(
+                {"detail": "This document already has active ingestion work."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except Exception as exc:
+            try:
+                from apps.audit.views import create_audit_log
+
+                create_audit_log(
+                    user=request.user,
+                    action="ingestion_retry",
+                    target_type="Document",
+                    target_id=str(failed_job.document_id),
+                    details={
+                        "failed_job_id": str(failed_job.id),
+                        "error_code": exc.__class__.__name__,
+                    },
+                    result="failure",
+                    request=request,
+                )
+            except Exception:
+                logger.exception("Could not audit ingestion retry dispatch failure")
+            return Response(
+                {"detail": "The ingestion retry could not be queued."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        from apps.audit.views import create_audit_log
+
+        create_audit_log(
+            user=request.user,
+            action="ingestion_retry",
+            target_type="Document",
+            target_id=str(failed_job.document_id),
+            details={
+                "failed_job_id": str(failed_job.id),
+                "retry_job_id": str(retry_job.id),
+            },
+            request=request,
+        )
+        return Response(
+            IngestionJobSerializer(retry_job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class DocumentQualitySerializer(serializers.ModelSerializer):
+    citation_count = serializers.IntegerField(read_only=True)
+    average_relevance = serializers.FloatField(read_only=True, allow_null=True)
+    last_cited_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    flags = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Document
+        fields = [
+            "id",
+            "title",
+            "space",
+            "status",
+            "effective_to",
+            "chunk_count",
+            "citation_count",
+            "average_relevance",
+            "last_cited_at",
+            "flags",
+        ]
+
+    def get_flags(self, obj):
+        return {
+            "unused": obj.status == "active" and obj.citation_count == 0,
+            "high_usage": obj.citation_count >= 3,
+            "stale_source": obj.status == "stale" and obj.citation_count > 0,
+        }
+
+
+class DocumentQualityListView(generics.ListAPIView):
+    serializer_class = DocumentQualitySerializer
+    permission_classes = [CanViewAdminOperations]
+
+    def get_queryset(self):
+        qs = Document.objects.filter(status__in=["active", "stale"])
+        space_ids = scoped_space_ids(self.request.user)
+        if space_ids is not None:
+            qs = qs.filter(space_id__in=space_ids)
+        qs = qs.annotate(
+            citation_count=Count("citation"),
+            average_relevance=Avg("citation__relevance_score"),
+            last_cited_at=Max("citation__message__created_at"),
+        )
+
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            if status_filter not in {"active", "stale"}:
+                raise serializers.ValidationError(
+                    {"status": "Quality status must be active or stale."}
+                )
+            qs = qs.filter(status=status_filter)
+
+        flag = self.request.query_params.get("flag")
+        if flag == "unused":
+            qs = qs.filter(status="active", citation_count=0)
+        elif flag == "high_usage":
+            qs = qs.filter(citation_count__gte=3)
+        elif flag == "stale_source":
+            qs = qs.filter(status="stale", citation_count__gt=0)
+        elif flag:
+            raise serializers.ValidationError({"flag": "Unknown quality flag."})
+        return qs.order_by("-citation_count", "title")
 
 
 def _audit(user, action, target_id=None, details=None, request=None):

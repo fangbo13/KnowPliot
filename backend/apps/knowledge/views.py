@@ -103,8 +103,12 @@ class DocumentListCreateView(generics.ListCreateAPIView):
             request=self.request,
         )
         # Trigger async ingestion
-        from apps.rag.services import ingest_document
-        ingest_document.delay(str(doc.id))
+        from apps.knowledge.ingestion import enqueue_document_ingestion
+        enqueue_document_ingestion(
+            doc,
+            requested_by=self.request.user,
+            trigger="upload",
+        )
 
 
 class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -312,8 +316,12 @@ class DocumentReindexView(generics.GenericAPIView):
         )
 
         # Trigger Celery task OUTSIDE the transaction (avoid long DB lock)
-        from apps.rag.services import ingest_document
-        ingest_document.delay(str(document.id))
+        from apps.knowledge.ingestion import enqueue_document_ingestion
+        enqueue_document_ingestion(
+            document,
+            requested_by=request.user,
+            trigger="reindex",
+        )
 
         return Response({"status": "reindexing started"})
 

@@ -22,6 +22,9 @@ vi.mock('../../api/admin', () => ({
   adminApi: {
     health: vi.fn(),
     metrics: vi.fn(),
+    ingestionJobs: vi.fn(),
+    retryIngestionJob: vi.fn(),
+    documentQuality: vi.fn(),
   },
 }));
 
@@ -56,6 +59,9 @@ describe('AdminDashboardPage', () => {
     vi.mocked(apiClient.get).mockReset();
     vi.mocked(adminApi.health).mockReset();
     vi.mocked(adminApi.metrics).mockReset();
+    vi.mocked(adminApi.ingestionJobs).mockReset();
+    vi.mocked(adminApi.retryIngestionJob).mockReset();
+    vi.mocked(adminApi.documentQuality).mockReset();
   });
 
   it('loads real health and scoped metrics instead of inferring from audit logs', async () => {
@@ -94,13 +100,62 @@ describe('AdminDashboardPage', () => {
         no_evidence_rate: 0,
         citation_coverage_rate: 0,
       },
+      model_api: {
+        calls: 2,
+        failures: 1,
+        error_rate: 0.5,
+        total_tokens: 120,
+        average_tokens: 120,
+        by_model: [{ model: 'qwen-plus', calls: 2 }],
+      },
+      knowledge_quality: {
+        unused_documents: 1,
+        high_usage_documents: 1,
+        stale_cited_documents: 0,
+      },
       security: { permission_denied: 0 },
     });
+    vi.mocked(adminApi.ingestionJobs).mockResolvedValue([
+      {
+        id: 'failed-job',
+        document: 'doc-1',
+        document_title: 'Policy',
+        space: 'space-1',
+        space_name: 'Advisory',
+        requested_by_email: 'admin@example.com',
+        trigger: 'upload',
+        status: 'failed',
+        celery_task_id: 'task-1',
+        attempt: 4,
+        max_attempts: 4,
+        last_error: 'RuntimeError',
+        retry_of: null,
+        started_at: null,
+        completed_at: null,
+        created_at: '2026-07-02T08:00:00Z',
+      },
+    ]);
+    vi.mocked(adminApi.documentQuality).mockResolvedValue([
+      {
+        id: 'doc-1',
+        title: 'Policy',
+        space: 'space-1',
+        status: 'active',
+        effective_to: null,
+        chunk_count: 2,
+        citation_count: 0,
+        average_relevance: null,
+        last_cited_at: null,
+        flags: { unused: true, high_usage: false, stale_source: false },
+      },
+    ]);
 
     render(<AdminDashboardPage />);
 
     await waitFor(() => expect(adminApi.health).toHaveBeenCalledTimes(1));
     expect(adminApi.metrics).toHaveBeenCalledTimes(1);
+    expect(adminApi.ingestionJobs).toHaveBeenCalledTimes(1);
+    expect(adminApi.documentQuality).toHaveBeenCalledTimes(1);
     expect(apiClient.get).not.toHaveBeenCalledWith(
       '/audit/logs/',
       expect.anything(),

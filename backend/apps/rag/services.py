@@ -12,12 +12,13 @@ import hashlib
 import logging
 
 from celery import shared_task
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def ingest_document(self, document_id: str) -> dict:
+def ingest_document(self, document_id: str, job_id: str | None = None) -> dict:
     """Full document ingestion pipeline.
 
     Steps: parse -> chunk -> embed -> store -> update status.
@@ -31,13 +32,36 @@ def ingest_document(self, document_id: str) -> dict:
     Returns:
         Dict with status and chunk count.
     """
-    from apps.knowledge.models import Document
+    from apps.knowledge.models import Document, IngestionJob
     from apps.rag.pipeline import RAGPipeline
+
+    job = None
+    if job_id:
+        job = IngestionJob.objects.filter(id=job_id, document_id=document_id).first()
+        if job:
+            job.status = "processing"
+            job.attempt = self.request.retries + 1
+            job.started_at = job.started_at or timezone.now()
+            job.last_error = ""
+            job.save(
+                update_fields=[
+                    "status", "attempt", "started_at", "last_error", "updated_at"
+                ]
+            )
 
     try:
         doc = Document.objects.get(id=document_id)
     except Document.DoesNotExist:
         logger.error(f"Document {document_id} not found")
+        if job:
+            job.status = "failed"
+            job.last_error = "document_not_found"
+            job.completed_at = timezone.now()
+            job.save(
+                update_fields=[
+                    "status", "last_error", "completed_at", "updated_at"
+                ]
+            )
         return {"status": "error", "message": "Document not found"}
 
     # V4.2 KB-V4.2-BATCH-010: Compute content hash for deduplication
@@ -63,16 +87,41 @@ def ingest_document(self, document_id: str) -> dict:
         if chunks:
             doc.status = "active"
             doc.chunk_count = len(chunks)
-            doc.save(update_fields=["status", "chunk_count"])
+            doc.processing_error = ""
+            doc.save(update_fields=["status", "chunk_count", "processing_error"])
         # If chunks is empty, pipeline already set status to "failed" (BATCH-012)
 
-        logger.info(f"Successfully ingested {document_id}: {len(chunks)} chunks")
-        return {"status": "success", "chunks": len(chunks)}
+        if job:
+            job.status = "succeeded" if chunks else "failed"
+            job.last_error = "" if chunks else (doc.processing_error or "no_chunks")
+            job.completed_at = timezone.now()
+            job.save(
+                update_fields=[
+                    "status", "last_error", "completed_at", "updated_at"
+                ]
+            )
+
+        if chunks:
+            logger.info(f"Successfully ingested {document_id}: {len(chunks)} chunks")
+            return {"status": "success", "chunks": len(chunks)}
+        logger.error("Ingestion produced no usable chunks for %s", document_id)
+        return {"status": "error", "message": "No usable chunks generated"}
 
     except Exception as exc:
-        doc.status = "failed"
+        final_attempt = self.request.retries >= self.max_retries
+        doc.status = "failed" if final_attempt else "processing"
         doc.processing_error = str(exc)[:1000]
         doc.save(update_fields=["status", "processing_error"])
+
+        if job:
+            job.status = "failed" if final_attempt else "retrying"
+            job.last_error = exc.__class__.__name__
+            job.completed_at = timezone.now() if final_attempt else None
+            job.save(
+                update_fields=[
+                    "status", "last_error", "completed_at", "updated_at"
+                ]
+            )
 
         logger.error(f"Failed to ingest {document_id}: {exc}")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))

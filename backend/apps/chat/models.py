@@ -161,3 +161,64 @@ class Feedback(models.Model):
 
     def __str__(self):
         return f"Feedback {self.rating} for message {self.message.id}"
+
+
+class ModelInvocation(models.Model):
+    """Operational telemetry for one model-backed answer attempt.
+
+    Only safe aggregate metadata is stored; prompts, answers, raw exceptions,
+    and credentials are deliberately excluded.
+    """
+
+    STATUS_CHOICES = [
+        ("success", "Success"),
+        ("failure", "Failure"),
+        ("timeout", "Timeout"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="model_invocations",
+    )
+    session = models.ForeignKey(
+        ChatSession,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="model_invocations",
+    )
+    message = models.OneToOneField(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="model_invocation",
+    )
+    model = models.CharField(max_length=100, blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    token_count = models.PositiveIntegerField(null=True, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    error_code = models.CharField(max_length=50, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_modelinvocation"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["space", "status", "-created_at"],
+                name="chat_modeli_space_i_cf0e07_idx",
+            ),
+            models.Index(
+                fields=["model", "-created_at"],
+                name="chat_modeli_model_d5d3d4_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.model or 'unknown'}: {self.status}"

@@ -7,11 +7,11 @@ from celery import current_app
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.db.models import Avg, Q
+from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 
 from apps.audit.models import AuditLog
-from apps.chat.models import ChatSession, Citation, Message
+from apps.chat.models import ChatSession, Citation, Message, ModelInvocation
 from apps.knowledge.models import Document
 from .models import KnowledgeSpace, OrganizationMembership, SpaceMembership
 from .permissions import admin_scope, is_platform_admin
@@ -117,6 +117,7 @@ def collect_scoped_metrics(user):
     messages = _scope(Message.objects.all(), space_ids)
     citations = _scope(Citation.objects.all(), space_ids)
     assistant_messages = messages.filter(role="assistant")
+    invocations = _scope(ModelInvocation.objects.all(), space_ids)
     assistant_count = assistant_messages.count()
     cited_message_count = (
         citations.values("message_id").distinct().count()
@@ -151,6 +152,23 @@ def collect_scoped_metrics(user):
     average_response = assistant_messages.aggregate(
         value=Avg("response_time_ms")
     )["value"]
+    completed_invocations = invocations.exclude(status="cancelled")
+    call_count = completed_invocations.count()
+    failures = completed_invocations.filter(status__in=["failure", "timeout"]).count()
+    successful_invocations = completed_invocations.filter(status="success")
+    token_summary = successful_invocations.aggregate(
+        total=Sum("token_count"),
+        average=Avg("token_count"),
+    )
+    by_model = list(
+        completed_invocations.exclude(model="")
+        .values("model")
+        .annotate(calls=Count("id"))
+        .order_by("model")
+    )
+    quality_documents = documents.filter(status__in=["active", "stale"]).annotate(
+        citation_count=Count("citation")
+    )
     return {
         "users": {
             "total": users.count(),
@@ -188,6 +206,29 @@ def collect_scoped_metrics(user):
                 if assistant_count
                 else 0.0
             ),
+        },
+        "model_api": {
+            "calls": call_count,
+            "failures": failures,
+            "error_rate": round(failures / call_count, 4) if call_count else 0.0,
+            "total_tokens": token_summary["total"] or 0,
+            "average_tokens": (
+                round(float(token_summary["average"]), 1)
+                if token_summary["average"] is not None
+                else 0.0
+            ),
+            "by_model": by_model,
+        },
+        "knowledge_quality": {
+            "unused_documents": quality_documents.filter(
+                status="active", citation_count=0
+            ).count(),
+            "high_usage_documents": quality_documents.filter(
+                citation_count__gte=3
+            ).count(),
+            "stale_cited_documents": quality_documents.filter(
+                status="stale", citation_count__gt=0
+            ).count(),
         },
         "security": {
             "permission_denied": denied_logs.count(),
