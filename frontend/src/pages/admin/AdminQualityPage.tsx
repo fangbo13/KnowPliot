@@ -165,6 +165,16 @@ export default function AdminQualityPage() {
     }
   };
 
+  const retryExportJob = async (job: ComplianceExportJob) => {
+    try {
+      await adminApi.retryExportJob(job.id);
+      message.success(t('quality_export_retry_queued'));
+      await loadExportJobs();
+    } catch {
+      message.error(t('quality_export_retry_failed'));
+    }
+  };
+
   const columns: ColumnsType<FeedbackReview> = useMemo(() => [
     {
       title: t('quality_type'),
@@ -321,16 +331,28 @@ export default function AdminQualityPage() {
                 key: 'row_count',
               },
               {
+                title: t('quality_export_error'),
+                key: 'error',
+                render: (_, job) => job.safe_error_summary || job.error_code || '—',
+              },
+              {
                 title: t('quality_actions'),
                 key: 'actions',
                 render: (_, job) => (
-                  <Button
-                    size="small"
-                    disabled={job.status !== 'succeeded'}
-                    onClick={() => downloadExportJob(job)}
-                  >
-                    {t('quality_download_export')}
-                  </Button>
+                  <Space>
+                    <Button
+                      size="small"
+                      disabled={job.status !== 'succeeded'}
+                      onClick={() => downloadExportJob(job)}
+                    >
+                      {t('quality_download_export')}
+                    </Button>
+                    {job.status === 'failed' && (
+                      <Button size="small" onClick={() => retryExportJob(job)}>
+                        {t('quality_retry_export')}
+                      </Button>
+                    )}
+                  </Space>
                 ),
               },
             ]}

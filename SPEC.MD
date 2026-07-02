@@ -1144,3 +1144,33 @@ Audit evidence:
 
 Phase 7A status: actual PASS. Next stage: Phase 7B scale hardening and
 background reliability.
+
+### 14.17 Phase 7B: Scale Hardening and Background Reliability
+
+Implementation status as of 2026-07-03:
+
+- Failed compliance export jobs can now be retried through
+  `/api/v1/admin/reports/export-jobs/{id}/retry/`.
+- Export retry is scoped by existing export-job access rules, creates a new job,
+  links it to the failed job with `retry_of`, and preserves the original failed
+  job's status and safe error evidence.
+- Export retry writes `export_job_retry` audit records with safe metadata.
+- `scan_quality_sla` now supports `--dry-run` and reports
+  candidates/created/skipped/errors, allowing operators to inspect SLA impact
+  without creating notifications or audit records.
+- Added scale-path indexes for notification feed queries, scoped audit queries,
+  and ingestion job status/space lookups; the export job status/requester index
+  remains guarded by Phase 7B tests.
+- The Answer Quality export job table now shows safe failure summaries and
+  provides a retry action for failed jobs.
+- Verified by 159 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+- Production deploy check was executed and recorded as environment-limited
+  because this local virtual environment lacks `psycopg` / `psycopg2` for the
+  production PostgreSQL backend.
+
+Audit evidence:
+`audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md`.
+
+Phase 7B status: actual PASS. Next stage: Phase 7C operational runbook and
+regression closure.

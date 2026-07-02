@@ -91,6 +91,7 @@ class AuditLog(models.Model):
         # Phase 6B / V8.1 async operations and SLA actions.
         ("export_job_create", "Export Job Create"),
         ("export_job_complete", "Export Job Complete"),
+        ("export_job_retry", "Export Job Retry"),
         ("audit_export_download", "Audit Export Download"),
         ("sla_alert_created", "SLA Alert Created"),
     ]
@@ -129,6 +130,12 @@ class AuditLog(models.Model):
     class Meta:
         db_table = "audit_auditlog"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["space_id", "action", "result", "created_at"],
+                name="audit_scope_action_result_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.action} by {self.user} at {self.created_at}"

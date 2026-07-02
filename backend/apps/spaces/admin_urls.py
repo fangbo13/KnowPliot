@@ -34,6 +34,7 @@ from apps.chat.report_views import (
     ComplianceExportJobDetailView,
     ComplianceExportJobDownloadView,
     ComplianceExportJobListCreateView,
+    ComplianceExportJobRetryView,
     ComplianceExportView,
     KnowledgeQualityReportView,
 )
@@ -74,4 +75,5 @@ urlpatterns = [
     path("reports/export-jobs/", ComplianceExportJobListCreateView.as_view(), name="admin-report-export-jobs"),
     path("reports/export-jobs/<uuid:pk>/", ComplianceExportJobDetailView.as_view(), name="admin-report-export-job-detail"),
     path("reports/export-jobs/<uuid:pk>/download/", ComplianceExportJobDownloadView.as_view(), name="admin-report-export-job-download"),
+    path("reports/export-jobs/<uuid:pk>/retry/", ComplianceExportJobRetryView.as_view(), name="admin-report-export-job-retry"),
 ]

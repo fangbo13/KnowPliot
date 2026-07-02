@@ -284,6 +284,7 @@ def _serialize_export_job(job):
         "status": job.status,
         "space": str(job.space_id) if job.space_id else None,
         "requested_by": str(job.requested_by_id),
+        "retry_of": str(job.retry_of_id) if job.retry_of_id else None,
         "row_count": job.row_count,
         "error_code": job.error_code,
         "safe_error_summary": job.safe_error_summary,
@@ -560,3 +561,39 @@ class ComplianceExportJobDownloadView(ComplianceExportJobDetailView):
         response = HttpResponse(content, content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{job.dataset}-{job.id}.csv"'
         return response
+
+
+class ComplianceExportJobRetryView(ComplianceExportJobDetailView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        failed_job = self.get_object(request, pk)
+        if failed_job is None:
+            return Response({"detail": "You do not have access to this export job."}, status=403)
+        if failed_job.status != ComplianceExportJob.STATUS_FAILED:
+            return Response({"detail": "Only failed export jobs can be retried."}, status=409)
+
+        retry_job = ComplianceExportJob.objects.create(
+            requested_by=request.user,
+            retry_of=failed_job,
+            space=failed_job.space,
+            dataset=failed_job.dataset,
+            date_from=failed_job.date_from,
+            date_to=failed_job.date_to,
+            expires_at=timezone.now() + timedelta(days=ASYNC_EXPORT_RETENTION_DAYS),
+        )
+        create_audit_log(
+            user=request.user,
+            action="export_job_retry",
+            target_type="ComplianceExportJob",
+            target_id=failed_job.id,
+            request=request,
+            space_id=failed_job.space_id,
+            details={
+                "retry_job_id": str(retry_job.id),
+                "dataset": failed_job.dataset,
+                "previous_error_code": failed_job.error_code,
+            },
+        )
+        _complete_export_job(retry_job, request=request)
+        return Response(_serialize_export_job(retry_job), status=status.HTTP_202_ACCEPTED)

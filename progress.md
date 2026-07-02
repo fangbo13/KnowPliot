@@ -128,6 +128,22 @@
   limitation rather than a PASS.
 - Saved the Phase 7A audit report at
   `audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md`.
+- Created local branch `Version_9.1` for Phase 7B from `Version_9.0`.
+- Added Phase 7B failing tests for failed export retry, retry scope isolation,
+  SLA scanner dry-run/statistics, and notification/audit/ingestion/export
+  scale-path indexes.
+- Implemented export job retry lineage, scoped retry API, `export_job_retry`
+  audit action, SLA dry-run statistics, scale-path indexes, and frontend export
+  retry controls with safe error summaries.
+- Completed Phase 7B V9.1 gates: 159/159 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, and production
+  build passed with known Vite chunking warnings.
+- Re-ran production deploy check with `config.settings.prod`; it failed because
+  the local venv lacks `psycopg` / `psycopg2`, recorded as an environment
+  limitation rather than a PASS.
+- Saved the Phase 7B audit report at
+  `audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md`.
 
 ## 2026-07-01
 

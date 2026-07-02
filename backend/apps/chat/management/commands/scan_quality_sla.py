@@ -51,9 +51,20 @@ def _create_once(*, recipient, dedupe_key, title, body, link, metadata):
 class Command(BaseCommand):
     help = "Create quality SLA notifications for overdue feedback reviews and gaps."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Report candidate SLA notifications without creating rows or audit logs.",
+        )
+
     def handle(self, *args, **options):
+        dry_run = options["dry_run"]
         now = timezone.now()
         created = 0
+        skipped = 0
+        candidates = 0
+        errors = 0
 
         feedback_thresholds = [
             (
@@ -81,7 +92,10 @@ class Command(BaseCommand):
                 if feedback.reviewer_id:
                     recipients.add(feedback.reviewer)
                 for recipient in recipients:
+                    candidates += 1
                     dedupe_key = f"{alert_type}:{feedback.id}:{recipient.id}"
+                    if dry_run:
+                        continue
                     notification = _create_once(
                         recipient=recipient,
                         dedupe_key=dedupe_key,
@@ -109,6 +123,8 @@ class Command(BaseCommand):
                                 "alert_type": alert_type,
                             },
                         )
+                    else:
+                        skipped += 1
 
         gap_threshold = now - timedelta(days=OPEN_GAP_DAYS)
         gap_qs = KnowledgeGapTicket.objects.filter(
@@ -123,7 +139,10 @@ class Command(BaseCommand):
             if gap.assignee_id:
                 recipients.add(gap.assignee)
             for recipient in recipients:
+                candidates += 1
                 dedupe_key = f"gap_overdue:{gap.id}:{recipient.id}"
+                if dry_run:
+                    continue
                 notification = _create_once(
                     recipient=recipient,
                     dedupe_key=dedupe_key,
@@ -151,5 +170,18 @@ class Command(BaseCommand):
                             "alert_type": "gap_overdue",
                         },
                     )
+                else:
+                    skipped += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Created {created} quality SLA notifications."))
+        self.stdout.write(
+            self.style.SUCCESS(
+                "Quality SLA scan dry_run={dry_run} candidates={candidates} "
+                "created={created} skipped={skipped} errors={errors}".format(
+                    dry_run=str(dry_run).lower(),
+                    candidates=candidates,
+                    created=created,
+                    skipped=skipped,
+                    errors=errors,
+                )
+            )
+        )

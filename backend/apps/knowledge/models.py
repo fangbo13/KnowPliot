@@ -276,6 +276,10 @@ class IngestionJob(models.Model):
                 fields=["document", "status"],
                 name="knowledge_i_documen_d529b8_idx",
             ),
+            models.Index(
+                fields=["status", "space", "created_at"],
+                name="know_ing_st_sp_cr_idx",
+            ),
         ]
 
     def __str__(self):

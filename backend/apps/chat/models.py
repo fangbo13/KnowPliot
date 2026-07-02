@@ -473,6 +473,13 @@ class ComplianceExportJob(models.Model):
         on_delete=models.CASCADE,
         related_name="compliance_export_jobs",
     )
+    retry_of = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="retries",
+    )
     space = models.ForeignKey(
         "spaces.KnowledgeSpace",
         null=True,

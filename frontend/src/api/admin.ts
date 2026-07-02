@@ -278,6 +278,7 @@ export interface ComplianceExportJob {
   status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'expired';
   space: string | null;
   requested_by: string;
+  retry_of?: string | null;
   row_count: number;
   error_code: string;
   safe_error_summary: string;
@@ -470,6 +471,10 @@ export const adminApi = {
     const { data } = await apiClient.get(`/admin/reports/export-jobs/${id}/download/`, {
       responseType: 'blob',
     });
+    return data;
+  },
+  async retryExportJob(id: string): Promise<ComplianceExportJob> {
+    const { data } = await apiClient.post(`/admin/reports/export-jobs/${id}/retry/`, {});
     return data;
   },
 };
