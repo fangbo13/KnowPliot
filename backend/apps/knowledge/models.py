@@ -41,6 +41,8 @@ class Document(models.Model):
         ("uploading", "Uploading"),
         ("processing", "Processing"),
         ("active", "Active"),
+        ("stale", "Stale"),
+        ("archived", "Archived"),
         ("expired", "Expired"),
         ("failed", "Failed"),
     ]

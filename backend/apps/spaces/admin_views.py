@@ -20,6 +20,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.views import APIView
 
 from .models import AdminRegistrationCode, BusinessLine, Organization, OrganizationMembership
 from .permissions import admin_scope, is_platform_admin
@@ -30,8 +31,54 @@ from .serializers import (
     OrganizationSerializer,
 )
 from .services import generate_admin_code, hash_code
+from .admin_operations import collect_scoped_metrics, collect_system_health
 
 logger = logging.getLogger(__name__)
+
+
+def _audit_operations_view(request, view_name, **details):
+    """Keep diagnostics available even when audit persistence is degraded."""
+    try:
+        from apps.audit.views import create_audit_log
+
+        create_audit_log(
+            user=request.user,
+            action="system_health_view",
+            target_type="System",
+            details={"view": view_name, **details},
+            result="success",
+            request=request,
+        )
+    except Exception as exc:  # pragma: no cover - exercised with a mocked outage
+        logger.warning("operations audit failed for %s: %s", view_name, exc)
+
+
+class CanViewAdminOperations(IsAuthenticated):
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        if is_platform_admin(request.user):
+            return True
+        org_ids, business_line_ids = admin_scope(request.user)
+        return bool(org_ids or business_line_ids)
+
+
+class SystemHealthView(APIView):
+    permission_classes = [CanViewAdminOperations]
+
+    def get(self, request):
+        payload = collect_system_health()
+        _audit_operations_view(request, "health", overall=payload["overall"])
+        return Response(payload)
+
+
+class SystemMetricsView(APIView):
+    permission_classes = [CanViewAdminOperations]
+
+    def get(self, request):
+        payload = collect_scoped_metrics(request.user)
+        _audit_operations_view(request, "metrics")
+        return Response(payload)
 
 
 def _audit(user, action, target_id=None, details=None, request=None):

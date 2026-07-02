@@ -78,6 +78,44 @@ export interface AuditLogQuery {
   date_to?: string;
 }
 
+export type ServiceHealthStatus =
+  | 'up'
+  | 'down'
+  | 'degraded'
+  | 'configured'
+  | 'not_configured';
+
+export interface SystemHealth {
+  overall: 'up' | 'degraded' | 'down';
+  services: Record<
+    'backend' | 'database' | 'redis' | 'celery' | 'vector_db' | 'llm',
+    {
+      status: ServiceHealthStatus;
+      latency_ms?: number;
+      detail?: string;
+      error?: string;
+    }
+  >;
+}
+
+export interface SystemMetrics {
+  users: { total: number; active: number };
+  usage: { sessions: number; questions: number; citations: number };
+  documents: {
+    total: number;
+    processing: number;
+    failed: number;
+    stale: number;
+    expiring: number;
+  };
+  quality: {
+    average_response_time_ms: number | null;
+    no_evidence_rate: number;
+    citation_coverage_rate: number;
+  };
+  security: { permission_denied: number };
+}
+
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
 
 export const adminApi = {
@@ -159,5 +197,13 @@ export const adminApi = {
   async auditLogs(params?: AuditLogQuery): Promise<AuditLog[]> {
     const { data } = await apiClient.get('/audit/logs/', { params });
     return unwrap(data);
+  },
+  async health(): Promise<SystemHealth> {
+    const { data } = await apiClient.get('/admin/health/');
+    return data;
+  },
+  async metrics(): Promise<SystemMetrics> {
+    const { data } = await apiClient.get('/admin/metrics/');
+    return data;
   },
 };

@@ -90,7 +90,7 @@ class DocumentIsolationTest(SpaceTestBase):
         resp = self.client.get(f"/api/v1/documents/{b_doc.id}/", HTTP_X_SPACE_ID=str(self.space_a.id))
         self.assertEqual(resp.status_code, 404)
 
-    def test_delete_cited_document_clears_citations_first(self):
+    def test_delete_cited_document_archives_and_preserves_citations(self):
         doc = make_doc(self.space_a, "Cited-doc")
         chunk = DocumentChunk.objects.create(
             document=doc, space=self.space_a, content="cited content", chunk_index=0
@@ -107,9 +107,10 @@ class DocumentIsolationTest(SpaceTestBase):
         resp = self.client.delete(f"/api/v1/documents/{doc.id}/", HTTP_X_SPACE_ID=str(self.space_a.id))
 
         self.assertEqual(resp.status_code, 204)
-        self.assertFalse(Document.objects.filter(id=doc.id).exists())
-        self.assertFalse(DocumentChunk.objects.filter(id=chunk.id).exists())
-        self.assertFalse(Citation.objects.filter(document_id=doc.id).exists())
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, "archived")
+        self.assertTrue(DocumentChunk.objects.filter(id=chunk.id).exists())
+        self.assertTrue(Citation.objects.filter(document_id=doc.id).exists())
 
 
 class SessionIsolationTest(SpaceTestBase):

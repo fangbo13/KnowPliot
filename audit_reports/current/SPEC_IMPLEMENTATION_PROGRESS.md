@@ -19,15 +19,16 @@ Current stage:
 - Phase 3B file-validation consistency: implemented and verified.
 - Phase 3C retrieval safety: implemented and verified.
 - Phase 4A scoped audit governance: implemented and verified.
-- Phase 4B operations, metrics, and document lifecycle MVP: next recommended stage.
+- Phase 4B operations, metrics, and document lifecycle MVP: implemented and verified.
+- Phase 4C ingestion visibility, retry, and deeper quality analytics: next recommended stage.
 
 Latest verified baseline:
 
 - Backend migration dry-run: no changes detected.
 - Django system check: passes with 3 known django-allauth deprecation warnings.
-- Backend Phase 3A/3B/3C + Phase 4A + space + V7 + template regression suite: 107 tests OK.
+- Backend Phase 3A/3B/3C + Phase 4A/4B + space + V7 + template regression suite: 117 tests OK.
 - Frontend i18n check: OK.
-- Frontend test suite: 43 tests OK.
+- Frontend test suite: 47 tests OK.
 - Frontend production build: OK with known Vite chunk/dynamic import warnings.
 
 ## SPEC Coverage Matrix
@@ -40,20 +41,20 @@ Latest verified baseline:
 | M1 Authentication and Identity | Implemented | Email/password registration, admin-code registration, optional signup approval, `/auth/me` identity payload | SSO remains a placeholder/future integration |
 | M2 Organization, Business Line, and Space Management | Mostly implemented | Organization, business line, KnowledgeSpace, membership, invite/access-code flows | Transfer/archive polish and broader admin ergonomics |
 | M3 Scenario Templates | Implemented through Phase 2B filter slice | `ScenarioTemplate`, create-space, quick questions, prompt/retrieval policy fields, clone, archive/restore, revisions, applications, filters | Tags/categories, recommendation ordering, URL-saved filters, marketplace/sharing |
-| M4 Knowledge Base and Document Lifecycle | Partially implemented | Upload/re-index/delete/archive, object-authorized delivery, and one server-enforced PDF/DOCX/HTML/TXT/Markdown validation policy | Stale/expired states, duplicate UX, quality score |
+| M4 Knowledge Base and Document Lifecycle | Partially implemented | Upload/re-index, archive-by-default deletion, protected hard delete, explicit stale/archive states, stale transition command, object-authorized delivery, and one server-enforced file policy | Duplicate UX, restore workflow, quality score |
 | M5 External Collection | Explicitly out of scope | SPEC says crawler collection is not supported in current version | No immediate work unless scope changes |
 | M6 RAG Retrieval and Answer Engine | Partially implemented | Mandatory space-scoped, active-only retrieval with typed document/category filter allowlist across SQLite and PostgreSQL | Hybrid retrieval, reranking, confidence markers, stronger insufficient-evidence behavior |
 | M7 Chat and Session Experience | Partially implemented | Space-scoped chat, session list, quick questions from template-created spaces | Citation drawer polish, feedback controls, export, mobile verification, stream cancellation hardening |
 | M8 RBAC and Object-Level Permission | Mostly implemented | Backend RBAC/admin scopes, frontend RoleGuard cleanup, scoped template permissions | Permission matrix coverage expansion and cache/performance hardening |
 | M9 Audit, Compliance, and Governance | Partially implemented | Immutable read-only audit API, explicit org/business-line/space scope, scoped admin visibility, result tracking, filters, and admin viewer | Compliance export, retention policy, bad-answer traceability |
-| M10 Metrics, Monitoring, and Quality Dashboard | Not complete | Basic admin foundation only | Usage metrics, RAG quality metrics, ingestion queue visibility, model/API/token dashboards, stale knowledge dashboard |
+| M10 Metrics, Monitoring, and Quality Dashboard | Partially implemented | Real backend/database/Redis/Celery/vector/LLM configuration health, scoped usage/latency/evidence/citation/document/security metrics, stale/failed counts, real admin dashboard | Ingestion queue and retry, model/API error and token metrics, deeper quality drill-down |
 | M11 User Feedback and Knowledge Improvement Loop | Not complete | No completed feedback/review workflow evidence | Helpful/unhelpful feedback, flagged-answer review queue, gap tickets, reviewer resolution workflow |
 | M12 Frontend UX and Accessibility | Partially implemented | React/AntD app, admin console, responsive foundations | Formal accessibility pass, keyboard flow verification, mobile citation inspection |
 | 5. Data Model Draft | Partially implemented | Core space, identity, audit, notification, and template models exist | Citation/feedback model completion and quality metrics schema |
-| 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, audit/admin foundations, protected document download API | Metrics APIs, feedback APIs, citation-inspection APIs |
-| 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, knowledge admin, template admin, governance admin | Metrics dashboards, feedback controls, source/citation inspection polish |
+| 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, scoped audit, protected document download, admin health, and scoped metrics APIs | Feedback APIs and citation-inspection APIs |
+| 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, lifecycle-aware knowledge admin, template admin, scoped audit, real health/metrics dashboard | Feedback controls and source/citation inspection polish |
 | 8. Deployment Model | Partially implemented | Current `docker-compose.yml`, backend Dockerfile, frontend Dockerfile | Production deployment guide, secrets handling, observability, scaling guidance |
-| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, Phase 3A-3C, and Phase 4A delivered | Phase 4B/4C and Phase 5 remain |
+| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, Phase 3A-3C, and Phase 4A/4B delivered | Phase 4C and Phase 5 remain |
 | 10. Non-Functional Requirements | Partially implemented | Auth required for APIs, scoped permissions, tests | Performance targets, retry visibility, stale-source compliance, caching strategy |
 | 11. Success Metrics | Not complete | Metrics listed in SPEC | Instrumentation and dashboard work required |
 | 12. Open Decisions | Open | Recommendations documented in SPEC | Product decisions still need confirmation before later phases |
@@ -90,22 +91,32 @@ Latest verified baseline:
   - Binary-text, signature mismatch, unknown extension, and unsupported-format rejection.
   - Batch DOCX support and unknown-extension fallback closure.
   - Frontend accept-list alignment and interceptor-aware upload.
+- Phase 3C retrieval safety:
+  - Mandatory valid `space_id` on every retrieval path.
+  - Typed document/category filter allowlist and active-document enforcement.
+  - SQLite/PostgreSQL semantic parity with parameterized SQL.
+- Phase 4A scoped audit governance:
+  - Immutable organization, business-line, and space scope plus result tracking.
+  - Platform/org/business administrator visibility boundaries and server filters.
+- Phase 4B operations and lifecycle MVP:
+  - Real health checks and scoped usage, quality, document, and security metrics.
+  - Admin dashboard consumes `/admin/health/` and `/admin/metrics/`.
+  - Archive-by-default deletion preserves citations; cited sources block hard deletion.
+  - Stale/archived UI states and idempotent stale transition command.
 
 ## Next Recommended Stage
 
-Continue Phase 4B: operations, metrics, and document lifecycle MVP.
+Continue Phase 4C: ingestion visibility, retry, and deeper quality analytics.
 
 Suggested order:
 
-1. Operations visibility:
-   - Add real bounded health checks and scoped metrics APIs.
-   - Replace inferred frontend health with server-reported states.
-2. Document states:
-   - Make stale/expired/failed states explicit and visible in admin UI.
-   - Exclude archived/stale documents from retrieval by default or warn clearly.
+1. Ingestion operations:
+   - Expose failed/queued tasks with safe retry actions.
+   - Add model/API error and token-usage instrumentation.
+2. Knowledge quality:
+   - Add unused/high-use documents, low-relevance answers, and quality drill-down.
 3. Verification:
-   - Add backend regression tests for health, metrics, archive, and stale states.
-   - Add frontend validation for admin document error states.
+   - Add PostgreSQL/Redis/Celery integration evidence and dashboard regression tests.
 
 ## Deferred Later Work
 

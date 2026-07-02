@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Card, Table, Button, Space, Upload, message, Modal, Empty } from 'antd';
 import {
-  DeleteOutlined,
+  InboxOutlined,
   DownloadOutlined,
   ReloadOutlined,
   UploadOutlined,
@@ -37,6 +37,8 @@ const tagStyleMap: Record<string, { bg: string; text: string; border: string }> 
   draft: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
   uploading: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
   expired: { bg: '#F3F4F6', text: '#9CA3AF', border: '#E5E7EB' },
+  stale: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
+  archived: { bg: '#F3F4F6', text: '#6B7280', border: '#E5E7EB' },
 };
 
 export default function KnowledgeBasePage() {
@@ -70,10 +72,10 @@ export default function KnowledgeBasePage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleArchive = async (id: string) => {
     try {
-      await documentApi.deleteDocument(id);
-      message.success(t('delete_success'));
+      await documentApi.archiveDocument(id);
+      message.success(t('archive_success'));
       loadDocuments();
     } catch {
       message.error(t('upload_error'));
@@ -103,14 +105,13 @@ export default function KnowledgeBasePage() {
     }
   };
 
-  const confirmDelete = (id: string, title: string) => {
+  const confirmArchive = (id: string, title: string) => {
     Modal.confirm({
-      title: t('delete_confirm'),
-      content: t('delete_confirm_content').replace('"%s"', `"${title}"`),
-      okText: t('delete'),
-      okType: 'danger',
+      title: t('archive_confirm'),
+      content: t('archive_confirm_content').replace('%s', title),
+      okText: t('archive'),
       cancelText: t('cancel'),
-      onOk: () => handleDelete(id),
+      onOk: () => handleArchive(id),
     });
   };
 
@@ -136,6 +137,8 @@ export default function KnowledgeBasePage() {
     draft: t('status_draft'),
     uploading: t('status_uploading'),
     expired: t('status_expired'),
+    stale: t('status_stale'),
+    archived: t('status_archived'),
   };
 
   const columns: ColumnsType<Document> = [
@@ -194,9 +197,11 @@ export default function KnowledgeBasePage() {
           />
           <Button
             size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => confirmDelete(record.id, record.title)}
+            icon={<InboxOutlined />}
+            onClick={() => confirmArchive(record.id, record.title)}
+            disabled={record.status === 'archived'}
+            aria-label={t('archive')}
+            title={t('archive')}
             style={{ borderRadius: 6 }}
           />
         </Space>

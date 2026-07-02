@@ -10,6 +10,8 @@ from .admin_views import (
     AdminRegistrationCodeListCreateView,
     BusinessLineListCreateView,
     OrganizationListView,
+    SystemHealthView,
+    SystemMetricsView,
     admin_code_revoke,
 )
 
@@ -20,4 +22,6 @@ urlpatterns = [
          name="admin-code-revoke"),
     path("organizations/", OrganizationListView.as_view(), name="admin-org-list"),
     path("business-lines/", BusinessLineListCreateView.as_view(), name="admin-bl-list"),
+    path("health/", SystemHealthView.as_view(), name="admin-health"),
+    path("metrics/", SystemMetricsView.as_view(), name="admin-metrics"),
 ]

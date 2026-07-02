@@ -88,6 +88,10 @@ export const documentApi = {
     await apiClient.delete(`/documents/${id}/`);
   },
 
+  async archiveDocument(id: string): Promise<void> {
+    await apiClient.delete(`/documents/${id}/`);
+  },
+
   async downloadDocument(
     id: string,
     fallbackTitle: string,

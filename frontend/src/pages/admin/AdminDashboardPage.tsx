@@ -13,6 +13,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import apiClient from '../../api/client';
+import {
+  adminApi,
+  type SystemHealth,
+  type SystemMetrics,
+} from '../../api/admin';
 
 const { Text } = Typography;
 
@@ -28,22 +33,12 @@ interface UserRecord {
   role_level: string | null;
 }
 
-interface SystemStatus {
-  backend_status: string;
-  celery_status: string;
-  db_status: string;
-  total_users: number;
-  active_users: number;
-  total_documents: number;
-}
-
-
-
 export default function AdminDashboardPage() {
   const { t } = useTranslation('common');
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
 
   const loadUsers = async () => {
@@ -63,44 +58,20 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // V4.2 UI-V4.2-011 + P1-4: System health now uses real API response data.
-  // Previously all status fields were hardcoded 'running'/'connected' regardless
-  // of API success/failure. Now:
-  // - backend_status: inferred from API reachability (if audit API responds → 'running')
-  // - db_status: inferred from successful queryset return (if data returned → 'connected')
-  // - celery_status: read from audit API response celery_status field if available,
-  //   otherwise inferred from backend reachability (if backend is running, celery likely is)
-  // On API failure: only failing services are marked 'unknown'/'down', rest stays undefined
+  // Phase 4B: health and metrics come from dedicated server-side checks.
   const loadSystemStatus = async () => {
     setStatusLoading(true);
     try {
-      // Health check — if audit API responds, backend & DB are operational
-      const auditRes = await apiClient.get('/audit/logs/', { timeout: 5000 });
-      const data = auditRes.data;
-      const resultCount = data?.count ?? (Array.isArray(data) ? data.length : 0);
-      // P1-4: Read real status values from API response if available.
-      // backend_status and db_status are inferred from successful API reachability
-      // (if Django can respond + query DB, both services are operational).
-      // celery_status is read from response if provided, otherwise inferred.
-      setSystemStatus({
-        backend_status: data?.backend_status ?? 'running',
-        celery_status: data?.celery_status ?? 'running',
-        db_status: data?.db_status ?? 'connected',
-        total_users: users.length,
-        active_users: users.filter(u => u.is_active).length,
-        total_documents: resultCount,
-      });
-    } catch (err: any) {
-      // API failure — backend may be down or unreachable
-      const backendDown = !err.response; // No response = network error / server unreachable
-      setSystemStatus({
-        backend_status: backendDown ? 'down' : 'degraded',
-        celery_status: 'unknown',
-        db_status: backendDown ? 'disconnected' : 'unknown',
-        total_users: users.length,
-        active_users: users.filter(u => u.is_active).length,
-        total_documents: 0,
-      });
+      const [health, metrics] = await Promise.all([
+        adminApi.health(),
+        adminApi.metrics(),
+      ]);
+      setSystemHealth(health);
+      setSystemMetrics(metrics);
+    } catch {
+      setSystemHealth(null);
+      setSystemMetrics(null);
+      message.error('Failed to load system operations data');
     } finally {
       setStatusLoading(false);
     }
@@ -108,13 +79,8 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     loadUsers();
+    loadSystemStatus();
   }, []);
-
-  useEffect(() => {
-    if (users.length > 0) {
-      loadSystemStatus();
-    }
-  }, [users.length]);
 
   const roleStyleMap: Record<string, { bg: string; text: string; border: string }> = {
     admin: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
@@ -125,6 +91,9 @@ export default function AdminDashboardPage() {
   const healthStyleMap: Record<string, { bg: string; text: string; border: string }> = {
     running: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
     connected: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    up: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    configured: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    not_configured: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
     degraded: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
     unknown: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
     down: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
@@ -133,7 +102,7 @@ export default function AdminDashboardPage() {
 
   const renderHealthTag = (status: string) => {
     const style = healthStyleMap[status] || { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' };
-    const isGood = status === 'running' || status === 'connected';
+    const isGood = ['running', 'connected', 'up', 'configured'].includes(status);
     return (
       <span style={{
         display: 'inline-flex',
@@ -311,22 +280,40 @@ export default function AdminDashboardPage() {
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Spin />
             </div>
-          ) : systemStatus ? (
+          ) : systemHealth && systemMetrics ? (
             <Descriptions column={1} size="small" bordered={false} style={{ marginBottom: 12 }}>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Backend</span>}>
-                {renderHealthTag(systemStatus.backend_status)}
+                {renderHealthTag(systemHealth.services.backend.status)}
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Celery</span>}>
-                {renderHealthTag(systemStatus.celery_status)}
+                {renderHealthTag(systemHealth.services.celery.status)}
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Database</span>}>
-                {renderHealthTag(systemStatus.db_status)}
+                {renderHealthTag(systemHealth.services.database.status)}
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Redis</span>}>
+                {renderHealthTag(systemHealth.services.redis.status)}
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Vector DB</span>}>
+                {renderHealthTag(systemHealth.services.vector_db.status)}
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>LLM</span>}>
+                {renderHealthTag(systemHealth.services.llm.status)}
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Total Users</span>}>
-                <Text strong style={{ color: 'var(--color-text)' }}>{systemStatus.total_users}</Text>
+                <Text strong style={{ color: 'var(--color-text)' }}>{systemMetrics.users.total}</Text>
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Active Users</span>}>
-                <Text strong style={{ color: 'var(--color-success)' }}>{systemStatus.active_users}</Text>
+                <Text strong style={{ color: 'var(--color-success)' }}>{systemMetrics.users.active}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Documents</span>}>
+                <Text strong>{systemMetrics.documents.total}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Stale / Failed</span>}>
+                <Text strong>{systemMetrics.documents.stale} / {systemMetrics.documents.failed}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>No-evidence rate</span>}>
+                <Text strong>{(systemMetrics.quality.no_evidence_rate * 100).toFixed(1)}%</Text>
               </Descriptions.Item>
             </Descriptions>
           ) : (

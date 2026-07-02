@@ -99,4 +99,12 @@ describe('document upload policy client', () => {
     expect((body as FormData).has('file_size')).toBe(false);
     expect(config).toBeUndefined();
   });
+
+  it('archives documents through the protected document endpoint', async () => {
+    const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: null });
+
+    await documentApi.archiveDocument('document-id');
+
+    expect(remove).toHaveBeenCalledWith('/documents/document-id/');
+  });
 });

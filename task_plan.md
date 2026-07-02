@@ -19,6 +19,9 @@ major phase.
 | 7. Design Phase 3B after Phase 3A passes | complete | `docs/superpowers/specs/2026-07-01-phase-3b-file-validation-design.md` |
 | 8. Implement Phase 3B with TDD | complete | File-policy convergence and upload repair |
 | 9. Audit Phase 3B | complete | `audit_reports/v7.3/Phase3B_File_Validation_Test_Audit_Report_V7.3.md` |
+| 10. Implement and audit Phase 3C | complete | `audit_reports/v7.4/Phase3C_Retrieval_Safety_Test_Audit_Report_V7.4.md` |
+| 11. Implement and audit Phase 4A | complete | `audit_reports/v8.0/Phase4A_Audit_Governance_Test_Audit_Report_V8.0.md` |
+| 12. Implement and audit Phase 4B MVP | complete | `audit_reports/v8.1/Phase4B_Operations_Metrics_Test_Audit_Report_V8.1.md` |
 
 ## Planning Constraints
 
