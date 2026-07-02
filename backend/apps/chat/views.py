@@ -469,6 +469,15 @@ def submit_feedback(request, message_id):
 
     if request.method == "DELETE":
         feedback = get_object_or_404(Feedback, message=message, user=request.user)
+        if feedback.status not in {
+            Feedback.STATUS_SUBMITTED,
+            Feedback.STATUS_PENDING_REVIEW,
+            Feedback.STATUS_WITHDRAWN,
+        }:
+            return Response(
+                {"detail": "Feedback cannot be withdrawn after review has started."},
+                status=status.HTTP_409_CONFLICT,
+            )
         feedback.status = Feedback.STATUS_WITHDRAWN
         feedback.save(update_fields=["status", "updated_at"])
         _audit_feedback(request, feedback, "feedback_withdraw")

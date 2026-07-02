@@ -172,6 +172,49 @@ export interface DocumentQuality {
   };
 }
 
+export interface FeedbackReview {
+  id: string;
+  space: string;
+  message: string;
+  user: string;
+  user_email?: string;
+  type?: string;
+  feedback_type: 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
+  comment: string;
+  suggested_source: string;
+  flag_for_review: boolean;
+  status: 'submitted' | 'pending_review' | 'in_review' | 'resolved' | 'dismissed' | 'withdrawn';
+  reviewer: string | null;
+  reviewer_email?: string | null;
+  resolution_code: string;
+  resolution_notes: string;
+  review_context: {
+    question?: string;
+    answer?: string;
+    citations?: Array<{ document_title?: string; quoted_text?: string }>;
+    retrieval_count?: number;
+    model?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeGap {
+  id: string;
+  space: string;
+  feedback: string | null;
+  question: string;
+  question_snapshot: string;
+  status: 'open' | 'in_progress' | 'resolved' | 'wont_fix';
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  assignee: string | null;
+  assignee_email?: string | null;
+  suggested_source: string;
+  resolution_notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
 
 export const adminApi = {
@@ -281,5 +324,48 @@ export const adminApi = {
   }): Promise<DocumentQuality[]> {
     const { data } = await apiClient.get('/admin/quality/documents/', { params });
     return unwrap(data);
+  },
+  async feedbackReviews(params?: {
+    status?: string;
+    type?: string;
+    space?: string;
+    reviewer?: string;
+  }): Promise<FeedbackReview[]> {
+    const { data } = await apiClient.get('/admin/quality/feedback/', { params });
+    return unwrap(data);
+  },
+  async claimFeedback(id: string): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/claim/`, {});
+    return data;
+  },
+  async assignFeedback(id: string, reviewer: string): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/assign/`, { reviewer });
+    return data;
+  },
+  async resolveFeedback(id: string, body: { resolution_code?: string; resolution_notes?: string }): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/resolve/`, body);
+    return data;
+  },
+  async dismissFeedback(id: string, body: { resolution_code?: string; resolution_notes?: string }): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/dismiss/`, body);
+    return data;
+  },
+  async reopenFeedback(id: string): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/reopen/`, {});
+    return data;
+  },
+  async knowledgeGaps(params?: { status?: string; priority?: string; space?: string }): Promise<KnowledgeGap[]> {
+    const { data } = await apiClient.get('/admin/quality/gaps/', { params });
+    return unwrap(data);
+  },
+  async createKnowledgeGap(body: {
+    space: string;
+    feedback?: string;
+    question: string;
+    priority?: string;
+    suggested_source?: string;
+  }): Promise<KnowledgeGap> {
+    const { data } = await apiClient.post('/admin/quality/gaps/', body);
+    return data;
   },
 };

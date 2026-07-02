@@ -5,9 +5,13 @@
 """Chat models."""
 
 import uuid
+import hashlib
+import re
 
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 
 class ChatSession(models.Model):
@@ -287,3 +291,138 @@ class ModelInvocation(models.Model):
 
     def __str__(self):
         return f"{self.model or 'unknown'}: {self.status}"
+
+
+class FeedbackReviewEvent(models.Model):
+    """Immutable event history for feedback review workflow."""
+
+    EVENT_ASSIGN = "assign"
+    EVENT_CLAIM = "claim"
+    EVENT_RESOLVE = "resolve"
+    EVENT_DISMISS = "dismiss"
+    EVENT_REOPEN = "reopen"
+    EVENT_CHOICES = [
+        (EVENT_ASSIGN, "Assign"),
+        (EVENT_CLAIM, "Claim"),
+        (EVENT_RESOLVE, "Resolve"),
+        (EVENT_DISMISS, "Dismiss"),
+        (EVENT_REOPEN, "Reopen"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    feedback = models.ForeignKey(
+        Feedback,
+        on_delete=models.CASCADE,
+        related_name="review_events",
+    )
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="feedback_review_events",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="feedback_review_events",
+    )
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assigned_feedback_review_events",
+    )
+    event_type = models.CharField(max_length=20, choices=EVENT_CHOICES)
+    from_status = models.CharField(max_length=20, blank=True, default="")
+    to_status = models.CharField(max_length=20, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_feedbackreviewevent"
+        ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.pk and FeedbackReviewEvent.objects.filter(pk=self.pk).exists():
+            raise ValidationError("Feedback review events are immutable.")
+        super().save(*args, **kwargs)
+
+
+class KnowledgeGapTicket(models.Model):
+    """Knowledge improvement ticket created from reviewed feedback."""
+
+    STATUS_OPEN = "open"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_RESOLVED = "resolved"
+    STATUS_WONT_FIX = "wont_fix"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_WONT_FIX, "Won't Fix"),
+    ]
+    PRIORITY_CHOICES = [
+        ("low", "Low"),
+        ("medium", "Medium"),
+        ("high", "High"),
+        ("critical", "Critical"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="knowledge_gap_tickets",
+    )
+    feedback = models.ForeignKey(
+        Feedback,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="knowledge_gap_tickets",
+    )
+    question_snapshot = models.TextField()
+    normalized_question_hash = models.CharField(max_length=64, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="medium")
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="knowledge_gap_tickets",
+    )
+    suggested_source = models.TextField(blank=True, default="")
+    resolution_notes = models.TextField(blank=True, default="")
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_knowledgegapticket"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["space", "status", "priority"],
+                name="chat_gap_space_status_idx",
+            ),
+        ]
+
+    @staticmethod
+    def normalize_question(question: str) -> str:
+        return re.sub(r"\s+", " ", (question or "").strip().lower())
+
+    @classmethod
+    def hash_question(cls, question: str) -> str:
+        return hashlib.sha256(cls.normalize_question(question).encode("utf-8")).hexdigest()
+
+    @property
+    def is_open_lifecycle(self):
+        return self.status in {self.STATUS_OPEN, self.STATUS_IN_PROGRESS}
+
+    def mark_resolved(self, notes="", wont_fix=False):
+        self.status = self.STATUS_WONT_FIX if wont_fix else self.STATUS_RESOLVED
+        self.resolution_notes = notes
+        self.resolved_at = timezone.now()

@@ -5,7 +5,14 @@
 """Chat serializers."""
 
 from rest_framework import serializers
-from .models import ChatSession, Message, Citation, Feedback
+from .models import (
+    ChatSession,
+    Message,
+    Citation,
+    Feedback,
+    FeedbackReviewEvent,
+    KnowledgeGapTicket,
+)
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
@@ -67,6 +74,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
         model = Feedback
         fields = [
             "id",
+            "space",
             "message",
             "user",
             "type",
@@ -87,6 +95,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "space",
             "user",
             "feedback_type",
             "status",
@@ -119,3 +128,74 @@ class FeedbackSerializer(serializers.ModelSerializer):
         if reason == "inaccurate":
             return Feedback.FEEDBACK_TYPE_INCORRECT
         return Feedback.FEEDBACK_TYPE_UNHELPFUL
+
+
+class FeedbackReviewEventSerializer(serializers.ModelSerializer):
+    actor_email = serializers.EmailField(source="actor.email", read_only=True)
+    reviewer_email = serializers.EmailField(source="reviewer.email", read_only=True)
+
+    class Meta:
+        model = FeedbackReviewEvent
+        fields = [
+            "id",
+            "feedback",
+            "space",
+            "actor",
+            "actor_email",
+            "reviewer",
+            "reviewer_email",
+            "event_type",
+            "from_status",
+            "to_status",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class FeedbackReviewSerializer(FeedbackSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    reviewer_email = serializers.EmailField(source="reviewer.email", read_only=True)
+    events = FeedbackReviewEventSerializer(source="review_events", many=True, read_only=True)
+
+    class Meta(FeedbackSerializer.Meta):
+        fields = FeedbackSerializer.Meta.fields + [
+            "user_email",
+            "reviewer_email",
+            "events",
+        ]
+
+
+class KnowledgeGapTicketSerializer(serializers.ModelSerializer):
+    assignee_email = serializers.EmailField(source="assignee.email", read_only=True)
+    feedback_type = serializers.CharField(source="feedback.feedback_type", read_only=True)
+    question = serializers.CharField(source="question_snapshot", read_only=True)
+
+    class Meta:
+        model = KnowledgeGapTicket
+        fields = [
+            "id",
+            "space",
+            "feedback",
+            "feedback_type",
+            "question",
+            "question_snapshot",
+            "status",
+            "priority",
+            "assignee",
+            "assignee_email",
+            "suggested_source",
+            "resolution_notes",
+            "resolved_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "feedback_type",
+            "question",
+            "normalized_question_hash",
+            "resolved_at",
+            "created_at",
+            "updated_at",
+        ]

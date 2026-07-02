@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V8.0 Phase 5A actual-pass baseline
+> Version: V8.1 Phase 5B actual-pass baseline
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -970,4 +970,36 @@ Implementation status as of 2026-07-03:
 Audit evidence:
 `audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md`.
 
-Next stage: Phase 5B scoped answer review queue and knowledge-gap workflow.
+### 14.11 Phase 5B: Scoped Answer Review and Knowledge Gaps
+
+Implementation status as of 2026-07-03:
+
+- Added scoped review queue APIs at `/api/v1/admin/quality/feedback/` with
+  detail, claim, assign, resolve, dismiss, and reopen actions.
+- Review access is limited to platform, organization, and business-line
+  administrators plus space owners, knowledge admins, and reviewers.
+- Claim/assign/resolve/dismiss/reopen transitions run transactionally and
+  return 409 for invalid state changes.
+- `FeedbackReviewEvent` records immutable event history with actor, reviewer,
+  event type, from/to status, notes, and timestamp.
+- Feedback can no longer be withdrawn by the submitter once review has started
+  or after it has been closed.
+- Added `KnowledgeGapTicket` with space, linked feedback, safe question
+  snapshot, normalized question hash, status, priority, assignee, suggested
+  source, resolution notes, and timestamps.
+- Duplicate open/in-progress gap creation in the same space for the same
+  normalized question returns the existing ticket instead of creating a second
+  open ticket.
+- Added gap list/create and assign/resolve/reopen APIs under
+  `/api/v1/admin/quality/gaps/`.
+- All review and gap state changes write scoped audit records.
+- The admin console exposes an Answer Quality page with filters, a detail
+  drawer, question/answer/feedback snapshots, review actions, and knowledge-gap
+  summary.
+- Verified by 138 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md`.
+
+Next stage: Phase 5C analytics and compliance reporting.

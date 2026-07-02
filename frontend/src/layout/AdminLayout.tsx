@@ -12,7 +12,7 @@ import { NavLink, Outlet, useNavigate, Navigate } from 'react-router-dom';
 import {
   DashboardOutlined, TeamOutlined, SafetyCertificateOutlined, SoundOutlined,
   ApartmentOutlined, AuditOutlined, DatabaseOutlined, ArrowLeftOutlined,
-  GlobalOutlined, SunOutlined, MoonOutlined, LayoutOutlined,
+  GlobalOutlined, SunOutlined, MoonOutlined, LayoutOutlined, MessageOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
@@ -26,6 +26,7 @@ const NAV = [
   { to: '/admin/announcements', icon: <SoundOutlined />, key: 'admin_nav_announcements' },
   { to: '/admin/business-lines', icon: <ApartmentOutlined />, key: 'admin_nav_business_lines' },
   { to: '/admin/templates', icon: <LayoutOutlined />, key: 'admin_nav_templates' },
+  { to: '/admin/quality', icon: <MessageOutlined />, key: 'admin_nav_quality' },
   { to: '/admin/audit', icon: <AuditOutlined />, key: 'admin_nav_audit' },
   { to: '/admin/knowledge', icon: <DatabaseOutlined />, key: 'admin_nav_knowledge' },
 ];

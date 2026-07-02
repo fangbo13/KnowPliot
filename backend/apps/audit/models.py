@@ -79,6 +79,15 @@ class AuditLog(models.Model):
         ("feedback_submit", "Feedback Submit"),
         ("feedback_update", "Feedback Update"),
         ("feedback_withdraw", "Feedback Withdraw"),
+        ("feedback_review_assign", "Feedback Review Assign"),
+        ("feedback_review_claim", "Feedback Review Claim"),
+        ("feedback_review_resolve", "Feedback Review Resolve"),
+        ("feedback_review_dismiss", "Feedback Review Dismiss"),
+        ("feedback_review_reopen", "Feedback Review Reopen"),
+        ("knowledge_gap_create", "Knowledge Gap Create"),
+        ("knowledge_gap_assign", "Knowledge Gap Assign"),
+        ("knowledge_gap_resolve", "Knowledge Gap Resolve"),
+        ("knowledge_gap_reopen", "Knowledge Gap Reopen"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

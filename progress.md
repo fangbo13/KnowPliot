@@ -25,6 +25,19 @@
   build passed with known Vite chunking warnings.
 - Saved the Phase 5A audit report at
   `audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md`.
+- Created local branch `Version_8.1` for Phase 5B from the V8.0 commit.
+- Added Phase 5B failing tests for scoped review queue access, claim, assign,
+  resolve, reopen, illegal state conflicts, duplicate knowledge-gap tickets,
+  gap action audits, and blocking user withdrawal after review has started.
+- Implemented `FeedbackReviewEvent`, `KnowledgeGapTicket`, review queue APIs,
+  gap APIs, scoped audit actions, transaction-protected status transitions, and
+  the admin Answer Quality page/navigation.
+- Completed Phase 5B V8.1 gates: 138/138 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, and production
+  build passed with known Vite chunking warnings.
+- Saved the Phase 5B audit report at
+  `audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md`.
 
 ## 2026-07-01
 

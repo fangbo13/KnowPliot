@@ -17,6 +17,19 @@ from .admin_views import (
     SystemMetricsView,
     admin_code_revoke,
 )
+from apps.chat.quality_views import (
+    FeedbackAssignView,
+    FeedbackClaimView,
+    FeedbackDismissView,
+    FeedbackReopenView,
+    FeedbackResolveView,
+    FeedbackReviewDetailView,
+    FeedbackReviewListView,
+    KnowledgeGapAssignView,
+    KnowledgeGapListCreateView,
+    KnowledgeGapReopenView,
+    KnowledgeGapResolveView,
+)
 
 urlpatterns = [
     path("registration-codes/", AdminRegistrationCodeListCreateView.as_view(),
@@ -38,4 +51,15 @@ urlpatterns = [
         DocumentQualityListView.as_view(),
         name="admin-document-quality",
     ),
+    path("quality/feedback/", FeedbackReviewListView.as_view(), name="admin-quality-feedback"),
+    path("quality/feedback/<uuid:pk>/", FeedbackReviewDetailView.as_view(), name="admin-quality-feedback-detail"),
+    path("quality/feedback/<uuid:pk>/claim/", FeedbackClaimView.as_view(), name="admin-quality-feedback-claim"),
+    path("quality/feedback/<uuid:pk>/assign/", FeedbackAssignView.as_view(), name="admin-quality-feedback-assign"),
+    path("quality/feedback/<uuid:pk>/resolve/", FeedbackResolveView.as_view(), name="admin-quality-feedback-resolve"),
+    path("quality/feedback/<uuid:pk>/dismiss/", FeedbackDismissView.as_view(), name="admin-quality-feedback-dismiss"),
+    path("quality/feedback/<uuid:pk>/reopen/", FeedbackReopenView.as_view(), name="admin-quality-feedback-reopen"),
+    path("quality/gaps/", KnowledgeGapListCreateView.as_view(), name="admin-quality-gaps"),
+    path("quality/gaps/<uuid:pk>/assign/", KnowledgeGapAssignView.as_view(), name="admin-quality-gap-assign"),
+    path("quality/gaps/<uuid:pk>/resolve/", KnowledgeGapResolveView.as_view(), name="admin-quality-gap-resolve"),
+    path("quality/gaps/<uuid:pk>/reopen/", KnowledgeGapReopenView.as_view(), name="admin-quality-gap-reopen"),
 ]

@@ -19,6 +19,7 @@ import AdminAnnouncementsPage from './pages/admin/AdminAnnouncementsPage';
 import AdminBusinessLinesPage from './pages/admin/AdminBusinessLinesPage';
 import AdminAuditPage from './pages/admin/AdminAuditPage';
 import AdminTemplatesPage from './pages/admin/AdminTemplatesPage';
+import AdminQualityPage from './pages/admin/AdminQualityPage';
 import LoginPage from './auth/LoginPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthProvider';
@@ -106,6 +107,7 @@ function App() {
         <Route path="business-lines" element={<AdminBusinessLinesPage />} />
         <Route path="audit" element={<AdminAuditPage />} />
         <Route path="templates" element={<AdminTemplatesPage />} />
+        <Route path="quality" element={<AdminQualityPage />} />
         <Route path="knowledge" element={<KnowledgeBasePage />} />
       </Route>
     </Routes>
