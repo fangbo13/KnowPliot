@@ -1115,3 +1115,32 @@ Audit evidence:
 `audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md`.
 
 Phase 6C status: actual PASS. Next stage: V9.0 Long-Run Operations / Scale Hardening.
+
+### 14.16 Phase 7A: Long-Run Operations Baseline
+
+Implementation status as of 2026-07-03:
+
+- Admin health now exposes long-run operations fields for readiness, liveness,
+  dependency health, and background worker health while preserving the existing
+  services payload.
+- Added a `long_run_operations` health service with safe status/code/detail,
+  last check time, latency bucket, retention configuration, cleanup counts, and
+  SLA/stale-document backlog counts.
+- Long-run health reports missing cleanup/retention settings by setting the
+  service to degraded and listing setting names only; it does not expose
+  secrets, connection strings, filesystem paths, prompts, or export contents.
+- Added `cleanup_export_jobs` with `--dry-run`; the mutating mode marks only
+  expired export jobs and clears generated result-file references.
+- The admin dashboard type definitions and readiness labels now include
+  long-run operations status.
+- Verified by 155 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+- Production deploy check was executed and recorded as environment-limited
+  because this local virtual environment lacks `psycopg` / `psycopg2` for the
+  production PostgreSQL backend.
+
+Audit evidence:
+`audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md`.
+
+Phase 7A status: actual PASS. Next stage: Phase 7B scale hardening and
+background reliability.

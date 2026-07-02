@@ -87,13 +87,40 @@ export type ServiceHealthStatus =
 
 export interface SystemHealth {
   overall: 'up' | 'degraded' | 'down';
-  services: Record<string, {
+  readiness?: 'up' | 'degraded' | 'down';
+  liveness?: 'up' | 'down';
+  dependency_health?: Record<string, ServiceHealthStatus>;
+  background_worker_health?: {
     status: ServiceHealthStatus;
     latency_ms?: number;
     detail?: string;
     error?: string;
+  };
+  services: Record<string, {
+    status: ServiceHealthStatus;
+    code?: string;
+    latency_ms?: number;
+    latency_bucket?: 'fast' | 'normal' | 'slow';
+    last_checked_at?: string;
+    detail?: string;
+    error?: string;
     missing?: string[];
     max_sync_rows?: number;
+    retention?: {
+      export_job_days?: number | null;
+      audit_log_days?: number | null;
+      notification_days?: number | null;
+      stale_job_days?: number | null;
+    };
+    cleanup?: {
+      expired_export_jobs?: number;
+      failed_export_jobs?: number;
+      failed_ingestion_jobs?: number;
+    };
+    backlog?: {
+      sla_overdue_items?: number;
+      stale_documents?: number;
+    };
   }>;
 }
 

@@ -1,0 +1,70 @@
+# Phase 7A / V9.0 Long-Run Operations Baseline Audit Report
+
+Date: 2026-07-03
+
+Branch: `Version_9.0`
+
+Baseline: `Version_8.2` commit `95f3be5`
+
+Final local commit: produced after this report is staged; see the Git commit on
+`Version_9.0` with message `chore(ops): add long-run operations baseline`.
+
+## Scope
+
+Phase 7A establishes a long-run operations baseline for production operations:
+safe readiness/liveness summaries, dependency/background-worker visibility,
+long-run cleanup configuration, expired export cleanup, and admin dashboard
+visibility.
+
+## Implementation evidence
+
+- Extended admin health with top-level `readiness`, `liveness`,
+  `dependency_health`, and `background_worker_health` fields.
+- Added `long_run_operations` health service with safe `status`, `code`,
+  `detail`, `last_checked_at`, `latency_bucket`, retention settings,
+  cleanup counts, and backlog counts.
+- Added `cleanup_export_jobs` management command with `--dry-run` support.
+- The cleanup command marks only expired export jobs and clears result-file
+  references after removing existing generated files.
+- Extended frontend admin health types and dashboard readiness labels for
+  long-run operations.
+- Added English and Chinese i18n keys for long-run operations health labels.
+
+## Verification
+
+Commands executed from `D:\Github\Onborading-AI`:
+
+| Gate | Result |
+| --- | --- |
+| `backend\venv\Scripts\python.exe backend\manage.py test apps.spaces.test_phase7a_long_run_ops --settings=config.settings.local_test -v 1` | PASS, 4 tests |
+| `npm --prefix frontend run test -- AdminDashboardPage` | PASS, 1 test |
+| `backend\venv\Scripts\python.exe backend\manage.py test apps --settings=config.settings.local_test -v 1` | PASS, 155 tests |
+| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS with known allauth deprecation warnings |
+| `backend\venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run --settings=config.settings.local_test` | PASS, no changes detected |
+| `npm --prefix frontend run test` | PASS, 49 tests |
+| `npm --prefix frontend run check:i18n` | PASS |
+| `npm --prefix frontend run typecheck` | PASS |
+| `npm --prefix frontend run build` | PASS with known Vite chunk-size / i18n import warnings |
+| `backend\venv\Scripts\python.exe backend\manage.py check --deploy --settings=config.settings.prod` | FAIL due to missing local PostgreSQL driver `psycopg` / `psycopg2`; recorded as environment limitation |
+
+## Known warnings and residual risk
+
+- `django-allauth` deprecation warnings remain unchanged from prior phases.
+- Vite continues to warn about large chunks and mixed static/dynamic i18n
+  imports; unchanged from prior green builds.
+- Production deploy check cannot complete in this local virtual environment
+  because PostgreSQL driver support is missing. Re-run in a production-like
+  environment with `psycopg` or `psycopg2` installed.
+- Cleanup currently targets export artifacts only. Broader notification/audit
+  retention automation remains for later Phase 7 work.
+
+## Rollback recommendation
+
+Revert the Phase 7A commit. No schema migration is introduced in this phase.
+Rollback removes the new health fields, cleanup command, frontend labels, and
+guard tests.
+
+## Verdict
+
+Phase 7A / V9.0 is PASS for local long-run operations baseline readiness, with
+the production deploy check explicitly recorded as environment-limited.

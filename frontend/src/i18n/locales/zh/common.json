@@ -414,5 +414,14 @@
   "health_security_config": "安全配置",
   "health_export_limits": "导出限制",
   "health_missing": "缺失",
-  "health_max_sync_rows": "同步最大行数"
+  "health_max_sync_rows": "同步最大行数",
+  "health_long_run_operations": "长期运行",
+  "health_cleanup": "清理",
+  "health_expired_exports": "过期导出",
+  "health_failed_exports": "失败导出",
+  "health_failed_ingestion": "失败入库",
+  "health_backlog": "积压",
+  "health_sla_overdue": "SLA 超期",
+  "health_stale_documents": "过期文档",
+  "health_latency_bucket": "延迟档位"
 }

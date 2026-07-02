@@ -30,7 +30,10 @@
 | V8.0 / Phase 6A | Production hardening baseline | Readiness health checks, safe API error shape, admin readiness UI, deploy-check evidence | `audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md` |
 | V8.1 / Phase 6B | Async operations and SLA alerts | Async compliance export jobs, export-complete notifications, quality SLA scanner, SLA UI | `audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md` |
 | V8.2 / Phase 6C | Release readiness and regression closure | Performance indexes, V8 smoke script, release readiness report, V8 documentation closure | `audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md` |
-| V9.0 / Long-Run Operations / Scale Hardening | Long-run production operations | Scale/performance budgets, observability, background-worker hardening, retention policy automation, deployment reliability | `audit_reports/v9.0/Long_Run_Operations_Scale_Hardening_Audit_Report_V9.0.md` |
+| V9.0 / Phase 7A | Long-run operations baseline | Readiness/liveness/dependency health, long-run cleanup config, export cleanup command, admin operations visibility | `audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md` |
+| V9.1 / Phase 7B | Scale hardening and background reliability | Export retry, SLA scanner dry-run/statistics, duplicate-operation prevention, scale-path indexes | `audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md` |
+| V9.2 / Phase 7C | Operational runbook and regression closure | V9 smoke checks, operational runbook, final regression audit, Phase 7 documentation closure | `audit_reports/v9.2/Phase7C_Operational_Runbook_Regression_Closure_Audit_Report_V9.2.md` |
+| V10.0 / Next candidate | Post-V9 product/operations expansion | To be planned after Phase 7 actual PASS | TBD |
 
 ## Dependency Order
 

@@ -12,8 +12,16 @@ from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 
 from apps.audit.models import AuditLog
-from apps.chat.models import ChatSession, Citation, Message, ModelInvocation
-from apps.knowledge.models import Document
+from apps.chat.models import (
+    ChatSession,
+    Citation,
+    ComplianceExportJob,
+    Feedback,
+    KnowledgeGapTicket,
+    Message,
+    ModelInvocation,
+)
+from apps.knowledge.models import Document, IngestionJob
 from .models import KnowledgeSpace, OrganizationMembership, SpaceMembership
 from .permissions import admin_scope, is_platform_admin
 
@@ -133,6 +141,101 @@ def _export_limits_status():
     }
 
 
+def _latency_bucket(latency_ms):
+    if latency_ms < 50:
+        return "fast"
+    if latency_ms < 250:
+        return "normal"
+    return "slow"
+
+
+def _configured_positive_int(name, default):
+    value = getattr(settings, name, default)
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _long_run_operations_status():
+    started = time.monotonic()
+    required = {
+        "EXPORT_JOB_RETENTION_DAYS": 7,
+        "AUDIT_LOG_RETENTION_DAYS": 365,
+        "NOTIFICATION_RETENTION_DAYS": 90,
+        "STALE_JOB_RETENTION_DAYS": 30,
+    }
+    configured = {
+        name: _configured_positive_int(name, default)
+        for name, default in required.items()
+    }
+    missing = [name for name, value in configured.items() if value is None]
+    now = timezone.now()
+    pending_feedback_cutoff = now - timedelta(days=3)
+    in_review_feedback_cutoff = now - timedelta(days=5)
+    open_gap_cutoff = now - timedelta(days=3)
+    expired_exports = ComplianceExportJob.objects.filter(
+        expires_at__lt=now,
+    ).exclude(status=ComplianceExportJob.STATUS_EXPIRED)
+    failed_exports = ComplianceExportJob.objects.filter(
+        status=ComplianceExportJob.STATUS_FAILED
+    )
+    failed_ingestion = IngestionJob.objects.filter(status="failed")
+    sla_backlog = (
+        Feedback.objects.filter(
+            status=Feedback.STATUS_PENDING_REVIEW,
+            created_at__lt=pending_feedback_cutoff,
+        ).count()
+        + Feedback.objects.filter(
+            status=Feedback.STATUS_IN_REVIEW,
+            created_at__lt=in_review_feedback_cutoff,
+        ).count()
+        + KnowledgeGapTicket.objects.filter(
+            status__in=[
+                KnowledgeGapTicket.STATUS_OPEN,
+                KnowledgeGapTicket.STATUS_IN_PROGRESS,
+            ],
+            created_at__lt=open_gap_cutoff,
+        ).count()
+    )
+    latency_ms = round((time.monotonic() - started) * 1000, 1)
+    return {
+        "status": "degraded" if missing else "configured",
+        "code": (
+            "long_run_operations_config_missing"
+            if missing
+            else "long_run_operations_configured"
+        ),
+        "detail": (
+            "Long-run cleanup configuration needs attention"
+            if missing
+            else "Long-run cleanup configuration is ready"
+        ),
+        "missing": missing,
+        "last_checked_at": now.isoformat(),
+        "latency_ms": latency_ms,
+        "latency_bucket": _latency_bucket(latency_ms),
+        "retention": {
+            "export_job_days": configured["EXPORT_JOB_RETENTION_DAYS"],
+            "audit_log_days": configured["AUDIT_LOG_RETENTION_DAYS"],
+            "notification_days": configured["NOTIFICATION_RETENTION_DAYS"],
+            "stale_job_days": configured["STALE_JOB_RETENTION_DAYS"],
+        },
+        "cleanup": {
+            "expired_export_jobs": expired_exports.count(),
+            "failed_export_jobs": failed_exports.count(),
+            "failed_ingestion_jobs": failed_ingestion.count(),
+        },
+        "backlog": {
+            "sla_overdue_items": sla_backlog,
+            "stale_documents": Document.objects.filter(status="stale").count(),
+        },
+    }
+
+
 def collect_system_health():
     services = {
         "backend": {"status": "up"},
@@ -158,6 +261,7 @@ def collect_system_health():
         ),
         "security_config": _security_config_status(),
         "export_limits": _export_limits_status(),
+        "long_run_operations": _long_run_operations_status(),
     }
     statuses = {service["status"] for service in services.values()}
     if services["database"]["status"] == "down":
@@ -166,7 +270,19 @@ def collect_system_health():
         overall = "degraded"
     else:
         overall = "up"
-    return {"overall": overall, "services": services}
+    dependencies = {
+        key: services[key]["status"]
+        for key in ["database", "redis", "celery", "vector_db", "llm"]
+        if key in services
+    }
+    return {
+        "overall": overall,
+        "readiness": overall,
+        "liveness": "up" if services["backend"]["status"] == "up" else "down",
+        "dependency_health": dependencies,
+        "background_worker_health": services["celery"],
+        "services": services,
+    }
 
 
 def scoped_space_ids(user):

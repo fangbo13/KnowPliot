@@ -29,6 +29,7 @@ const READINESS_SERVICE_LABELS: Record<string, string> = {
   media_storage: 'health_media_storage',
   security_config: 'health_security_config',
   export_limits: 'health_export_limits',
+  long_run_operations: 'health_long_run_operations',
 };
 
 interface UserRecord {

@@ -416,5 +416,14 @@
   "health_security_config": "Security config",
   "health_export_limits": "Export limits",
   "health_missing": "Missing",
-  "health_max_sync_rows": "Max sync rows"
+  "health_max_sync_rows": "Max sync rows",
+  "health_long_run_operations": "Long-run operations",
+  "health_cleanup": "Cleanup",
+  "health_expired_exports": "Expired exports",
+  "health_failed_exports": "Failed exports",
+  "health_failed_ingestion": "Failed ingestion",
+  "health_backlog": "Backlog",
+  "health_sla_overdue": "SLA overdue",
+  "health_stale_documents": "Stale documents",
+  "health_latency_bucket": "Latency bucket"
 }
