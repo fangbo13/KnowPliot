@@ -1,9 +1,9 @@
-# KnowPilot SPEC
+﻿# KnowPilot SPEC
 
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V8.2 Phase 5A–5C actual-pass baseline
+> Version: V7.8 Phase 5A–5C actual-pass baseline
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -968,7 +968,7 @@ Implementation status as of 2026-07-03:
   i18n validation, TypeScript, and production build.
 
 Audit evidence:
-`audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md`.
+`audit_reports/V7.6/Phase5A_Feedback_Test_Audit_Report_V7.6.md`.
 
 ### 14.11 Phase 5B: Scoped Answer Review and Knowledge Gaps
 
@@ -1000,7 +1000,7 @@ Implementation status as of 2026-07-03:
   i18n validation, TypeScript, and production build.
 
 Audit evidence:
-`audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md`.
+`audit_reports/V7.7/Phase5B_Review_Workflow_Test_Audit_Report_V7.7.md`.
 
 ### 14.12 Phase 5C: Analytics and Compliance Reporting
 
@@ -1027,6 +1027,6 @@ Implementation status as of 2026-07-03:
   i18n validation, TypeScript, and production build.
 
 Audit evidence:
-`audit_reports/v8.2/Phase5C_Compliance_Reporting_Test_Audit_Report_V8.2.md`.
+`audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md`.
 
 Phase 5A–5C status: actual PASS. Next stage: V9.0 Production Hardening.

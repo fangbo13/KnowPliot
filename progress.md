@@ -1,14 +1,14 @@
-# Progress Log
+﻿# Progress Log
 
 ## 2026-07-03
 
-- Loaded the V8 objective from
+- Loaded the V7.6–V7.8 objective from
   `C:\Users\方海波\.codex\attachments\358147c8-c17e-4277-bdb6-a29b5750f80f\goal-objective.md`.
 - Confirmed the baseline branch and commit: `Version_7.5` at `f2a1237`.
 - Preserved existing user worktree files and untracked assets, including
   `backend/db.sqlite3`, `frontend/tsconfig.tsbuildinfo`, deleted token files,
   screenshots, videos, and other untracked resources.
-- Created local branch `Version_8.0` for Phase 5A.
+- Created local branch `Version_7.6` for Phase 5A.
 - Added Phase 5A failing backend tests for answer feedback upsert, ownership,
   assistant-only enforcement, soft withdrawal, safe audit metadata, and
   `ModelInvocation.question_message`.
@@ -19,38 +19,38 @@
 - Added chat MessageBubble helpful/not-helpful controls, detailed feedback
   fields, withdrawal, persisted-message gating, styles, and English/Chinese
   i18n keys.
-- Completed Phase 5A V8.0 gates: 131/131 backend tests passed, Django check
+- Completed Phase 5A V7.6 gates: 131/131 backend tests passed, Django check
   passed with known allauth warnings, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
   build passed with known Vite chunking warnings.
 - Saved the Phase 5A audit report at
-  `audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md`.
-- Created local branch `Version_8.1` for Phase 5B from the V8.0 commit.
+  `audit_reports/V7.6/Phase5A_Feedback_Test_Audit_Report_V7.6.md`.
+- Created local branch `Version_7.7` for Phase 5B from the V7.6 commit.
 - Added Phase 5B failing tests for scoped review queue access, claim, assign,
   resolve, reopen, illegal state conflicts, duplicate knowledge-gap tickets,
   gap action audits, and blocking user withdrawal after review has started.
 - Implemented `FeedbackReviewEvent`, `KnowledgeGapTicket`, review queue APIs,
   gap APIs, scoped audit actions, transaction-protected status transitions, and
   the admin Answer Quality page/navigation.
-- Completed Phase 5B V8.1 gates: 138/138 backend tests passed, Django check
+- Completed Phase 5B V7.7 gates: 138/138 backend tests passed, Django check
   passed with known allauth warnings, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
   build passed with known Vite chunking warnings.
 - Saved the Phase 5B audit report at
-  `audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md`.
-- Created local branch `Version_8.2` for Phase 5C from the V8.1 commit.
+  `audit_reports/V7.7/Phase5B_Review_Workflow_Test_Audit_Report_V7.7.md`.
+- Created local branch `Version_7.8` for Phase 5C from the V7.7 commit.
 - Added Phase 5C failing tests for scoped quality reports, member denial,
   unanswered-question grouping, UTF-8 BOM CSV export, stable columns, unknown
   dataset rejection, and `audit_export` metadata.
 - Implemented knowledge-quality JSON reports, synchronous scoped CSV export,
   DRF `format=csv` handling, export auditing, admin quality summary cards, and
   dataset download actions.
-- Completed Phase 5C V8.2 gates: 142/142 backend tests passed, Django check
+- Completed Phase 5C V7.8 gates: 142/142 backend tests passed, Django check
   passed with known allauth warnings, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
   build passed with known Vite chunking warnings.
 - Saved the Phase 5C audit report at
-  `audit_reports/v8.2/Phase5C_Compliance_Reporting_Test_Audit_Report_V8.2.md`.
+  `audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md`.
 - Marked Phase 5A–5C as actual PASS in `SPEC.MD`; next stage is V9.0
   Production Hardening.
 
