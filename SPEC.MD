@@ -1174,3 +1174,30 @@ Audit evidence:
 
 Phase 7B status: actual PASS. Next stage: Phase 7C operational runbook and
 regression closure.
+
+### 14.18 Phase 7C: Operational Runbook and Regression Closure
+
+Implementation status as of 2026-07-03:
+
+- Added `docs/operations/KnowPilot_V9_Operations_Runbook.md` covering health degraded triage,
+  export job failed recovery, SLA backlog handling, migration checks, deploy check,
+  smoke script usage, and rollback.
+- Added `backend/scripts/smoke_v9_operations.py` for frontend build artifact checks and
+  authenticated API smoke checks covering health, admin metrics, quality report,
+  export job list, notification feed, and review queue.
+- V9 smoke returns structured JSON and fails safely without tracebacks.
+- Added Phase 7C guard tests for the runbook, smoke script, safe smoke failure,
+  and V9.0–V9.2 documentation closure.
+- Phase 7 is now closed as V9.0–V9.2. The next roadmap candidate is V10.0 and
+  is not considered started.
+- Verified by 163 backend tests, the 4-test Phase 7C focused suite, V9 smoke
+  build-artifact validation, Django check, migration dry-run, 49 frontend
+  tests, i18n validation, TypeScript, and production build.
+- Production deploy check was executed and recorded as environment-limited
+  because this local virtual environment lacks `psycopg` / `psycopg2` for the
+  production PostgreSQL backend.
+
+Audit evidence:
+`audit_reports/v9.2/Phase7C_Operational_Runbook_Regression_Closure_Audit_Report_V9.2.md`.
+
+Phase 7C status: actual PASS. Next stage: V10.0 candidate planning only.

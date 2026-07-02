@@ -50,7 +50,10 @@
                   -> 6A production baseline
                     -> 6B async operations
                       -> 6C release readiness
-                        -> V9 long-run operations / scale hardening
+                        -> 7A long-run operations baseline
+                          -> 7B scale hardening and background reliability
+                            -> 7C operational runbook and regression closure
+                              -> V10.0 candidate planning
 ```
 
 ## Cross-Cutting Audit Matrix
