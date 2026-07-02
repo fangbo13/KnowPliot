@@ -385,4 +385,13 @@
   "quality_dismiss": "Dismiss",
   "quality_reopen": "Reopen",
   "quality_create_gap": "Create gap"
+  ,"quality_report_failed": "Failed to load quality report",
+  "quality_export_failed": "Export failed",
+  "quality_feedback_total": "Feedback",
+  "quality_negative_rate": "Negative rate",
+  "quality_open_reviews": "Open reviews",
+  "quality_open_gaps": "Open gaps",
+  "quality_refresh_report": "Refresh report",
+  "quality_export_feedback": "Export feedback CSV",
+  "quality_export_gaps": "Export gaps CSV"
 }

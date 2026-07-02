@@ -215,6 +215,35 @@ export interface KnowledgeGap {
   updated_at: string;
 }
 
+export interface KnowledgeQualityReport {
+  feedback: {
+    total: number;
+    negative_rate: number;
+    flagged_rate: number;
+    by_type: Record<string, number>;
+  };
+  reviews: {
+    pending: number;
+    in_review: number;
+    resolved: number;
+    dismissed: number;
+    average_resolution_seconds: number | null;
+  };
+  unanswered_questions: Array<{ question: string; count: number }>;
+  knowledge_gaps: {
+    open: number;
+    in_progress: number;
+    resolved: number;
+    wont_fix: number;
+  };
+  documents: {
+    high_citation: Array<{ id: string; title: string; citation_count: number }>;
+    uncited: Array<{ id: string; title: string }>;
+    stale_cited: Array<{ id: string; title: string }>;
+  };
+  trends: Array<{ date: string; feedback: number; negative: number }>;
+}
+
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
 
 export const adminApi = {
@@ -366,6 +395,17 @@ export const adminApi = {
     suggested_source?: string;
   }): Promise<KnowledgeGap> {
     const { data } = await apiClient.post('/admin/quality/gaps/', body);
+    return data;
+  },
+  async knowledgeQualityReport(): Promise<KnowledgeQualityReport> {
+    const { data } = await apiClient.get('/admin/reports/knowledge-quality/');
+    return data;
+  },
+  async exportQualityDataset(dataset: 'feedback' | 'reviews' | 'gaps' | 'unanswered' | 'documents'): Promise<Blob> {
+    const { data } = await apiClient.get('/admin/reports/export/', {
+      params: { dataset, format: 'csv' },
+      responseType: 'blob',
+    });
     return data;
   },
 };

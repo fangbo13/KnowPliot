@@ -383,4 +383,13 @@
   "quality_dismiss": "驳回",
   "quality_reopen": "重开",
   "quality_create_gap": "创建缺口"
+  ,"quality_report_failed": "质量报告加载失败",
+  "quality_export_failed": "导出失败",
+  "quality_feedback_total": "反馈",
+  "quality_negative_rate": "负面率",
+  "quality_open_reviews": "待处理审核",
+  "quality_open_gaps": "未关闭缺口",
+  "quality_refresh_report": "刷新报告",
+  "quality_export_feedback": "导出反馈 CSV",
+  "quality_export_gaps": "导出缺口 CSV"
 }

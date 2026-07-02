@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V8.1 Phase 5B actual-pass baseline
+> Version: V8.2 Phase 5A–5C actual-pass baseline
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -1002,4 +1002,31 @@ Implementation status as of 2026-07-03:
 Audit evidence:
 `audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md`.
 
-Next stage: Phase 5C analytics and compliance reporting.
+### 14.12 Phase 5C: Analytics and Compliance Reporting
+
+Implementation status as of 2026-07-03:
+
+- Added administrator/reviewer-scoped knowledge-quality report API at
+  `/api/v1/admin/reports/knowledge-quality/`.
+- Reports include feedback totals by type, negative feedback rate, flagged
+  rate, review status counts, average resolution time, unanswered-question
+  groups, knowledge-gap status counts, high-citation documents, uncited
+  documents, stale cited documents, and daily improvement trends.
+- “Unanswered” includes assistant messages with `retrieval_count=0` and
+  model invocations with `failure` or `timeout` status.
+- Unanswered questions are grouped internally by normalized text hash while the
+  response exposes only safe question text and counts.
+- Added synchronous CSV export at `/api/v1/admin/reports/export/` for feedback,
+  reviews, gaps, unanswered questions, and documents.
+- CSV exports use UTF-8 BOM, stable columns, UTC ISO timestamps, a 10,000-row
+  cap with 413 overflow response, and scoped `audit_export` records that store
+  dataset/range/result metadata without export content.
+- The admin Answer Quality page displays report summary cards and download
+  buttons for quality datasets.
+- Verified by 142 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.2/Phase5C_Compliance_Reporting_Test_Audit_Report_V8.2.md`.
+
+Phase 5A–5C status: actual PASS. Next stage: V9.0 Production Hardening.

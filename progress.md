@@ -38,6 +38,21 @@
   build passed with known Vite chunking warnings.
 - Saved the Phase 5B audit report at
   `audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md`.
+- Created local branch `Version_8.2` for Phase 5C from the V8.1 commit.
+- Added Phase 5C failing tests for scoped quality reports, member denial,
+  unanswered-question grouping, UTF-8 BOM CSV export, stable columns, unknown
+  dataset rejection, and `audit_export` metadata.
+- Implemented knowledge-quality JSON reports, synchronous scoped CSV export,
+  DRF `format=csv` handling, export auditing, admin quality summary cards, and
+  dataset download actions.
+- Completed Phase 5C V8.2 gates: 142/142 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, and production
+  build passed with known Vite chunking warnings.
+- Saved the Phase 5C audit report at
+  `audit_reports/v8.2/Phase5C_Compliance_Reporting_Test_Audit_Report_V8.2.md`.
+- Marked Phase 5A–5C as actual PASS in `SPEC.MD`; next stage is V9.0
+  Production Hardening.
 
 ## 2026-07-01
 

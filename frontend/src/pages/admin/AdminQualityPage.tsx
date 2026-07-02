@@ -9,6 +9,7 @@ import { Button, Card, Drawer, Empty, Input, Select, Space, Table, Tag, message 
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type FeedbackReview, type KnowledgeGap } from '../../api/admin';
+import type { KnowledgeQualityReport } from '../../api/admin';
 
 const STATUS_COLORS: Record<string, string> = {
   submitted: 'default',
@@ -31,6 +32,7 @@ export default function AdminQualityPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [report, setReport] = useState<KnowledgeQualityReport | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -52,6 +54,19 @@ export default function AdminQualityPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, typeFilter]);
+
+  const loadReport = async () => {
+    try {
+      setReport(await adminApi.knowledgeQualityReport());
+    } catch {
+      message.error(t('quality_report_failed'));
+    }
+  };
+
+  useEffect(() => {
+    loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const mutateReview = async (fn: () => Promise<FeedbackReview>) => {
     try {
@@ -79,6 +94,22 @@ export default function AdminQualityPage() {
       setGaps(gapRows);
     } catch {
       message.error(t('quality_action_failed'));
+    }
+  };
+
+  const downloadDataset = async (dataset: 'feedback' | 'reviews' | 'gaps' | 'unanswered' | 'documents') => {
+    try {
+      const blob = await adminApi.exportQualityDataset(dataset);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${dataset}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      message.error(t('quality_export_failed'));
     }
   };
 
@@ -126,6 +157,27 @@ export default function AdminQualityPage() {
           <p style={{ color: 'var(--color-text-secondary)', marginTop: 6 }}>{t('quality_page_subtitle')}</p>
         </div>
 
+        {report && (
+          <Space wrap>
+            <Card size="small">
+              <strong>{report.feedback.total}</strong>
+              <div>{t('quality_feedback_total')}</div>
+            </Card>
+            <Card size="small">
+              <strong>{Math.round(report.feedback.negative_rate * 100)}%</strong>
+              <div>{t('quality_negative_rate')}</div>
+            </Card>
+            <Card size="small">
+              <strong>{report.reviews.pending + report.reviews.in_review}</strong>
+              <div>{t('quality_open_reviews')}</div>
+            </Card>
+            <Card size="small">
+              <strong>{report.knowledge_gaps.open + report.knowledge_gaps.in_progress}</strong>
+              <div>{t('quality_open_gaps')}</div>
+            </Card>
+          </Space>
+        )}
+
         <Card>
           <Space wrap style={{ marginBottom: 14 }}>
             <Select
@@ -145,6 +197,9 @@ export default function AdminQualityPage() {
               options={['helpful', 'unhelpful', 'incorrect', 'outdated', 'missing_source'].map((value) => ({ value, label: value }))}
             />
             <Button onClick={load}>{t('refresh')}</Button>
+            <Button onClick={loadReport}>{t('quality_refresh_report')}</Button>
+            <Button onClick={() => downloadDataset('feedback')}>{t('quality_export_feedback')}</Button>
+            <Button onClick={() => downloadDataset('gaps')}>{t('quality_export_gaps')}</Button>
           </Space>
           <Table
             rowKey="id"
