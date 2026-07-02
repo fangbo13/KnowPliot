@@ -88,6 +88,28 @@
   build passed with known Vite chunking warnings.
 - Saved the Phase 6B audit report at
   `audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md`.
+- Created local branch `Version_8.2` for Phase 6C from `Version_8.1`.
+- Added Phase 6C V8.2 release-readiness guard tests for critical quality
+  indexes, smoke-script build artifact validation, and SPEC/progress/roadmap
+  consistency.
+- Added feedback, knowledge-gap, and export-job query indexes for the
+  release-readiness performance budget.
+- Added `backend/scripts/smoke_v8_release.py` for frontend build artifact
+  checks plus authenticated API smoke checks covering health, quality report,
+  feedback export, and review queue list.
+- Reconciled the long-term roadmap so Phase 5 maps to V7.6–V7.8 and Phase 6
+  maps to V8.0–V8.2, with V9.0 reserved for Long-Run Operations / Scale
+  Hardening.
+- Completed Phase 6C V8.2 gates: 151/151 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, production build
+  passed with known Vite chunking warnings, and the V8 smoke build-artifact
+  check passed.
+- Re-ran production deploy check with `config.settings.prod`; it failed because
+  the local venv lacks `psycopg` / `psycopg2`, recorded as an environment
+  limitation rather than a PASS.
+- Saved the Phase 6C audit report at
+  `audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md`.
 
 ## 2026-07-01
 

@@ -24,10 +24,13 @@
 | V7.5 / Phase 4A | Audit and governance closure | Sensitive-action coverage matrix, failed-access visibility, immutable API posture, scoped audit filters | `audit_reports/v7.5/Phase4A_Audit_Governance_Test_Audit_Report_V7.5.md` |
 | V7.5 / Phase 4B | Operations and lifecycle MVP | Real service health, scoped usage/quality/security metrics, stale/archive lifecycle, provenance-preserving archive UX | `audit_reports/v7.5/Phase4B_Operations_Metrics_Test_Audit_Report_V7.5.md` |
 | V7.5 / Phase 4C | Operations and quality completion | Ingestion queue/retry, model/API/token metrics, unused/high-use documents, quality drill-down | `audit_reports/v7.5/Phase4C_Knowledge_Quality_Test_Audit_Report_V7.5.md` |
-| V8.0 / Phase 5A | Feedback loop | Helpful/unhelpful/incorrect/outdated/missing-source feedback tied to answer and citations | `audit_reports/v8.0/Phase5A_Feedback_Test_Audit_Report_V8.0.md` |
-| V8.1 / Phase 5B | Review and gap workflow | Flagged-answer queue, assignments, resolution history, knowledge-gap tickets | `audit_reports/v8.1/Phase5B_Review_Workflow_Test_Audit_Report_V8.1.md` |
-| V8.2 / Phase 5C | Reporting | Usage/compliance export, top unanswered questions, improvement trend reports | `audit_reports/v8.2/Phase5C_Compliance_Reporting_Test_Audit_Report_V8.2.md` |
-| V9.0 / Hardening | Production readiness | Accessibility audit, mobile citation flows, performance budgets, stream cancellation, retry reliability, deployment/secrets/observability guide | `audit_reports/v9.0/Production_Readiness_Test_Audit_Report_V9.0.md` |
+| V7.6 / Phase 5A | Feedback loop | Helpful/unhelpful/incorrect/outdated/missing-source feedback tied to answer and citations | `audit_reports/V7.6/Phase5A_Feedback_Test_Audit_Report_V7.6.md` |
+| V7.7 / Phase 5B | Review and gap workflow | Flagged-answer queue, assignments, resolution history, knowledge-gap tickets | `audit_reports/V7.7/Phase5B_Review_Workflow_Test_Audit_Report_V7.7.md` |
+| V7.8 / Phase 5C | Reporting | Usage/compliance export, top unanswered questions, improvement trend reports | `audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md` |
+| V8.0 / Phase 6A | Production hardening baseline | Readiness health checks, safe API error shape, admin readiness UI, deploy-check evidence | `audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md` |
+| V8.1 / Phase 6B | Async operations and SLA alerts | Async compliance export jobs, export-complete notifications, quality SLA scanner, SLA UI | `audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md` |
+| V8.2 / Phase 6C | Release readiness and regression closure | Performance indexes, V8 smoke script, release readiness report, V8 documentation closure | `audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md` |
+| V9.0 / Long-Run Operations / Scale Hardening | Long-run production operations | Scale/performance budgets, observability, background-worker hardening, retention policy automation, deployment reliability | `audit_reports/v9.0/Long_Run_Operations_Scale_Hardening_Audit_Report_V9.0.md` |
 
 ## Dependency Order
 
@@ -41,7 +44,10 @@
             -> 5A feedback capture
               -> 5B reviewer workflow
                 -> 5C reporting
-                  -> production hardening
+                  -> 6A production baseline
+                    -> 6B async operations
+                      -> 6C release readiness
+                        -> V9 long-run operations / scale hardening
 ```
 
 ## Cross-Cutting Audit Matrix

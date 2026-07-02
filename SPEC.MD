@@ -1090,3 +1090,28 @@ Audit evidence:
 
 Phase 6B status: actual PASS. Next stage: Phase 6C release readiness,
 performance indexes, smoke validation, and documentation.
+
+### 14.15 Phase 6C: Release Readiness and Regression Closure
+
+Implementation status as of 2026-07-03:
+
+- Added release-readiness indexes for the highest-risk quality operations:
+  feedback by space/status/created time, knowledge gaps by space/status/created
+  time, and export jobs by status/requester/created time.
+- Added a dependency-light V8 smoke script at
+  `backend/scripts/smoke_v8_release.py` that can validate frontend build
+  artifacts independently or run authenticated API smoke checks for health,
+  quality report, feedback CSV export, and review queue list.
+- Added Phase 6C release guard tests that verify the query indexes, smoke
+  script build-artifact mode, and V8.2 documentation/roadmap consistency.
+- Reconciled the long-term roadmap so Phase 5 remains V7.6–V7.8 and Phase 6
+  maps to V8.0–V8.2.
+- V8 release readiness records the remaining local production deploy-check
+  limitation: this workstation virtual environment does not include
+  `psycopg` / `psycopg2`, so the PostgreSQL production deploy check cannot be
+  treated as a local PASS.
+
+Audit evidence:
+`audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md`.
+
+Phase 6C status: actual PASS. Next stage: V9.0 Long-Run Operations / Scale Hardening.

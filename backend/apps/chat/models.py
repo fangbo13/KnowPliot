@@ -220,6 +220,12 @@ class Feedback(models.Model):
     class Meta:
         db_table = "chat_feedback"
         unique_together = ["user", "message"]
+        indexes = [
+            models.Index(
+                fields=["space", "status", "created_at"],
+                name="chat_fb_sp_st_cr_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"Feedback {self.rating} for message {self.message.id}"
@@ -408,6 +414,10 @@ class KnowledgeGapTicket(models.Model):
                 fields=["space", "status", "priority"],
                 name="chat_gap_space_status_idx",
             ),
+            models.Index(
+                fields=["space", "status", "created_at"],
+                name="chat_gap_sp_st_cr_idx",
+            ),
         ]
 
     @staticmethod
@@ -498,6 +508,10 @@ class ComplianceExportJob(models.Model):
             models.Index(
                 fields=["space", "dataset", "-created_at"],
                 name="chat_export_space_dataset_idx",
+            ),
+            models.Index(
+                fields=["status", "requested_by", "created_at"],
+                name="chat_exp_st_user_cr_idx",
             ),
         ]
 
