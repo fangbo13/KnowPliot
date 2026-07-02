@@ -394,4 +394,11 @@
   "quality_refresh_report": "Refresh report",
   "quality_export_feedback": "Export feedback CSV",
   "quality_export_gaps": "Export gaps CSV"
+  ,"health_migrations": "Migrations",
+  "health_static_files": "Static files",
+  "health_media_storage": "Media storage",
+  "health_security_config": "Security config",
+  "health_export_limits": "Export limits",
+  "health_missing": "Missing",
+  "health_max_sync_rows": "Max sync rows"
 }

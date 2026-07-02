@@ -87,15 +87,14 @@ export type ServiceHealthStatus =
 
 export interface SystemHealth {
   overall: 'up' | 'degraded' | 'down';
-  services: Record<
-    'backend' | 'database' | 'redis' | 'celery' | 'vector_db' | 'llm',
-    {
-      status: ServiceHealthStatus;
-      latency_ms?: number;
-      detail?: string;
-      error?: string;
-    }
-  >;
+  services: Record<string, {
+    status: ServiceHealthStatus;
+    latency_ms?: number;
+    detail?: string;
+    error?: string;
+    missing?: string[];
+    max_sync_rows?: number;
+  }>;
 }
 
 export interface SystemMetrics {

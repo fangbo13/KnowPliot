@@ -53,6 +53,25 @@
   `audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md`.
 - Marked Phase 5A–5C as actual PASS in `SPEC.MD`; next stage is V9.0
   Production Hardening.
+- Loaded the Phase 6A–6C / V8.0–V8.2 objective from
+  `C:\Users\方海波\.codex\attachments\54b46526-2dff-430c-88c3-7ef953f6d2e4\goal-objective.md`.
+- Confirmed the baseline branch and commit: `Version_7.8` at `eb3571d`.
+- Created local branch `Version_8.0` for Phase 6A.
+- Added Phase 6A failing tests for production-readiness health payload fields,
+  safe security configuration reporting, and stable permission-denied error
+  response shape.
+- Implemented health readiness checks for migrations, static/media config,
+  security config, export limits, stable `detail/code` error fields, and admin
+  dashboard readiness display.
+- Completed Phase 6A V8.0 gates: 145/145 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, and production
+  build passed with known Vite chunking warnings.
+- Executed production deploy check; it failed because the local venv lacks
+  PostgreSQL driver support (`psycopg` / `psycopg2`), and this is recorded as
+  an environment limitation rather than a PASS.
+- Saved the Phase 6A audit report at
+  `audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md`.
 
 ## 2026-07-01
 

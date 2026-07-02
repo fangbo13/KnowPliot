@@ -23,6 +23,14 @@ import {
 
 const { Text } = Typography;
 
+const READINESS_SERVICE_LABELS: Record<string, string> = {
+  migrations: 'health_migrations',
+  static_files: 'health_static_files',
+  media_storage: 'health_media_storage',
+  security_config: 'health_security_config',
+  export_limits: 'health_export_limits',
+};
+
 interface UserRecord {
   id: string;
   email: string;
@@ -153,6 +161,31 @@ export default function AdminDashboardPage() {
         )}
         {status.toUpperCase()}
       </span>
+    );
+  };
+
+  const renderReadinessDetail = (key: string) => {
+    const service = systemHealth?.services[key];
+    if (!service) return null;
+    const details = [
+      service.detail,
+      service.missing && service.missing.length > 0
+        ? `${t('health_missing')}: ${service.missing.join(', ')}`
+        : null,
+      service.max_sync_rows != null
+        ? `${t('health_max_sync_rows')}: ${service.max_sync_rows}`
+        : null,
+    ].filter(Boolean).join(' · ');
+    return (
+      <Descriptions.Item
+        key={key}
+        label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>{t(READINESS_SERVICE_LABELS[key])}</span>}
+      >
+        <Space direction="vertical" size={2}>
+          {renderHealthTag(service.status)}
+          {details && <Text type="secondary" style={{ fontSize: 11.5 }}>{details}</Text>}
+        </Space>
+      </Descriptions.Item>
     );
   };
 
@@ -324,6 +357,7 @@ export default function AdminDashboardPage() {
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>LLM</span>}>
                 {renderHealthTag(systemHealth.services.llm.status)}
               </Descriptions.Item>
+              {Object.keys(READINESS_SERVICE_LABELS).map(renderReadinessDetail)}
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Total Users</span>}>
                 <Text strong style={{ color: 'var(--color-text)' }}>{systemMetrics.users.total}</Text>
               </Descriptions.Item>

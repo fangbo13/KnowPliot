@@ -7,6 +7,7 @@ from celery import current_app
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 
@@ -69,10 +70,74 @@ def _vector_status():
     return _timed_check(check_extension)
 
 
+def _migration_status():
+    def check_migrations():
+        executor = MigrationExecutor(connection)
+        plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
+        if plan:
+            raise RuntimeError("Unapplied migrations")
+
+    result = _timed_check(check_migrations)
+    if result["status"] == "down":
+        result["status"] = "degraded"
+        result["detail"] = "Unapplied migrations detected"
+        result.pop("error", None)
+    else:
+        result["detail"] = "All migrations applied"
+    return result
+
+
+def _path_config_status(name, value):
+    if value:
+        return {"status": "configured", "detail": f"{name} configured"}
+    return {"status": "degraded", "detail": f"{name} is not configured"}
+
+
+def _security_config_status():
+    missing = []
+    if getattr(settings, "DEBUG", False):
+        missing.append("DEBUG")
+    allowed_hosts = list(getattr(settings, "ALLOWED_HOSTS", []) or [])
+    if not allowed_hosts or "*" in allowed_hosts:
+        missing.append("ALLOWED_HOSTS")
+    if getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False):
+        missing.append("CORS_ALLOW_ALL_ORIGINS")
+    if not getattr(settings, "SESSION_COOKIE_SECURE", False):
+        missing.append("SESSION_COOKIE_SECURE")
+    if not getattr(settings, "CSRF_COOKIE_SECURE", False):
+        missing.append("CSRF_COOKIE_SECURE")
+    if not getattr(settings, "SECURE_SSL_REDIRECT", False):
+        missing.append("SECURE_SSL_REDIRECT")
+    return {
+        "status": "degraded" if missing else "configured",
+        "missing": missing,
+        "detail": (
+            "Production security settings need attention"
+            if missing
+            else "Production security settings configured"
+        ),
+    }
+
+
+def _export_limits_status():
+    try:
+        from apps.chat.report_views import MAX_EXPORT_ROWS
+    except Exception:
+        max_export_rows = 10000
+    else:
+        max_export_rows = MAX_EXPORT_ROWS
+    return {
+        "status": "configured",
+        "max_sync_rows": max_export_rows,
+        "detail": "Synchronous export row limit configured",
+    }
+
+
 def collect_system_health():
     services = {
         "backend": {"status": "up"},
         "database": _timed_check(_check_database),
+        "migrations": _migration_status(),
         "redis": _timed_check(_check_redis),
         "celery": _timed_check(_check_celery),
         "vector_db": _vector_status(),
@@ -83,11 +148,21 @@ def collect_system_health():
                 else "not_configured"
             )
         },
+        "static_files": _path_config_status(
+            "STATIC_ROOT",
+            str(getattr(settings, "STATIC_ROOT", "") or ""),
+        ),
+        "media_storage": _path_config_status(
+            "MEDIA_ROOT",
+            str(getattr(settings, "MEDIA_ROOT", "") or ""),
+        ),
+        "security_config": _security_config_status(),
+        "export_limits": _export_limits_status(),
     }
     statuses = {service["status"] for service in services.values()}
     if services["database"]["status"] == "down":
         overall = "down"
-    elif "down" in statuses:
+    elif "down" in statuses or "degraded" in statuses:
         overall = "degraded"
     else:
         overall = "up"

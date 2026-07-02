@@ -6,34 +6,47 @@
 
 import logging
 
-from rest_framework.views import exception_handler
-from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import exception_handler
 
 logger = logging.getLogger(__name__)
 
 
 def custom_exception_handler(exc, context):
-    """Custom exception handler for consistent error responses.
+    """Return stable, safe API error responses.
 
-    V4.0 DEFECT-012: 500 responses must NOT leak str(exc) to clients.
-    Internal exception details (stack traces, file paths, DB connection strings)
-    are logged server-side only, never returned in API responses.
+    Internal exception details are logged server-side only. The response keeps
+    the historical ``error`` key while adding Phase 6A's stable ``detail`` and
+    ``code`` fields for management clients.
     """
     response = exception_handler(exc, context)
 
     if response is None:
-        # Unhandled exception — log internally, return generic message to client
         logger.error("Unhandled exception: %s", exc, exc_info=True)
         return Response(
-            {"error": "Internal server error"},
+            {
+                "detail": "Internal server error",
+                "code": "internal_error",
+                "error": "Internal server error",
+            },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    raw_detail = response.data.get("detail", response.data)
+    if hasattr(raw_detail, "code"):
+        detail = str(raw_detail)
+        code = raw_detail.code
+    else:
+        detail = str(raw_detail)
+        code = getattr(exc, "default_code", "error")
+
     return Response(
         {
-            "error": response.data.get("detail", str(response.data)),
-            "detail": response.data,
+            "detail": detail,
+            "code": code,
+            "error": detail,
+            "errors": response.data,
         },
         status=response.status_code,
     )

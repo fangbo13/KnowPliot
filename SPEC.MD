@@ -1029,4 +1029,30 @@ Implementation status as of 2026-07-03:
 Audit evidence:
 `audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md`.
 
-Phase 5A–5C status: actual PASS. Next stage: V9.0 Production Hardening.
+### 14.13 Phase 6A: Production Hardening Baseline
+
+Implementation status as of 2026-07-03:
+
+- Admin health now includes production readiness services for migrations,
+  static files, media storage, security configuration, and export limits.
+- Health status distinguishes `configured`, `degraded`, `down`,
+  `not_configured`, and `up`, with safe details that do not expose secret
+  values or environment variable contents.
+- Security readiness reports missing setting names such as `DEBUG`,
+  `ALLOWED_HOSTS`, `CORS_ALLOW_ALL_ORIGINS`, cookie security, and SSL redirect
+  requirements.
+- API exception responses now include stable `detail` and `code` fields while
+  preserving the legacy `error` key for compatibility.
+- The admin dashboard displays the new readiness health checks with operational
+  details and bilingual labels.
+- Verified by 145 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+- Production deploy check was executed and recorded as environment-limited
+  because this local virtual environment lacks `psycopg` / `psycopg2` for the
+  production PostgreSQL backend.
+
+Audit evidence:
+`audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md`.
+
+Phase 6A status: actual PASS. Next stage: Phase 6B async operations,
+notifications, and SLA alerts.
