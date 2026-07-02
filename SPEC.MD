@@ -1056,3 +1056,37 @@ Audit evidence:
 
 Phase 6A status: actual PASS. Next stage: Phase 6B async operations,
 notifications, and SLA alerts.
+
+### 14.14 Phase 6B: Async Operations and Quality SLA Alerts
+
+Implementation status as of 2026-07-03:
+
+- Added `ComplianceExportJob` for asynchronous compliance exports across
+  feedback, reviews, gaps, unanswered questions, and documents.
+- Export jobs track requester, optional space scope, date range, status,
+  result file, row count, safe error fields, expiry, and timestamps.
+- Added scoped admin export-job APIs for create, list, detail, and audited CSV
+  download under `/api/v1/admin/reports/export-jobs/`.
+- Synchronous CSV exports keep the 10,000-row cap and now return an async
+  export-job hint when the request is too large.
+- Export-job creation, completion, and download write scoped audit records
+  without storing export contents.
+- Export download access is limited to the creator and same-scope
+  administrators/reviewers.
+- Added `scan_quality_sla` to identify pending feedback older than 3 days,
+  in-review feedback older than 5 days, and open/in-progress knowledge gaps;
+  notifications are deduplicated by stable metadata keys.
+- SLA alerts notify space owners, reviewers, knowledge admins, and assigned
+  reviewers/assignees where present, and write `sla_alert_created` audit logs.
+- Export completion creates a system notification for the requester; existing
+  notification center surfaces both export-complete and SLA notifications.
+- The admin Answer Quality page now shows SLA overdue labels/filtering plus
+  async export creation, job status list, and job download actions.
+- Verified by 148 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md`.
+
+Phase 6B status: actual PASS. Next stage: Phase 6C release readiness,
+performance indexes, smoke validation, and documentation.

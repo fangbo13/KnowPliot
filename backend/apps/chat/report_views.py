@@ -3,11 +3,13 @@
 import csv
 import hashlib
 import io
+import os
 from collections import Counter, defaultdict
 from datetime import timedelta, timezone as dt_timezone
 
+from django.conf import settings
 from django.db.models import Count
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.renderers import BaseRenderer, JSONRenderer
@@ -16,14 +18,24 @@ from rest_framework.views import APIView
 
 from apps.audit.views import create_audit_log
 from apps.knowledge.models import Document
+from apps.notifications.models import Notification
+from apps.spaces.models import KnowledgeSpace
 from apps.spaces.permissions import accessible_spaces
-from .models import Citation, Feedback, KnowledgeGapTicket, Message, ModelInvocation
+from .models import (
+    Citation,
+    ComplianceExportJob,
+    Feedback,
+    KnowledgeGapTicket,
+    Message,
+    ModelInvocation,
+)
 from .quality_views import _can_review
 
 
 MAX_DAYS = 365
 DEFAULT_DAYS = 30
 MAX_EXPORT_ROWS = 10000
+ASYNC_EXPORT_RETENTION_DAYS = 7
 
 
 class CSVRenderer(BaseRenderer):
@@ -52,6 +64,25 @@ def _parse_range(request):
             start = timezone.make_aware(start)
     if date_to:
         end = timezone.datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+        if timezone.is_naive(end):
+            end = timezone.make_aware(end)
+    if end - start > timedelta(days=MAX_DAYS):
+        start = end - timedelta(days=MAX_DAYS)
+    return start, end
+
+
+def _parse_data_range(data):
+    now = timezone.now()
+    start = now - timedelta(days=DEFAULT_DAYS)
+    end = now
+    date_from = data.get("date_from")
+    date_to = data.get("date_to")
+    if date_from:
+        start = timezone.datetime.fromisoformat(str(date_from).replace("Z", "+00:00"))
+        if timezone.is_naive(start):
+            start = timezone.make_aware(start)
+    if date_to:
+        end = timezone.datetime.fromisoformat(str(date_to).replace("Z", "+00:00"))
         if timezone.is_naive(end):
             end = timezone.make_aware(end)
     if end - start > timedelta(days=MAX_DAYS):
@@ -246,6 +277,128 @@ def _rows_for_dataset(dataset, spaces, start, end):
     return None, None
 
 
+def _serialize_export_job(job):
+    return {
+        "id": str(job.id),
+        "dataset": job.dataset,
+        "status": job.status,
+        "space": str(job.space_id) if job.space_id else None,
+        "requested_by": str(job.requested_by_id),
+        "row_count": job.row_count,
+        "error_code": job.error_code,
+        "safe_error_summary": job.safe_error_summary,
+        "date_from": job.date_from.isoformat() if job.date_from else None,
+        "date_to": job.date_to.isoformat() if job.date_to else None,
+        "expires_at": job.expires_at.isoformat() if job.expires_at else None,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+        "download_url": f"/api/v1/admin/reports/export-jobs/{job.id}/download/"
+        if job.status == ComplianceExportJob.STATUS_SUCCEEDED
+        else "",
+    }
+
+
+def _export_job_path(job):
+    export_root = os.path.join(settings.MEDIA_ROOT, "exports", "compliance")
+    os.makedirs(export_root, exist_ok=True)
+    return os.path.join(export_root, f"{job.id}.csv")
+
+
+def _complete_export_job(job, request=None):
+    job.status = ComplianceExportJob.STATUS_PROCESSING
+    job.save(update_fields=["status", "updated_at"])
+    try:
+        spaces = [job.space] if job.space_id else _report_spaces(job.requested_by)
+        columns, rows_iter = _rows_for_dataset(job.dataset, spaces, job.date_from, job.date_to)
+        if columns is None:
+            raise ValueError("unknown_dataset")
+
+        output = io.StringIO()
+        output.write("\ufeff")
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow(columns)
+        count = 0
+        for row in rows_iter:
+            count += 1
+            writer.writerow(row)
+
+        path = _export_job_path(job)
+        with open(path, "w", encoding="utf-8", newline="") as handle:
+            handle.write(output.getvalue())
+
+        job.status = ComplianceExportJob.STATUS_SUCCEEDED
+        job.result_file = path
+        job.row_count = count
+        job.error_code = ""
+        job.safe_error_summary = ""
+        job.expires_at = timezone.now() + timedelta(days=ASYNC_EXPORT_RETENTION_DAYS)
+        job.save(
+            update_fields=[
+                "status",
+                "result_file",
+                "row_count",
+                "error_code",
+                "safe_error_summary",
+                "expires_at",
+                "updated_at",
+            ]
+        )
+        create_audit_log(
+            user=job.requested_by,
+            action="export_job_complete",
+            target_type="ComplianceExportJob",
+            target_id=job.id,
+            request=request,
+            space_id=job.space_id,
+            details={"dataset": job.dataset, "row_count": count},
+        )
+        Notification.objects.create(
+            recipient=job.requested_by,
+            type=Notification.TYPE_SYSTEM,
+            title="Compliance export is ready",
+            body=f"Your {job.dataset} export completed with {count} rows.",
+            level="success",
+            link="/admin/quality",
+            metadata={
+                "event": "export_job_complete",
+                "export_job_id": str(job.id),
+                "dataset": job.dataset,
+                "row_count": count,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - defensive production path
+        job.status = ComplianceExportJob.STATUS_FAILED
+        job.error_code = "export_failed"
+        job.safe_error_summary = "Export job failed before completion."
+        job.save(
+            update_fields=[
+                "status",
+                "error_code",
+                "safe_error_summary",
+                "updated_at",
+            ]
+        )
+        create_audit_log(
+            user=job.requested_by,
+            action="export_job_complete",
+            target_type="ComplianceExportJob",
+            target_id=job.id,
+            request=request,
+            result="failure",
+            space_id=job.space_id,
+            details={"dataset": job.dataset, "error_code": job.error_code},
+        )
+        raise exc
+
+
+def _can_access_job(user, job):
+    if job.requested_by_id == user.id:
+        return True
+    if job.space_id and _can_review(user, job.space):
+        return True
+    return False
+
+
 class ComplianceExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     renderer_classes = [CSVRenderer, JSONRenderer]
@@ -271,7 +424,14 @@ class ComplianceExportView(APIView):
         for row in rows_iter:
             count += 1
             if count > MAX_EXPORT_ROWS:
-                return Response({"detail": "Export too large. Narrow the date range."}, status=413)
+                return Response(
+                    {
+                        "detail": "Export too large for synchronous download. Use async export jobs.",
+                        "code": "sync_export_too_large",
+                        "async_export_url": "/api/v1/admin/reports/export-jobs/",
+                    },
+                    status=413,
+                )
             writer.writerow(row)
 
         create_audit_log(
@@ -290,4 +450,113 @@ class ComplianceExportView(APIView):
         )
         response = HttpResponse(output.getvalue().encode("utf-8"), content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{dataset}.csv"'
+        return response
+
+
+class ComplianceExportJobListCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        spaces = _report_spaces(request.user)
+        space_ids = [space.id for space in spaces]
+        qs = ComplianceExportJob.objects.filter(requested_by=request.user)
+        if space_ids:
+            qs = qs | ComplianceExportJob.objects.filter(space_id__in=space_ids)
+        qs = qs.select_related("space", "requested_by").distinct().order_by("-created_at")
+        return Response({
+            "count": qs.count(),
+            "results": [_serialize_export_job(job) for job in qs[:100]],
+        })
+
+    def post(self, request):
+        spaces = _report_spaces(request.user)
+        if not spaces:
+            return Response({"detail": "You do not have export access."}, status=403)
+        dataset = request.data.get("dataset")
+        valid_datasets = {choice[0] for choice in ComplianceExportJob.DATASET_CHOICES}
+        if dataset not in valid_datasets:
+            return Response({"detail": "Unknown dataset."}, status=400)
+
+        requested_space_id = request.data.get("space")
+        selected_space = None
+        if requested_space_id:
+            selected_space = KnowledgeSpace.objects.filter(id=requested_space_id).first()
+            if not selected_space or selected_space not in spaces:
+                return Response({"detail": "You do not have export access for this space."}, status=403)
+
+        start, end = _parse_data_range(request.data)
+        job = ComplianceExportJob.objects.create(
+            requested_by=request.user,
+            space=selected_space,
+            dataset=dataset,
+            date_from=start,
+            date_to=end,
+            expires_at=timezone.now() + timedelta(days=ASYNC_EXPORT_RETENTION_DAYS),
+        )
+        create_audit_log(
+            user=request.user,
+            action="export_job_create",
+            target_type="ComplianceExportJob",
+            target_id=job.id,
+            request=request,
+            space_id=job.space_id,
+            details={
+                "dataset": dataset,
+                "space_id": str(job.space_id) if job.space_id else "",
+                "date_from": start.isoformat(),
+                "date_to": end.isoformat(),
+            },
+        )
+        _complete_export_job(job, request=request)
+        return Response(_serialize_export_job(job), status=status.HTTP_201_CREATED)
+
+
+class ComplianceExportJobDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, request, pk):
+        try:
+            job = ComplianceExportJob.objects.select_related("space", "requested_by").get(pk=pk)
+        except ComplianceExportJob.DoesNotExist:
+            raise Http404
+        if not _can_access_job(request.user, job):
+            return None
+        return job
+
+    def get(self, request, pk):
+        job = self.get_object(request, pk)
+        if job is None:
+            return Response({"detail": "You do not have access to this export job."}, status=403)
+        return Response(_serialize_export_job(job))
+
+
+class ComplianceExportJobDownloadView(ComplianceExportJobDetailView):
+    renderer_classes = [CSVRenderer, JSONRenderer]
+
+    def get(self, request, pk):
+        job = self.get_object(request, pk)
+        if job is None:
+            return Response({"detail": "You do not have access to this export job."}, status=403)
+        if job.status != ComplianceExportJob.STATUS_SUCCEEDED:
+            return Response({"detail": "Export job is not ready."}, status=409)
+        if job.expires_at and job.expires_at < timezone.now():
+            job.status = ComplianceExportJob.STATUS_EXPIRED
+            job.save(update_fields=["status", "updated_at"])
+            return Response({"detail": "Export job has expired."}, status=410)
+        if not job.result_file or not os.path.exists(job.result_file):
+            return Response({"detail": "Export file is unavailable."}, status=404)
+
+        create_audit_log(
+            user=request.user,
+            action="audit_export_download",
+            target_type="ComplianceExportJob",
+            target_id=job.id,
+            request=request,
+            space_id=job.space_id,
+            details={"dataset": job.dataset, "row_count": job.row_count},
+        )
+        with open(job.result_file, "rb") as handle:
+            content = handle.read()
+        response = HttpResponse(content, content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{job.dataset}-{job.id}.csv"'
         return response

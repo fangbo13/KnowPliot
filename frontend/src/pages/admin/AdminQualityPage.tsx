@@ -9,7 +9,7 @@ import { Button, Card, Drawer, Empty, Input, Select, Space, Table, Tag, message 
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type FeedbackReview, type KnowledgeGap } from '../../api/admin';
-import type { KnowledgeQualityReport } from '../../api/admin';
+import type { ComplianceExportJob, KnowledgeQualityReport, QualityExportDataset } from '../../api/admin';
 
 const STATUS_COLORS: Record<string, string> = {
   submitted: 'default',
@@ -20,8 +20,15 @@ const STATUS_COLORS: Record<string, string> = {
   withdrawn: 'default',
   open: 'gold',
   in_progress: 'blue',
+  succeeded: 'green',
+  failed: 'red',
+  expired: 'red',
+  queued: 'blue',
+  processing: 'blue',
   wont_fix: 'red',
 };
+
+const DATASETS: QualityExportDataset[] = ['feedback', 'reviews', 'gaps', 'unanswered', 'documents'];
 
 export default function AdminQualityPage() {
   const { t } = useTranslation('common');
@@ -31,8 +38,24 @@ export default function AdminQualityPage() {
   const [selected, setSelected] = useState<FeedbackReview | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
+  const [slaFilter, setSlaFilter] = useState<string | undefined>();
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [report, setReport] = useState<KnowledgeQualityReport | null>(null);
+  const [exportJobs, setExportJobs] = useState<ComplianceExportJob[]>([]);
+  const [exportDataset, setExportDataset] = useState<QualityExportDataset>('feedback');
+
+  const isSlaOverdue = (row: FeedbackReview) => {
+    const ageDays = (Date.now() - new Date(row.created_at).getTime()) / 86400000;
+    return (
+      (row.status === 'pending_review' && ageDays > 3) ||
+      (row.status === 'in_review' && ageDays > 5)
+    );
+  };
+
+  const filteredReviews = useMemo(
+    () => (slaFilter === 'overdue' ? reviews.filter(isSlaOverdue) : reviews),
+    [reviews, slaFilter],
+  );
 
   const load = async () => {
     setLoading(true);
@@ -63,8 +86,17 @@ export default function AdminQualityPage() {
     }
   };
 
+  const loadExportJobs = async () => {
+    try {
+      setExportJobs(await adminApi.exportJobs());
+    } catch {
+      message.error(t('quality_export_jobs_failed'));
+    }
+  };
+
   useEffect(() => {
     loadReport();
+    loadExportJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -90,24 +122,44 @@ export default function AdminQualityPage() {
         suggested_source: selected.suggested_source,
       });
       message.success(t('quality_gap_created'));
-      const gapRows = await adminApi.knowledgeGaps();
-      setGaps(gapRows);
+      setGaps(await adminApi.knowledgeGaps());
     } catch {
       message.error(t('quality_action_failed'));
     }
   };
 
-  const downloadDataset = async (dataset: 'feedback' | 'reviews' | 'gaps' | 'unanswered' | 'documents') => {
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadDataset = async (dataset: QualityExportDataset) => {
     try {
-      const blob = await adminApi.exportQualityDataset(dataset);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${dataset}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      saveBlob(await adminApi.exportQualityDataset(dataset), `${dataset}.csv`);
+    } catch {
+      message.error(t('quality_export_failed'));
+    }
+  };
+
+  const createAsyncExport = async () => {
+    try {
+      await adminApi.createExportJob({ dataset: exportDataset });
+      message.success(t('quality_export_job_created'));
+      await loadExportJobs();
+    } catch {
+      message.error(t('quality_export_failed'));
+    }
+  };
+
+  const downloadExportJob = async (job: ComplianceExportJob) => {
+    try {
+      saveBlob(await adminApi.downloadExportJob(job.id), `${job.dataset}-${job.id}.csv`);
     } catch {
       message.error(t('quality_export_failed'));
     }
@@ -125,6 +177,15 @@ export default function AdminQualityPage() {
       dataIndex: 'status',
       key: 'status',
       render: (value) => <Tag color={STATUS_COLORS[value] || 'default'}>{value}</Tag>,
+    },
+    {
+      title: t('quality_sla'),
+      key: 'sla',
+      render: (_, row) => (
+        isSlaOverdue(row)
+          ? <Tag color="red">{t('quality_sla_overdue')}</Tag>
+          : <Tag>{t('quality_sla_ok')}</Tag>
+      ),
     },
     {
       title: t('quality_question'),
@@ -147,7 +208,7 @@ export default function AdminQualityPage() {
         </Button>
       ),
     },
-  ], [t]);
+  ], [t, reviews]);
 
   return (
     <div>
@@ -196,6 +257,14 @@ export default function AdminQualityPage() {
               onChange={setTypeFilter}
               options={['helpful', 'unhelpful', 'incorrect', 'outdated', 'missing_source'].map((value) => ({ value, label: value }))}
             />
+            <Select
+              allowClear
+              placeholder={t('quality_sla')}
+              style={{ width: 180 }}
+              value={slaFilter}
+              onChange={setSlaFilter}
+              options={[{ value: 'overdue', label: t('quality_sla_overdue') }]}
+            />
             <Button onClick={load}>{t('refresh')}</Button>
             <Button onClick={loadReport}>{t('quality_refresh_report')}</Button>
             <Button onClick={() => downloadDataset('feedback')}>{t('quality_export_feedback')}</Button>
@@ -205,9 +274,66 @@ export default function AdminQualityPage() {
             rowKey="id"
             loading={loading}
             columns={columns}
-            dataSource={reviews}
+            dataSource={filteredReviews}
             pagination={{ pageSize: 10 }}
             locale={{ emptyText: <Empty description={t('quality_empty')} /> }}
+          />
+        </Card>
+
+        <Card title={t('quality_async_exports')}>
+          <Space wrap style={{ marginBottom: 14 }}>
+            <Select
+              value={exportDataset}
+              style={{ width: 190 }}
+              onChange={setExportDataset}
+              options={DATASETS.map((value) => ({
+                value,
+                label: t(`quality_dataset_${value}`),
+              }))}
+            />
+            <Button type="primary" onClick={createAsyncExport}>
+              {t('quality_create_export_job')}
+            </Button>
+            <Button onClick={loadExportJobs}>{t('refresh')}</Button>
+          </Space>
+          <Table
+            rowKey="id"
+            size="small"
+            dataSource={exportJobs}
+            pagination={{ pageSize: 5 }}
+            locale={{ emptyText: <Empty description={t('quality_no_export_jobs')} /> }}
+            columns={[
+              {
+                title: t('quality_export_dataset'),
+                dataIndex: 'dataset',
+                key: 'dataset',
+                render: (value) => t(`quality_dataset_${value}`),
+              },
+              {
+                title: t('quality_status'),
+                dataIndex: 'status',
+                key: 'status',
+                render: (value) => <Tag color={STATUS_COLORS[value] || 'default'}>{value}</Tag>,
+              },
+              {
+                title: t('quality_export_rows'),
+                dataIndex: 'row_count',
+                key: 'row_count',
+              },
+              {
+                title: t('quality_actions'),
+                key: 'actions',
+                render: (_, job) => (
+                  <Button
+                    size="small"
+                    disabled={job.status !== 'succeeded'}
+                    onClick={() => downloadExportJob(job)}
+                  >
+                    {t('quality_download_export')}
+                  </Button>
+                ),
+              },
+            ]}
           />
         </Card>
 
@@ -241,6 +367,7 @@ export default function AdminQualityPage() {
             <Space>
               <Tag>{selected.feedback_type}</Tag>
               <Tag color={STATUS_COLORS[selected.status] || 'default'}>{selected.status}</Tag>
+              {isSlaOverdue(selected) && <Tag color="red">{t('quality_sla_overdue')}</Tag>}
             </Space>
             <Card size="small" title={t('quality_question')}>
               {selected.review_context?.question || '—'}

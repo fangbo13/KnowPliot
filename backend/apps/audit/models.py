@@ -88,6 +88,11 @@ class AuditLog(models.Model):
         ("knowledge_gap_assign", "Knowledge Gap Assign"),
         ("knowledge_gap_resolve", "Knowledge Gap Resolve"),
         ("knowledge_gap_reopen", "Knowledge Gap Reopen"),
+        # Phase 6B / V8.1 async operations and SLA actions.
+        ("export_job_create", "Export Job Create"),
+        ("export_job_complete", "Export Job Complete"),
+        ("audit_export_download", "Audit Export Download"),
+        ("sla_alert_created", "SLA Alert Created"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

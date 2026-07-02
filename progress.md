@@ -72,6 +72,22 @@
   an environment limitation rather than a PASS.
 - Saved the Phase 6A audit report at
   `audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md`.
+- Created local branch `Version_8.1` for Phase 6B from `Version_8.0`.
+- Added Phase 6B failing tests for async export job create/list/download,
+  creator-scoped download enforcement, export audit records, and deduplicated
+  quality SLA notifications.
+- Implemented `ComplianceExportJob`, export-job APIs, immediate local job
+  completion, scoped audited downloads, export-complete notifications, the
+  `scan_quality_sla` command, SLA system notifications, and answer-quality SLA
+  audit records.
+- Extended the admin Answer Quality page with SLA overdue labels/filtering,
+  async export creation, export job list/status, and download actions.
+- Completed Phase 6B V8.1 gates: 148/148 backend tests passed, Django check
+  passed with known allauth warnings, migration dry-run found no changes,
+  49/49 frontend tests passed, i18n passed, typecheck passed, and production
+  build passed with known Vite chunking warnings.
+- Saved the Phase 6B audit report at
+  `audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md`.
 
 ## 2026-07-01
 

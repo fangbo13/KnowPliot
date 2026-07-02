@@ -426,3 +426,80 @@ class KnowledgeGapTicket(models.Model):
         self.status = self.STATUS_WONT_FIX if wont_fix else self.STATUS_RESOLVED
         self.resolution_notes = notes
         self.resolved_at = timezone.now()
+
+
+class ComplianceExportJob(models.Model):
+    """Asynchronous compliance export job with scoped, audited downloads."""
+
+    DATASET_FEEDBACK = "feedback"
+    DATASET_REVIEWS = "reviews"
+    DATASET_GAPS = "gaps"
+    DATASET_UNANSWERED = "unanswered"
+    DATASET_DOCUMENTS = "documents"
+    DATASET_CHOICES = [
+        (DATASET_FEEDBACK, "Feedback"),
+        (DATASET_REVIEWS, "Reviews"),
+        (DATASET_GAPS, "Knowledge Gaps"),
+        (DATASET_UNANSWERED, "Unanswered Questions"),
+        (DATASET_DOCUMENTS, "Documents"),
+    ]
+
+    STATUS_QUEUED = "queued"
+    STATUS_PROCESSING = "processing"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = [
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_PROCESSING, "Processing"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_EXPIRED, "Expired"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="compliance_export_jobs",
+    )
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="compliance_export_jobs",
+    )
+    dataset = models.CharField(max_length=20, choices=DATASET_CHOICES, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+        db_index=True,
+    )
+    date_from = models.DateTimeField(null=True, blank=True)
+    date_to = models.DateTimeField(null=True, blank=True)
+    result_file = models.CharField(max_length=500, blank=True, default="")
+    row_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=80, blank=True, default="")
+    safe_error_summary = models.CharField(max_length=500, blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_complianceexportjob"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["requested_by", "status", "-created_at"],
+                name="chat_export_request_status_idx",
+            ),
+            models.Index(
+                fields=["space", "dataset", "-created_at"],
+                name="chat_export_space_dataset_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.dataset} export {self.id} ({self.status})"

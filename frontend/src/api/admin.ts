@@ -243,6 +243,25 @@ export interface KnowledgeQualityReport {
   trends: Array<{ date: string; feedback: number; negative: number }>;
 }
 
+export type QualityExportDataset = 'feedback' | 'reviews' | 'gaps' | 'unanswered' | 'documents';
+
+export interface ComplianceExportJob {
+  id: string;
+  dataset: QualityExportDataset;
+  status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'expired';
+  space: string | null;
+  requested_by: string;
+  row_count: number;
+  error_code: string;
+  safe_error_summary: string;
+  date_from: string | null;
+  date_to: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  download_url: string;
+}
+
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
 
 export const adminApi = {
@@ -400,9 +419,28 @@ export const adminApi = {
     const { data } = await apiClient.get('/admin/reports/knowledge-quality/');
     return data;
   },
-  async exportQualityDataset(dataset: 'feedback' | 'reviews' | 'gaps' | 'unanswered' | 'documents'): Promise<Blob> {
+  async exportQualityDataset(dataset: QualityExportDataset): Promise<Blob> {
     const { data } = await apiClient.get('/admin/reports/export/', {
       params: { dataset, format: 'csv' },
+      responseType: 'blob',
+    });
+    return data;
+  },
+  async exportJobs(): Promise<ComplianceExportJob[]> {
+    const { data } = await apiClient.get('/admin/reports/export-jobs/');
+    return unwrap(data);
+  },
+  async createExportJob(body: {
+    dataset: QualityExportDataset;
+    space?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<ComplianceExportJob> {
+    const { data } = await apiClient.post('/admin/reports/export-jobs/', body);
+    return data;
+  },
+  async downloadExportJob(id: string): Promise<Blob> {
+    const { data } = await apiClient.get(`/admin/reports/export-jobs/${id}/download/`, {
       responseType: 'blob',
     });
     return data;

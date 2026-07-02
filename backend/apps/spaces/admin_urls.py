@@ -30,7 +30,13 @@ from apps.chat.quality_views import (
     KnowledgeGapReopenView,
     KnowledgeGapResolveView,
 )
-from apps.chat.report_views import ComplianceExportView, KnowledgeQualityReportView
+from apps.chat.report_views import (
+    ComplianceExportJobDetailView,
+    ComplianceExportJobDownloadView,
+    ComplianceExportJobListCreateView,
+    ComplianceExportView,
+    KnowledgeQualityReportView,
+)
 
 urlpatterns = [
     path("registration-codes/", AdminRegistrationCodeListCreateView.as_view(),
@@ -65,4 +71,7 @@ urlpatterns = [
     path("quality/gaps/<uuid:pk>/reopen/", KnowledgeGapReopenView.as_view(), name="admin-quality-gap-reopen"),
     path("reports/knowledge-quality/", KnowledgeQualityReportView.as_view(), name="admin-report-knowledge-quality"),
     path("reports/export/", ComplianceExportView.as_view(), name="admin-report-export"),
+    path("reports/export-jobs/", ComplianceExportJobListCreateView.as_view(), name="admin-report-export-jobs"),
+    path("reports/export-jobs/<uuid:pk>/", ComplianceExportJobDetailView.as_view(), name="admin-report-export-job-detail"),
+    path("reports/export-jobs/<uuid:pk>/download/", ComplianceExportJobDownloadView.as_view(), name="admin-report-export-job-download"),
 ]
