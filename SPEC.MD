@@ -1,7 +1,10 @@
 # KnowPilot SPEC
 
-> Version: V6.1
-> Source: `KnowPilot.md`, `README.md`, existing V4.x audit/planning reports
+> Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
+> with versioned implementation audits on 2026-07-02.
+
+> Version: V8.1 implementation baseline
+> Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
 ## 1. Architecture Decision
@@ -640,7 +643,7 @@ Delivered slices:
 - object-level document permissions;
 - allowlisted retrieval filters.
 
-Delivered and planned slices:
+Delivered slices:
 
 - Phase 3A: Authenticated Document Access.
 - Phase 3B: File Validation Consistency.
@@ -653,6 +656,16 @@ Delivered and planned slices:
 - invite code management UI;
 - system health and usage metrics;
 - stale knowledge and quality dashboards.
+
+Delivered slices:
+
+- Phase 4A: Scoped Audit Governance.
+- Phase 4B: Operations, Metrics, and Document Lifecycle MVP.
+
+Remaining slice:
+
+- Phase 4C: ingestion queue/retry, model/API/token metrics, and deeper
+  knowledge-quality analytics.
 
 ### Phase 5: Knowledge Improvement Loop
 
@@ -727,9 +740,9 @@ The platform should not multiply deployments for every business line. It should 
 
 ## 14. Implementation Appendix: Delivered Extensions and Phase Details
 
-This appendix preserves implementation details that were added after the core
-SPEC was written. It should be read as evidence and clarification for the
-roadmap in `## 9. Implementation Phases`, not as separate product phases.
+This appendix records delivered behavior and versioned audit evidence. It
+clarifies the canonical roadmap in `## 9. Implementation Phases`; it does not
+create additional top-level product phases.
 
 ### 14.1 V7 Identity & Governance (extension)
 
@@ -747,7 +760,8 @@ Key invariants:
 - Permission = "who you are in the org" (Super/Org/Business Admin / Employee) ×
   "what you can do in this space" (Owner / Knowledge Admin / Reviewer / Member / Guest).
 - A "project group" is a `KnowledgeSpace`; its lead is the Space **Owner**.
-- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` �?  **Super Admin is never obtainable through any registration entry point** (CLI /
+- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` —
+  **Super Admin is never obtainable through any registration entry point** (CLI /
   console promotion only).
 - The access/admin code is an *entry* mechanism; it never bypasses RBAC.
 
@@ -845,3 +859,67 @@ Audit evidence:
 
 Next Phase 3 slice: allowlisted retrieval filters, mandatory space scoping, and
 active-document status enforcement across every retrieval path.
+
+### 14.6 Phase 3C: Retrieval Safety
+
+Implementation status as of 2026-07-02:
+
+- Every retrieval request requires a valid `space_id`; unscoped or malformed
+  requests fail before embedding or database access.
+- Caller-controlled metadata filters use the typed `RetrievalFilters`
+  allowlist and accept only document IDs and category IDs.
+- SQLite and PostgreSQL retrieval both enforce the requested space and an
+  `active` source-document status.
+- PostgreSQL filter names map to qualified chunk/document columns and all
+  values remain parameterized.
+- Verified by 100 backend regression tests, migration checks, and Django
+  system checks.
+
+Audit evidence:
+`audit_reports/v7.4/Phase3C_Retrieval_Safety_Test_Audit_Report_V7.4.md`.
+
+### 14.7 Phase 4A: Scoped Audit Governance
+
+Implementation status as of 2026-07-02:
+
+- Audit records carry immutable organization, business-line, and space UUID
+  scope plus `success`, `denied`, or `failure` result.
+- Platform administrators see all records; organization and business
+  administrators see only their authorized scope.
+- Legacy unscoped records remain visible only to platform administrators.
+- The read-only audit API supports server-side pagination and action, actor,
+  result, scope, and date filters.
+- The admin audit page exposes scope/result/date filters and visible load
+  errors.
+- Verified by 107 backend and 43 frontend regression tests, migration and
+  system checks, i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.0/Phase4A_Audit_Governance_Test_Audit_Report_V8.0.md`.
+
+### 14.8 Phase 4B: Operations, Metrics, and Document Lifecycle MVP
+
+Implementation status as of 2026-07-02:
+
+- Added authenticated `/api/v1/admin/health/` with honest backend, database,
+  Redis, Celery, vector database, and LLM configuration states.
+- Added administrator-scoped `/api/v1/admin/metrics/` for users, sessions,
+  questions, citations, documents, latency, evidence, citation coverage,
+  ingestion state, expiry, and permission denials.
+- The admin dashboard consumes these dedicated APIs rather than inferring
+  service health from audit-log reachability.
+- Document lifecycle now includes `stale` and `archived`. Default deletion
+  archives and preserves chunks/citations; physical deletion is restricted to
+  platform superusers and rejected for cited sources.
+- Archived documents are hidden from normal lists, excluded from retrieval,
+  and cannot be re-indexed.
+- The idempotent `mark_stale_documents` command retires active documents whose
+  effective date has passed.
+- Verified by 117 backend and 47 frontend tests, migration and Django checks,
+  Python compilation, i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.1/Phase4B_Operations_Metrics_Test_Audit_Report_V8.1.md`.
+
+Next stage: Phase 4C ingestion visibility, safe retry, model/API/token metrics,
+and deeper knowledge-quality analytics.
