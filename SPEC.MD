@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V10.0 actual-pass baseline; Phase 8B–8C planned
+> Version: V10.1 actual-pass baseline; Phase 8C planned
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -697,7 +697,7 @@ Delivered slices:
 Delivery slices:
 
 - Phase 8A / V10.0: Answer Quality and Evaluation — actual PASS.
-- Phase 8B / V10.1: Template Catalog and Isolated Knowledge Packs.
+- Phase 8B / V10.1: Template Catalog and Isolated Knowledge Packs — actual PASS.
 - Phase 8C / V10.2: Accessibility and Product Closure.
 
 ## 10. Non-Functional Requirements

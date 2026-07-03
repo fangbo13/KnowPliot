@@ -7,6 +7,10 @@ from .models import (
     ScenarioTemplate,
     ScenarioTemplateApplication,
     ScenarioTemplateRevision,
+    ScenarioTemplateAsset,
+    TemplateAssetApplication,
+    TemplateCategory,
+    TemplateTag,
 )
 from apps.spaces.models import KnowledgeSpace, Organization, BusinessLine
 
@@ -18,12 +22,29 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
     usage_count = serializers.SerializerMethodField()
     last_applied_at = serializers.SerializerMethodField()
     latest_version = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    tags = serializers.SerializerMethodField()
+    category_id = serializers.PrimaryKeyRelatedField(
+        source="category",
+        queryset=TemplateCategory.objects.all(),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+    tag_ids = serializers.PrimaryKeyRelatedField(
+        source="tags",
+        queryset=TemplateTag.objects.all(),
+        required=False,
+        many=True,
+        write_only=True,
+    )
 
     class Meta:
         model = ScenarioTemplate
         fields = [
             "id", "name", "code", "description", "scenario_type",
             "default_language", "icon", "quick_questions",
+            "category", "category_id", "tags", "tag_ids", "featured",
             "prompt_policy", "retrieval_policy", "default_visibility",
             "is_active", "organization", "organization_name",
             "business_line", "business_line_name",
@@ -63,6 +84,17 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
         latest = obj.revisions.order_by("-version").first()
         return latest.version if latest else 0
 
+    def get_category(self, obj):
+        if not obj.category_id:
+            return None
+        return {"id": str(obj.category_id), "name": obj.category.name, "slug": obj.category.slug}
+
+    def get_tags(self, obj):
+        return [
+            {"id": str(tag.id), "name": tag.name, "slug": tag.slug}
+            for tag in obj.tags.all()
+        ]
+
     def validate_code(self, value):
         # Ensure code is unique
         qs = ScenarioTemplate.objects.filter(code=value)
@@ -101,7 +133,8 @@ class ScenarioTemplateApplicationSerializer(serializers.ModelSerializer):
             "organization", "organization_name",
             "business_line", "business_line_name",
             "created_by", "created_by_email",
-            "template_snapshot", "created_at",
+            "template_snapshot", "provisioning_status", "asset_total",
+            "task_ids", "created_at",
         ]
         read_only_fields = fields
 
@@ -116,6 +149,22 @@ class ScenarioTemplateRevisionSerializer(serializers.ModelSerializer):
             "created_by", "created_by_email", "created_at",
         ]
         read_only_fields = fields
+
+
+class ScenarioTemplateAssetSerializer(serializers.ModelSerializer):
+    document_title = serializers.CharField(source="document.title", read_only=True)
+    source_space = serializers.UUIDField(source="document.space_id", read_only=True)
+
+    class Meta:
+        model = ScenarioTemplateAsset
+        fields = [
+            "id", "template", "document", "document_title", "source_space",
+            "created_by", "created_at",
+        ]
+        read_only_fields = [
+            "id", "template", "document_title", "source_space",
+            "created_by", "created_at",
+        ]
 
 
 class CloneScenarioTemplateSerializer(serializers.Serializer):

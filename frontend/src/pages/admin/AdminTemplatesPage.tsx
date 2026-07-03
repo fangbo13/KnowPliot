@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Table, Button, Tag, Modal, Select, Input, Space, Form, Switch, Tooltip,
   message as antdMessage,
@@ -23,16 +23,24 @@ import { adminApi, type Organization, type BusinessLine } from '../../api/admin'
 export default function AdminTemplatesPage() {
   const { t } = useTranslation('common');
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [lines, setLines] = useState<BusinessLine[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [scenarioFilter, setScenarioFilter] = useState<ScenarioTemplate['scenario_type'] | undefined>();
+  const [searchText, setSearchText] = useState(searchParams.get('q') || '');
+  const [scenarioFilter, setScenarioFilter] = useState<ScenarioTemplate['scenario_type'] | undefined>(
+    (searchParams.get('scenario_type') as ScenarioTemplate['scenario_type']) || undefined,
+  );
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | undefined>();
   const [scopeFilter, setScopeFilter] = useState<'global' | 'organization' | 'business_line' | undefined>();
   const [orgFilter, setOrgFilter] = useState<string | undefined>();
   const [lineFilter, setLineFilter] = useState<string | undefined>();
+  const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') || '');
+  const [tagsFilter, setTagsFilter] = useState(searchParams.get('tags') || '');
+  const [sort, setSort] = useState<'recommended' | 'popular' | 'recent' | 'name'>(
+    (searchParams.get('sort') as 'recommended' | 'popular' | 'recent' | 'name') || 'recommended',
+  );
 
   // Modal / Form state for space instantiation
   const [open, setOpen] = useState(false);
@@ -82,6 +90,9 @@ export default function AdminTemplatesPage() {
           scope: scopeFilter,
           organization: orgFilter,
           business_line: lineFilter,
+          category: categoryFilter || undefined,
+          tags: tagsFilter || undefined,
+          sort,
         }).catch(() => []),
         adminApi.organizations().catch(() => []),
         adminApi.businessLines().catch(() => []),
@@ -95,7 +106,17 @@ export default function AdminTemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [lineFilter, orgFilter, scenarioFilter, scopeFilter, searchText, statusFilter]);
+  }, [categoryFilter, lineFilter, orgFilter, scenarioFilter, scopeFilter, searchText, sort, statusFilter, tagsFilter]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (searchText.trim()) next.set('q', searchText.trim());
+    if (scenarioFilter) next.set('scenario_type', scenarioFilter);
+    if (categoryFilter) next.set('category', categoryFilter);
+    if (tagsFilter) next.set('tags', tagsFilter);
+    if (sort !== 'recommended') next.set('sort', sort);
+    setSearchParams(next, { replace: true });
+  }, [categoryFilter, scenarioFilter, searchText, setSearchParams, sort, tagsFilter]);
 
   useEffect(() => {
     refresh();
@@ -659,6 +680,31 @@ export default function AdminTemplatesPage() {
             options={orgs.map((o) => ({ value: o.id, label: o.name }))}
             style={{ width: 200 }}
           />
+          <Input
+            allowClear
+            value={categoryFilter}
+            placeholder={t('admin_template_filter_category') || 'Category slug'}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            style={{ width: 160 }}
+          />
+          <Input
+            allowClear
+            value={tagsFilter}
+            placeholder={t('admin_template_filter_tags') || 'Tags (comma separated)'}
+            onChange={(event) => setTagsFilter(event.target.value)}
+            style={{ width: 200 }}
+          />
+          <Select
+            value={sort}
+            onChange={setSort}
+            options={[
+              { value: 'recommended', label: t('admin_template_sort_recommended') || 'Recommended' },
+              { value: 'popular', label: t('admin_template_sort_popular') || 'Popular' },
+              { value: 'recent', label: t('admin_template_sort_recent') || 'Recent' },
+              { value: 'name', label: t('admin_template_sort_name') || 'Name' },
+            ]}
+            style={{ width: 160 }}
+          />
           <Select
             allowClear
             showSearch
@@ -677,6 +723,9 @@ export default function AdminTemplatesPage() {
               setScopeFilter(undefined);
               setOrgFilter(undefined);
               setLineFilter(undefined);
+              setCategoryFilter('');
+              setTagsFilter('');
+              setSort('recommended');
             }}
           >
             {t('clear_filters') || 'Clear filters'}

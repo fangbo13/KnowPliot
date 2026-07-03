@@ -17,6 +17,9 @@ export interface ScenarioTemplate {
   scenario_type: 'onboarding' | 'audit' | 'tax' | 'consulting' | 'core_services' | 'standards_qa' | 'project_ai';
   default_language: string;
   icon: string;
+  category?: { id: string; name: string; slug: string } | null;
+  tags: Array<{ id: string; name: string; slug: string }>;
+  featured: boolean;
   quick_questions: string[];
   prompt_policy: Record<string, any>;
   retrieval_policy: Record<string, any>;
@@ -87,6 +90,10 @@ export interface TemplateListParams {
   scope?: 'global' | 'organization' | 'business_line';
   organization?: string;
   business_line?: string;
+  category?: string;
+  tags?: string;
+  sort?: 'recommended' | 'popular' | 'recent' | 'name';
+  page?: number;
 }
 
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
@@ -134,6 +141,20 @@ export const templatesApi = {
   },
   async restore(templateId: string): Promise<ScenarioTemplate> {
     const { data } = await apiClient.post(`/templates/${templateId}/restore/`);
+    return data;
+  },
+  async diff(templateId: string, from: number, to: number) {
+    const { data } = await apiClient.get(`/templates/${templateId}/diff/`, {
+      params: { from, to },
+    });
+    return data as {
+      from: number;
+      to: number;
+      changes: Record<string, { from: unknown; to: unknown }>;
+    };
+  },
+  async rollback(templateId: string, revision: number): Promise<ScenarioTemplate> {
+    const { data } = await apiClient.post(`/templates/${templateId}/rollback/`, { revision });
     return data;
   },
 };
