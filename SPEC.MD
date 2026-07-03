@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V7.8 Phase 5A–5C actual-pass baseline
+> Version: V10.0 actual-pass baseline; Phase 8B–8C planned
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -669,6 +669,36 @@ Delivered slices:
 - flagged-answer review queue;
 - knowledge gap analytics;
 - exportable compliance and usage reports.
+
+Delivered slices:
+
+- Phase 5A: Answer Feedback Foundation.
+- Phase 5B: Scoped Answer Review and Knowledge Gaps.
+- Phase 5C: Analytics and Compliance Reporting.
+
+### Phase 6: Production Hardening
+
+Delivered slices:
+
+- Phase 6A: Production Hardening Baseline.
+- Phase 6B: Async Operations and Quality SLA Alerts.
+- Phase 6C: Release Readiness and Regression Closure.
+
+### Phase 7: Long-Run Operations and Scale
+
+Delivered slices:
+
+- Phase 7A: Long-Run Operations Baseline.
+- Phase 7B: Scale Hardening and Background Reliability.
+- Phase 7C: Operational Runbook and Regression Closure.
+
+### Phase 8: Product Completeness
+
+Delivery slices:
+
+- Phase 8A / V10.0: Answer Quality and Evaluation — actual PASS.
+- Phase 8B / V10.1: Template Catalog and Isolated Knowledge Packs.
+- Phase 8C / V10.2: Accessibility and Product Closure.
 
 ## 10. Non-Functional Requirements
 

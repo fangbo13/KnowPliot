@@ -21,12 +21,16 @@ Current stage:
 - Phase 4A scoped audit governance: implemented and verified.
 - Phase 4B operations, metrics, and document lifecycle MVP: implemented and verified.
 - Phase 4C ingestion operations and knowledge-quality analytics: implemented and verified.
+- Phase 5A-5C knowledge improvement loop: implemented and verified.
+- Phase 6A-6C production hardening: implemented and verified.
+- Phase 7A-7C long-run operations and scale: implemented and verified.
+- Phase 8A answer quality and evaluation: implemented and audited in V10.0.
 
 Latest verified baseline:
 
 - Backend migration dry-run: no changes detected.
 - Django system check: passes with 3 known django-allauth deprecation warnings.
-- Backend Phase 3A/3B/3C + Phase 4A/4B/4C + space + V7 + template regression suite: 126 tests OK.
+- Backend full regression suite: 163 tests OK.
 - Frontend i18n check: OK.
 - Frontend test suite: 49 tests OK.
 - Frontend production build: OK with known Vite chunk/dynamic import warnings.
@@ -48,13 +52,13 @@ Latest verified baseline:
 | M8 RBAC and Object-Level Permission | Mostly implemented | Backend RBAC/admin scopes, frontend RoleGuard cleanup, scoped template permissions | Permission matrix coverage expansion and cache/performance hardening |
 | M9 Audit, Compliance, and Governance | Partially implemented | Immutable read-only audit API, explicit org/business-line/space scope, scoped admin visibility, result tracking, filters, and admin viewer | Compliance export, retention policy, bad-answer traceability |
 | M10 Metrics, Monitoring, and Quality Dashboard | Mostly implemented | Real service health, scoped usage/latency/evidence/citation/document/security metrics, durable ingestion queue and retry, model/API error and token metrics, unused/high-use/stale-source drill-down, real admin dashboard | Low-confidence retrieval/generation split and live dependency integration evidence |
-| M11 User Feedback and Knowledge Improvement Loop | Not complete | No completed feedback/review workflow evidence | Helpful/unhelpful feedback, flagged-answer review queue, gap tickets, reviewer resolution workflow |
+| M11 User Feedback and Knowledge Improvement Loop | Implemented | Feedback, scoped review queue, gap tickets, resolution history, reports, async exports, and SLA alerts | Continue measuring production quality |
 | M12 Frontend UX and Accessibility | Partially implemented | React/AntD app, admin console, responsive foundations | Formal accessibility pass, keyboard flow verification, mobile citation inspection |
 | 5. Data Model Draft | Partially implemented | Core space, identity, audit, notification, template, ingestion-job, and model-invocation telemetry models exist | Feedback/review workflow completion |
 | 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, scoped audit, protected document download, health/metrics, ingestion operations, and quality APIs | Feedback/review and citation-inspection APIs |
 | 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, lifecycle-aware knowledge admin, template admin, scoped audit, operations queue, and quality dashboard | Feedback controls and source/citation inspection polish |
 | 8. Deployment Model | Partially implemented | Current `docker-compose.yml`, backend Dockerfile, frontend Dockerfile | Production deployment guide, secrets handling, observability, scaling guidance |
-| 9. Implementation Phases | In progress | Phase 1, V7, Phase 2A, Phase 2B filter slice, Phase 3A-3C, and Phase 4A-4C delivered | Phase 5 remains |
+| 9. Implementation Phases | In progress | Phase 1-8A delivered through V10.0 with versioned PASS audits | Phase 8B-8C planned |
 | 10. Non-Functional Requirements | Partially implemented | Auth required for APIs, scoped permissions, retry visibility, stale-source analytics, tests | Performance targets, live dependency evidence, and caching strategy |
 | 11. Success Metrics | Not complete | Metrics listed in SPEC | Instrumentation and dashboard work required |
 | 12. Open Decisions | Open | Recommendations documented in SPEC | Product decisions still need confirmation before later phases |
@@ -113,7 +117,7 @@ Latest verified baseline:
 
 ## Next Recommended Stage
 
-Begin Phase 5A: answer feedback and flagged-answer review foundations.
+Begin Phase 8B / V10.1: template catalog and isolated knowledge packs.
 
 Suggested order:
 

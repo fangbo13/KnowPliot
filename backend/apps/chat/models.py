@@ -52,6 +52,12 @@ class Message(models.Model):
         ("assistant", "Assistant"),
         ("system", "System"),
     ]
+    CONFIDENCE_CHOICES = [
+        ("high", "High"),
+        ("medium", "Medium"),
+        ("low", "Low"),
+        ("insufficient", "Insufficient"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # V6.0: denormalized space FK (mirrors session.space) for direct scoping.
@@ -73,6 +79,16 @@ class Message(models.Model):
     model_used = models.CharField(max_length=100, null=True, blank=True)
     response_time_ms = models.IntegerField(null=True, blank=True)
     retrieval_count = models.IntegerField(null=True, blank=True)
+    confidence_score = models.FloatField(null=True, blank=True)
+    confidence_label = models.CharField(
+        max_length=20,
+        choices=CONFIDENCE_CHOICES,
+        blank=True,
+        default="",
+    )
+    needs_human_review = models.BooleanField(default=False)
+    retrieval_mode = models.CharField(max_length=20, blank=True, default="")
+    retrieval_latency_ms = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -524,3 +540,33 @@ class ComplianceExportJob(models.Model):
 
     def __str__(self):
         return f"{self.dataset} export {self.id} ({self.status})"
+
+
+class RAGEvaluationRun(models.Model):
+    """Immutable summary of one versioned RAG quality evaluation."""
+
+    STATUS_CHOICES = [
+        ("running", "Running"),
+        ("succeeded", "Succeeded"),
+        ("failed", "Failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rag_evaluation_runs",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="running")
+    dataset_version = models.CharField(max_length=80)
+    config_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    metrics = models.JSONField(default=dict)
+    report = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "chat_ragevaluationrun"
+        ordering = ["-created_at"]

@@ -70,6 +70,13 @@ class PgVectorRetriever:
     In development (SQLite), falls back to Python cosine similarity.
     """
 
+    def __init__(self, embedder=None):
+        self.embedder = embedder
+
+    def _embed(self, query: str) -> list[float]:
+        embedder = self.embedder or EmbeddingService()
+        return embedder.embed(query)
+
     def search(
         self,
         query: str,
@@ -136,8 +143,7 @@ class PgVectorRetriever:
         filters: RetrievalFilters | None, space_id: str,
     ) -> list[dict]:
         """SQLite fallback: compute cosine similarity in Python."""
-        embedder = EmbeddingService()
-        query_embedding = embedder.embed(query)
+        query_embedding = self._embed(query)
 
         normalized_filters = (filters or RetrievalFilters()).normalized()
         qs = DocumentChunk.objects.filter(
@@ -188,8 +194,7 @@ class PgVectorRetriever:
         """
 
         # V3.7 P0.2: Use EmbeddingService singleton — reuses global httpx.Client
-        embedder = EmbeddingService()
-        query_embedding = embedder.embed(query)
+        query_embedding = self._embed(query)
 
         # Use raw SQL to query embedding_vector column since it's added via migration
         # (not declared as a Django model field to maintain SQLite dev compatibility)

@@ -20,7 +20,7 @@ from django.conf import settings
 
 from .chunker import LangChainChunker
 from .embedding import EmbeddingService
-from .retriever import PgVectorRetriever
+from .hybrid import HybridRetriever, classify_confidence
 from .prompt_builder import PromptBuilder
 from .guardrails import GuardrailsService, LiteLLMChatService
 from .config import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K, SIMILARITY_THRESHOLD
@@ -40,7 +40,7 @@ class RAGPipeline:
             chunk_overlap=CHUNK_OVERLAP,
         )
         self.embedder = EmbeddingService()
-        self.retriever = PgVectorRetriever()
+        self.retriever = HybridRetriever()
         self.prompt_builder = PromptBuilder()
         self.guardrails = GuardrailsService()
         self.llm = LiteLLMChatService()
@@ -198,6 +198,7 @@ class RAGPipeline:
         # (e.g., PgVector not configured, DashScope embedding API unavailable),
         # return graceful degraded response instead of uncaught exception that
         # causes SSE "error" event → frontend shows "当前无法获取响应".
+        retrieval_started = time.monotonic()
         try:
             chunks = self.retriever.search(
                 query=query,
@@ -212,6 +213,17 @@ class RAGPipeline:
                 "抱歉，知识检索服务暂时不可用，请稍后重试。" if language == "zh"
                 else "Sorry, the knowledge retrieval service is temporarily unavailable. Please try again later."
             )
+            retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
+            yield {
+                "event": "quality",
+                "data": {
+                    "confidence": "insufficient",
+                    "score": 0.0,
+                    "needs_human_review": True,
+                    "retrieval_mode": "hybrid",
+                    "retrieval_latency_ms": retrieval_latency_ms,
+                },
+            }
             yield {"event": "token", "data": {"token": degraded_msg}}
             yield {"event": "citations", "data": []}
             yield {"event": "done", "data": {}}
@@ -237,16 +249,32 @@ class RAGPipeline:
                 content = self._sanitize_content(content)
             sanitized_chunks.append({**chunk, "content": content})
         chunks = sanitized_chunks
+        retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
+        quality = classify_confidence(chunks)
+        yield {
+            "event": "quality",
+            "data": {
+                "confidence": quality.label,
+                "score": quality.score,
+                "needs_human_review": quality.needs_human_review,
+                "retrieval_mode": "hybrid",
+                "retrieval_latency_ms": retrieval_latency_ms,
+            },
+        }
 
-        # Step 2b: If no good results, return fallback
-        if not chunks:
+        # Step 2b: Refuse when evidence is absent or too weak. Low-confidence
+        # retrieval must never be promoted into an uncited deterministic claim.
+        if not chunks or quality.label in {"low", "insufficient"}:
             fallback = (
                 "我没有足够的信息来回答此问题，请联系您的人力资源伙伴或HR团队。"
                 if language == "zh"
                 else "I don't have enough information to answer this question. Please contact your HR buddy or HR team."
             )
             yield {"event": "token", "data": {"token": fallback}}
-            yield {"event": "citations", "data": []}
+            yield {
+                "event": "citations",
+                "data": self._build_citations(chunks) if chunks else [],
+            }
             yield {"event": "done", "data": {}}
             return
 

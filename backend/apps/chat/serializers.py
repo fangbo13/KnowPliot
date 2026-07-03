@@ -32,6 +32,8 @@ class MessageSerializer(serializers.ModelSerializer):
         fields = [
             "id", "session", "role", "content", "token_count",
             "model_used", "response_time_ms", "retrieval_count",
+            "confidence_score", "confidence_label", "needs_human_review",
+            "retrieval_mode", "retrieval_latency_ms",
             "created_at", "citations",
         ]
         read_only_fields = ["id", "created_at"]

@@ -21,7 +21,20 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   citations?: Citation[];
+  confidenceScore?: number | null;
+  confidenceLabel?: 'high' | 'medium' | 'low' | 'insufficient' | '';
+  needsHumanReview?: boolean;
+  retrievalMode?: string;
+  retrievalLatencyMs?: number | null;
   createdAt: string;
+}
+
+interface QualityData {
+  confidence: Message['confidenceLabel'];
+  score: number;
+  needs_human_review: boolean;
+  retrieval_mode: string;
+  retrieval_latency_ms: number;
 }
 
 export interface Citation {
@@ -112,6 +125,7 @@ interface ChatState {
   streamingSessionId: string | null;
   streamContent: string;
   citations: Citation[];
+  streamQuality: QualityData | null;
   isLoadingMessages: boolean;
   sendError: string | null;
   // V3.5: Send lock to prevent double-send during async gap
@@ -192,6 +206,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   streamingSessionId: null,
   streamContent: '',
   citations: [],
+  streamQuality: null,
   isLoadingMessages: false,
   sendError: null,
   isSendLocked: false,
@@ -243,6 +258,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       allMessages: [],
       streamContent: '',
       citations: [],
+      streamQuality: null,
       streamPhase: 'idle',
       streamingSessionId: null,
       sendError: null,
@@ -321,6 +337,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         role: m.role,
         content: m.content || '',
         citations: m.citations || [],
+        confidenceScore: m.confidence_score,
+        confidenceLabel: m.confidence_label,
+        needsHumanReview: m.needs_human_review,
+        retrievalMode: m.retrieval_mode,
+        retrievalLatencyMs: m.retrieval_latency_ms,
         createdAt: m.created_at || m.createdAt || new Date().toISOString(),
       }));
 
@@ -373,7 +394,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Atomic lock: check + lock in one synchronous operation (no gap between read and write)
     // V4.6: Set streamingSessionId to current activeSessionId (or null if creating new session).
     // If new session is created below, streamingSessionId will be updated in the next set() call.
-    set({ isSendLocked: true, sendError: null, streamPhase: 'connecting', streamingSessionId: state.activeSessionId });
+    set({ isSendLocked: true, sendError: null, streamPhase: 'connecting', streamingSessionId: state.activeSessionId, streamQuality: null });
 
     let sessionId = get().activeSessionId;
     if (!sessionId) {
@@ -552,6 +573,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   lastTokenTime = Date.now();
                   get().setStreamCitations(data);
                   break;
+                case 'quality':
+                  lastTokenTime = Date.now();
+                  set({ streamQuality: data });
+                  break;
                 case 'done':
                   clearAllTimers();
                   flushImmediate(); // V3.5: Force flush remaining buffered tokens
@@ -612,6 +637,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             streamPhase: isTimeout ? 'error' : 'idle',
             streamContent: '',
             citations: [],
+            streamQuality: null,
             streamingSessionId: null,
             sendError: isTimeout ? 'error_timeout' : null,
             _isTimeoutAbort: false,
@@ -685,19 +711,24 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // (user switched sessions while stream was running)
     if (currentSessionId !== sessionId) {
       // Discard stale stream data, clean up
-      set({ streamPhase: 'idle', streamContent: '', citations: [], totalRoundCount: 0, streamingSessionId: null });
+      set({ streamPhase: 'idle', streamContent: '', citations: [], streamQuality: null, totalRoundCount: 0, streamingSessionId: null });
       clearStreamOnComplete();
       get().unlockSend();
       return;
     }
 
-    const { streamContent, citations } = get();
+    const { streamContent, citations, streamQuality } = get();
 
     const assistantMessage: Message = {
       id: messageId,
       role: 'assistant',
       content: streamContent,
       citations,
+      confidenceScore: streamQuality?.score,
+      confidenceLabel: streamQuality?.confidence,
+      needsHumanReview: streamQuality?.needs_human_review,
+      retrievalMode: streamQuality?.retrieval_mode,
+      retrievalLatencyMs: streamQuality?.retrieval_latency_ms,
       createdAt: new Date().toISOString(),
     };
 
@@ -718,6 +749,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set({
       messages: visibleMessages,
       allMessages: prunedAllMessages,
+      streamQuality: null,
       streamPhase: 'idle',
       streamContent: '',
       citations: [],

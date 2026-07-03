@@ -38,6 +38,7 @@ from apps.chat.report_views import (
     ComplianceExportView,
     KnowledgeQualityReportView,
 )
+from apps.rag.evaluation_views import RAGEvaluationRunListView
 
 urlpatterns = [
     path("registration-codes/", AdminRegistrationCodeListCreateView.as_view(),
@@ -58,6 +59,11 @@ urlpatterns = [
         "quality/documents/",
         DocumentQualityListView.as_view(),
         name="admin-document-quality",
+    ),
+    path(
+        "quality/evaluations/",
+        RAGEvaluationRunListView.as_view(),
+        name="admin-quality-evaluations",
     ),
     path("quality/feedback/", FeedbackReviewListView.as_view(), name="admin-quality-feedback"),
     path("quality/feedback/<uuid:pk>/", FeedbackReviewDetailView.as_view(), name="admin-quality-feedback-detail"),

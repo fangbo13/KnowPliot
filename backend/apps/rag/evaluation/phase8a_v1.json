@@ -1,0 +1,26 @@
+{
+  "version": "phase8a-v1",
+  "cases": [
+    {
+      "id": "leave-policy",
+      "space_code": "evaluation-hr",
+      "query": "How many days of annual leave are provided?",
+      "answerable": true,
+      "expected_document_titles": ["Annual Leave Policy"]
+    },
+    {
+      "id": "security-training",
+      "space_code": "evaluation-hr",
+      "query": "When must security awareness training be completed?",
+      "answerable": true,
+      "expected_document_titles": ["Security Training Guide"]
+    },
+    {
+      "id": "unanswerable-stock-price",
+      "space_code": "evaluation-hr",
+      "query": "What will the company share price be tomorrow?",
+      "answerable": false,
+      "expected_document_titles": []
+    }
+  ]
+}

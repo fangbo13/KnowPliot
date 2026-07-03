@@ -301,6 +301,13 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
         </div>
       )}
 
+      {message.role === 'assistant' && message.confidenceLabel && (
+        <div className={`msg-quality msg-quality-${message.confidenceLabel}`}>
+          <span>{t(`confidence_${message.confidenceLabel}`)}</span>
+          {message.needsHumanReview && <span>{t('needs_human_review')}</span>}
+        </div>
+      )}
+
       {message.citations && message.citations.length > 0 && (
         <div className="msg-citations">
           <button className="citation-toggle" onClick={() => setSourcesExpanded((v) => !v)}>

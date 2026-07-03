@@ -266,6 +266,7 @@ def send_message(request, session_id):
         SSE_TIMEOUT_SECONDS = 60
         response_tokens = []
         citations_data = []
+        quality_data = {}
         client_disconnected = False
 
         def record_invocation(
@@ -313,6 +314,11 @@ def send_message(request, session_id):
                 if event_type == "citations":
                     citations_data = data
                     yield "event: citations\n"
+                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "quality":
+                    quality_data = data
+                    yield "event: quality\n"
                     yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "token":
@@ -366,6 +372,11 @@ def send_message(request, session_id):
             model_used=pipeline.model_name,
             response_time_ms=elapsed_ms,
             retrieval_count=len(citations_data),
+            confidence_score=quality_data.get("score"),
+            confidence_label=quality_data.get("confidence", ""),
+            needs_human_review=quality_data.get("needs_human_review", False),
+            retrieval_mode=quality_data.get("retrieval_mode", ""),
+            retrieval_latency_ms=quality_data.get("retrieval_latency_ms"),
             space=space,  # V6.0 space isolation
         )
 

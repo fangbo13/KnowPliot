@@ -33,7 +33,9 @@
 | V9.0 / Phase 7A | Long-run operations baseline | Readiness/liveness/dependency health, long-run cleanup config, export cleanup command, admin operations visibility | `audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md` |
 | V9.1 / Phase 7B | Scale hardening and background reliability | Export retry, SLA scanner dry-run/statistics, duplicate-operation prevention, scale-path indexes | `audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md` |
 | V9.2 / Phase 7C | Operational runbook and regression closure | V9 smoke checks, operational runbook, final regression audit, Phase 7 documentation closure | `audit_reports/v9.2/Phase7C_Operational_Runbook_Regression_Closure_Audit_Report_V9.2.md` |
-| V10.0 / Next candidate | Post-V9 product/operations expansion | To be planned after Phase 7 actual PASS | TBD |
+| V10.0 / Phase 8A | Answer quality and evaluation | Single-space hybrid retrieval, explainable ranking, confidence/refusal policy, deterministic evaluation | `audit_reports/v10.0/Phase8A_Answer_Quality_Evaluation_Audit_Report_V10.0.md` |
+| V10.1 / Phase 8B | Template catalog and knowledge packs | Categories/tags, explainable recommendations, revision diff/rollback, isolated asset cloning | `audit_reports/v10.1/Phase8B_Template_Knowledge_Pack_Audit_Report_V10.1.md` |
+| V10.2 / Phase 8C | Accessible product closure | Pinned/exportable sessions, mobile citations, WCAG keyboard/screen-reader/reduced-motion closure | `audit_reports/v10.2/Phase8C_Accessibility_Product_Closure_Audit_Report_V10.2.md` |
 
 ## Dependency Order
 
