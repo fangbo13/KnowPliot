@@ -55,7 +55,7 @@
                         -> 7A long-run operations baseline
                           -> 7B scale hardening and background reliability
                             -> 7C operational runbook and regression closure
-                              -> V10.0 candidate planning
+                              -> V10.0–V10.2 Phase 8 actual PASS
 ```
 
 ## Cross-Cutting Audit Matrix

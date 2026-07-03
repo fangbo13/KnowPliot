@@ -7,8 +7,9 @@
 import json
 import logging
 import time
+from html import escape
 
-from django.http import StreamingHttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -54,7 +55,7 @@ def _default_space_for(user):
 
 # V3.5 HIGH-004: Cursor pagination for sessions
 class SessionCursorPagination(CursorPagination):
-    ordering = '-updated_at'
+    ordering = ('-is_pinned', '-updated_at')
     page_size = 20
 
 
@@ -89,7 +90,7 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     # V3.5 HIGH-004: Enable cursor pagination for sessions (was None)
     pagination_class = SessionCursorPagination
-    ordering = '-updated_at'  # Most recent first
+    ordering = ('-is_pinned', '-updated_at')
 
     def get_queryset(self):
         qs = ChatSession.objects.filter(user=self.request.user, is_active=True)
@@ -98,7 +99,7 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
         space = resolve_request_space(self.request, required=False)
         if space is not None:
             qs = qs.filter(space=space)
-        return qs.order_by('-updated_at')
+        return qs.order_by('-is_pinned', '-updated_at')
 
     def perform_create(self, serializer):
         space = resolve_request_space(self.request, require_perm=CHAT_ASK, required=False) \
@@ -118,7 +119,55 @@ class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         """Only update title field — preserve updated_at so session stays in
         its original position in the sidebar list instead of jumping to the top."""
-        serializer.save(update_fields=["title"])
+        serializer.save(update_fields=list(serializer.validated_data))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def export_session(request, session_id):
+    """Export one owned, currently accessible session as Markdown or safe HTML."""
+    try:
+        session = ChatSession.objects.prefetch_related("messages").get(
+            id=session_id,
+            user=request.user,
+            is_active=True,
+        )
+    except ChatSession.DoesNotExist:
+        from rest_framework.exceptions import NotFound
+        raise NotFound("Session not found.")
+    if session.space_id and effective_space_role(request.user, session.space) is None:
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied("You no longer have access to this space.")
+    export_format = request.query_params.get("format", "markdown")
+    if export_format not in {"markdown", "html"}:
+        return Response({"detail": "format must be markdown or html"}, status=400)
+    messages = list(session.messages.order_by("created_at"))
+    if export_format == "markdown":
+        lines = [f"# {session.title or 'Conversation'}", ""]
+        for message in messages:
+            lines.extend([f"## {message.role.title()}", "", message.content, ""])
+        response = HttpResponse(
+            "\n".join(lines),
+            content_type="text/markdown; charset=utf-8",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="session-{session.id}.md"'
+        )
+        return response
+    sections = "".join(
+        f'<section class="message"><h2>{escape(message.role.title())}</h2>'
+        f"<p>{escape(message.content).replace(chr(10), '<br>')}</p></section>"
+        for message in messages
+    )
+    document = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{escape(session.title or 'Conversation')}</title>"
+        "<style>body{font:16px/1.5 system-ui;max-width:800px;margin:auto;padding:2rem}"
+        "@media print{body{max-width:none;padding:0}}.message{break-inside:avoid}</style>"
+        "</head><body>"
+        f"<h1>{escape(session.title or 'Conversation')}</h1>{sections}</body></html>"
+    )
+    return HttpResponse(document, content_type="text/html; charset=utf-8")
 
 
 class ChatSessionMessagesView(generics.ListAPIView):

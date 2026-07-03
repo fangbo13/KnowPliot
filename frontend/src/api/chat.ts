@@ -20,6 +20,7 @@ function mapSession(raw: any): ChatSession {
     id: raw.id,
     title: raw.title,
     is_active: raw.is_active,
+    isPinned: Boolean(raw.is_pinned),
     updatedAt: raw.updated_at ?? raw.updatedAt ?? '',  // snake_case → camelCase
   };
 }
@@ -50,6 +51,21 @@ export const chatApi = {
   async renameSession(id: string, title: string): Promise<ChatSession> {
     const { data } = await apiClient.patch(`/chat/sessions/${id}/`, { title });
     return mapSession(data);
+  },
+
+  async pinSession(id: string, isPinned: boolean): Promise<ChatSession> {
+    const { data } = await apiClient.patch(`/chat/sessions/${id}/`, {
+      is_pinned: isPinned,
+    });
+    return mapSession(data);
+  },
+
+  async exportSession(id: string, format: 'markdown' | 'html'): Promise<Blob> {
+    const { data } = await apiClient.get(`/chat/sessions/${id}/export/`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    return data;
   },
 
   async getMessages(sessionId: string): Promise<any[]> {

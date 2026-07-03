@@ -49,6 +49,7 @@ export interface ChatSession {
   id: string;
   title: string;
   is_active: boolean;
+  isPinned: boolean;
   updatedAt: string;
 }
 

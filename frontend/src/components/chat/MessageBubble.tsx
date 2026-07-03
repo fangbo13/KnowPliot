@@ -11,7 +11,7 @@ import {
   DownOutlined, RightOutlined, PaperClipOutlined,
   LikeOutlined, DislikeOutlined, FlagOutlined, CloseOutlined,
 } from '@ant-design/icons';
-import { useEffect, useState, memo } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import type { Message, Citation } from '../../store/chatStore';
 import { chatApi } from '../../api/chat';
 import ErrorBoundary from '../ErrorBoundary';
@@ -63,6 +63,27 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
   const [suggestedSource, setSuggestedSource] = useState('');
   const [flagForReview, setFlagForReview] = useState(false);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const feedbackTriggerRef = useRef<HTMLButtonElement>(null);
+  const feedbackWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (feedbackWasOpenRef.current && !feedbackOpen) {
+      feedbackTriggerRef.current?.focus();
+    }
+    feedbackWasOpenRef.current = feedbackOpen;
+  }, [feedbackOpen]);
+
+  useEffect(() => {
+    if (!feedbackOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setFeedbackOpen(false);
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [feedbackOpen]);
   const canGiveFeedback = !isStreaming && !disableActions && isPersistedUuid(message.id);
 
   useEffect(() => {
@@ -225,6 +246,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
                 <LikeOutlined />{t('feedback_helpful') || 'Helpful'}
               </button>
               <button
+                ref={feedbackTriggerRef}
                 className={`msg-action-btn ${feedbackType && feedbackType !== 'helpful' ? 'active' : ''}`}
                 onClick={() => setFeedbackOpen((v) => !v)}
                 disabled={feedbackBusy}
@@ -249,7 +271,17 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
       )}
 
       {feedbackOpen && canGiveFeedback && (
-        <div className="msg-feedback-panel" role="form" aria-label={t('feedback_panel_label')}>
+        <div
+          className="msg-feedback-panel"
+          role="form"
+          aria-label={t('feedback_panel_label')}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setFeedbackOpen(false);
+            }
+          }}
+        >
           <label>
             <span>{t('feedback_issue_type')}</span>
             <select

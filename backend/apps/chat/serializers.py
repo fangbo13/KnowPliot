@@ -20,7 +20,10 @@ class ChatSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChatSession
-        fields = ["id", "user", "title", "is_active", "created_at", "updated_at", "message_count"]
+        fields = [
+            "id", "user", "title", "is_active", "is_pinned",
+            "created_at", "updated_at", "message_count",
+        ]
         read_only_fields = ["id", "user", "created_at", "updated_at"]
 
 

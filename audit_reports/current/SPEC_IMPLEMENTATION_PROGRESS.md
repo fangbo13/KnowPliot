@@ -26,6 +26,7 @@ Current stage:
 - Phase 7A-7C long-run operations and scale: implemented and verified.
 - Phase 8A answer quality and evaluation: implemented and audited in V10.0.
 - Phase 8B template catalog and isolated knowledge packs: implemented and audited in V10.1.
+- Phase 8C accessibility and product closure: implemented and audited in V10.2.
 
 Latest verified baseline:
 
@@ -59,7 +60,7 @@ Latest verified baseline:
 | 6. API Surface Draft | Partially implemented | Auth, spaces, templates, notifications, scoped audit, protected document download, health/metrics, ingestion operations, and quality APIs | Feedback/review and citation-inspection APIs |
 | 7. Frontend Page Modules | Partially implemented | Login, space picker/management, chat, lifecycle-aware knowledge admin, template admin, scoped audit, operations queue, and quality dashboard | Feedback controls and source/citation inspection polish |
 | 8. Deployment Model | Partially implemented | Current `docker-compose.yml`, backend Dockerfile, frontend Dockerfile | Production deployment guide, secrets handling, observability, scaling guidance |
-| 9. Implementation Phases | In progress | Phase 1-8B delivered through V10.1 with versioned PASS audits | Phase 8C planned |
+| 9. Implementation Phases | Implemented through current baseline | Phase 1-8C delivered through V10.2 with versioned PASS audits | Re-plan the next post-V10 phase |
 | 10. Non-Functional Requirements | Partially implemented | Auth required for APIs, scoped permissions, retry visibility, stale-source analytics, tests | Performance targets, live dependency evidence, and caching strategy |
 | 11. Success Metrics | Not complete | Metrics listed in SPEC | Instrumentation and dashboard work required |
 | 12. Open Decisions | Open | Recommendations documented in SPEC | Product decisions still need confirmation before later phases |
@@ -118,7 +119,7 @@ Latest verified baseline:
 
 ## Next Recommended Stage
 
-Begin Phase 8C / V10.2: accessibility, mobile workflows, and product closure.
+Phase 8 is complete. Re-plan the next post-V10 phase from the V10.2 baseline.
 
 Suggested order:
 

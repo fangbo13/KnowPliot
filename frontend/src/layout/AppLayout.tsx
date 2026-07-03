@@ -13,6 +13,7 @@ import {
   DeleteOutlined, SearchOutlined, MoreOutlined, MenuOutlined, AppstoreOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
+  PushpinOutlined, DownloadOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
@@ -55,7 +56,7 @@ export default function AppLayout() {
 
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(['7days', '30days', 'earlier']));
-  const [sessionMenu, setSessionMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
+  const [sessionMenu, setSessionMenu] = useState<{ id: string; title: string; isPinned: boolean; x: number; y: number } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; title: string } | null>(null);
@@ -224,12 +225,29 @@ export default function AppLayout() {
     }
   }, [loadSessions, renameSessionTarget]);
 
-  const openMenuFromButton = (e: React.MouseEvent, session: { id: string; title: string }) => {
+  const handlePinSession = useCallback(async (id: string, isPinned: boolean) => {
+    await chatApi.pinSession(id, !isPinned);
+    await loadSessions();
+    closeMenu();
+  }, [closeMenu, loadSessions]);
+
+  const handleExportSession = useCallback(async (id: string, format: 'markdown' | 'html') => {
+    const blob = await chatApi.exportSession(id, format);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `conversation-${id}.${format === 'markdown' ? 'md' : 'html'}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    closeMenu();
+  }, [closeMenu]);
+
+  const openMenuFromButton = (e: React.MouseEvent, session: { id: string; title: string; isPinned: boolean }) => {
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const { x, y } = clampToViewport(rect.right - 180, rect.bottom + 4);
     setConfirmingDelete(false);
-    setSessionMenu({ id: session.id, title: session.title, x, y });
+    setSessionMenu({ id: session.id, title: session.title, isPinned: session.isPinned, x, y });
   };
 
   /* ---- sidebar sub-renderers (shared by desktop + mobile drawer) ---- */
@@ -266,14 +284,13 @@ export default function AppLayout() {
                   <div
                     key={session.id}
                     className={`sidebar-item${isActive ? ' is-active' : ''}`}
-                    onClick={() => handleSidebarSessionClick(session.id)}
-                    onContextMenu={(e) => { e.preventDefault(); const { x, y } = clampToViewport(e.clientX, e.clientY); setConfirmingDelete(false); setSessionMenu({ id: session.id, title, x, y }); }}
-                    role="button" tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSidebarSessionClick(session.id); }}
+                    onContextMenu={(e) => { e.preventDefault(); const { x, y } = clampToViewport(e.clientX, e.clientY); setConfirmingDelete(false); setSessionMenu({ id: session.id, title, isPinned: session.isPinned, x, y }); }}
                     title={title}
                   >
-                    <span className="sidebar-item-title">{title}</span>
-                    <button className="sidebar-item-more" aria-label={t('sidebar_rename')} onClick={(e) => openMenuFromButton(e, { id: session.id, title })}><MoreOutlined /></button>
+                    <button className="sidebar-item-main" onClick={() => handleSidebarSessionClick(session.id)}>
+                      <span className="sidebar-item-title">{session.isPinned && <PushpinOutlined aria-label={t('sidebar_pinned')} />} {title}</span>
+                    </button>
+                    <button className="sidebar-item-more" aria-label={t('sidebar_rename')} onClick={(e) => openMenuFromButton(e, { id: session.id, title, isPinned: session.isPinned })}><MoreOutlined /></button>
                   </div>
                 );
               })}
@@ -325,7 +342,7 @@ export default function AppLayout() {
           <div style={{ marginTop: 12, minHeight: 22 }}>
             {showSkipHint
               ? <button className="msg-action-btn" style={{ margin: '0 auto' }} onClick={handleOnboardingClose}>{t('skip_for_now')}</button>
-              : <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>{t('skip_hint_loading') || ''}</span>}
+              : <span className="onboarding-skip-hint">{t('skip_hint_loading') || ''}</span>}
           </div>
         </div>
       </Modal>
@@ -420,6 +437,9 @@ export default function AppLayout() {
           ) : (
             <>
               <div className="menu-pop-label">{sessionMenu.title}</div>
+              <div className="menu-pop-item" onClick={() => handlePinSession(sessionMenu.id, sessionMenu.isPinned)}><PushpinOutlined />{sessionMenu.isPinned ? t('sidebar_unpin') : t('sidebar_pin')}</div>
+              <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'markdown')}><FileTextOutlined />{t('sidebar_export_markdown')}</div>
+              <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'html')}><DownloadOutlined />{t('sidebar_export_html')}</div>
               <div className="menu-pop-item" onClick={() => openRenameSession({ id: sessionMenu.id, title: sessionMenu.title })}><EditOutlined />{t('sidebar_rename')}</div>
               <div className="menu-pop-item danger" onClick={() => setConfirmingDelete(true)}><DeleteOutlined />{t('sidebar_delete')}</div>
             </>

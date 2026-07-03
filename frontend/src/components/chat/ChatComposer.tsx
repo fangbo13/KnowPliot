@@ -6,6 +6,7 @@
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { SendOutlined, ArrowUpOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 
 type Props = {
   value: string;
@@ -45,6 +46,7 @@ export default function ChatComposer({
   showHint = false,
   hintText,
 }: Props) {
+  const { t } = useTranslation('chat');
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const [focused, setFocused] = useState(false);
@@ -106,7 +108,7 @@ export default function ChatComposer({
           )}
 
           {isStreaming ? (
-            <button type="button" className="composer-stop" onClick={onStop} aria-label="Stop generation">
+            <button type="button" className="composer-stop" onClick={onStop} aria-label={t('stop_generation')}>
               <span style={{ width: 11, height: 11, borderRadius: 3, background: 'currentColor', display: 'block' }} />
             </button>
           ) : (

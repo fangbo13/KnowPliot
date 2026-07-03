@@ -175,6 +175,9 @@ SITE_ID = 1
 
 # Django REST Framework
 REST_FRAMEWORK = {
+    # ``format`` is a business query parameter for compliance and chat exports.
+    # Do not reserve it for renderer selection.
+    "URL_FORMAT_OVERRIDE": None,
     # V4.2 SYS-V4.2-020: Use custom auth class that checks blacklist table.
     # Default JWTAuthentication only validates signature + expiry, ignoring
     # blacklisted_tokens — meaning blacklisted access tokens remain valid

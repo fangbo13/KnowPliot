@@ -323,13 +323,20 @@ h1, h2, h3, h4, h5 {
   box-shadow: 0 0 0 3.5px var(--accent-soft-strong), var(--shadow-sm) !important;
   border-color: var(--accent) !important;
 }
+.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--accent-text) !important;
+}
 
 .login-btn-premium {
+  background: var(--accent-active) !important;
+  border-color: var(--accent-active) !important;
   transition: all var(--dur) var(--ease-out) !important;
   box-shadow: var(--shadow-sm) !important;
 }
 
 .login-btn-premium:hover:not(:disabled) {
+  background: #733116 !important;
+  border-color: #733116 !important;
   transform: translateY(-1.5px);
   box-shadow: var(--shadow-accent), 0 8px 24px rgba(194, 105, 63, 0.2) !important;
 }
