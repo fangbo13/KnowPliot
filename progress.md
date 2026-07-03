@@ -20,9 +20,9 @@
   fields, withdrawal, persisted-message gating, styles, and English/Chinese
   i18n keys.
 - Completed Phase 5A V7.6 gates: 131/131 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
 - Saved the Phase 5A audit report at
   `audit_reports/V7.6/Phase5A_Feedback_Test_Audit_Report_V7.6.md`.
 - Created local branch `Version_7.7` for Phase 5B from the V7.6 commit.
@@ -33,9 +33,9 @@
   gap APIs, scoped audit actions, transaction-protected status transitions, and
   the admin Answer Quality page/navigation.
 - Completed Phase 5B V7.7 gates: 138/138 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
 - Saved the Phase 5B audit report at
   `audit_reports/V7.7/Phase5B_Review_Workflow_Test_Audit_Report_V7.7.md`.
 - Created local branch `Version_7.8` for Phase 5C from the V7.7 commit.
@@ -46,9 +46,9 @@
   DRF `format=csv` handling, export auditing, admin quality summary cards, and
   dataset download actions.
 - Completed Phase 5C V7.8 gates: 142/142 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
 - Saved the Phase 5C audit report at
   `audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md`.
 - Marked Phase 5A–5C as actual PASS in `SPEC.MD`; next stage is V9.0
@@ -64,12 +64,13 @@
   security config, export limits, stable `detail/code` error fields, and admin
   dashboard readiness display.
 - Completed Phase 6A V8.0 gates: 145/145 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
-- Executed production deploy check; it failed because the local venv lacks
-  PostgreSQL driver support (`psycopg` / `psycopg2`), and this is recorded as
-  an environment limitation rather than a PASS.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
+- Executed production deploy check; it initially failed because the local venv
+  lacked PostgreSQL driver support (`psycopg` / `psycopg2`), then the V9.2
+  Docker closure installed `psycopg[binary]` and superseded this historical
+  limitation with a clean PASS.
 - Saved the Phase 6A audit report at
   `audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md`.
 - Created local branch `Version_8.1` for Phase 6B from `Version_8.0`.
@@ -83,9 +84,9 @@
 - Extended the admin Answer Quality page with SLA overdue labels/filtering,
   async export creation, export job list/status, and download actions.
 - Completed Phase 6B V8.1 gates: 148/148 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
 - Saved the Phase 6B audit report at
   `audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md`.
 - Created local branch `Version_8.2` for Phase 6C from `Version_8.1`.
@@ -101,13 +102,14 @@
   maps to V8.0–V8.2, with V9.0 reserved for Long-Run Operations / Scale
   Hardening.
 - Completed Phase 6C V8.2 gates: 151/151 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, production build
-  passed with known Vite chunking warnings, and the V8 smoke build-artifact
+  passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest, and the V8 smoke build-artifact
   check passed.
-- Re-ran production deploy check with `config.settings.prod`; it failed because
-  the local venv lacks `psycopg` / `psycopg2`, recorded as an environment
-  limitation rather than a PASS.
+- Re-ran production deploy check with `config.settings.prod`; it initially
+  failed because the local venv lacked `psycopg` / `psycopg2`, then the V9.2
+  Docker closure installed `psycopg[binary]` and superseded this historical
+  limitation with a clean PASS.
 - Saved the Phase 6C audit report at
   `audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md`.
 - Loaded the Phase 7A–7C / V9.0–V9.2 objective from
@@ -120,12 +122,13 @@
 - Implemented long-run operations health summaries, safe cleanup/backlog
   counts, `cleanup_export_jobs --dry-run`, and admin dashboard readiness labels.
 - Completed Phase 7A V9.0 gates: 155/155 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
-- Re-ran production deploy check with `config.settings.prod`; it failed because
-  the local venv lacks `psycopg` / `psycopg2`, recorded as an environment
-  limitation rather than a PASS.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
+- Re-ran production deploy check with `config.settings.prod`; it initially
+  failed because the local venv lacked `psycopg` / `psycopg2`, then the V9.2
+  Docker closure installed `psycopg[binary]` and superseded this historical
+  limitation with a clean PASS.
 - Saved the Phase 7A audit report at
   `audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md`.
 - Created local branch `Version_9.1` for Phase 7B from `Version_9.0`.
@@ -136,12 +139,13 @@
   audit action, SLA dry-run statistics, scale-path indexes, and frontend export
   retry controls with safe error summaries.
 - Completed Phase 7B V9.1 gates: 159/159 backend tests passed, Django check
-  passed with known allauth warnings, migration dry-run found no changes,
+  passed; historical allauth warnings were later closed in the V9.2 Docker retest, migration dry-run found no changes,
   49/49 frontend tests passed, i18n passed, typecheck passed, and production
-  build passed with known Vite chunking warnings.
-- Re-ran production deploy check with `config.settings.prod`; it failed because
-  the local venv lacks `psycopg` / `psycopg2`, recorded as an environment
-  limitation rather than a PASS.
+  build passed; historical Vite chunking warnings were later closed in the V9.2 Docker retest.
+- Re-ran production deploy check with `config.settings.prod`; it initially
+  failed because the local venv lacked `psycopg` / `psycopg2`, then the V9.2
+  Docker closure installed `psycopg[binary]` and superseded this historical
+  limitation with a clean PASS.
 - Saved the Phase 7B audit report at
   `audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md`.
 - Created local branch `Version_9.2` for Phase 7C from `Version_9.1`.
@@ -163,15 +167,45 @@
 - Completed Phase 7C V9.2 gates: focused Phase 7C guard tests passed 4/4, V9
   smoke build-artifact check passed against `frontend/dist`, backend full suite
   passed 163/163 after increasing the command timeout from an inconclusive
-  184-second timeout, Django check passed with known allauth warnings,
+  184-second timeout, Django check passed; historical allauth warnings were later closed in the V9.2 Docker retest,
   migration dry-run found no changes, frontend tests passed 49/49, i18n
   checked 52 source files, typecheck passed, and production build passed with
-  known Vite chunking warnings.
-- Re-ran production deploy check with `config.settings.prod`; it failed because
-  the local venv lacks `psycopg` / `psycopg2`, recorded as an environment
-  limitation rather than a PASS.
+  historical Vite chunking warnings later closed in the V9.2 Docker retest.
+- Re-ran production deploy check with `config.settings.prod`; it initially
+  failed because the local venv lacked `psycopg` / `psycopg2`, then the V9.2
+  Docker closure installed `psycopg[binary]` and superseded this historical
+  limitation with a clean PASS.
 - Saved the Phase 7C audit report at
   `audit_reports/v9.2/Phase7C_Operational_Runbook_Regression_Closure_Audit_Report_V9.2.md`.
+- Continued V9.2 closure under Docker per user request: installed
+  `psycopg[binary]` into `backend\venv`, updated allauth settings, added prod
+  HSTS settings, fixed Docker health's Celery probe to use the project Celery
+  app, added a Docker-local health security profile, and removed frontend Vite
+  build warnings.
+- Repaired the existing local Docker PostgreSQL volume owner mismatch from the
+  old `ey_onboarding` role to the current `knowpilot` role so migrations can
+  run under the compose user.
+- Re-ran gates after fixes: backend full suite passed 163/163, focused health
+  suite passed 7/7, local Django check passed with no issues, production deploy
+  check passed with no issues, migration dry-run found no changes, frontend
+  Vitest passed 49/49, i18n checked 52 source files, typecheck passed, frontend
+  build passed with no warnings, Docker backend check passed, Docker migration
+  dry-run found no changes, and V9 Docker smoke passed all API checks.
+- Captured browser validation screenshots under `output/playwright/` for chat
+  login/welcome, Admin Dashboard health, Answer Quality async exports,
+  export-complete notifications, and Knowledge Base document actions.
+- Saved Docker validation and bugfix reports at
+  `audit_reports/v9.2/Docker_SPEC_Functional_Test_Report_V9.2.md` and
+  `audit_reports/v9.2/Docker_Bugfix_Report_V9.2.md`.
+- Re-ran Docker validation after changing the Celery worker to non-root
+  execution: `docker compose ps` showed db/redis/backend/celery-worker/frontend
+  running, Docker admin health returned `overall=up` and `readiness=up`, V9
+  Docker smoke passed health/admin metrics/quality report/export jobs/
+  notification feed/review queue, and recent Celery logs contained no root or
+  security-warning pattern.
+- Updated the Docker SPEC functional report and Docker bugfix report so the
+  former Celery root-user warning is recorded as fixed and no longer appears as
+  a residual non-PASS item.
 
 ## 2026-07-01
 

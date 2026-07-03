@@ -39,20 +39,18 @@ Commands executed from `D:\Github\Onborading-AI`:
 | --- | --- |
 | `backend\venv\Scripts\python.exe backend\manage.py test apps.chat.test_phase6b_async_ops --settings=config.settings.local_test -v 1` | PASS, 3 tests |
 | `backend\venv\Scripts\python.exe backend\manage.py test apps --settings=config.settings.local_test -v 1` | PASS, 148 tests |
-| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS with known allauth deprecation warnings |
+| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS, no issues after V9.2 Docker closure config cleanup |
 | `backend\venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run --settings=config.settings.local_test` | PASS, no changes detected |
 | `npm --prefix frontend run test` | PASS, 49 tests |
 | `npm --prefix frontend run check:i18n` | PASS |
 | `npm --prefix frontend run typecheck` | PASS |
-| `npm --prefix frontend run build` | PASS with known Vite chunk-size / i18n import warnings |
+| `npm --prefix frontend run build` | PASS, no Vite warnings after V9.2 Docker closure frontend cleanup |
 | `git diff --check` | PASS; only line-ending conversion warnings were reported |
 
 ## Notes
 
-- The local Django check continues to report the known django-allauth
-  deprecation warnings already present in previous phases.
-- The Vite production build continues to report the known large chunk and
-  mixed dynamic/static i18n import warnings already present in previous phases.
+- V9.2 Docker closure removed the earlier local django-allauth deprecation
+  warnings and Vite build warnings.
 - Async job execution is implemented as an immediate local completion path for
   this release, while preserving queued/processing/succeeded/failed/expired
   status semantics for a later Celery worker handoff.

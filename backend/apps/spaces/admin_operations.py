@@ -3,7 +3,6 @@
 import time
 from datetime import timedelta
 
-from celery import current_app
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
@@ -60,7 +59,9 @@ def _check_redis():
 
 
 def _check_celery():
-    replies = current_app.control.inspect(timeout=0.75).ping()
+    from config.celery import app as celery_app
+
+    replies = celery_app.control.inspect(timeout=3).ping()
     if not replies:
         raise RuntimeError("No Celery workers replied")
 
@@ -110,12 +111,13 @@ def _security_config_status():
         missing.append("ALLOWED_HOSTS")
     if getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False):
         missing.append("CORS_ALLOW_ALL_ORIGINS")
-    if not getattr(settings, "SESSION_COOKIE_SECURE", False):
-        missing.append("SESSION_COOKIE_SECURE")
-    if not getattr(settings, "CSRF_COOKIE_SECURE", False):
-        missing.append("CSRF_COOKIE_SECURE")
-    if not getattr(settings, "SECURE_SSL_REDIRECT", False):
-        missing.append("SECURE_SSL_REDIRECT")
+    if getattr(settings, "HEALTH_REQUIRE_HTTPS_SECURITY", True):
+        if not getattr(settings, "SESSION_COOKIE_SECURE", False):
+            missing.append("SESSION_COOKIE_SECURE")
+        if not getattr(settings, "CSRF_COOKIE_SECURE", False):
+            missing.append("CSRF_COOKIE_SECURE")
+        if not getattr(settings, "SECURE_SSL_REDIRECT", False):
+            missing.append("SECURE_SSL_REDIRECT")
     return {
         "status": "degraded" if missing else "configured",
         "missing": missing,

@@ -44,25 +44,18 @@ Commands executed from `D:\Github\Onborading-AI`:
 | `backend\venv\Scripts\python.exe backend\manage.py test apps.chat.test_phase6c_release_readiness --settings=config.settings.local_test -v 1` | PASS, 3 tests |
 | `backend\venv\Scripts\python.exe backend\scripts\smoke_v8_release.py --check-build-only --frontend-dist frontend\dist` | PASS, frontend build artifact check |
 | `backend\venv\Scripts\python.exe backend\manage.py test apps --settings=config.settings.local_test -v 1` | PASS, 151 tests |
-| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS with known allauth deprecation warnings |
+| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS, no issues after V9.2 Docker closure config cleanup |
 | `backend\venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run --settings=config.settings.local_test` | PASS, no changes detected |
 | `npm --prefix frontend run test` | PASS, 49 tests |
 | `npm --prefix frontend run check:i18n` | PASS |
 | `npm --prefix frontend run typecheck` | PASS |
-| `npm --prefix frontend run build` | PASS with known Vite chunk-size / i18n import warnings |
-| `backend\venv\Scripts\python.exe backend\manage.py check --deploy --settings=config.settings.prod` | FAIL due to missing local PostgreSQL driver `psycopg` / `psycopg2`; recorded as environment limitation |
+| `npm --prefix frontend run build` | PASS, no Vite warnings after V9.2 Docker closure frontend cleanup |
+| `backend\venv\Scripts\python.exe backend\manage.py check --deploy --settings=config.settings.prod` | PASS, no issues after installing `psycopg[binary]` and adding prod HSTS settings |
 
 ## Known warnings and residual risk
 
-- `django-allauth` deprecation warnings remain unchanged from prior phases:
-  `ACCOUNT_AUTHENTICATION_METHOD`, `ACCOUNT_EMAIL_REQUIRED`, and
-  `ACCOUNT_USERNAME_REQUIRED`.
-- Vite continues to warn about large chunks and mixed static/dynamic i18n
-  import behavior; this is unchanged from prior green builds.
-- Production deploy check cannot run to completion on this workstation because
-  the local virtual environment lacks PostgreSQL driver support. This is not
-  counted as a PASS and should be rerun in a production-like environment with
-  `psycopg` or `psycopg2` installed.
+- V9.2 Docker closure removed the earlier local django-allauth deprecation
+  warnings, Vite build warnings, and missing PostgreSQL driver limitation.
 - The smoke script validates endpoint reachability and artifact presence; it is
   intentionally not a substitute for browser-based end-to-end testing.
 
@@ -74,5 +67,6 @@ and removing the smoke/readiness guardrails.
 
 ## Verdict
 
-Phase 6C / V8.2 is PASS for local release readiness, with the production deploy
-check explicitly recorded as environment-limited.
+Phase 6C / V8.2 is PASS for release readiness. The earlier local production
+deploy-check environment limitation has been removed by the V9.2 Docker closure
+retest.

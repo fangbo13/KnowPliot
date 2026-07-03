@@ -58,7 +58,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.docker
-    command: celery -A config worker -l info -c 4
+    command: celery -A config worker -l info -c 4 --uid=nobody --gid=nogroup
     volumes:
       - ./backend:/app
       - media_volume:/app/media

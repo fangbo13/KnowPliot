@@ -50,9 +50,8 @@ export default function LoginPage() {
     localStorage.setItem('ey-language', nextLang);
   };
 
-  const syncLanguage = async (pref?: string) => {
-    const { default: i18nModule } = await import('../i18n');
-    if (pref && pref !== i18nModule.language) i18nModule.changeLanguage(pref);
+  const syncLanguage = (pref?: string) => {
+    if (pref && pref !== i18n.language) i18n.changeLanguage(pref);
   };
 
   // NOTE: login auth data-flow preserved verbatim from the hardened V4.3 implementation.
@@ -75,7 +74,7 @@ export default function LoginPage() {
       const user = await profileResponse.json();
 
       login({ token: tokenData.access, user });
-      await syncLanguage(user.language_preference);
+      syncLanguage(user.language_preference);
     } catch (err: unknown) {
       const messageKey = err instanceof Error ? err.message : 'login_failed';
       setError(t(messageKey) || t('login_failed'));
@@ -108,7 +107,7 @@ export default function LoginPage() {
         return;
       }
       login({ token: data.access, user: data.user });
-      await syncLanguage(data.user?.language_preference);
+      syncLanguage(data.user?.language_preference);
     } catch {
       setError(t('register_failed'));
     } finally {
@@ -133,7 +132,7 @@ export default function LoginPage() {
         return;
       }
       login({ token: data.access, user: data.user });
-      await syncLanguage(data.user?.language_preference);
+      syncLanguage(data.user?.language_preference);
     } catch {
       setError(t('register_failed'));
     } finally {

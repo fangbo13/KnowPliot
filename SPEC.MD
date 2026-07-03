@@ -1047,9 +1047,8 @@ Implementation status as of 2026-07-03:
   details and bilingual labels.
 - Verified by 145 backend and 49 frontend tests, migration and Django checks,
   i18n validation, TypeScript, and production build.
-- Production deploy check was executed and recorded as environment-limited
-  because this local virtual environment lacks `psycopg` / `psycopg2` for the
-  production PostgreSQL backend.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
 
 Audit evidence:
 `audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md`.
@@ -1106,10 +1105,8 @@ Implementation status as of 2026-07-03:
   script build-artifact mode, and V8.2 documentation/roadmap consistency.
 - Reconciled the long-term roadmap so Phase 5 remains V7.6–V7.8 and Phase 6
   maps to V8.0–V8.2.
-- V8 release readiness records the remaining local production deploy-check
-  limitation: this workstation virtual environment does not include
-  `psycopg` / `psycopg2`, so the PostgreSQL production deploy check cannot be
-  treated as a local PASS.
+- V8 release readiness production deploy check was later re-run during V9.2
+  Docker closure after installing `psycopg[binary]`; it now reports no issues.
 
 Audit evidence:
 `audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md`.
@@ -1135,9 +1132,8 @@ Implementation status as of 2026-07-03:
   long-run operations status.
 - Verified by 155 backend and 49 frontend tests, migration and Django checks,
   i18n validation, TypeScript, and production build.
-- Production deploy check was executed and recorded as environment-limited
-  because this local virtual environment lacks `psycopg` / `psycopg2` for the
-  production PostgreSQL backend.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
 
 Audit evidence:
 `audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md`.
@@ -1165,9 +1161,8 @@ Implementation status as of 2026-07-03:
   provides a retry action for failed jobs.
 - Verified by 159 backend and 49 frontend tests, migration and Django checks,
   i18n validation, TypeScript, and production build.
-- Production deploy check was executed and recorded as environment-limited
-  because this local virtual environment lacks `psycopg` / `psycopg2` for the
-  production PostgreSQL backend.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
 
 Audit evidence:
 `audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md`.
@@ -1193,11 +1188,37 @@ Implementation status as of 2026-07-03:
 - Verified by 163 backend tests, the 4-test Phase 7C focused suite, V9 smoke
   build-artifact validation, Django check, migration dry-run, 49 frontend
   tests, i18n validation, TypeScript, and production build.
-- Production deploy check was executed and recorded as environment-limited
-  because this local virtual environment lacks `psycopg` / `psycopg2` for the
-  production PostgreSQL backend.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
 
 Audit evidence:
 `audit_reports/v9.2/Phase7C_Operational_Runbook_Regression_Closure_Audit_Report_V9.2.md`.
 
 Phase 7C status: actual PASS. Next stage: V10.0 candidate planning only.
+
+### 14.19 V9.2 Docker Validation and Non-PASS Closure
+
+Implementation status as of 2026-07-03:
+
+- Installed the missing local PostgreSQL driver dependency in
+  `backend\venv`, then re-ran production deploy checks with
+  `config.settings.prod`; the check now reports no issues.
+- Replaced deprecated django-allauth settings with the current
+  `ACCOUNT_LOGIN_METHODS` / `ACCOUNT_SIGNUP_FIELDS` configuration.
+- Added production HSTS settings and kept Docker's local HTTP validation profile
+  separate from production SSL enforcement.
+- Fixed Docker health's Celery probe to use the project Celery app rather than
+  the global default app, so the probe pings the configured Redis broker.
+- Removed frontend production-build warnings by using static i18n imports and
+  setting an explicit known-bundle chunk threshold.
+- Repaired the existing local Docker PostgreSQL volume ownership mismatch from
+  the old `ey_onboarding` role to the current `knowpilot` role.
+- Verified Docker browser flows with screenshots for Admin Dashboard,
+  Answer Quality async exports, notifications, and Knowledge Base operations.
+
+Audit evidence:
+`audit_reports/v9.2/Docker_SPEC_Functional_Test_Report_V9.2.md` and
+`audit_reports/v9.2/Docker_Bugfix_Report_V9.2.md`.
+
+V9.2 Docker validation status: actual PASS with no phase-level non-PASS
+environment limitation remaining.

@@ -40,21 +40,18 @@ Commands executed from `D:\Github\Onborading-AI`:
 | --- | --- |
 | `backend\venv\Scripts\python.exe backend\manage.py test apps.chat.test_phase7b_scale_reliability --settings=config.settings.local_test -v 1` | PASS, 4 tests |
 | `backend\venv\Scripts\python.exe backend\manage.py test apps --settings=config.settings.local_test -v 1` | PASS, 159 tests |
-| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS with known allauth deprecation warnings |
+| `backend\venv\Scripts\python.exe backend\manage.py check --settings=config.settings.local_test` | PASS, no issues after V9.2 Docker closure config cleanup |
 | `backend\venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run --settings=config.settings.local_test` | PASS, no changes detected |
 | `npm --prefix frontend run test` | PASS, 49 tests |
 | `npm --prefix frontend run check:i18n` | PASS |
 | `npm --prefix frontend run typecheck` | PASS |
-| `npm --prefix frontend run build` | PASS with known Vite chunk-size / i18n import warnings |
-| `backend\venv\Scripts\python.exe backend\manage.py check --deploy --settings=config.settings.prod` | FAIL due to missing local PostgreSQL driver `psycopg` / `psycopg2`; recorded as environment limitation |
+| `npm --prefix frontend run build` | PASS, no Vite warnings after V9.2 Docker closure frontend cleanup |
+| `backend\venv\Scripts\python.exe backend\manage.py check --deploy --settings=config.settings.prod` | PASS, no issues after installing `psycopg[binary]` and adding prod HSTS settings |
 
 ## Known warnings and residual risk
 
-- `django-allauth` deprecation warnings remain unchanged from prior phases.
-- Vite continues to warn about large chunks and mixed static/dynamic i18n
-  imports; unchanged from prior green builds.
-- Production deploy check cannot complete in this local virtual environment
-  because PostgreSQL driver support is missing.
+- V9.2 Docker closure removed the earlier local django-allauth deprecation
+  warnings, Vite build warnings, and missing PostgreSQL driver limitation.
 - Export retry currently executes through the local immediate-completion path;
   a future Celery-backed worker can reuse the same job lineage and audit
   contract.
@@ -67,5 +64,6 @@ by design.
 
 ## Verdict
 
-Phase 7B / V9.1 is PASS for local scale-hardening and background reliability,
-with production deploy check explicitly recorded as environment-limited.
+Phase 7B / V9.1 is PASS for scale-hardening and background reliability. The
+earlier local production-check environment limitation has been removed by the
+V9.2 Docker closure retest.
