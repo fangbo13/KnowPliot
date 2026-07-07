@@ -618,7 +618,7 @@ export default function AdminTemplatesPage() {
         </Space>
       </div>
 
-      <Card styles={{ body: { padding: 16 } }} style={{ marginBottom: 16, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+      <Card className="glass-panel section-enter" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
         <Space wrap size="middle">
           <Input.Search
             allowClear
@@ -733,12 +733,14 @@ export default function AdminTemplatesPage() {
         </Space>
       </Card>
 
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+      <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)', animationDelay: '0.1s' }}>
         <Table rowKey="id" loading={loading} dataSource={templates} columns={columns} pagination={false} size="middle" />
       </Card>
 
       {/* 1. Modal for space instantiation */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={t('create_space_from_template') || 'Create Space from Template'}
         open={open}
         onOk={handleCreateSpace}
@@ -814,6 +816,8 @@ export default function AdminTemplatesPage() {
 
       {/* 2. Modal for creating/editing templates */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={editingTemplate ? (t('admin_edit_template') || 'Edit Template') : (t('admin_create_template') || 'Create Template')}
         open={templateModalOpen}
         onOk={handleSaveTemplate}
@@ -961,6 +965,8 @@ export default function AdminTemplatesPage() {
 
       {/* 3. Modal for application history */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={`${t('admin_template_applications') || 'Template Applications'} - ${selectedAppTemplate?.name || ''}`}
         open={appsModalOpen}
         onCancel={() => setAppsModalOpen(false)}
@@ -1015,6 +1021,8 @@ export default function AdminTemplatesPage() {
 
       {/* 4. Modal for revision history */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={`${t('admin_template_revisions') || 'Template Revisions'} - ${selectedRevTemplate?.name || ''}`}
         open={revisionsModalOpen}
         onCancel={() => setRevisionsModalOpen(false)}
@@ -1082,6 +1090,8 @@ export default function AdminTemplatesPage() {
 
       {/* 5. Sub-modal for Revision Snapshot JSON */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={`${t('admin_template_revision_snapshot') || 'Revision Snapshot'} - v${selectedRevision?.version ?? ''}`}
         open={snapshotModalOpen}
         onCancel={() => setSnapshotModalOpen(false)}
@@ -1105,6 +1115,8 @@ export default function AdminTemplatesPage() {
 
       {/* 6. Modal for cloning templates */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={t('admin_clone_template') || 'Clone Template'}
         open={cloneModalOpen}
         onOk={handleCloneTemplate}

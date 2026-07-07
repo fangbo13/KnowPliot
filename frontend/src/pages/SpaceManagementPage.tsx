@@ -11,7 +11,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Card,
-  Table,
+  List,
   Button,
   Input,
   Select,
@@ -20,7 +20,6 @@ import {
   Space,
   Modal,
   Popconfirm,
-  Empty,
   message as antdMessage,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -181,85 +180,14 @@ export default function SpaceManagementPage() {
 
   if (!active) {
     return (
-      <div style={{ padding: 24 }}>
-        <Empty description={t('no_active_space') || 'No active space selected'} />
+      <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>{t('no_active_space') || 'No active space selected'}</div>
       </div>
     );
   }
 
-  const memberColumns = [
-    { title: t('member_email') || 'Email', dataIndex: 'user_email', key: 'email' },
-    {
-      title: t('member_role') || 'Role',
-      dataIndex: 'role',
-      key: 'role',
-      render: (r: SpaceRole, rec: SpaceMember) =>
-        canManage && rec.status === 'active' ? (
-          <Select
-            size="small"
-            value={r}
-            style={{ width: 160 }}
-            popupClassName="menu-pop-dropdown"
-            onChange={(v) => changeMemberRole(rec.user, v as SpaceRole)}
-            options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
-          />
-        ) : (
-          <Tag>{r}</Tag>
-        ),
-    },
-    {
-      title: t('member_status') || 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag>,
-    },
-    ...(canManage
-      ? [{
-          title: '',
-          key: 'member_actions',
-          render: (_: any, rec: SpaceMember) =>
-            rec.status === 'active' ? (
-              <Popconfirm
-                title={t('member_remove_confirm') || 'Remove this member?'}
-                onConfirm={() => removeMember(rec.user)}
-              >
-                <Button type="link" danger size="small">{t('remove') || 'Remove'}</Button>
-              </Popconfirm>
-            ) : null,
-        }]
-      : []),
-  ];
 
-  const inviteColumns = [
-    { title: t('access_code') || 'Code', dataIndex: 'code_prefix', key: 'code', render: (p: string) => `${p}…` },
-    { title: t('member_role') || 'Role', dataIndex: 'role', key: 'role', render: (r: string) => <Tag>{r}</Tag> },
-    {
-      title: t('invite_uses') || 'Uses',
-      key: 'uses',
-      render: (_: any, rec: InviteCode) => `${rec.used_count}${rec.max_uses ? ` / ${rec.max_uses}` : ''}`,
-    },
-    {
-      title: t('member_status') || 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (s: string) => <Tag color={s === 'active' ? 'green' : 'red'}>{s}</Tag>,
-    },
-    {
-      title: '',
-      key: 'actions',
-      render: (_: any, rec: InviteCode) =>
-        rec.status === 'active' ? (
-          <Popconfirm
-            title={t('invite_revoke_confirm') || 'Revoke this code?'}
-            onConfirm={() => revokeInvite(rec.id)}
-          >
-            <Button type="link" danger size="small">
-              {t('revoke') || 'Revoke'}
-            </Button>
-          </Popconfirm>
-        ) : null,
-    },
-  ];
   return (
     <div className="page" style={{ background: 'transparent' }}>
       <div className="page-inner">
@@ -276,7 +204,8 @@ export default function SpaceManagementPage() {
             </span>
           }
           styles={{ body: { padding: '28px' } }}
-          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
         >
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <div>
@@ -325,7 +254,8 @@ export default function SpaceManagementPage() {
             </span>
           }
           styles={{ body: { padding: '24px' } }}
-          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
           extra={<Button icon={<ReloadOutlined />} size="middle" onClick={refresh} style={{ borderRadius: 8 }} />}
         >
           {canManage && (
@@ -357,13 +287,45 @@ export default function SpaceManagementPage() {
               </Button>
             </div>
           )}
-          <Table
-            rowKey="id"
-            loading={loading}
+          <List
+            grid={{ gutter: 16, xs: 1, sm: 1, md: 2, lg: 2, xl: 3, xxl: 3 }}
             dataSource={members}
-            columns={memberColumns}
-            pagination={false}
-            size="middle"
+            loading={loading}
+            renderItem={(rec, i) => (
+              <List.Item className="stagger-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
+                <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <Text strong style={{ fontSize: 14 }}>{rec.user_email}</Text>
+                      <Tag color={rec.status === 'active' ? 'green' : 'default'}>{rec.status}</Tag>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      {canManage && rec.status === 'active' ? (
+                        <Select
+                          size="small"
+                          value={rec.role}
+                          style={{ width: 140 }}
+                          popupClassName="menu-pop-dropdown"
+                          onChange={(v) => changeMemberRole(rec.user, v as SpaceRole)}
+                          options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+                        />
+                      ) : (
+                        <Tag>{rec.role}</Tag>
+                      )}
+                      {canManage && rec.status === 'active' && (
+                        <Popconfirm
+                          title={t('member_remove_confirm') || 'Remove this member?'}
+                          onConfirm={() => removeMember(rec.user)}
+                        >
+                          <Button type="text" danger size="small">{t('remove') || 'Remove'}</Button>
+                        </Popconfirm>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              </List.Item>
+            )}
+            locale={{ emptyText: <div style={{ padding: 40 }}><div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div><div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_members') || '暂无成员'}</div></div> }}
           />
         </Card>
 
@@ -375,20 +337,47 @@ export default function SpaceManagementPage() {
               </span>
             }
             styles={{ body: { padding: '24px' } }}
-            style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+            className="glass-panel hover-lift"
+            style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
             extra={
               <Button type="primary" icon={<PlusOutlined />} size="middle" onClick={() => setInviteOpen(true)} style={{ borderRadius: 8 }}>
                 {t('generate_code') || 'Generate code'}
               </Button>
             }
           >
-            <Table
-              rowKey="id"
-              loading={loading}
+            <List
+              grid={{ gutter: 16, xs: 1, sm: 1, md: 2, lg: 2, xl: 3, xxl: 3 }}
               dataSource={invites}
-              columns={inviteColumns}
-              pagination={false}
-              size="middle"
+              loading={loading}
+              renderItem={(rec, i) => (
+                <List.Item className="stagger-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
+                  <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text strong code style={{ fontSize: 15 }}>{rec.code_prefix}…</Text>
+                        <Tag color={rec.status === 'active' ? 'green' : 'red'}>{rec.status}</Tag>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Space>
+                          <Tag>{rec.role}</Tag>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{t('invite_uses') || 'Uses'}: {rec.used_count}{rec.max_uses ? ` / ${rec.max_uses}` : ''}</Text>
+                        </Space>
+                        {rec.status === 'active' && (
+                          <Popconfirm
+                            title={t('invite_revoke_confirm') || 'Revoke this code?'}
+                            onConfirm={() => revokeInvite(rec.id)}
+                          >
+                            <Button type="text" danger size="small">
+                              {t('revoke') || 'Revoke'}
+                            </Button>
+                          </Popconfirm>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                </List.Item>
+              )}
+              locale={{ emptyText: <div style={{ padding: 40 }}><div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div><div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_invites') || '暂无邀请码'}</div></div> }}
             />
           </Card>
         )}

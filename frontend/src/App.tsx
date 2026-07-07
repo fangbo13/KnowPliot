@@ -21,6 +21,7 @@ import AdminAuditPage from './pages/admin/AdminAuditPage';
 import AdminTemplatesPage from './pages/admin/AdminTemplatesPage';
 import AdminQualityPage from './pages/admin/AdminQualityPage';
 import LoginPage from './auth/LoginPage';
+import ResetPasswordPage from './auth/ResetPasswordPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthProvider';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -73,6 +74,7 @@ function App() {
         path="/login"
         element={isAuthenticated ? <Navigate to="/chat" /> : <LoginPage />}
       />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route
         path="/"
         element={

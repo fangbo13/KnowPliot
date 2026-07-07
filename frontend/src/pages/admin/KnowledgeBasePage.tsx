@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Upload, message, Modal, Empty } from 'antd';
+import { Card, Table, Button, Space, Upload, message, Modal } from 'antd';
 import {
   InboxOutlined,
   DownloadOutlined,
@@ -193,6 +193,8 @@ export default function KnowledgeBasePage() {
             icon={<ReloadOutlined />}
             onClick={() => handleReindex(record.id)}
             disabled={record.status === 'processing'}
+            aria-label={t('reindex')}
+            title={t('reindex')}
             style={{ borderRadius: 6 }}
           />
           <Button
@@ -217,7 +219,8 @@ export default function KnowledgeBasePage() {
         </div>
         <Card
           styles={{ body: { padding: '28px 28px 24px' } }}
-          style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ borderRadius: 'var(--radius-lg)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
             <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
@@ -239,6 +242,7 @@ export default function KnowledgeBasePage() {
             }}
             accept={ALLOWED_DOCUMENT_EXTENSIONS.join(',')}
             beforeUpload={beforeUpload}
+            showUploadList={false}
             onChange={(info) => {
               if (info.file.status === 'done') {
                 message.success(t('upload_success'));
@@ -248,9 +252,11 @@ export default function KnowledgeBasePage() {
               }
             }}
           >
-            <Button icon={<UploadOutlined />}>{t('upload')}</Button>
+            <Button type="primary" icon={<UploadOutlined />} style={{ borderRadius: 8 }} className="btn-press">
+              {t('upload')}
+            </Button>
           </Upload>
-          <Button icon={<ReloadOutlined />} onClick={loadDocuments}>
+          <Button icon={<ReloadOutlined />} onClick={loadDocuments} style={{ borderRadius: 8 }} className="btn-press">
             {t('refresh')}
           </Button>
         </Space>
@@ -265,14 +271,15 @@ export default function KnowledgeBasePage() {
         scroll={{ x: 'max-content' }}
         locale={{
           emptyText: (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={t('no_documents')}
-            />
+            <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
+              <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+              <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('no_documents') || 'No documents'}</div>
+            </div>
           ),
         }}
       />
-    </Card>
-    </div></div>
+        </Card>
+      </div>
+    </div>
   );
 }

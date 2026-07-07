@@ -283,18 +283,43 @@ export default function AdminDashboardPage() {
           </span>
         );
       },
+
+
     },
   ];
 
   return (
     <div className="page" style={{ background: 'transparent' }}>
-      <div className="page-head" style={{ marginBottom: 32 }}>
+      <div className="page-head" style={{ marginBottom: 24 }}>
         <h1 className="page-title">{t('admin_dashboard') || 'Admin Dashboard'}</h1>
       </div>
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      
+      {systemMetrics && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0s' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Users</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.users.total}</div>
+          </Card>
+          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.1s' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Users</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{systemMetrics.users.active}</div>
+          </Card>
+          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.2s' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Documents</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.documents.total}</div>
+          </Card>
+          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.3s' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generated Tokens</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.model_api.total_tokens.toLocaleString()}</div>
+          </Card>
+        </div>
+      )}
+
+      <div className="section-enter" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start', animationDelay: '0.4s' }}>
         {/* Left: User list table */}
         <Card
-          style={{ flex: 2, minWidth: 320, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ flex: 2, minWidth: 320, borderRadius: 'var(--radius-lg)' }}
           styles={{ body: { padding: '24px' } }}
           title={
             <Space size="middle">
@@ -323,7 +348,8 @@ export default function AdminDashboardPage() {
 
         {/* Right: System status panel */}
         <Card
-          style={{ flex: 1, minWidth: 280, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ flex: 1, minWidth: 280, borderRadius: 'var(--radius-lg)' }}
           styles={{ body: { padding: '24px' } }}
           title={
             <Space size="middle">
@@ -359,30 +385,6 @@ export default function AdminDashboardPage() {
                 {renderHealthTag(systemHealth.services.llm.status)}
               </Descriptions.Item>
               {Object.keys(READINESS_SERVICE_LABELS).map(renderReadinessDetail)}
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Total Users</span>}>
-                <Text strong style={{ color: 'var(--color-text)' }}>{systemMetrics.users.total}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Active Users</span>}>
-                <Text strong style={{ color: 'var(--color-success)' }}>{systemMetrics.users.active}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Documents</span>}>
-                <Text strong>{systemMetrics.documents.total}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Stale / Failed</span>}>
-                <Text strong>{systemMetrics.documents.stale} / {systemMetrics.documents.failed}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>No-evidence rate</span>}>
-                <Text strong>{(systemMetrics.quality.no_evidence_rate * 100).toFixed(1)}%</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Model API errors</span>}>
-                <Text strong>{(systemMetrics.model_api.error_rate * 100).toFixed(1)}%</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Generated tokens</span>}>
-                <Text strong>{systemMetrics.model_api.total_tokens}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Unused / high-use docs</span>}>
-                <Text strong>{systemMetrics.knowledge_quality.unused_documents} / {systemMetrics.knowledge_quality.high_usage_documents}</Text>
-              </Descriptions.Item>
             </Descriptions>
           ) : (
             <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
@@ -403,11 +405,12 @@ export default function AdminDashboardPage() {
         </Card>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24 }}>
+      <div className="section-enter" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24, animationDelay: '0.5s' }}>
         <Card
           title="Ingestion queue"
           extra={<Button icon={<ReloadOutlined />} onClick={loadSystemStatus}>Refresh</Button>}
-          style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)' }}
+          className="glass-panel hover-lift"
+          style={{ borderRadius: 'var(--radius-lg)' }}
         >
           <Table<IngestionJob>
             rowKey="id"
@@ -442,7 +445,8 @@ export default function AdminDashboardPage() {
 
         <Card
           title="Knowledge quality"
-          style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)' }}
+          className="glass-panel hover-lift"
+          style={{ borderRadius: 'var(--radius-lg)' }}
         >
           <Table<DocumentQuality>
             rowKey="id"

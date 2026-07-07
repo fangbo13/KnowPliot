@@ -64,10 +64,13 @@ export default function AdminAuditPage() {
   ];
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_audit_title')}</h1>
-        <Space wrap>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 className="page-title">{t('admin_audit_title')}</h1>
+        </div>
+        <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+          <Space wrap style={{ marginBottom: 16 }}>
           <Input.Search placeholder="action e.g. admin_code_register" allowClear value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)} onSearch={refresh} style={{ width: 280 }} />
           <Select
@@ -118,11 +121,10 @@ export default function AdminAuditPage() {
             style={{ width: 145 }}
           />
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
-        </Space>
+          </Space>
+          <Table rowKey="id" loading={loading} dataSource={logs} columns={columns} pagination={{ pageSize: 15 }} size="middle" scroll={{ x: 'max-content' }} />
+        </Card>
       </div>
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
-        <Table rowKey="id" loading={loading} dataSource={logs} columns={columns} pagination={{ pageSize: 15 }} size="middle" scroll={{ x: 'max-content' }} />
-      </Card>
     </div>
   );
 }

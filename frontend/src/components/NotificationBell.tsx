@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Badge, Popover, Spin, Empty, Button } from 'antd';
+import { Badge, Popover, Spin, Button } from 'antd';
 import { BellOutlined, CheckOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -101,12 +101,16 @@ export default function NotificationBell() {
           <div style={{ padding: 32, textAlign: 'center' }}><Spin /></div>
         ) : items.length === 0 ? (
           <div style={{ padding: '28px 12px' }}>
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications_empty')} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-placeholder)' }}>
+              <div style={{ fontFamily: 'var(--font-family-serif)', fontSize: 32, opacity: 0.5, marginBottom: 12 }}>K</div>
+              <span>{t('notifications_empty')}</span>
+            </div>
           </div>
         ) : (
           items.map((it) => (
             <button
               key={it.id}
+              className="hover-lift btn-press"
               onClick={() => handleItem(it)}
               style={{
                 display: 'flex', gap: 10, width: '100%', textAlign: 'left',
@@ -157,9 +161,10 @@ export default function NotificationBell() {
       trigger="click"
       placement="bottomRight"
       content={panel}
+      overlayClassName="ambient-glow section-enter"
       styles={{ body: { padding: 0, borderRadius: 14, overflow: 'hidden' } }}
     >
-      <button className="icon-btn" aria-label={t('notifications_aria')}>
+      <button className={`icon-btn hover-lift btn-press ${count > 0 ? 'ambient-glow' : ''}`} aria-label={t('notifications_aria')}>
         <Badge count={count} size="small" offset={[-1, 1]}>
           <BellOutlined />
         </Badge>

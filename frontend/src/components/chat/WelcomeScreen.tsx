@@ -71,8 +71,8 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
 
   return (
     <div className="welcome">
-      <div className="welcome-head">
-        <div className="welcome-mark">K</div>
+      <div className="welcome-head section-enter">
+        <div className="welcome-mark ambient-glow">K</div>
         <h1 className="welcome-greeting">{t('welcome_greeting', { defaultValue: 'How can I help with your onboarding?' })}</h1>
         <p className="welcome-sub">{t('welcome_tip')}</p>
       </div>
@@ -94,10 +94,11 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
       />
 
       <div className="welcome-suggest-grid">
-        {activeQuickActions.map((action) => (
+        {activeQuickActions.map((action, index) => (
           <button
             key={action.label}
-            className="welcome-suggest"
+            className="welcome-suggest stagger-fade-in hover-lift btn-press"
+            style={{ animationDelay: `${0.1 + index * 0.05}s` }}
             onClick={() => onQuickAction(action.question)}
             aria-label={`${action.label}: ${action.question}`}
           >

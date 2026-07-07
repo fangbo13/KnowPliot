@@ -177,7 +177,7 @@ export default function ChatPageContainer() {
             justifyContent: 'center',
             pointerEvents: aiStatusText ? 'auto' : 'none'
           }}>
-            <div className="gemini-status-indicator">
+            <div className="gemini-status-indicator" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.6))' }}>
               <span className="gemini-status-spinner" />
               <span>{aiStatusText}</span>
             </div>
@@ -237,15 +237,21 @@ export default function ChatPageContainer() {
         </div>
 
         {isLoadingMessages && messages.length === 0 && (
-          <div className="skeleton-msg">
-            {[80, 55, 70].map((w, i) => (
-              <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: i === 0 ? 20 : 14 }} />
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px 0' }}>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-end', width: '60%', padding: '14px 18px', borderRadius: 20 }}>
+              {[100, 85].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-start', width: '85%', padding: '14px 18px', borderRadius: 20 }}>
+              {[100, 100, 65].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-end', width: '40%', padding: '14px 18px', borderRadius: 20 }}>
+              {[90].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
           </div>
         )}
 
         {sendError && (
-          <div className="chat-error" role="alert">
+          <div className="chat-error section-enter" role="alert">
             <WarningOutlined className="chat-error-icon" />
             <div className="chat-error-body">
               <div className="chat-error-title">{t('error_title') || 'Error'}</div>
@@ -273,7 +279,7 @@ export default function ChatPageContainer() {
           />
 
           {showScrollFab && (
-            <button className="scroll-fab" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'}>
+            <button className="scroll-fab section-enter" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'} style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.7))' }}>
               <ArrowDownOutlined />{t('new_messages') || 'Latest'}
             </button>
           )}
@@ -290,7 +296,7 @@ export default function ChatPageContainer() {
           justifyContent: 'center',
           pointerEvents: aiStatusText ? 'auto' : 'none'
         }}>
-          <div className="gemini-status-indicator">
+          <div className="gemini-status-indicator" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.6))' }}>
             <span className="gemini-status-spinner" />
             <span>{aiStatusText}</span>
           </div>

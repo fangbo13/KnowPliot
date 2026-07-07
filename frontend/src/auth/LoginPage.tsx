@@ -5,7 +5,8 @@
  */
 
 import { useState } from 'react';
-import { Form, Input, Button, Alert, Tabs, Select } from 'antd';
+import { motion } from 'framer-motion';
+import { Form, Input, Button, Alert, Tabs, Select, Modal } from 'antd';
 import {
   MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined,
   SunOutlined, MoonOutlined, UserAddOutlined, SafetyCertificateOutlined, TeamOutlined,
@@ -14,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { useTheme } from '../hooks/useTheme';
+import { accountApi } from '../api/account';
 
 // Service Line options — values match backend User.SERVICE_LINE_CHOICES.
 const SERVICE_LINES = ['assurance', 'consulting', 'tax', 'strategy_transactions', 'core'] as const;
@@ -43,6 +45,10 @@ export default function LoginPage() {
   const [info, setInfo] = useState('');
   const [activeTab, setActiveTab] = useState('signin');
   const [form] = Form.useForm();
+  const [mfaChallenge, setMfaChallenge] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
 
   const toggleLanguage = () => {
     const nextLang = i18n.language.startsWith('zh') ? 'en' : 'zh';
@@ -66,6 +72,10 @@ export default function LoginPage() {
       });
       if (!response.ok) throw new Error('login_failed');
       const tokenData = await response.json();
+      if (tokenData.mfa_required) {
+        setMfaChallenge(tokenData.challenge);
+        return;
+      }
 
       const profileResponse = await fetch('/api/v1/auth/me/', {
         headers: { Authorization: `Bearer ${tokenData.access}` },
@@ -78,6 +88,35 @@ export default function LoginPage() {
     } catch (err: unknown) {
       const messageKey = err instanceof Error ? err.message : 'login_failed';
       setError(t(messageKey) || t('login_failed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const completeMfa = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const tokenData = await accountApi.completeMfa(mfaChallenge, mfaCode);
+      login({ token: tokenData.access, user: tokenData.user });
+      syncLanguage(tokenData.user?.language_preference);
+      setMfaChallenge('');
+      setMfaCode('');
+    } catch {
+      setError(t('login_failed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestReset = async () => {
+    setLoading(true);
+    try {
+      await accountApi.requestPasswordReset(resetEmail);
+      setResetOpen(false);
+      setInfo(t('password_reset_sent'));
+    } catch {
+      setError(t('save_error'));
     } finally {
       setLoading(false);
     }
@@ -148,6 +187,7 @@ export default function LoginPage() {
   const confirmPasswordField = (
     <Form.Item
       name="confirm"
+      className="stagger-fade-in" style={{ animationDelay: '0.4s' }}
       label={t('confirm_password_label')}
       dependencies={['password']}
       rules={[
@@ -185,16 +225,21 @@ export default function LoginPage() {
             </Button>
           </div>
           <Form form={form} layout="vertical" size="large" onFinish={handleLogin} requiredMark={false} validateTrigger="onChange">
-            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
-              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" />
+            <Form.Item name="email" label={t('email_label')} className="stagger-fade-in" style={{ animationDelay: '0.1s' }} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="password" label={t('password_label')} rules={[{ required: true, message: t('validation_password_required') }]}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="current-password" />
+            <Form.Item name="password" label={t('password_label')} className="stagger-fade-in" style={{ animationDelay: '0.2s' }} rules={[{ required: true, message: t('validation_password_required') }]}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="current-password" className="input-focus-float" />
             </Form.Item>
-            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
-              <Button type="primary" htmlType="submit" icon={<LoginOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
-                {t('sign_in')}
-              </Button>
+            <Button type="link" onClick={() => setResetOpen(true)} className="stagger-fade-in" style={{ padding: 0, marginBottom: 8, animationDelay: '0.3s' }}>
+              {t('forgot_password')}
+            </Button>
+            <Form.Item className="stagger-fade-in" style={{ marginTop: 12, marginBottom: 0, animationDelay: '0.4s' }}>
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Button type="primary" htmlType="submit" icon={<LoginOutlined />} loading={loading} block className="login-btn-premium hover-lift btn-press" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+                  {t('sign_in')}
+                </Button>
+              </motion.div>
             </Form.Item>
           </Form>
         </div>
@@ -206,24 +251,27 @@ export default function LoginPage() {
       children: (
         <div className="login-input-wrapper">
           <Form layout="vertical" size="large" onFinish={handleRegister} requiredMark={false} validateTrigger="onBlur">
-            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
-              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" />
+            <Form.Item name="email" label={t('email_label')} className="stagger-fade-in" style={{ animationDelay: '0.1s' }} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="service_line" label={t('service_line_label')} rules={[{ required: true, message: t('validation_service_line_required') }]}>
+            <Form.Item name="service_line" label={t('service_line_label')} className="stagger-fade-in" style={{ animationDelay: '0.2s' }} rules={[{ required: true, message: t('validation_service_line_required') }]}>
               <Select
                 placeholder={t('service_line_placeholder')}
                 suffixIcon={<TeamOutlined />}
                 options={SERVICE_LINES.map((sl) => ({ value: sl, label: t(`sl_${sl}`) }))}
+                className="input-focus-float"
               />
             </Form.Item>
-            <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" />
+            <Form.Item name="password" label={t('password_label')} className="stagger-fade-in" style={{ animationDelay: '0.3s' }} rules={passwordRules}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
             </Form.Item>
             {confirmPasswordField}
-            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
-              <Button type="primary" htmlType="submit" icon={<UserAddOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
-                {t('create_account')}
-              </Button>
+            <Form.Item className="stagger-fade-in" style={{ marginTop: 12, marginBottom: 0, animationDelay: '0.5s' }}>
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Button type="primary" htmlType="submit" icon={<UserAddOutlined />} loading={loading} block className="login-btn-premium hover-lift btn-press" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+                  {t('create_account')}
+                </Button>
+              </motion.div>
             </Form.Item>
           </Form>
         </div>
@@ -236,20 +284,22 @@ export default function LoginPage() {
         <div className="login-input-wrapper">
           <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 18px', fontSize: 13 }}>{t('admin_register_subtitle')}</p>
           <Form layout="vertical" size="large" onFinish={handleAdminRegister} requiredMark={false} validateTrigger="onBlur">
-            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
-              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" />
+            <Form.Item name="email" label={t('email_label')} className="stagger-fade-in" style={{ animationDelay: '0.1s' }} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+              <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="code" label={t('admin_code_label')} rules={[{ required: true, message: t('validation_code_required') }]}>
-              <Input prefix={<SafetyCertificateOutlined />} placeholder={t('admin_code_placeholder')} autoComplete="off" />
+            <Form.Item name="code" label={t('admin_code_label')} className="stagger-fade-in" style={{ animationDelay: '0.2s' }} rules={[{ required: true, message: t('validation_code_required') }]}>
+              <Input prefix={<SafetyCertificateOutlined />} placeholder={t('admin_code_placeholder')} autoComplete="off" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" />
+            <Form.Item name="password" label={t('password_label')} className="stagger-fade-in" style={{ animationDelay: '0.3s' }} rules={passwordRules}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
             </Form.Item>
             {confirmPasswordField}
-            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
-              <Button type="primary" htmlType="submit" icon={<SafetyCertificateOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
-                {t('register_admin_btn')}
-              </Button>
+            <Form.Item className="stagger-fade-in" style={{ marginTop: 12, marginBottom: 0, animationDelay: '0.5s' }}>
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Button type="primary" htmlType="submit" icon={<SafetyCertificateOutlined />} loading={loading} block className="login-btn-premium hover-lift btn-press" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+                  {t('register_admin_btn')}
+                </Button>
+              </motion.div>
             </Form.Item>
           </Form>
         </div>
@@ -263,7 +313,11 @@ export default function LoginPage() {
     : activeTab === 'register' ? t('register_subtitle') : t('admin_register_subtitle');
 
   return (
-    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--color-bg-body)', position: 'relative' }}>
+    <div className={isDark ? 'gemini-mesh-bg' : 'gemini-mesh-bg-light'} style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, position: 'relative' }}>
+      <style>{`
+        .input-focus-float { transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out); }
+        .input-focus-float:focus-within, .input-focus-float:hover { transform: translateY(-0.5px); }
+      `}</style>
       <div style={{ position: 'absolute', top: 24, right: 24, display: 'flex', gap: 12, zIndex: 1000 }}>
         <Button
           shape="circle"
@@ -280,14 +334,16 @@ export default function LoginPage() {
           style={{ border: '1px solid var(--color-border-secondary)', background: 'var(--color-bg-container)' }}
         />
       </div>
-      <div
+      <motion.div
+        className="glass-panel"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: [0.175, 0.885, 0.32, 1.275] }}
         style={{
           display: 'flex', flexDirection: isNarrow ? 'column' : 'row',
           width: '100%', maxWidth: 940, minHeight: isNarrow ? 'auto' : 540,
           borderRadius: 24, overflow: 'hidden',
-          boxShadow: 'var(--shadow-xl)', background: 'var(--color-bg-container)',
-          border: '1px solid var(--color-border-secondary)',
-          animation: 'softFadeInUp var(--dur-slow) var(--ease-out)',
+          boxShadow: 'var(--shadow-xl)',
         }}
       >
         {/* Brand panel — warm espresso editorial */}
@@ -295,7 +351,7 @@ export default function LoginPage() {
           <div style={{
             flex: '0 0 400px', position: 'relative', overflow: 'hidden',
             padding: 48, display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            background: 'linear-gradient(165deg, #2C2722 0%, #1B1815 100%)', color: '#F3EFE6',
+            background: 'linear-gradient(165deg, rgba(44,39,34,0.6) 0%, rgba(27,24,21,0.6) 100%)', color: '#F3EFE6',
           }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'var(--gradient-accent)' }} />
             <div style={{
@@ -352,8 +408,21 @@ export default function LoginPage() {
             items={tabItems}
             destroyOnHidden
           />
+          <Modal open={Boolean(mfaChallenge)} title={t('mfa_challenge_title')}
+            onCancel={() => setMfaChallenge('')} onOk={completeMfa} confirmLoading={loading}
+            styles={{ mask: { backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' } }}
+            className="section-enter"
+          >
+            <Input value={mfaCode} onChange={(event) => setMfaCode(event.target.value)}
+              autoComplete="one-time-code" placeholder={t('mfa_code')} className="input-focus-float" />
+          </Modal>
+          <Modal open={resetOpen} title={t('forgot_password')}
+            onCancel={() => setResetOpen(false)} onOk={requestReset} confirmLoading={loading}>
+            <Input value={resetEmail} onChange={(event) => setResetEmail(event.target.value)}
+              autoComplete="email" placeholder={t('email_placeholder')} />
+          </Modal>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

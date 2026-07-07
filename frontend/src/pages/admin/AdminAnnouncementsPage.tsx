@@ -90,20 +90,21 @@ export default function AdminAnnouncementsPage() {
           : [];
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_announcements_title')}</h1>
-        <Space>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 className="page-title">{t('admin_announcements_title')}</h1>
+          <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)} style={{ borderRadius: 8 }}>{t('admin_publish')}</Button>
         </Space>
       </div>
 
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
-        <Table rowKey="id" loading={loading} dataSource={items} columns={columns} pagination={false} size="middle" />
+      <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+        <Table rowKey="id" loading={loading} dataSource={items} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 
-      <Modal title={t('admin_publish')} open={open} onOk={publish} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('admin_publish')}>
+      <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_publish')} open={open} onOk={publish} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('admin_publish')}>
         <Space direction="vertical" style={{ width: '100%', padding: '12px 0' }} size="middle">
           <Input placeholder={t('kb_title') || 'Title'} value={title} onChange={(e) => setTitle(e.target.value)} />
           <Input.TextArea rows={4} placeholder="Body" value={body} onChange={(e) => setBody(e.target.value)} />
@@ -128,6 +129,7 @@ export default function AdminAnnouncementsPage() {
           )}
         </Space>
       </Modal>
+      </div>
     </div>
   );
 }

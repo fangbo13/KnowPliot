@@ -36,6 +36,9 @@
 | V10.0 / Phase 8A | Answer quality and evaluation | Single-space hybrid retrieval, explainable ranking, confidence/refusal policy, deterministic evaluation | `audit_reports/v10.0/Phase8A_Answer_Quality_Evaluation_Audit_Report_V10.0.md` |
 | V10.1 / Phase 8B | Template catalog and knowledge packs | Categories/tags, explainable recommendations, revision diff/rollback, isolated asset cloning | `audit_reports/v10.1/Phase8B_Template_Knowledge_Pack_Audit_Report_V10.1.md` |
 | V10.2 / Phase 8C | Accessible product closure | Pinned/exportable sessions, mobile citations, WCAG keyboard/screen-reader/reduced-motion closure | `audit_reports/v10.2/Phase8C_Accessibility_Product_Closure_Audit_Report_V10.2.md` |
+| V11.0 / Phase 9A | Account security and preferences | Password reset/change, server-side session revocation, TOTP MFA, governed preferences | `audit_reports/v11.0/Phase9A_Account_Security_User_Preferences_Audit_Report_V11.0.md` |
+| V11.1 / Phase 9B | Scoped administration lifecycle | Organization/business-line lifecycle, access requests, scoped assignments, isolated space cloning | `audit_reports/v11.1/Phase9B_Scoped_Administration_Lifecycle_Audit_Report_V11.1.md` |
+| V11.2 / Phase 9C | Model and retention governance | Secret-safe model profiles, inherited policy revisions, safe retention execution | `audit_reports/v11.2/Phase9C_Model_Governance_Retention_Audit_Report_V11.2.md` |
 
 ## Dependency Order
 

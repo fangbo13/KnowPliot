@@ -193,8 +193,8 @@ export default function AdminQualityPage() {
       key: 'sla',
       render: (_, row) => (
         isSlaOverdue(row)
-          ? <Tag color="red">{t('quality_sla_overdue')}</Tag>
-          : <Tag>{t('quality_sla_ok')}</Tag>
+          ? <Tag color="error" style={{ borderRadius: 4, fontWeight: 500, padding: '2px 8px', border: '1px solid #ffccc7' }}>{t('quality_sla_overdue')}</Tag>
+          : <Tag style={{ borderRadius: 4, padding: '2px 8px' }}>{t('quality_sla_ok')}</Tag>
       ),
     },
     {
@@ -221,36 +221,36 @@ export default function AdminQualityPage() {
   ], [t, reviews]);
 
   return (
-    <div>
-      <Space direction="vertical" size={18} style={{ width: '100%' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>{t('admin_nav_quality')}</h1>
-          <p style={{ color: 'var(--color-text-secondary)', marginTop: 6 }}>{t('quality_page_subtitle')}</p>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 32 }}>
+          <h1 className="page-title">{t('admin_nav_quality')}</h1>
+          <p className="page-subtitle" style={{ marginTop: 8 }}>{t('quality_page_subtitle')}</p>
         </div>
 
         {report && (
-          <Space wrap>
-            <Card size="small">
-              <strong>{report.feedback.total}</strong>
-              <div>{t('quality_feedback_total')}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0s' }} styles={{ body: { padding: '20px' } }}>
+              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_feedback_total')}</div>
+              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{report.feedback.total}</div>
             </Card>
-            <Card size="small">
-              <strong>{Math.round(report.feedback.negative_rate * 100)}%</strong>
-              <div>{t('quality_negative_rate')}</div>
+            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.1s' }} styles={{ body: { padding: '20px' } }}>
+              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_negative_rate')}</div>
+              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{Math.round(report.feedback.negative_rate * 100)}%</div>
             </Card>
-            <Card size="small">
-              <strong>{report.reviews.pending + report.reviews.in_review}</strong>
-              <div>{t('quality_open_reviews')}</div>
+            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.2s' }} styles={{ body: { padding: '20px' } }}>
+              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_open_reviews')}</div>
+              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{report.reviews.pending + report.reviews.in_review}</div>
             </Card>
-            <Card size="small">
-              <strong>{report.knowledge_gaps.open + report.knowledge_gaps.in_progress}</strong>
-              <div>{t('quality_open_gaps')}</div>
+            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.3s' }} styles={{ body: { padding: '20px' } }}>
+              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_open_gaps')}</div>
+              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-warning)' }}>{report.knowledge_gaps.open + report.knowledge_gaps.in_progress}</div>
             </Card>
-          </Space>
+          </div>
         )}
 
-        <Card>
-          <Space wrap style={{ marginBottom: 14 }}>
+        <Card className="glass-panel section-enter" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.4s' }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
             <Select
               allowClear
               placeholder={t('quality_status')}
@@ -275,18 +275,28 @@ export default function AdminQualityPage() {
               onChange={setSlaFilter}
               options={[{ value: 'overdue', label: t('quality_sla_overdue') }]}
             />
-            <Button onClick={load}>{t('refresh')}</Button>
-            <Button onClick={loadReport}>{t('quality_refresh_report')}</Button>
-            <Button onClick={() => downloadDataset('feedback')}>{t('quality_export_feedback')}</Button>
-            <Button onClick={() => downloadDataset('gaps')}>{t('quality_export_gaps')}</Button>
-          </Space>
+            <div style={{ flex: 1 }} />
+            <Space>
+              <Button onClick={load} className="btn-press">{t('refresh')}</Button>
+              <Button onClick={loadReport} className="btn-press">{t('quality_refresh_report')}</Button>
+              <Button onClick={() => downloadDataset('feedback')} className="btn-press">{t('quality_export_feedback')}</Button>
+              <Button onClick={() => downloadDataset('gaps')} className="btn-press">{t('quality_export_gaps')}</Button>
+            </Space>
+          </div>
           <Table
             rowKey="id"
             loading={loading}
             columns={columns}
             dataSource={filteredReviews}
             pagination={{ pageSize: 10 }}
-            locale={{ emptyText: <Empty description={t('quality_empty')} /> }}
+            locale={{
+              emptyText: (
+                <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
+                  <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+                  <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('quality_empty')}</div>
+                </div>
+              ),
+            }}
           />
         </Card>
 
@@ -376,7 +386,7 @@ export default function AdminQualityPage() {
             </Space>
           )}
         </Card>
-      </Space>
+      </div>
 
       <Drawer
         title={t('quality_detail')}

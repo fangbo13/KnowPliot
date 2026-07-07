@@ -12,6 +12,7 @@ import {
   LikeOutlined, DislikeOutlined, FlagOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import { useEffect, useRef, useState, memo } from 'react';
+import { motion } from 'framer-motion';
 import type { Message, Citation } from '../../store/chatStore';
 import { chatApi } from '../../api/chat';
 import ErrorBoundary from '../ErrorBoundary';
@@ -188,14 +189,24 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
 
   if (isUser) {
     return (
-      <div className="msg-row user">
+      <motion.div 
+        className="msg-row user"
+        initial={{ opacity: 0, y: 15, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
+      >
         <div className="msg-bubble user">{message.content}</div>
-      </div>
+      </motion.div>
     );
   }
 
   return (
-    <div className="msg-row assistant">
+    <motion.div 
+      className="msg-row assistant"
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
+    >
       <div className="msg-assistant-label">
         <span className="msg-assistant-dot">K</span>
         <span className="msg-assistant-name">KnowPilot</span>
@@ -219,17 +230,17 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
 
       {!isStreaming && (
         <div className="msg-actions">
-          <button className="msg-action-btn" onClick={handleCopy} disabled={disableActions}
+          <button className="msg-action-btn hover-lift btn-press" onClick={handleCopy} disabled={disableActions}
             aria-label={copied ? t('copied') : t('copy_message')}>
             {copied ? <CheckOutlined style={{ color: 'var(--color-success)' }} /> : <CopyOutlined />}
             {copied ? (t('copied') || 'Copied') : (t('copy_message') || 'Copy')}
           </button>
-          <button className="msg-action-btn" onClick={handleShare} disabled={disableActions}
+          <button className="msg-action-btn hover-lift btn-press" onClick={handleShare} disabled={disableActions}
             aria-label={t('share_message')}>
             <ShareAltOutlined />{t('share_message') || 'Share'}
           </button>
           {onRegenerate && (
-            <button className="msg-action-btn" onClick={onRegenerate} disabled={disableActions}
+            <button className="msg-action-btn hover-lift btn-press" onClick={onRegenerate} disabled={disableActions}
               aria-label={t('regenerate')}>
               <ReloadOutlined />{t('regenerate') || 'Retry'}
             </button>
@@ -237,7 +248,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
           {canGiveFeedback && (
             <>
               <button
-                className={`msg-action-btn ${feedbackType === 'helpful' ? 'active' : ''}`}
+                className={`msg-action-btn hover-lift btn-press ${feedbackType === 'helpful' ? 'active' : ''}`}
                 onClick={() => submitSimpleFeedback('helpful')}
                 disabled={feedbackBusy}
                 aria-pressed={feedbackType === 'helpful'}
@@ -247,7 +258,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
               </button>
               <button
                 ref={feedbackTriggerRef}
-                className={`msg-action-btn ${feedbackType && feedbackType !== 'helpful' ? 'active' : ''}`}
+                className={`msg-action-btn hover-lift btn-press ${feedbackType && feedbackType !== 'helpful' ? 'active' : ''}`}
                 onClick={() => setFeedbackOpen((v) => !v)}
                 disabled={feedbackBusy}
                 aria-expanded={feedbackOpen}
@@ -257,7 +268,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
               </button>
               {feedbackType && (
                 <button
-                  className="msg-action-btn"
+                  className="msg-action-btn hover-lift btn-press"
                   onClick={withdrawFeedback}
                   disabled={feedbackBusy}
                   aria-label={t('feedback_withdraw')}
@@ -323,10 +334,10 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
             <span><FlagOutlined /> {t('feedback_flag_for_review')}</span>
           </label>
           <div className="msg-feedback-actions">
-            <button className="msg-action-btn" onClick={submitDetailedFeedback} disabled={feedbackBusy}>
+            <button className="msg-action-btn hover-lift btn-press" onClick={submitDetailedFeedback} disabled={feedbackBusy}>
               {t('feedback_submit') || 'Submit'}
             </button>
-            <button className="msg-action-btn" onClick={() => setFeedbackOpen(false)} disabled={feedbackBusy}>
+            <button className="msg-action-btn hover-lift btn-press" onClick={() => setFeedbackOpen(false)} disabled={feedbackBusy}>
               {t('feedback_cancel') || 'Cancel'}
             </button>
           </div>
@@ -367,7 +378,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
           )}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 

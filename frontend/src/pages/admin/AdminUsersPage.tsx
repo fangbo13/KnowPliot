@@ -77,14 +77,16 @@ export default function AdminUsersPage() {
   ];
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_users_title')}</h1>
-        <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 className="page-title">{t('admin_users_title')}</h1>
+          <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
+        </div>
+        <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+          <Table rowKey="id" loading={loading} dataSource={users} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
+        </Card>
       </div>
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
-        <Table rowKey="id" loading={loading} dataSource={users} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
-      </Card>
     </div>
   );
 }

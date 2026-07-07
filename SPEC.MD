@@ -700,6 +700,18 @@ Delivery slices:
 - Phase 8B / V10.1: Template Catalog and Isolated Knowledge Packs — actual PASS.
 - Phase 8C / V10.2: Accessibility and Product Closure — actual PASS.
 
+### Phase 9: Enterprise Account and Administration Governance
+
+Delivery slices:
+
+- Phase 9A / V11.0: Account Security and User Preferences — implemented locally; Docker audit pending.
+- Phase 9B / V11.1: Scoped Administration and Lifecycle — planned, blocked until Phase 9A PASS.
+- Phase 9C / V11.2: Model and Retention Policy Governance — planned, blocked until Phase 9B PASS.
+
+Phase 9 preserves single-space retrieval, citation enforcement, backend
+authorization, and immutable audit evidence. Real SSO, cross-space retrieval,
+external crawling, and billing remain outside this phase.
+
 ## 10. Non-Functional Requirements
 
 ### Security

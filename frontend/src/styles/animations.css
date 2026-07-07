@@ -1,0 +1,157 @@
+/* 
+ * Global Animations and Transitions
+ * Implements "呼吸感", "过渡", "微动效", "物理阻尼感"
+ */
+
+/* Hover effects with physical feel (Claude-inspired restraint) */
+.hover-lift {
+  transition: transform var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-smooth);
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.08), 0 4px 8px -4px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .hover-lift:hover {
+  box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.25), 0 4px 8px -4px rgba(0, 0, 0, 0.15);
+}
+
+.hover-lift:active {
+  transform: translateY(0.5px) scale(0.995);
+  transition-duration: var(--dur-instant);
+}
+
+/* Gemini style fluid background for login */
+.gemini-mesh-bg {
+  background: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+              radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+              radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+  background-size: 200% 200%;
+  animation: mesh-movement 15s ease infinite alternate;
+}
+
+.gemini-mesh-bg-light {
+  background: radial-gradient(at 0% 0%, hsla(253,16%,97%,1) 0, transparent 50%), 
+              radial-gradient(at 50% 0%, hsla(225,39%,80%,1) 0, transparent 50%), 
+              radial-gradient(at 100% 0%, hsla(339,49%,80%,1) 0, transparent 50%);
+  background-size: 200% 200%;
+  animation: mesh-movement 15s ease infinite alternate;
+}
+
+@keyframes mesh-movement {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+
+
+/* AI Thinking Indicator */
+.ai-thinking {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-thinking span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ant-color-primary);
+  animation: bounce var(--transition-slow) infinite alternate var(--ease-in-out-sine);
+}
+
+.ai-thinking span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.ai-thinking span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes bounce {
+  to {
+    opacity: 0.3;
+    transform: translateY(-4px);
+  }
+}
+
+/* Smooth enter animations */
+.fade-in-up {
+  animation: fadeInUp var(--dur) var(--ease-out-expo) forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- New Utility Animations ---- */
+
+/* Stagger fade in for lists */
+.stagger-fade-in > * {
+  opacity: 0;
+  animation: softFadeInUp var(--dur) var(--ease-out) forwards;
+}
+
+/* Section/Card entry */
+.section-enter {
+  animation: softFadeInUp var(--dur) var(--ease-out) forwards;
+}
+
+/* Skeleton loaders */
+.skeleton-card {
+  background: linear-gradient(90deg, var(--color-bg-sunken) 25%, var(--color-fill) 50%, var(--color-bg-sunken) 75%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+.skeleton-table {
+  background: linear-gradient(90deg, var(--color-bg-sunken) 25%, var(--color-fill) 50%, var(--color-bg-sunken) 75%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Subtle pulse for indicators */
+.pulse-subtle {
+  animation: pulse-subtle-anim 2.5s infinite alternate var(--ease-in-out);
+}
+@keyframes pulse-subtle-anim {
+  0% { opacity: 0.6; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1.05); }
+}
+
+/* Success Checkmark */
+.success-check {
+  animation: success-check-anim var(--dur) var(--ease-spring) forwards;
+  display: inline-block;
+}
+@keyframes success-check-anim {
+  0% { opacity: 0; transform: scale(0.5) rotate(-15deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+/* Button Press Physical Feedback */
+.btn-press:active {
+  transform: translateY(1px) scale(0.98);
+  transition: transform var(--dur-instant) var(--ease-spring);
+}
+
+@keyframes ripple {
+  0% { transform: scale(0); opacity: 0.4; }
+  100% { transform: scale(3); opacity: 0; }
+}

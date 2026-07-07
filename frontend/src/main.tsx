@@ -14,6 +14,7 @@ import { useTheme, eyTheme } from './hooks/useTheme';
 import './i18n';
 import './styles/tokens.css';
 import './styles/globals.css';
+import './styles/animations.css';
 import './styles/chat.css';
 
 function ThemeRoot({ children }: { children: React.ReactNode }) {

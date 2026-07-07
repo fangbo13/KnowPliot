@@ -11,6 +11,7 @@ V4.2 SYS-V4.2-020: Added BlacklistCheckingTokenRefreshView — checks if
 """
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.exceptions import ValidationError
@@ -19,7 +20,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework.throttling import AnonRateThrottle
-from .models import User
+from .models import AuthSession, User
 from .serializers import UserSerializer, UserPreferenceSerializer
 
 
@@ -50,8 +51,24 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        data = super().validate(attrs)
-        # V7.0: single source of truth for the user payload (adds admin scope flags)
+        from django.contrib.auth import authenticate
+        from rest_framework.exceptions import AuthenticationFailed
+        from .security import create_mfa_challenge, issue_token_pair
+
+        self.user = authenticate(
+            request=self.context.get("request"),
+            email=attrs.get("email"),
+            password=attrs.get("password"),
+        )
+        if self.user is None or not self.user.is_active:
+            raise AuthenticationFailed("No active account found with the given credentials")
+        if self.user.mfa_enabled:
+            return {
+                "mfa_required": True,
+                "challenge": create_mfa_challenge(self.user),
+                "expires_in": 300,
+            }
+        data = issue_token_pair(self.user, self.context.get("request"))
         from .identity import identity_payload
         data["user"] = identity_payload(self.user)
         return data
@@ -113,6 +130,38 @@ class BlacklistCheckingTokenRefreshSerializer(TokenRefreshSerializer):
         return super().validate(attrs)
 
 
+class SessionCheckingTokenRefreshSerializer(TokenRefreshSerializer):
+    """Reject revoked token families and preserve session claims on rotation."""
+
+    def validate(self, attrs):
+        from rest_framework.exceptions import AuthenticationFailed
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        refresh_token = RefreshToken(attrs["refresh"])
+        jti = refresh_token.get("jti")
+        if jti and BlacklistedToken.objects.filter(token__jti=jti).exists():
+            raise AuthenticationFailed("Token is blacklisted.")
+        session = AuthSession.objects.filter(
+            id=refresh_token.get("session_id"),
+            refresh_jti=jti,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        ).first()
+        if session is None:
+            raise AuthenticationFailed("Session has been revoked.")
+        data = super().validate(attrs)
+        if "refresh" in data:
+            rotated = RefreshToken(data["refresh"])
+            rotated["session_id"] = str(session.id)
+            session.refresh_jti = rotated["jti"]
+            session.save(update_fields=["refresh_jti", "last_seen_at"])
+            data["refresh"] = str(rotated)
+            access = rotated.access_token
+            access["session_id"] = str(session.id)
+            data["access"] = str(access)
+        return data
+
+
 class BlacklistCheckingTokenRefreshView(TokenRefreshView):
     """V4.2 SYS-V4.2-020: Uses BlacklistCheckingTokenRefreshSerializer.
 
@@ -120,7 +169,7 @@ class BlacklistCheckingTokenRefreshView(TokenRefreshView):
     This view checks if the refresh token's JTI has been blacklisted
     before issuing a new access+refresh pair.
     """
-    serializer_class = BlacklistCheckingTokenRefreshSerializer
+    serializer_class = SessionCheckingTokenRefreshSerializer
 
 
 class UserMeView(generics.RetrieveUpdateAPIView):
@@ -159,6 +208,271 @@ def update_preference(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data)
+
+
+def _audit_security(user, action, request, result="success"):
+    from apps.audit.views import create_audit_log
+
+    create_audit_log(
+        user=user,
+        action=action,
+        target_type="User",
+        target_id=user.id,
+        details={},
+        request=request,
+        result=result,
+    )
+
+
+class ChangePasswordView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from .security import revoke_all_sessions
+
+        current = request.data.get("current_password")
+        new = request.data.get("new_password")
+        if not current or not request.user.check_password(current):
+            _audit_security(request.user, "password_change", request, "denied")
+            return Response({"detail": "Current password is incorrect."}, status=400)
+        try:
+            validate_password(new, request.user)
+        except DjangoValidationError as exc:
+            return Response({"new_password": list(exc.messages)}, status=400)
+        request.user.set_password(new)
+        request.user.save(update_fields=["password"])
+        revoke_all_sessions(request.user)
+        _audit_security(request.user, "password_change", request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PasswordResetRequestView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    def post(self, request):
+        from django.conf import settings
+        from django.contrib.auth.tokens import default_token_generator
+        from django.core.mail import send_mail
+        from django.utils.encoding import force_bytes
+        from django.utils.http import urlsafe_base64_encode
+
+        user = User.objects.filter(
+            email__iexact=request.data.get("email", ""), is_active=True
+        ).first()
+        if user:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            link = (
+                f"{settings.FRONTEND_URL.rstrip('/')}/reset-password"
+                f"?uid={uid}&token={token}"
+            )
+            send_mail(
+                "Reset your KnowPilot password",
+                f"Use this link to reset your password: {link}",
+                None,
+                [user.email],
+                fail_silently=False,
+            )
+        return Response(
+            {"detail": "If the account exists, reset instructions have been sent."},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class PasswordResetConfirmView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    def post(self, request):
+        from django.contrib.auth.password_validation import validate_password
+        from django.contrib.auth.tokens import default_token_generator
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from django.utils.encoding import force_str
+        from django.utils.http import urlsafe_base64_decode
+        from .security import revoke_all_sessions
+
+        try:
+            user = User.objects.get(
+                pk=force_str(urlsafe_base64_decode(request.data.get("uid", "")))
+            )
+        except (User.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "Invalid or expired reset link."}, status=400)
+        token = request.data.get("token", "")
+        if not default_token_generator.check_token(user, token):
+            return Response({"detail": "Invalid or expired reset link."}, status=400)
+        try:
+            validate_password(request.data.get("new_password"), user)
+        except DjangoValidationError as exc:
+            return Response({"new_password": list(exc.messages)}, status=400)
+        user.set_password(request.data["new_password"])
+        user.save(update_fields=["password"])
+        revoke_all_sessions(user)
+        _audit_security(user, "password_reset", request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AuthSessionListView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        current_id = getattr(request.auth, "payload", {}).get("session_id")
+        rows = [
+            {
+                "id": str(item.id),
+                "ip_address": item.ip_address,
+                "user_agent": item.user_agent,
+                "created_at": item.created_at,
+                "last_seen_at": item.last_seen_at,
+                "expires_at": item.expires_at,
+                "current": str(item.id) == str(current_id),
+            }
+            for item in request.user.auth_sessions.filter(
+                revoked_at__isnull=True, expires_at__gt=timezone.now()
+            )
+        ]
+        return Response(rows)
+
+
+class AuthSessionDetailView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, pk):
+        updated = request.user.auth_sessions.filter(
+            pk=pk, revoked_at__isnull=True
+        ).update(revoked_at=timezone.now())
+        if not updated:
+            return Response({"detail": "Session not found."}, status=404)
+        _audit_security(request.user, "session_revoke", request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RevokeOtherSessionsView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        current_id = request.auth.get("session_id")
+        request.user.auth_sessions.filter(revoked_at__isnull=True).exclude(
+            pk=current_id
+        ).update(revoked_at=timezone.now())
+        _audit_security(request.user, "session_revoke_others", request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MFASetupView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        import pyotp
+        from .security import encrypt_mfa_secret
+
+        if not request.user.check_password(request.data.get("current_password", "")):
+            return Response({"detail": "Current password is incorrect."}, status=400)
+        secret = pyotp.random_base32()
+        request.user.mfa_pending_secret = encrypt_mfa_secret(secret)
+        request.user.save(update_fields=["mfa_pending_secret"])
+        return Response(
+            {
+                "secret": secret,
+                "provisioning_uri": pyotp.TOTP(secret).provisioning_uri(
+                    request.user.email, issuer_name="KnowPilot"
+                ),
+            }
+        )
+
+
+class MFAConfirmView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        import pyotp
+        from .security import (
+            decrypt_mfa_secret,
+            generate_recovery_codes,
+            revoke_all_sessions,
+        )
+
+        if not request.user.mfa_pending_secret:
+            return Response({"detail": "MFA setup has not started."}, status=409)
+        secret = decrypt_mfa_secret(request.user.mfa_pending_secret)
+        if not pyotp.TOTP(secret).verify(request.data.get("code", ""), valid_window=1):
+            return Response({"detail": "Invalid code."}, status=400)
+        raw, encoded = generate_recovery_codes()
+        request.user.mfa_secret = request.user.mfa_pending_secret
+        request.user.mfa_pending_secret = None
+        request.user.mfa_enabled = True
+        request.user.mfa_recovery_codes = encoded
+        request.user.save(
+            update_fields=[
+                "mfa_secret",
+                "mfa_pending_secret",
+                "mfa_enabled",
+                "mfa_recovery_codes",
+            ]
+        )
+        revoke_all_sessions(request.user)
+        _audit_security(request.user, "mfa_enable", request)
+        return Response({"recovery_codes": raw})
+
+
+class MFADisableView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        import pyotp
+        from .security import consume_recovery_code, decrypt_mfa_secret, revoke_all_sessions
+
+        if not request.user.check_password(request.data.get("current_password", "")):
+            return Response({"detail": "Current password is incorrect."}, status=400)
+        code = request.data.get("code", "")
+        valid = pyotp.TOTP(decrypt_mfa_secret(request.user.mfa_secret)).verify(
+            code, valid_window=1
+        ) or consume_recovery_code(request.user, code)
+        if not valid:
+            return Response({"detail": "Invalid code."}, status=400)
+        request.user.mfa_enabled = False
+        request.user.mfa_secret = None
+        request.user.mfa_recovery_codes = []
+        request.user.save(
+            update_fields=["mfa_enabled", "mfa_secret", "mfa_recovery_codes"]
+        )
+        revoke_all_sessions(request.user)
+        _audit_security(request.user, "mfa_disable", request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MFALoginView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    def post(self, request):
+        import pyotp
+        from .identity import identity_payload
+        from .security import (
+            consume_mfa_challenge,
+            consume_recovery_code,
+            decrypt_mfa_secret,
+            issue_token_pair,
+        )
+
+        user_id = consume_mfa_challenge(request.data.get("challenge", ""))
+        if not user_id:
+            return Response({"detail": "Invalid or expired challenge."}, status=401)
+        user = User.objects.filter(pk=user_id, is_active=True, mfa_enabled=True).first()
+        if not user:
+            return Response({"detail": "Invalid or expired challenge."}, status=401)
+        code = request.data.get("code", "")
+        valid = pyotp.TOTP(decrypt_mfa_secret(user.mfa_secret)).verify(
+            code, valid_window=1
+        ) or consume_recovery_code(user, code)
+        if not valid:
+            return Response({"detail": "Invalid code."}, status=401)
+        data = issue_token_pair(user, request)
+        data["user"] = identity_payload(user)
+        _audit_security(user, "mfa_login", request)
+        return Response(data)
 
 
 @api_view(["POST"])
@@ -219,6 +533,14 @@ def logout(request):
         except Exception as e:
             logger.error("Could not blacklist refresh token for %s: %s", request.user.email, e)
 
+    try:
+        session_id = request.auth.get("session_id")
+        request.user.auth_sessions.filter(
+            pk=session_id, revoked_at__isnull=True
+        ).update(revoked_at=timezone.now())
+    except (AttributeError, ValueError):
+        pass
+
     return Response(
         {"detail": "Logged out successfully."},
         status=status.HTTP_200_OK,
@@ -232,17 +554,14 @@ class SignupRateThrottle(AnonRateThrottle):
     scope = "signup"
 
 
-def _auth_response(user):
+def _auth_response(user, request=None):
     """Mint a JWT pair and the identity payload — mirrors the login response."""
-    from rest_framework_simplejwt.tokens import RefreshToken
     from .identity import identity_payload
+    from .security import issue_token_pair
 
-    refresh = RefreshToken.for_user(user)
-    return {
-        "access": str(refresh.access_token),
-        "refresh": str(refresh),
-        "user": identity_payload(user),
-    }
+    data = issue_token_pair(user, request)
+    data["user"] = identity_payload(user)
+    return data
 
 
 def _audit_register(user, action, request, details=None):
@@ -301,7 +620,7 @@ def register(request):
         )
 
     _provision_new_user(user, request)
-    return Response(_auth_response(user), status=status.HTTP_201_CREATED)
+    return Response(_auth_response(user, request), status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
@@ -340,4 +659,4 @@ def register_admin(request):
         level="success", link="/admin/dashboard",
         metadata={"role": code.grants_role, "scope": scope},
     )
-    return Response(_auth_response(user), status=status.HTTP_201_CREATED)
+    return Response(_auth_response(user, request), status=status.HTTP_201_CREATED)

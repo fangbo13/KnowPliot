@@ -53,6 +53,22 @@ class User(AbstractUser):
     language_preference = models.CharField(
         max_length=2, choices=LANGUAGE_CHOICES, default="en"
     )
+    THEME_CHOICES = [("system", "System"), ("light", "Light"), ("dark", "Dark")]
+    theme_preference = models.CharField(
+        max_length=10, choices=THEME_CHOICES, default="system"
+    )
+    default_space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="default_for_users",
+    )
+    notification_preferences = models.JSONField(default=dict, blank=True)
+    mfa_enabled = models.BooleanField(default=False)
+    mfa_secret = models.BinaryField(null=True, blank=True)
+    mfa_pending_secret = models.BinaryField(null=True, blank=True)
+    mfa_recovery_codes = models.JSONField(default=list, blank=True)
     manager = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="direct_reports"
     )
@@ -195,3 +211,32 @@ class User(AbstractUser):
         Returns None if outside a request context (e.g., management commands).
         """
         return getattr(self, "_rbac_cache", None)
+
+
+class AuthSession(models.Model):
+    """Server-side revocation state for a JWT refresh/access token family."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="auth_sessions"
+    )
+    refresh_jti = models.CharField(max_length=255, unique=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "users_auth_session"
+        ordering = ["-last_seen_at"]
+        indexes = [
+            models.Index(fields=["user", "revoked_at", "-last_seen_at"]),
+        ]
+
+    @property
+    def is_active(self):
+        from django.utils import timezone
+
+        return self.revoked_at is None and self.expires_at > timezone.now()

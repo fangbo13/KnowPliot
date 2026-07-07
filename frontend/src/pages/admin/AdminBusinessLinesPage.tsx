@@ -57,19 +57,20 @@ export default function AdminBusinessLinesPage() {
   ];
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_business_lines_title')}</h1>
-        <Space>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 className="page-title">{t('admin_business_lines_title')}</h1>
+          <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)} style={{ borderRadius: 8 }}>{t('admin_create_business_line')}</Button>
         </Space>
       </div>
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
-        <Table rowKey="id" loading={loading} dataSource={lines} columns={columns} pagination={false} size="middle" />
+      <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+        <Table rowKey="id" loading={loading} dataSource={lines} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 
-      <Modal title={t('admin_create_business_line')} open={open} onOk={create} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>
+      <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_create_business_line')} open={open} onOk={create} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>
         <Space direction="vertical" style={{ width: '100%', padding: '12px 0' }} size="middle">
           <Select value={orgId || undefined} onChange={setOrgId} style={{ width: '100%' }} placeholder="Organization"
             options={orgs.map((o) => ({ value: o.id, label: o.name }))} />
@@ -77,6 +78,7 @@ export default function AdminBusinessLinesPage() {
           <Input placeholder="Code (e.g. risk)" value={code} onChange={(e) => setCode(e.target.value)} />
         </Space>
       </Modal>
+      </div>
     </div>
   );
 }

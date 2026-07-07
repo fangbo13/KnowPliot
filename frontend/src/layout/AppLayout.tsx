@@ -5,8 +5,9 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Dropdown, Drawer, Modal, Button, Tooltip, message as antMessage } from 'antd';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageOutlined, BookOutlined, UserOutlined, LogoutOutlined,
   SunOutlined, MoonOutlined, GlobalOutlined, SettingOutlined, PlusOutlined,
@@ -46,6 +47,7 @@ function initials(email?: string) {
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { sessions, activeSessionId, streamPhase, loadSessions, setActiveSession, resetSession } = useChatStore();
   const isStreaming = streamPhase !== 'idle';
   const activeSpaceRole = useSpaceStore((s) => s.spaces.find((x) => x.id === s.activeSpaceId)?.my_role ?? null);
@@ -372,7 +374,11 @@ export default function AppLayout() {
       {/* Mobile drawer */}
       {isMobile && (
         <Drawer placement="left" onClose={() => setMobileDrawerOpen(false)} open={mobileDrawerOpen} width={300}
-          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-sunken)' }, header: { display: 'none' } }}>
+          styles={{ 
+            body: { padding: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-sunken)' }, 
+            header: { display: 'none' },
+            mask: { backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' } 
+          }}>
           <div className="sidebar-header">
             <div className="sidebar-brand"><span className="sidebar-brand-mark">K</span><span className="sidebar-brand-name">KnowPilot</span></div>
             <button className="icon-btn" onClick={() => setMobileDrawerOpen(false)} aria-label={t('cancel') || 'Close'}><CloseOutlined /></button>
@@ -418,9 +424,18 @@ export default function AppLayout() {
         <NetworkStatusBanner />
         <main id="main-content" role="main" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <ErrorBoundary title={t('error_boundary_title')} description={t('error_boundary_desc')} retryText={t('error_boundary_retry')}>
-            <div className="page-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <Outlet />
-            </div>
+            <AnimatePresence mode="wait">
+              <motion.div 
+                key={location.pathname}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.3, ease: 'easeOut' }}
+                style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              >
+                <Outlet />
+              </motion.div>
+            </AnimatePresence>
           </ErrorBoundary>
         </main>
       </div>

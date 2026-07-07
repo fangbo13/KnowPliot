@@ -6,7 +6,7 @@
 
 import { useTranslation } from 'react-i18next';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Card, List, Typography, Empty, Button, Spin, Divider, Input, Segmented, Pagination } from 'antd';
+import { List, Typography, Button, Divider, Input, Segmented, Pagination } from 'antd';
 import { PlusOutlined, ArrowLeftOutlined, MessageOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore, type Message } from '../store/chatStore';
@@ -147,47 +147,28 @@ export default function HistoryPage() {
   // Viewing a specific session — show messages inline (read-only)
   if (viewingSessionId) {
     return (
-      <Card
-        className="history-page-card"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-        styles={{
-          body: {
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          },
-        }}
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <Button
-              type="text"
-              icon={<ArrowLeftOutlined />}
-              onClick={handleBack}
-              aria-label={t('back_to_history') || '返回历史列表'}
-            />
-            <span style={{
-              fontFamily: "'Calistoga', Georgia, serif",
-              fontWeight: 400,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {sessions.find(s => s.id === viewingSessionId)?.title || t('new_conversation')}
-            </span>
-          </div>
-        }
-      >
+      <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="page-head" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={handleBack}
+            className="btn-press"
+            aria-label={t('back_to_history') || '返回历史列表'}
+          />
+          <h1 className="page-title" style={{ margin: 0, fontSize: 22, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {sessions.find(s => s.id === viewingSessionId)?.title || t('new_conversation')}
+          </h1>
+        </div>
+        <div className="page-inner" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '0 24px 24px' }}>
         {viewLoading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, minHeight: 0, padding: '48px 0' }}>
-            <Spin size="large" tip={t('loading_messages') || '加载中...'} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px 0' }}>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-start', width: '70%', padding: '14px 18px', borderRadius: 20 }}>
+              {[100, 85].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-end', width: '60%', padding: '14px 18px', borderRadius: 20 }}>
+              {[100, 100, 65].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
           </div>
         ) : (
           <div style={{
@@ -201,8 +182,9 @@ export default function HistoryPage() {
               <MessageBubble key={msg.id} message={msg} />
             ))}
             {viewMessages.length === 0 && (
-              <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Empty description={t('no_messages') || '暂无消息'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+                <div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_messages') || '暂无消息'}</div>
               </div>
             )}
             {viewMessages.length > 0 && (
@@ -223,62 +205,42 @@ export default function HistoryPage() {
             <div ref={messagesEndRef} />
           </div>
         )}
-      </Card>
+        </div>
+      </div>
     );
   }
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, minHeight: 0, padding: '80px 0' }}>
-        <Spin size="large" tip={t('loading') || '加载中...'} />
+      <div className="page section-enter" style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="skeleton-msg" style={{ width: '100%', padding: '16px', borderRadius: 12 }}>
+            <div className="skeleton-line" style={{ width: '40%', height: 16, marginBottom: 8 }} />
+            <div className="skeleton-line" style={{ width: '80%', height: 12 }} />
+          </div>
+        ))}
       </div>
     );
   }
 
   if (sessions.length === 0) {
     return (
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Empty
-          description={t('no_history')}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        >
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => navigate('/chat')}
-          >
-            {t('new_conversation')}
-          </Button>
-        </Empty>
+      <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>{t('no_history')}</div>
+        <Button type="primary" className="btn-press hover-lift" icon={<PlusOutlined />} onClick={() => navigate('/chat')} style={{ marginTop: 24, borderRadius: 12 }}>
+          {t('new_conversation')}
+        </Button>
       </div>
     );
   }
 
   return (
-    <Card
-      className="history-page-card"
-      style={{
-        flex: 1,
-        minHeight: 0,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-      styles={{
-        body: {
-          flex: 1,
-          minHeight: 0,
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        },
-      }}
-      title={
-        <span style={{ fontFamily: "'Calistoga', Georgia, serif", fontWeight: 400 }}>
-          {t('conversation_history')}
-        </span>
-      }
-    >
+    <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="page-head">
+        <h1 className="page-title">{t('conversation_history')}</h1>
+      </div>
+      <div className="page-inner" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Search and filter toolbar */}
       <div style={{
         display: 'flex',
@@ -294,10 +256,12 @@ export default function HistoryPage() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           prefix={<SearchOutlined />}
+          className="input-focus-float"
           style={{ maxWidth: 320, flex: '1 1 200px' }}
           aria-label={t('search_history') || '搜索对话'}
         />
         <Segmented
+          className="hover-lift"
           options={timeFilterOptions}
           value={timeFilter}
           onChange={(value) => setTimeFilter(value as TimeFilter)}
@@ -306,11 +270,9 @@ export default function HistoryPage() {
       </div>
 
       {filteredSessions.length === 0 ? (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Empty
-            description={t('no_search_results') || '没有找到匹配的对话'}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+          <div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_search_results') || '没有找到匹配的对话'}</div>
         </div>
       ) : (
         <div style={{
@@ -355,6 +317,7 @@ export default function HistoryPage() {
                       <Button
                         type="text"
                         onClick={() => handleSelectSession(session.id)}
+                        className="stagger-fade-in hover-lift btn-press"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
@@ -367,6 +330,7 @@ export default function HistoryPage() {
                           textAlign: 'left',
                           padding: '12px 16px',
                           height: 'auto',
+                          animationDelay: '0.1s'
                         }}
                         aria-label={`${session.title || t('new_conversation')}, ${session.updatedAt ? formatDate(session.updatedAt) : t('filter_earlier')}`}
                       >
@@ -380,7 +344,8 @@ export default function HistoryPage() {
                 />
               </div>
             );
-          })})()}
+          });
+        })()}
           {filteredSessions.length > PAGE_SIZE && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16, paddingBottom: 4 }}>
               <Pagination
@@ -395,6 +360,7 @@ export default function HistoryPage() {
           )}
         </div>
       )}
-    </Card>
+      </div>
+    </div>
   );
 }

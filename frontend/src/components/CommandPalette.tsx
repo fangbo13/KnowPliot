@@ -141,8 +141,8 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   let lastGroup: Cmd['group'] | null = null;
 
   return (
-    <div className="cmdk-overlay" onMouseDown={close} role="dialog" aria-modal="true" aria-label={t('cmdk_placeholder', { defaultValue: 'Search and commands' })}>
-      <div className="cmdk-panel" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="cmdk-overlay" style={{ backdropFilter: 'blur(6px)' }} onMouseDown={close} role="dialog" aria-modal="true" aria-label={t('cmdk_placeholder', { defaultValue: 'Search and commands' })}>
+      <div className="cmdk-panel section-enter" onMouseDown={(e) => e.stopPropagation()}>
         <div className="cmdk-input-wrap">
           <SearchOutlined />
           <input
@@ -158,7 +158,10 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
 
         <div className="cmdk-list" ref={listRef}>
           {filtered.length === 0 && (
-            <div className="cmdk-empty">{t('cmdk_empty', { defaultValue: 'No results' })}</div>
+            <div className="cmdk-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', color: 'var(--color-text-placeholder)' }}>
+              <div style={{ fontFamily: 'var(--font-family-serif)', fontSize: 48, opacity: 0.5, marginBottom: 16 }}>K</div>
+              <span>{t('cmdk_empty', { defaultValue: 'No results' })}</span>
+            </div>
           )}
           {filtered.map((cmd, i) => {
             const header = cmd.group !== lastGroup ? <div className="cmdk-group-label" key={`h-${cmd.group}`}>{groupLabels[cmd.group]}</div> : null;

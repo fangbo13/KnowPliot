@@ -21,6 +21,10 @@ interface User {
   roles: string[];             // V4.0: ['hr'] or ['admin'] or []
   permissions: string[];       // V4.0: ['document.create', 'category.read', ...]
   language_preference: string;
+  theme_preference?: 'system' | 'light' | 'dark';
+  default_space?: string | null;
+  notification_preferences?: Record<string, boolean>;
+  mfa_enabled?: boolean;
   service_line?: string;
   office_location?: string;
   role_level?: string;
@@ -97,6 +101,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       roles: derivedRoles,
       permissions: user.permissions || [],
       language_preference: user.language_preference ?? 'zh',
+      theme_preference: user.theme_preference ?? 'system',
+      default_space: user.default_space ?? null,
+      notification_preferences: user.notification_preferences ?? {},
+      mfa_enabled: user.mfa_enabled ?? false,
       service_line: user.service_line,
       office_location: user.office_location,
       role_level: user.role_level,
