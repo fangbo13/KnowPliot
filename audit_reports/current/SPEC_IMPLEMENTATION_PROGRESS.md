@@ -27,8 +27,8 @@ Current stage:
 - Phase 8A answer quality and evaluation: implemented and audited in V10.0.
 - Phase 8B template catalog and isolated knowledge packs: implemented and audited in V10.1.
 - Phase 8C accessibility and product closure: implemented and audited in V10.2.
-- Phase 9A account security and user preferences: implemented locally; Docker audit pending.
-- Phase 9B scoped administration lifecycle: not started; gated by Phase 9A PASS.
+- Phase 9A account security and user preferences: implemented and audited in V11.0.
+- Phase 9B scoped administration lifecycle: not started; next authorized stage.
 - Phase 9C model and retention policy governance: not started; gated by Phase 9B PASS.
 
 Latest verified baseline:
@@ -122,7 +122,7 @@ Latest verified baseline:
 
 ## Next Recommended Stage
 
-Phase 8 is complete. Re-plan the next post-V10 phase from the V10.2 baseline.
+Phase 9A is complete. Phase 9B is the next authorized stage from the V11.0 baseline.
 
 Suggested order:
 
