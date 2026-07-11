@@ -414,3 +414,53 @@ class SpaceEmailInvite(models.Model):
         if self.expires_at and self.expires_at < timezone.now():
             return False
         return True
+
+
+class SpaceAccessRequest(models.Model):
+    """A user's idempotent request to join a discoverable knowledge space."""
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        KnowledgeSpace, on_delete=models.CASCADE, related_name="access_requests"
+    )
+    user = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="space_access_requests",
+    )
+    role = models.CharField(max_length=20, choices=[
+        (SpaceMembership.ROLE_MEMBER, "Member"),
+        (SpaceMembership.ROLE_GUEST, "Guest"),
+    ], default=SpaceMembership.ROLE_MEMBER)
+    reason = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    reviewed_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_space_access_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "spaces_spaceaccessrequest"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["space", "user", "status"],
+                name="spaces_access_request_unique_status",
+            )
+        ]
+        ordering = ["-created_at"]

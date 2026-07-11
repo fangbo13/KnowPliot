@@ -168,13 +168,19 @@ def has_space_permission(user, space: KnowledgeSpace, perm: str) -> bool:
     role = effective_space_role(user, space)
     if role is None:
         return False
-    if role in _FULL_ACCESS_ROLES:
-        return True
-    # Archived spaces are read-only: deny write/admin perms even to owners.
-    if space.status != "active" and perm not in {
+    # An archived tenant, business line, or space is read-only for everyone,
+    # including scoped and platform administrators.  This prevents a parent
+    # lifecycle action from being bypassed by an inherited full-access role.
+    if (
+        space.status != "active"
+        or space.organization.status != "active"
+        or (space.business_line_id and space.business_line.status != "active")
+    ) and perm not in {
         SPACE_VIEW, DOCUMENT_VIEW, DOCUMENT_DOWNLOAD, CHAT_VIEW_HISTORY, AUDIT_VIEW,
     }:
         return False
+    if role in _FULL_ACCESS_ROLES:
+        return True
     return perm in ROLE_PERMISSIONS.get(role, set())
 
 

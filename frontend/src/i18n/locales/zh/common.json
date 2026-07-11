@@ -459,5 +459,9 @@
   "mfa_start": "开始 MFA 设置",
   "mfa_confirm": "确认 MFA",
   "current_session": "当前会话",
-  "unknown_device": "未知设备"
+  "unknown_device": "未知设备",
+  "account_info_desc": "管理您的账户信息和偏好设置。",
+  "saved": "已保存",
+  "no_members": "暂无成员",
+  "no_invites": "暂无有效邀请"
 }

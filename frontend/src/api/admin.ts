@@ -343,6 +343,14 @@ export const adminApi = {
     const { data } = await apiClient.get('/admin/organizations/');
     return unwrap(data);
   },
+  async archiveOrganization(id: string): Promise<Organization> {
+    const { data } = await apiClient.post(`/admin/organizations/${id}/archive/`, {});
+    return data;
+  },
+  async restoreOrganization(id: string): Promise<Organization> {
+    const { data } = await apiClient.post(`/admin/organizations/${id}/restore/`, {});
+    return data;
+  },
   async businessLines(orgId?: string): Promise<BusinessLine[]> {
     const { data } = await apiClient.get('/admin/business-lines/', {
       params: orgId ? { organization: orgId } : {},
@@ -351,6 +359,14 @@ export const adminApi = {
   },
   async createBusinessLine(body: { organization: string; name: string; code: string; description?: string }): Promise<BusinessLine> {
     const { data } = await apiClient.post('/admin/business-lines/', body);
+    return data;
+  },
+  async archiveBusinessLine(id: string): Promise<BusinessLine> {
+    const { data } = await apiClient.post(`/admin/business-lines/${id}/archive/`, {});
+    return data;
+  },
+  async restoreBusinessLine(id: string): Promise<BusinessLine> {
+    const { data } = await apiClient.post(`/admin/business-lines/${id}/restore/`, {});
     return data;
   },
 

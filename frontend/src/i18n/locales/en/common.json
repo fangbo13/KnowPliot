@@ -461,5 +461,9 @@
   "mfa_start": "Start MFA setup",
   "mfa_confirm": "Confirm MFA",
   "current_session": "Current session",
-  "unknown_device": "Unknown device"
+  "unknown_device": "Unknown device",
+  "account_info_desc": "Manage your account information and preferences.",
+  "saved": "Saved",
+  "no_members": "No members yet",
+  "no_invites": "No active invitations"
 }

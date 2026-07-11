@@ -15,7 +15,10 @@ Authorization model (docs/KnowPilot_V7_Identity_RBAC_Spec.md §4.1):
 
 import logging
 
+from django.db import transaction
 from django.db.models import Avg, Count, Max
+from django.utils import timezone
+from django.contrib.auth import get_user_model
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -23,13 +26,14 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.views import APIView
 
-from .models import AdminRegistrationCode, BusinessLine, Organization, OrganizationMembership
+from .models import AdminRegistrationCode, BusinessLine, Organization, OrganizationMembership, KnowledgeSpace, SpaceAccessRequest, SpaceMembership
 from .permissions import admin_scope, is_platform_admin
 from .serializers import (
     AdminRegistrationCodeCreateSerializer,
     AdminRegistrationCodeSerializer,
     BusinessLineSerializer,
     OrganizationSerializer,
+    SpaceAccessRequestSerializer,
 )
 from .services import generate_admin_code, hash_code
 from .admin_operations import (
@@ -386,7 +390,7 @@ def _scoped_org_ids(user):
     return org_ids
 
 
-class OrganizationListView(generics.ListAPIView):
+class OrganizationListView(generics.ListCreateAPIView):
     """List organizations the user administers (super sees all)."""
 
     serializer_class = OrganizationSerializer
@@ -397,6 +401,59 @@ class OrganizationListView(generics.ListAPIView):
         org_ids = _scoped_org_ids(self.request.user)
         qs = Organization.objects.all()
         return qs if org_ids is None else qs.filter(id__in=list(org_ids))
+
+    def create(self, request, *args, **kwargs):
+        if not is_platform_admin(request.user):
+            raise PermissionDenied("Only platform administrators can create organizations.")
+        serializer = OrganizationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        organization = serializer.save()
+        from apps.audit.views import create_audit_log
+        create_audit_log(request.user, "organization_create", "Organization", organization.id, request=request)
+        return Response(OrganizationSerializer(organization).data, status=status.HTTP_201_CREATED)
+
+
+class OrganizationDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = OrganizationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        org_ids = _scoped_org_ids(self.request.user)
+        qs = Organization.objects.all()
+        return qs if org_ids is None else qs.filter(id__in=list(org_ids))
+
+    def perform_update(self, serializer):
+        organization = serializer.save()
+        from apps.audit.views import create_audit_log
+        create_audit_log(self.request.user, "organization_update", "Organization", organization.id, request=self.request)
+
+
+def _organization_lifecycle(request, pk, status_value, action):
+    org_ids = _scoped_org_ids(request.user)
+    qs = Organization.objects.all() if org_ids is None else Organization.objects.filter(id__in=list(org_ids))
+    try:
+        organization = qs.get(pk=pk)
+    except Organization.DoesNotExist as exc:
+        raise NotFound("Organization not found.") from exc
+    if not is_platform_admin(request.user) and action == "archive":
+        raise PermissionDenied("Only platform administrators can archive organizations.")
+    organization.status = status_value
+    organization.save(update_fields=["status", "updated_at"])
+    from apps.audit.views import create_audit_log
+    create_audit_log(request.user, f"organization_{action}", "Organization", organization.id, request=request)
+    return Response(OrganizationSerializer(organization).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def organization_archive(request, pk):
+    return _organization_lifecycle(request, pk, "archived", "archive")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def organization_restore(request, pk):
+    return _organization_lifecycle(request, pk, "active", "restore")
 
 
 class BusinessLineListCreateView(generics.ListCreateAPIView):
@@ -434,3 +491,194 @@ class BusinessLineListCreateView(generics.ListCreateAPIView):
         except Exception:  # pragma: no cover
             pass
         return Response(BusinessLineSerializer(bl).data, status=status.HTTP_201_CREATED)
+
+
+class BusinessLineDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = BusinessLineSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        org_ids = _scoped_org_ids(self.request.user)
+        qs = BusinessLine.objects.select_related("organization")
+        return qs if org_ids is None else qs.filter(organization_id__in=list(org_ids))
+
+    def perform_update(self, serializer):
+        line = serializer.save()
+        from apps.audit.views import create_audit_log
+        create_audit_log(self.request.user, "business_line_update", "BusinessLine", line.id, request=self.request)
+
+
+def _business_line_lifecycle(request, pk, status_value, action):
+    org_ids = _scoped_org_ids(request.user)
+    qs = BusinessLine.objects.all() if org_ids is None else BusinessLine.objects.filter(organization_id__in=list(org_ids))
+    try:
+        line = qs.get(pk=pk)
+    except BusinessLine.DoesNotExist as exc:
+        raise NotFound("Business line not found.") from exc
+    line.status = status_value
+    line.save(update_fields=["status", "updated_at"])
+    from apps.audit.views import create_audit_log
+    create_audit_log(request.user, f"business_line_{action}", "BusinessLine", line.id, request=request)
+    return Response(BusinessLineSerializer(line).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def business_line_archive(request, pk):
+    return _business_line_lifecycle(request, pk, "archived", "archive")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def business_line_restore(request, pk):
+    return _business_line_lifecycle(request, pk, "active", "restore")
+
+
+def _can_manage_space(user, space):
+    if is_platform_admin(user):
+        return True
+    org_ids, line_ids = admin_scope(user)
+    return (
+        space.organization_id in org_ids
+        or space.business_line_id in line_ids
+        or SpaceMembership.objects.filter(
+            user=user, space=space, status="active", role=SpaceMembership.ROLE_OWNER
+        ).exists()
+    )
+
+
+class SpaceAccessRequestListView(generics.ListAPIView):
+    serializer_class = SpaceAccessRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        try:
+            space = KnowledgeSpace.objects.get(pk=self.kwargs["pk"])
+        except KnowledgeSpace.DoesNotExist as exc:
+            raise NotFound("Space not found.") from exc
+        if not _can_manage_space(self.request.user, space):
+            raise PermissionDenied("You cannot review access requests for this space.")
+        return SpaceAccessRequest.objects.filter(space=space).select_related("user", "reviewed_by")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_access_request_approve(request, pk, request_id):
+    try:
+        space = KnowledgeSpace.objects.get(pk=pk)
+        access_request = SpaceAccessRequest.objects.get(pk=request_id, space=space)
+    except (KnowledgeSpace.DoesNotExist, SpaceAccessRequest.DoesNotExist) as exc:
+        raise NotFound("Access request not found.") from exc
+    if not _can_manage_space(request.user, space):
+        raise PermissionDenied("You cannot approve this access request.")
+    if access_request.status != SpaceAccessRequest.STATUS_PENDING:
+        return Response({"detail": "Request is already resolved."}, status=status.HTTP_409_CONFLICT)
+    with transaction.atomic():
+        membership, _ = SpaceMembership.objects.update_or_create(
+            space=space,
+            user=access_request.user,
+            defaults={"role": access_request.role, "status": "active", "invited_by": request.user},
+        )
+        access_request.status = SpaceAccessRequest.STATUS_APPROVED
+        access_request.reviewed_by = request.user
+        access_request.reviewed_at = timezone.now()
+        access_request.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+    from apps.audit.views import create_audit_log
+    create_audit_log(request.user, "space_access_request_approve", "KnowledgeSpace", space.id, request=request)
+    from apps.notifications.services import notify
+    notify(
+        access_request.user,
+        "space_access_approved",
+        "Space access approved",
+        body=f"Your request to join {space.name} has been approved.",
+        link=f"/spaces/{space.id}",
+        metadata={"space_id": str(space.id), "access_request_id": str(access_request.id)},
+    )
+    return Response(SpaceAccessRequestSerializer(access_request).data)
+
+
+User = get_user_model()
+
+
+class ScopedAdminUserListView(generics.ListAPIView):
+    """Paginated users visible in the caller's organization/business scope."""
+    permission_classes = [CanViewAdminOperations]
+
+    def list(self, request, *args, **kwargs):
+        if is_platform_admin(request.user):
+            qs = User.objects.all()
+        else:
+            org_ids, line_ids = admin_scope(request.user)
+            scoped_user_ids = set(OrganizationMembership.objects.filter(
+                organization_id__in=org_ids | set()
+            ).values_list("user_id", flat=True))
+            if line_ids:
+                scoped_user_ids.update(OrganizationMembership.objects.filter(
+                    business_line_id__in=line_ids
+                ).values_list("user_id", flat=True))
+                scoped_user_ids.update(SpaceMembership.objects.filter(
+                    space__business_line_id__in=line_ids
+                ).values_list("user_id", flat=True))
+            scoped_user_ids.update(SpaceMembership.objects.filter(
+                space__organization_id__in=org_ids
+            ).values_list("user_id", flat=True))
+            qs = User.objects.filter(id__in=scoped_user_ids)
+        query = request.query_params.get("q", "").strip()
+        if query:
+            qs = qs.filter(email__icontains=query)
+        page = self.paginate_queryset(qs.order_by("email"))
+        rows = [{"id": str(user.id), "email": user.email, "is_active": user.is_active} for user in page]
+        return self.get_paginated_response(rows)
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def scoped_user_assignment(request, user_id):
+    try:
+        target = User.objects.get(pk=user_id)
+    except User.DoesNotExist as exc:
+        raise NotFound("User not found.") from exc
+    scope = request.data.get("scope")
+    role = request.data.get("role")
+    scope_id = request.data.get("scope_id")
+    if scope == "organization":
+        try:
+            organization = Organization.objects.get(pk=scope_id)
+        except Organization.DoesNotExist as exc:
+            raise NotFound("Organization not found.") from exc
+        if not is_platform_admin(request.user) and organization.id not in _scoped_org_ids(request.user):
+            raise PermissionDenied("You cannot manage this organization.")
+        if role not in {OrganizationMembership.ROLE_ORG_ADMIN, OrganizationMembership.ROLE_BUSINESS_ADMIN}:
+            raise ValidationError({"role": "Invalid organization role."})
+        if role == OrganizationMembership.ROLE_ORG_ADMIN and not is_platform_admin(request.user):
+            raise PermissionDenied("Only platform administrators can grant organization admin.")
+        if request.method == "POST":
+            assignment, _ = OrganizationMembership.objects.get_or_create(
+                user=target, organization=organization, business_line=None, role=role
+            )
+        else:
+            OrganizationMembership.objects.filter(user=target, organization=organization, business_line=None, role=role).delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+    elif scope == "space":
+        try:
+            space = KnowledgeSpace.objects.get(pk=scope_id)
+        except KnowledgeSpace.DoesNotExist as exc:
+            raise NotFound("Space not found.") from exc
+        if not _can_manage_space(request.user, space):
+            raise PermissionDenied("You cannot manage this space.")
+        if role not in dict(SpaceMembership.ROLE_CHOICES):
+            raise ValidationError({"role": "Invalid space role."})
+        if request.method == "POST":
+            assignment, _ = SpaceMembership.objects.update_or_create(
+                user=target, space=space, defaults={"role": role, "status": "active", "invited_by": request.user}
+            )
+        else:
+            if role == SpaceMembership.ROLE_OWNER and SpaceMembership.objects.filter(space=space, role=role, status="active").count() <= 1:
+                raise ValidationError({"detail": "Cannot remove the last owner."})
+            SpaceMembership.objects.filter(user=target, space=space, role=role).delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+    else:
+        raise ValidationError({"scope": "Use organization or space."})
+    from apps.audit.views import create_audit_log
+    create_audit_log(request.user, "scoped_role_assign", "User", target.id, details={"scope": scope, "scope_id": str(scope_id), "role": role}, request=request)
+    return Response({"id": str(assignment.id), "user_id": str(target.id), "scope": scope, "role": role}, status=status.HTTP_201_CREATED)

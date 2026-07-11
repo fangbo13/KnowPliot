@@ -705,7 +705,7 @@ Delivery slices:
 Delivery slices:
 
 - Phase 9A / V11.0: Account Security and User Preferences — actual PASS.
-- Phase 9B / V11.1: Scoped Administration and Lifecycle — planned.
+- Phase 9B / V11.1: Scoped Administration and Lifecycle — actual PASS.
 - Phase 9C / V11.2: Model and Retention Policy Governance — planned, blocked until Phase 9B PASS.
 
 Phase 9 preserves single-space retrieval, citation enforcement, backend

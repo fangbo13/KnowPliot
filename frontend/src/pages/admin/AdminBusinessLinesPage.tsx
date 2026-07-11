@@ -49,11 +49,40 @@ export default function AdminBusinessLinesPage() {
 
   const orgName = (id: string) => orgs.find((o) => o.id === id)?.name || id;
 
+  const changeLifecycle = async (line: BusinessLine) => {
+    const archive = line.status === 'active';
+    try {
+      if (archive) await adminApi.archiveBusinessLine(line.id);
+      else await adminApi.restoreBusinessLine(line.id);
+      antdMessage.success(archive ? 'Business line archived' : 'Business line restored');
+      await refresh();
+    } catch {
+      antdMessage.error('Unable to update business line status');
+    }
+  };
+
+  const changeOrganizationLifecycle = async (organization: Organization) => {
+    const archive = organization.status === 'active';
+    try {
+      if (archive) await adminApi.archiveOrganization(organization.id);
+      else await adminApi.restoreOrganization(organization.id);
+      antdMessage.success(archive ? 'Organization archived' : 'Organization restored');
+      await refresh();
+    } catch {
+      antdMessage.error('Unable to update organization status');
+    }
+  };
+
   const columns = [
     { title: t('kb_title') || 'Name', dataIndex: 'name', key: 'name' },
     { title: 'Code', dataIndex: 'code', key: 'code', render: (c: string) => <Tag>{c}</Tag> },
     { title: 'Organization', dataIndex: 'organization', key: 'organization', render: (o: string) => orgName(o) },
     { title: t('kb_status') || 'Status', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag> },
+    { title: 'Lifecycle', key: 'lifecycle', render: (_: unknown, line: BusinessLine) => (
+      <Button size="small" onClick={() => changeLifecycle(line)}>
+        {line.status === 'active' ? 'Archive' : 'Restore'}
+      </Button>
+    ) },
   ];
 
   return (
@@ -68,6 +97,21 @@ export default function AdminBusinessLinesPage() {
       </div>
       <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
         <Table rowKey="id" loading={loading} dataSource={lines} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
+      </Card>
+
+      <Card title="Organizations" className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ marginTop: 24, borderRadius: 'var(--radius-lg)' }}>
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={orgs}
+          pagination={false}
+          size="small"
+          columns={[
+            { title: 'Name', dataIndex: 'name', key: 'name' },
+            { title: 'Status', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag> },
+            { title: 'Lifecycle', key: 'lifecycle', render: (_: unknown, org: Organization) => <Button size="small" onClick={() => changeOrganizationLifecycle(org)}>{org.status === 'active' ? 'Archive' : 'Restore'}</Button> },
+          ]}
+        />
       </Card>
 
       <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_create_business_line')} open={open} onOk={create} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>
