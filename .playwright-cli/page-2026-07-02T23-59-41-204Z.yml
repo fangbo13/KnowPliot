@@ -1,0 +1,107 @@
+- generic [ref=f4e3]:
+  - complementary [ref=f4e4]:
+    - generic [ref=f4e5]:
+      - generic [ref=f4e6]: K
+      - generic [ref=f4e7]: Admin Console
+    - navigation [ref=f4e8]:
+      - link "dashboard Dashboard" [ref=f4e9] [cursor=pointer]:
+        - /url: /admin/dashboard
+        - img "dashboard" [ref=f4e11]:
+          - img [ref=f4e12]
+        - text: Dashboard
+      - link "team Users & Roles" [ref=f4e14] [cursor=pointer]:
+        - /url: /admin/users
+        - img "team" [ref=f4e16]:
+          - img [ref=f4e17]
+        - text: Users & Roles
+      - link "safety-certificate Admin Codes" [ref=f4e19] [cursor=pointer]:
+        - /url: /admin/codes
+        - img "safety-certificate" [ref=f4e21]:
+          - img [ref=f4e22]
+        - text: Admin Codes
+      - link "sound Announcements" [ref=f4e24] [cursor=pointer]:
+        - /url: /admin/announcements
+        - img "sound" [ref=f4e26]:
+          - img [ref=f4e27]
+        - text: Announcements
+      - link "apartment Business Lines" [ref=f4e29] [cursor=pointer]:
+        - /url: /admin/business-lines
+        - img "apartment" [ref=f4e31]:
+          - img [ref=f4e32]
+        - text: Business Lines
+      - link "layout Scenario Templates" [ref=f4e34] [cursor=pointer]:
+        - /url: /admin/templates
+        - img "layout" [ref=f4e36]:
+          - img [ref=f4e37]
+        - text: Scenario Templates
+      - link "message Answer Quality" [ref=f4e39] [cursor=pointer]:
+        - /url: /admin/quality
+        - img "message" [ref=f4e41]:
+          - img [ref=f4e42]
+        - text: Answer Quality
+      - link "audit Audit Logs" [ref=f4e44] [cursor=pointer]:
+        - /url: /admin/audit
+        - img "audit" [ref=f4e46]:
+          - img [ref=f4e47]
+        - text: Audit Logs
+      - link "database Knowledge Base" [ref=f4e49] [cursor=pointer]:
+        - /url: /admin/knowledge
+        - img "database" [ref=f4e51]:
+          - img [ref=f4e52]
+        - text: Knowledge Base
+    - button "arrow-left Back to app" [ref=f4e54] [cursor=pointer]:
+      - img "arrow-left" [ref=f4e55]:
+        - img [ref=f4e56]
+      - text: Back to app
+  - generic [ref=f4e58]:
+    - banner [ref=f4e59]:
+      - button "Switch language" [ref=f4e60] [cursor=pointer]:
+        - img "global" [ref=f4e61]:
+          - img [ref=f4e62]
+      - button "Switch to Dark Mode" [ref=f4e64] [cursor=pointer]:
+        - img "moon" [ref=f4e65]:
+          - img [ref=f4e66]
+      - button "Notifications" [ref=f4e68] [cursor=pointer]:
+        - img "bell" [ref=f4e70]:
+          - img [ref=f4e71]
+      - button "User menu" [ref=f4e73] [cursor=pointer]:
+        - generic [ref=f4e74]: CO
+        - generic [ref=f4e75]: codex.qa.admin@example.test
+    - main [ref=f4e76]:
+      - generic [ref=f4e78]:
+        - heading "Knowledge Base" [level=1] [ref=f4e80]
+        - generic [ref=f4e82]:
+          - generic [ref=f4e83]:
+            - generic [ref=f4e84]: Document List
+            - generic [ref=f4e85]:
+              - button "upload Upload" [ref=f4e90] [cursor=pointer]:
+                - img "upload" [ref=f4e92]:
+                  - img [ref=f4e93]
+                - generic [ref=f4e95]: Upload
+              - button "reload Refresh" [ref=f4e97] [cursor=pointer]:
+                - img "reload" [ref=f4e99]:
+                  - img [ref=f4e100]
+                - generic [ref=f4e102]: Refresh
+          - generic [ref=f4e104]:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - table:
+                      - rowgroup:
+                        - row "Title Category Type Chunks Status Created Actions":
+                          - columnheader "Title"
+                          - columnheader "Category"
+                          - columnheader "Type"
+                          - columnheader "Chunks"
+                          - columnheader "Status"
+                          - columnheader "Created"
+                          - columnheader "Actions"
+                      - rowgroup:
+                        - row "No data No documents":
+                          - cell "No data No documents":
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - img "No data"
+                                - generic: No documents

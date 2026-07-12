@@ -1,0 +1,67 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - button "global" [ref=e5] [cursor=pointer]:
+      - img "global" [ref=e7]:
+        - img [ref=e8]
+    - button "moon" [ref=e10] [cursor=pointer]:
+      - img "moon" [ref=e12]:
+        - img [ref=e13]
+  - generic [ref=e15]:
+    - generic [ref=e16]:
+      - generic [ref=e18]: K
+      - heading "KnowPilot" [level=1] [ref=e19]
+      - paragraph [ref=e20]: 智能知识助手，随时解答政策、福利等问题
+      - generic [ref=e21]:
+        - generic [ref=e22]: AI 智能问答
+        - generic [ref=e24]: 知识库集成
+        - generic [ref=e26]: 个性化服务
+    - generic [ref=e28]:
+      - heading "欢迎回来" [level=2] [ref=e29]
+      - paragraph [ref=e30]: 登录你的账户以继续
+      - generic [ref=e31]:
+        - tablist [ref=e32]:
+          - generic [ref=e34]:
+            - tab "login 登录" [selected] [ref=e36] [cursor=pointer]:
+              - generic [ref=e37]:
+                - img "login" [ref=e38]:
+                  - img [ref=e39]
+                - text: 登录
+            - tab "user-add 注册" [ref=e42] [cursor=pointer]:
+              - generic [ref=e43]:
+                - img "user-add" [ref=e44]:
+                  - img [ref=e45]
+                - text: 注册
+            - tab "safety-certificate 管理员" [ref=e48] [cursor=pointer]:
+              - generic [ref=e49]:
+                - img "safety-certificate" [ref=e50]:
+                  - img [ref=e51]
+                - text: 管理员
+        - tabpanel "login 登录" [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e57]:
+              - generic [ref=e58]: 演示账户：admin@test.ey.com / admin123
+              - button "user-switch 使用演示账户" [ref=e59] [cursor=pointer]:
+                - img "user-switch" [ref=e61]:
+                  - img [ref=e62]
+                - generic [ref=e64]: 使用演示账户
+            - generic [ref=e65]:
+              - generic [ref=e67]:
+                - generic "邮箱地址" [ref=e69]
+                - generic [ref=e73]:
+                  - img "mail" [ref=e75]:
+                    - img [ref=e76]
+                  - textbox "邮箱地址" [ref=e78]:
+                    - /placeholder: 请输入你的邮箱
+              - generic [ref=e80]:
+                - generic "密码" [ref=e82]
+                - generic [ref=e86]:
+                  - img "lock" [ref=e88]:
+                    - img [ref=e89]
+                  - textbox "密码" [ref=e91]:
+                    - /placeholder: 请输入你的密码
+                  - img "eye-invisible" [ref=e93] [cursor=pointer]:
+                    - img [ref=e94]
+              - button "login 登录" [ref=e102] [cursor=pointer]:
+                - img "login" [ref=e104]:
+                  - img [ref=e105]
+                - generic [ref=e107]: 登录
