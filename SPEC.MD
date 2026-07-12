@@ -3,7 +3,7 @@
 > Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
 > with versioned implementation audits on 2026-07-02.
 
-> Version: V11.0 actual-pass baseline; Phase 9A complete
+> Version: V11.2 actual-pass baseline; Phase 9 complete
 > Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
@@ -706,7 +706,7 @@ Delivery slices:
 
 - Phase 9A / V11.0: Account Security and User Preferences — actual PASS.
 - Phase 9B / V11.1: Scoped Administration and Lifecycle — actual PASS.
-- Phase 9C / V11.2: Model and Retention Policy Governance — planned, blocked until Phase 9B PASS.
+- Phase 9C / V11.2: Model and Retention Policy Governance — actual PASS.
 
 Phase 9 preserves single-space retrieval, citation enforcement, backend
 authorization, and immutable audit evidence. Real SSO, cross-space retrieval,

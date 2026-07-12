@@ -15,6 +15,8 @@ from .models import (
     SpaceEmailInvite,
     SpaceAccessRequest,
     SpaceMembership,
+    GovernancePolicy,
+    ModelProfile,
 )
 
 
@@ -227,3 +229,17 @@ class SpaceCloneSerializer(serializers.Serializer):
 
 class SpaceOwnerTransferSerializer(serializers.Serializer):
     user = serializers.UUIDField()
+
+
+class GovernancePolicySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GovernancePolicy
+        fields = ["id", "organization", "space", "revision", "values", "created_at"]
+        read_only_fields = ["id", "revision", "created_at"]
+
+
+class ModelProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModelProfile
+        fields = ["id", "name", "provider", "model_id", "enabled", "created_at"]
+        read_only_fields = ["id", "created_at"]

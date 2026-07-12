@@ -464,3 +464,74 @@ class SpaceAccessRequest(models.Model):
             )
         ]
         ordering = ["-created_at"]
+
+
+class GovernancePolicy(models.Model):
+    """Versioned, scoped operational policy. Security invariants are not configurable."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.CASCADE, related_name="governance_policies")
+    space = models.ForeignKey(KnowledgeSpace, null=True, blank=True, on_delete=models.CASCADE, related_name="governance_policies")
+    revision = models.PositiveIntegerField(default=1)
+    values = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spaces_governancepolicy"
+        ordering = ["-revision", "-created_at"]
+
+    def clean(self):
+        allowed = {"model_profile", "retrieval_top_k", "similarity_threshold", "needs_human_review", "max_answer_chars", "retention_days"}
+        invalid = set(self.values) - allowed
+        if invalid:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({"values": f"Unsupported policy fields: {', '.join(sorted(invalid))}"})
+        top_k = self.values.get("retrieval_top_k")
+        if top_k is not None and (not isinstance(top_k, int) or not 1 <= top_k <= 20):
+            from django.core.exceptions import ValidationError
+            raise ValidationError({"values": "retrieval_top_k must be an integer from 1 to 20."})
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Governance policy revisions are immutable; create a new revision instead.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class ModelProfile(models.Model):
+    """Platform-managed model registry; secrets remain in deployment configuration."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    provider = models.CharField(max_length=40)
+    model_id = models.CharField(max_length=160)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spaces_modelprofile"
+
+
+def resolve_effective_policy(space):
+    """Resolve defaults < organization < space; retrieval safety is never configurable."""
+    defaults = {"retrieval_top_k": 5, "similarity_threshold": 0.3, "needs_human_review": False, "max_answer_chars": 12000, "retention_days": 365}
+    org = GovernancePolicy.objects.filter(organization=space.organization, space__isnull=True).order_by("-revision", "-created_at").first()
+    scoped = GovernancePolicy.objects.filter(space=space).order_by("-revision", "-created_at").first()
+    if org:
+        defaults.update(org.values)
+    if scoped:
+        defaults.update(scoped.values)
+    return defaults
+
+
+def create_policy_revision(*, organization=None, space=None, values=None):
+    """Create (never mutate) the next revision for one policy scope."""
+    if bool(organization) == bool(space):
+        raise ValueError("A policy revision needs exactly one organization or space scope.")
+    query = GovernancePolicy.objects.filter(space=space) if space else GovernancePolicy.objects.filter(organization=organization, space__isnull=True)
+    latest = query.order_by("-revision").first()
+    return GovernancePolicy.objects.create(
+        organization=organization or space.organization,
+        space=space,
+        revision=(latest.revision + 1) if latest else 1,
+        values=values or {},
+    )

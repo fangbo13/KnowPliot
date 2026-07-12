@@ -23,10 +23,10 @@ from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.views import APIView
 
-from .models import AdminRegistrationCode, BusinessLine, Organization, OrganizationMembership, KnowledgeSpace, SpaceAccessRequest, SpaceMembership
+from .models import AdminRegistrationCode, BusinessLine, Organization, OrganizationMembership, KnowledgeSpace, SpaceAccessRequest, SpaceMembership, GovernancePolicy, ModelProfile, create_policy_revision, resolve_effective_policy
 from .permissions import admin_scope, is_platform_admin
 from .serializers import (
     AdminRegistrationCodeCreateSerializer,
@@ -34,6 +34,8 @@ from .serializers import (
     BusinessLineSerializer,
     OrganizationSerializer,
     SpaceAccessRequestSerializer,
+    GovernancePolicySerializer,
+    ModelProfileSerializer,
 )
 from .services import generate_admin_code, hash_code
 from .admin_operations import (
@@ -44,6 +46,40 @@ from .admin_operations import (
 from apps.knowledge.models import Document, IngestionJob
 
 logger = logging.getLogger(__name__)
+
+
+class ModelProfileListCreateView(generics.ListCreateAPIView):
+    serializer_class = ModelProfileSerializer
+    permission_classes = [IsAuthenticated]
+    queryset = ModelProfile.objects.all().order_by("name")
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not is_platform_admin(request.user):
+            raise PermissionDenied("Only platform administrators can manage model profiles.")
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def governance_policies(request):
+    if request.method == "GET":
+        space_id = request.query_params.get("space")
+        if not space_id:
+            raise ValidationError({"space": "Required."})
+        try:
+            space = KnowledgeSpace.objects.get(pk=space_id)
+        except KnowledgeSpace.DoesNotExist as exc:
+            raise NotFound("Space not found.") from exc
+        if not is_platform_admin(request.user) and space.organization_id not in admin_scope(request.user)[0]:
+            raise PermissionDenied("You cannot view this policy.")
+        return Response({"effective": resolve_effective_policy(space), "revisions": GovernancePolicySerializer(GovernancePolicy.objects.filter(space=space), many=True).data})
+    if not is_platform_admin(request.user):
+        raise PermissionDenied("Only platform administrators can create governance policies.")
+    serializer = GovernancePolicySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    validated = serializer.validated_data
+    policy = create_policy_revision(organization=validated.get("organization"), space=validated.get("space"), values=validated.get("values"))
+    return Response(GovernancePolicySerializer(policy).data, status=status.HTTP_201_CREATED)
 
 
 def _audit_operations_view(request, view_name, **details):

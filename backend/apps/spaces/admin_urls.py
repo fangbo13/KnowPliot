@@ -24,6 +24,8 @@ from .admin_views import (
     space_access_request_approve,
     ScopedAdminUserListView,
     scoped_user_assignment,
+    ModelProfileListCreateView,
+    governance_policies,
     business_line_archive,
     business_line_restore,
 )
@@ -67,6 +69,8 @@ urlpatterns = [
     path("spaces/<uuid:pk>/access-requests/<uuid:request_id>/approve/", space_access_request_approve, name="admin-space-access-request-approve"),
     path("users/", ScopedAdminUserListView.as_view(), name="admin-scoped-user-list"),
     path("users/<uuid:user_id>/assignments/", scoped_user_assignment, name="admin-scoped-user-assignment"),
+    path("model-profiles/", ModelProfileListCreateView.as_view(), name="admin-model-profiles"),
+    path("governance/policies/", governance_policies, name="admin-governance-policies"),
     path("health/", SystemHealthView.as_view(), name="admin-health"),
     path("metrics/", SystemMetricsView.as_view(), name="admin-metrics"),
     path("ingestion-jobs/", IngestionJobListView.as_view(), name="admin-ingestion-jobs"),
