@@ -53,3 +53,6 @@ htmlcov/
 *.tmp
 *.bak
 skills/open-design/
+
+# Local Git worktrees
+.worktrees/
