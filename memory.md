@@ -1,18 +1,18 @@
 # KnowPilot Delivery Memory
 
 - **Last updated:** 2026-07-16
-- **Current phase:** Task 1 — Specification and durable handoff (complete and verified)
-- **Active branch/commit:** `codex/knowpilot-optimization` / baseline `1e408df`
+- **Current phase:** Task 3A — durable ChatTurn identity and idempotency (complete and verified); Task 3B is next.
+- **Active branch/commit:** `codex/knowpilot-optimization` / Task 3A implementation `f2650a7`
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
 
 ## 1 Current Objective
 
-Establish the approved optimization specification and a durable, safe handoff
-baseline. Task 1 changes documentation only. The implementation sequence starts
-with frontend chat stability containment before backend protocol, capability,
-model, or visual rollout.
+Continue from the verified frontend chat stability containment and durable
+ChatTurn identity. The next bounded objective is Task 3B: add the renewable
+Redis session lock, SSE v2 event identity/replay, and explicit worker-loss
+recovery while preserving the current v1 stream contract.
 
 ## 2 Locked Decisions
 
@@ -45,13 +45,18 @@ model, or visual rollout.
 
 ### ChatTurn
 
-- Planned additive UUID record with `client_request_id`, session/space/user,
-  question/assistant messages, status, answer mode, model ID, attempt count,
-  last sequence, safe error code, and timestamps.
+- Additive UUID record is implemented in migration `chat.0013_chatturn`, with
+  `client_request_id`, session/space/user, question/assistant messages, status,
+  answer mode, model ID, attempt count, last sequence, safe error code, and
+  timestamps.
 - Database uniqueness: `(user, client_request_id)`.
 - Completed duplicates return the existing result; active duplicates return
   `turn_in_progress`; retryable failures reuse the question and increment the
   attempt count.
+- `GET /api/v1/chat/turns/{turn_id}/` returns owner-scoped safe status and the
+  completed answer. Other users are filtered at lookup and are not revealed.
+- The frontend sends and retains one `client_request_id` per send invocation;
+  it still never automatically retries the POST.
 
 ### SSE
 
@@ -73,7 +78,7 @@ model, or visual rollout.
 
 | Flag | Current state | Enable gate |
 |---|---|---|
-| `CHAT_TURN_IDEMPOTENCY` | Planned; disabled/not implemented | Additive Turn migration and idempotency tests pass. |
+| `CHAT_TURN_IDEMPOTENCY` | Implementation complete; not enabled in the unstarted deployment | Apply `0013`, pass PostgreSQL-backed concurrency tests, then enable. |
 | `CHAT_STREAM_V2` | Planned; disabled/not implemented | Turn durability/recovery and dual-protocol tests pass. |
 | `CAPABILITY_NAV` | Planned; disabled/not implemented | Role matrix, scoped API, route, and navigation tests pass. |
 | `DEEP_ANSWER_MODE` | Planned; disabled/not implemented | Governed model/privacy/mode tests and fast fallback pass. |
@@ -100,21 +105,29 @@ Enable in the table order. Roll back in reverse order.
 - Approved implementation plan committed at baseline `1e408df`.
 - Task 1 optimization addendum, durable memory, and root-spec pointer authored.
 - Task 1 scope, link/path, structure, and diff checks passed.
+- Task 2 frontend containment: session-keyed stream state, stale-load guards,
+  pagination/deduplication, recoverable partials, History routing, and no POST
+  retry. Full frontend suite reached 109 passing before Task 3A.
+- Task 3A implementation `f2650a7`: additive ChatTurn model/migration,
+  transactionally serialized begin/reuse service, stable duplicate outcomes,
+  owner recovery endpoint, primary-key history exclusion, session timestamp
+  touches, completed-result v1 replay, and frontend request identity.
 
 ### In Progress
 
-- None. Task 1 is committed and handed off.
+- None. Task 3A is committed and verified within the available environment.
 
 ### Next
 
-- **Single next action:** Start Task 2 by writing failing Vitest coverage for
-  active-session reselection preserving messages, pagination, loading state,
-  and the current Turn without issuing a reload.
+- **Single next action:** Start Task 3B with failing database-free tests for a
+  180-second Redis session lock that renews every 30 seconds and releases on
+  every stream exit path, followed by SSE v2 event IDs and 15-minute replay.
 
 ### Deferred
 
-- Tasks 3–8: ChatTurn/SSE v2, capability consoles, fast/deep execution, design
-  convergence, product closure, and compatibility cleanup.
+- Task 3B and Tasks 4–8: Redis locking/SSE v2 replay, capability consoles,
+  fast/deep execution, design convergence, product closure, and compatibility
+  cleanup.
 - Deployed 筼筜 validation and deployment-server migration require separate
   authorization and environment details.
 
@@ -122,7 +135,8 @@ Enable in the table order. Roll back in reverse order.
 
 | Group | Open IDs | State |
 |---|---|---|
-| Chat stability/data | `KP-C01`–`KP-C11` | Audited; implementation not started. |
+| Chat stability/data | `KP-C01`–`KP-C06`, `KP-C08`–`KP-C10` | Implemented with database-free/frontend coverage; deployed validation remains. |
+| Chat lock/replay | `KP-C07`, remaining `KP-C11` recovery | Task 3B pending: Redis lease/renewal, event replay, and worker-loss closure. |
 | Authorization/governance | `KP-A01`–`KP-A04` | Audited; implementation not started. |
 | Product closure | `KP-U01`, `KP-U02` | Audited; implementation not started. |
 | Design system | `KP-D01`, `KP-D02` | Audited; implementation not started. |
@@ -130,22 +144,29 @@ Enable in the table order. Roll back in reverse order.
 
 ## 8 Database and Migration State
 
-- No Task 1 product code or migration change.
-- `ChatTurn` and its additive migration are planned for Task 3 and do not yet
-  exist at this baseline.
+- Additive migration `backend/apps/chat/migrations/0013_chatturn.py` creates the
+  durable record and its `(user, client_request_id)` unique constraint.
+- Migration model state is consistent: `makemigrations --check --dry-run`
+  reported `No changes detected`; its database-history probe separately warned
+  that host `db` could not be resolved.
 - Existing data must remain intact through rollout and rollback.
-- PostgreSQL-dependent backend tests were not run: blocked because hostname
-  `db` is unavailable. Do not start Docker to bypass this constraint.
+- Migration `0013` was not applied. One PostgreSQL-backed API test was attempted
+  and blocked at setup with `failed to resolve host 'db': [Errno 11001]
+  getaddrinfo failed`. Do not start Docker to bypass this constraint.
 
 ## 9 Verification Ledger
 
 | Evidence | Result | Provenance / limitation |
 |---|---|---|
-| Frontend baseline | 53 passed | Approved pre-task baseline; product tests are not required or rerun for Task 1. |
-| Backend DB baseline | Not run / blocked | PostgreSQL hostname `db` is unavailable. |
-| Task 1 product tests | Not run | Documentation-only task per approved plan. |
-| Documentation path/link checks | PASS | 5 required paths resolved; 3 relative Markdown links resolved; 19 audited IDs and 11 ordered memory sections verified. |
-| `git diff --check` | PASS | Exit 0 with the Task 1 report included in the checked diff. |
+| Task 3A backend pure/SimpleTestCase | 12 passed | Model, serializer, transition, atomic begin/reuse, duplicate, status-owner, and no-RAG replay contracts; no PostgreSQL required. |
+| Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
+| Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
+| PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
+| Frontend full suite | 110 passed in 18 files | Includes retained `client_request_id` and v2 request-body coverage. |
+| Frontend typecheck | PASS | `tsc --noEmit`. |
+| Frontend production build | PASS | `tsc -b && vite build`; 4000 modules transformed. Generated `tsconfig.tsbuildinfo` was restored and not committed. |
+| Ruff changed-file check | PASS | All Task 3A Python implementation/test files passed. |
+| `git diff --check` | PASS | Exit 0 before the Task 3A implementation commit. |
 
 ## 10 Deployment and Rollback
 
@@ -155,17 +176,20 @@ Enable in the table order. Roll back in reverse order.
   → `DEEP_ANSWER_MODE`.
 - Rollback reverses that order and preserves additive `ChatTurn` data,
   migrations, v1 streaming, and the one-release legacy authorization fallback.
+- Code rollback may disable the idempotent path while leaving the additive
+  `chat_chatturn` table intact; do not reverse `0013` after production data is
+  written without a separate data-retention decision.
 - Do not delete v1 routes or legacy fallback in this branch.
 
 ## 11 Handoff Checklist
 
-- [x] Active branch and baseline commit recorded.
+- [x] Active branch and Task 3A implementation commit recorded.
 - [x] Primary addendum and implementation plan identified.
 - [x] 筼筜 target recorded without inventing host, path, or credentials.
 - [x] Environment-not-started state recorded.
 - [x] Locked decisions, contracts, matrix, feature flags, and issues recorded.
-- [x] Baseline evidence and DB-test limitation recorded honestly.
-- [x] Exactly one next action identified.
-- [x] Documentation path/link checks pass.
-- [x] `git diff --check` passes with the Task 1 report included.
-- [x] Task 1 commit SHA was handed back to the coordinating agent.
+- [x] Task 2 and Task 3A evidence plus DB-test limitation recorded honestly.
+- [x] Additive migration and owner-visible recovery contract recorded.
+- [x] Exactly one bounded Task 3B action identified.
+- [x] Generated build metadata excluded from the implementation commit.
+- [x] Task 3A commit SHA is ready for coordinating-agent review.
