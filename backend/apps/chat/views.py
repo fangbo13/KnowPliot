@@ -9,26 +9,36 @@ import logging
 import time
 from html import escape
 
+from django.db import transaction
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
-from .models import ChatSession, Message, Citation, Feedback
-from .serializers import (
-    ChatSessionSerializer,
-    ChatMessageRequestSerializer,
-    FeedbackSerializer,
-    MessageSerializer,
-)
 # V6.0: space isolation helpers.
 from apps.spaces.permissions import (
     CHAT_ASK,
     effective_space_role,
     resolve_request_space,
+)
+
+from .models import ChatSession, ChatTurn, Citation, Feedback, Message
+from .serializers import (
+    ChatMessageRequestSerializer,
+    ChatSessionSerializer,
+    ChatTurnStatusSerializer,
+    FeedbackSerializer,
+    MessageSerializer,
+)
+from .services import (
+    BeginTurnDisposition,
+    InvalidTurnTransitionError,
+    begin_chat_turn,
+    transition_chat_turn,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,7 +144,7 @@ def export_session(request, session_id):
         )
     except ChatSession.DoesNotExist:
         from rest_framework.exceptions import NotFound
-        raise NotFound("Session not found.")
+        raise NotFound("Session not found.") from None
     if session.space_id and effective_space_role(request.user, session.space) is None:
         from rest_framework.exceptions import PermissionDenied
         raise PermissionDenied("You no longer have access to this space.")
@@ -229,22 +239,92 @@ class SendMessageRateThrottle(UserRateThrottle):
     rate = '10/minute'  # Normal users: 5-10 msg/hr; Active: 1-2 msg/min; Blocks cost explosion
 
 
+def _streaming_response(events):
+    response = StreamingHttpResponse(events, content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
+def _completed_turn_events(turn):
+    """Replay one completed result in the legacy SSE protocol without running RAG."""
+
+    message = turn.assistant_message
+    citations = [
+        {
+            "document_id": str(citation.document_id),
+            "document_title": citation.document.title,
+            "page_number": citation.page_number,
+            "score": citation.relevance_score,
+            "quoted_text": citation.quoted_text,
+        }
+        for citation in message.citations.select_related("document").all()
+    ]
+    if citations:
+        yield "event: citations\n"
+        yield f"data: {json.dumps(citations, ensure_ascii=False)}\n\n"
+
+    quality = {
+        "score": message.confidence_score,
+        "confidence": message.confidence_label,
+        "needs_human_review": message.needs_human_review,
+        "retrieval_mode": message.retrieval_mode,
+        "retrieval_latency_ms": message.retrieval_latency_ms,
+    }
+    if any(value not in (None, "", False) for value in quality.values()):
+        yield "event: quality\n"
+        yield f"data: {json.dumps(quality, ensure_ascii=False)}\n\n"
+
+    yield "event: token\n"
+    yield f"data: {json.dumps({'token': message.content}, ensure_ascii=False)}\n\n"
+    done_data = {
+        "message_id": str(message.id),
+        "session_id": str(turn.session_id),
+        "model": turn.model_id or message.model_used or "",
+        "turn_id": str(turn.id),
+        "client_request_id": str(turn.client_request_id),
+    }
+    yield "event: done\n"
+    yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def chat_turn_status(request, turn_id):
+    """Return an owned Turn's safe recovery state without revealing other users."""
+
+    turn = get_object_or_404(
+        ChatTurn.objects.select_related(
+            "space",
+            "space__organization",
+            "space__business_line",
+            "assistant_message",
+        ).prefetch_related("assistant_message__citations__document"),
+        id=turn_id,
+        user=request.user,
+    )
+    if turn.space_id and effective_space_role(request.user, turn.space) is None:
+        from rest_framework.exceptions import NotFound
+
+        raise NotFound("Turn not found.")
+    return Response(ChatTurnStatusSerializer(turn, context={"request": request}).data)
+
+
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 @throttle_classes([SendMessageRateThrottle])
 def send_message(request, session_id):
     """Send a message and get streaming response (SSE).
 
-    TODO (SYS-V4.1-007): Add Redis session-level lock when migrating to
-    gunicorn multi-worker deployment. Current runserver is single-threaded
-    so concurrent SSE requests cannot race. Future: acquire Redis lock
-    with key "chat:session_lock:{session_id}" before streaming, release
-    in GeneratorExit/finally block.
+    ChatTurn identity/idempotency is durable here. The Redis session lock and
+    replayable SSE v2 envelope are intentionally deferred to Task 3B.
     """
     serializer = ChatMessageRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
     content = serializer.validated_data["content"]
+    client_request_id = serializer.validated_data["client_request_id"]
+    answer_mode = serializer.validated_data["answer_mode"]
     user = request.user
     language = getattr(user, "language_preference", "en")
 
@@ -288,35 +368,69 @@ def send_message(request, session_id):
         session.title = content[:50]
         session.save(update_fields=["title"])
 
-    # Save user message
-    question_message = Message.objects.create(
-        session=session, role="user", content=content, space=space
+    begin_result = begin_chat_turn(
+        user=user,
+        session=session,
+        space=space,
+        client_request_id=client_request_id,
+        content=content,
+        answer_mode=answer_mode,
     )
+    turn = begin_result.turn
+
+    if begin_result.disposition == BeginTurnDisposition.CONFLICT:
+        return Response(
+            {
+                "code": "client_request_conflict",
+                "turn_id": str(turn.id),
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    if begin_result.disposition == BeginTurnDisposition.IN_PROGRESS:
+        return Response(
+            {"code": "turn_in_progress", "turn_id": str(turn.id)},
+            status=status.HTTP_409_CONFLICT,
+        )
+    if begin_result.disposition == BeginTurnDisposition.TERMINAL:
+        return Response(
+            {
+                "code": "turn_not_retryable",
+                "turn_id": str(turn.id),
+                "turn_status": turn.status,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    if begin_result.disposition == BeginTurnDisposition.COMPLETED:
+        if turn.assistant_message is None:
+            return Response(
+                {"code": "turn_result_unavailable", "turn_id": str(turn.id)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return _streaming_response(_completed_turn_events(turn))
+
+    question_message = turn.question_message
 
     # V3.5 HIGH-006: Sliding window aligned with frontend — 10 rounds (20 messages)
     # (was fixed 16 messages = 8 rounds, misaligned with frontend's 10-round default)
-    WINDOW_ROUNDS = 10
+    window_rounds = 10
     history = list(
         Message.objects.filter(session=session)
-        .exclude(role="user", content=content)  # exclude the one we just saved
-        .order_by("-created_at")[:WINDOW_ROUNDS * 2]
+        .exclude(pk=question_message.pk)
+        .order_by("-created_at")[:window_rounds * 2]
         .values_list("role", "content")
     )
     history.reverse()
-
-    from apps.rag.pipeline import RAGPipeline
-
-    pipeline = RAGPipeline()
 
     def event_stream():
         start_time = time.time()
         # V4.2 SYS-V4.2-014: SSE timeout limit — abort stream if total time exceeds 60s
         # Prevents runserver from being blocked indefinitely by DashScope failures.
-        SSE_TIMEOUT_SECONDS = 60
+        sse_timeout_seconds = 60
         response_tokens = []
         citations_data = []
         quality_data = {}
         client_disconnected = False
+        pipeline = None
 
         def record_invocation(
             invocation_status,
@@ -334,7 +448,7 @@ def send_message(request, session_id):
                     message=message,
                     question_message=question_message,
                     space=space,
-                    model=pipeline.model_name,
+                    model=getattr(pipeline, "model_name", turn.model_id),
                     status=invocation_status,
                     token_count=token_count,
                     latency_ms=int((time.time() - start_time) * 1000),
@@ -347,6 +461,14 @@ def send_message(request, session_id):
                 )
 
         try:
+            from apps.rag.pipeline import RAGPipeline
+
+            pipeline = RAGPipeline()
+            transition_chat_turn(
+                turn,
+                ChatTurn.STATUS_RETRIEVING,
+                model_id=pipeline.model_name,
+            )
             for event in pipeline.retrieve_and_generate(
                 query=content,
                 user_profile=user,
@@ -372,17 +494,28 @@ def send_message(request, session_id):
 
                 elif event_type == "token":
                     # V4.2 SYS-V4.2-014: Check SSE timeout — abort if stream exceeds limit
-                    if time.time() - start_time > SSE_TIMEOUT_SECONDS:
+                    if time.time() - start_time > sse_timeout_seconds:
                         logger.warning(
                             "SSE timeout for session %s — stream exceeded %ds",
-                            session_id, SSE_TIMEOUT_SECONDS,
+                            session_id, sse_timeout_seconds,
                         )
                         record_invocation("timeout", error_code="stream_timeout")
+                        transition_chat_turn(
+                            turn,
+                            ChatTurn.STATUS_FAILED,
+                            error_code="stream_timeout",
+                        )
                         yield "event: error\n"
                         yield f"data: {json.dumps({'error': 'stream_timeout'}, ensure_ascii=False)}\n\n"
                         return
 
                     token = data.get("token", "")
+                    if turn.status != ChatTurn.STATUS_ANSWERING:
+                        transition_chat_turn(
+                            turn,
+                            ChatTurn.STATUS_ANSWERING,
+                            model_id=pipeline.model_name,
+                        )
                     response_tokens.append(token)
                     yield "event: token\n"
                     yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
@@ -392,11 +525,27 @@ def send_message(request, session_id):
             client_disconnected = True
             logger.info("Client disconnected during stream for session %s", session_id)
             record_invocation("cancelled", error_code="client_disconnected")
+            try:
+                transition_chat_turn(
+                    turn,
+                    ChatTurn.STATUS_FAILED,
+                    error_code="client_disconnected",
+                )
+            except InvalidTurnTransitionError:
+                logger.info("Turn %s was already terminal on disconnect", turn.id)
             return
         except Exception as e:
             # V4.0 DEFECT-013: SSE error event must NOT leak str(e) to frontend
             logger.error("Stream error for session %s: %s", session_id, e, exc_info=True)
             record_invocation("failure", error_code="stream_error")
+            try:
+                transition_chat_turn(
+                    turn,
+                    ChatTurn.STATUS_FAILED,
+                    error_code="stream_error",
+                )
+            except InvalidTurnTransitionError:
+                logger.exception("Could not mark Turn %s failed", turn.id)
             yield "event: error\n"
             yield f"data: {json.dumps({'error': 'stream_error'}, ensure_ascii=False)}\n\n"
             return
@@ -406,46 +555,90 @@ def send_message(request, session_id):
             logger.info("Skipping message save — client disconnected for session %s", session_id)
             return
 
-        # Save assistant message
-        elapsed_ms = int((time.time() - start_time) * 1000)
-        assistant_content = "".join(response_tokens)
+        pre_save_status = turn.status
+        try:
+            # Persist the answer before declaring the Turn complete. Save failures
+            # remain recoverable under the same client_request_id.
+            with transaction.atomic():
+                transition_chat_turn(turn, ChatTurn.STATUS_SAVING)
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                assistant_content = "".join(response_tokens)
 
-        # H-03: Use tiktoken for accurate token count
-        token_count = _estimate_token_count(assistant_content)
+                # H-03: Use tiktoken for accurate token count
+                token_count = _estimate_token_count(assistant_content)
 
-        assistant_message = Message.objects.create(
-            session=session,
-            role="assistant",
-            content=assistant_content,
-            token_count=token_count,
-            model_used=pipeline.model_name,
-            response_time_ms=elapsed_ms,
-            retrieval_count=len(citations_data),
-            confidence_score=quality_data.get("score"),
-            confidence_label=quality_data.get("confidence", ""),
-            needs_human_review=quality_data.get("needs_human_review", False),
-            retrieval_mode=quality_data.get("retrieval_mode", ""),
-            retrieval_latency_ms=quality_data.get("retrieval_latency_ms"),
-            space=space,  # V6.0 space isolation
-        )
+                assistant_message = Message.objects.create(
+                    session=session,
+                    role="assistant",
+                    content=assistant_content,
+                    token_count=token_count,
+                    model_used=pipeline.model_name,
+                    response_time_ms=elapsed_ms,
+                    retrieval_count=len(citations_data),
+                    confidence_score=quality_data.get("score"),
+                    confidence_label=quality_data.get("confidence", ""),
+                    needs_human_review=quality_data.get("needs_human_review", False),
+                    retrieval_mode=quality_data.get("retrieval_mode", ""),
+                    retrieval_latency_ms=quality_data.get("retrieval_latency_ms"),
+                    space=space,  # V6.0 space isolation
+                )
 
-        # Save citations
-        _save_citations(assistant_message, citations_data, space)
-        record_invocation(
-            "success",
-            message=assistant_message,
-            token_count=token_count,
-        )
+                # Save citations
+                _save_citations(assistant_message, citations_data, space)
+                record_invocation(
+                    "success",
+                    message=assistant_message,
+                    token_count=token_count,
+                )
+                ChatSession.objects.filter(pk=session.pk).update(updated_at=timezone.now())
+                transition_chat_turn(
+                    turn,
+                    ChatTurn.STATUS_COMPLETED,
+                    assistant_message=assistant_message,
+                    model_id=pipeline.model_name,
+                )
+        except GeneratorExit:
+            record_invocation("cancelled", error_code="client_disconnected")
+            try:
+                transition_chat_turn(
+                    turn,
+                    ChatTurn.STATUS_FAILED,
+                    error_code="client_disconnected",
+                )
+            except InvalidTurnTransitionError:
+                logger.info("Turn %s was already terminal on disconnect", turn.id)
+            return
+        except Exception:
+            logger.exception("Answer persistence failed for Turn %s", turn.id)
+            record_invocation("failure", error_code="answer_save_error")
+            try:
+                # The atomic save rolled the database back to this lifecycle
+                # state; mirror it in memory before applying the failure state.
+                turn.status = pre_save_status
+                turn.assistant_message = None
+                turn.completed_at = None
+                transition_chat_turn(
+                    turn,
+                    ChatTurn.STATUS_FAILED,
+                    error_code="answer_save_error",
+                )
+            except Exception:
+                logger.exception("Could not mark Turn %s failed", turn.id)
+            yield "event: error\n"
+            yield f"data: {json.dumps({'error': 'answer_save_error'}, ensure_ascii=False)}\n\n"
+            return
 
+        done_data = {
+            "message_id": str(assistant_message.id),
+            "session_id": str(session.id),
+            "model": pipeline.model_name,
+            "turn_id": str(turn.id),
+            "client_request_id": str(turn.client_request_id),
+        }
         yield "event: done\n"
-        yield f"data: {json.dumps({'message_id': str(assistant_message.id), 'session_id': str(session.id), 'model': pipeline.model_name}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
-    response = StreamingHttpResponse(
-        event_stream(), content_type="text/event-stream"
-    )
-    response["Cache-Control"] = "no-cache"
-    response["X-Accel-Buffering"] = "no"
-    return response
+    return _streaming_response(event_stream())
 
 
 def _feedback_question_for(message):

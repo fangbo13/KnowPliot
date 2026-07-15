@@ -4,13 +4,13 @@
 
 """Chat models."""
 
-import uuid
 import hashlib
 import re
+import uuid
 
-from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.utils import timezone
 
 
@@ -98,6 +98,109 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.role}: {self.content[:50]}..."
+
+
+class ChatTurn(models.Model):
+    """Durable identity and lifecycle for one user question/assistant answer."""
+
+    STATUS_ACCEPTED = "accepted"
+    STATUS_RETRIEVING = "retrieving"
+    STATUS_REASONING = "reasoning"
+    STATUS_ANSWERING = "answering"
+    STATUS_SAVING = "saving"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_RETRIEVING, "Retrieving"),
+        (STATUS_REASONING, "Reasoning"),
+        (STATUS_ANSWERING, "Answering"),
+        (STATUS_SAVING, "Saving"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    ANSWER_MODE_FAST = "fast"
+    ANSWER_MODE_DEEP = "deep"
+    ANSWER_MODE_CHOICES = [
+        (ANSWER_MODE_FAST, "Fast"),
+        (ANSWER_MODE_DEEP, "Deep"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client_request_id = models.UUIDField()
+    session = models.ForeignKey(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="turns",
+    )
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="chat_turns",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_turns",
+    )
+    question_message = models.OneToOneField(
+        Message,
+        on_delete=models.CASCADE,
+        related_name="question_turn",
+    )
+    assistant_message = models.OneToOneField(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assistant_turn",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACCEPTED,
+        db_index=True,
+    )
+    answer_mode = models.CharField(
+        max_length=10,
+        choices=ANSWER_MODE_CHOICES,
+        default=ANSWER_MODE_FAST,
+    )
+    model_id = models.CharField(max_length=100, blank=True, default="")
+    attempt_count = models.PositiveIntegerField(default=1)
+    last_event_seq = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True, default="")
+    started_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "chat_chatturn"
+        ordering = ["-started_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "client_request_id"],
+                name="chat_turn_user_request_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["session", "status"],
+                name="chat_turn_session_status_idx",
+            ),
+            models.Index(
+                fields=["user", "-started_at"],
+                name="chat_turn_user_started_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Turn {self.id} ({self.status})"
 
 
 class Citation(models.Model):

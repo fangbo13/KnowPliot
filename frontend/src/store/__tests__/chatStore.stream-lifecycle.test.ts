@@ -107,6 +107,24 @@ afterEach(() => {
 });
 
 describe('sendMessage stream lifecycle', () => {
+  it('sends and retains one client request identity for later recovery', async () => {
+    mocks.fetch.mockResolvedValue(streamResponse([
+      `event: token\ndata: {"token":"answer"}\nevent: done\ndata: {"message_id":"55555555-5555-4555-8555-555555555555","session_id":"${SESSION_ID}"}\n`,
+    ]));
+
+    await useChatStore.getState().sendMessage('identity question');
+
+    const request = mocks.fetch.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toEqual({
+      content: 'identity question',
+      client_request_id: '22222222-2222-4222-8222-222222222222',
+      answer_mode: 'fast',
+      protocol_version: 2,
+    });
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]?.clientRequestId)
+      .toBe('22222222-2222-4222-8222-222222222222');
+  });
+
   it('ignores a terminal callback from a stale generation', () => {
     useChatStore.setState({
       turnsBySession: {

@@ -4,14 +4,17 @@
 
 """Chat serializers."""
 
+import uuid
+
 from rest_framework import serializers
+
 from .models import (
     ChatSession,
-    Message,
-    Citation,
+    ChatTurn,
     Feedback,
     FeedbackReviewEvent,
     KnowledgeGapTicket,
+    Message,
 )
 
 
@@ -59,6 +62,17 @@ class MessageSerializer(serializers.ModelSerializer):
 class ChatMessageRequestSerializer(serializers.Serializer):
     """Serializer for sending a chat message."""
     content = serializers.CharField(max_length=4000, min_length=1)
+    client_request_id = serializers.UUIDField(default=uuid.uuid4, required=False)
+    answer_mode = serializers.ChoiceField(
+        choices=[choice[0] for choice in ChatTurn.ANSWER_MODE_CHOICES],
+        default=ChatTurn.ANSWER_MODE_FAST,
+        required=False,
+    )
+    protocol_version = serializers.ChoiceField(
+        choices=[1, 2],
+        default=1,
+        required=False,
+    )
 
     def validate_content(self, value):
         """Strip whitespace and reject empty/whitespace-only messages."""
@@ -66,6 +80,36 @@ class ChatMessageRequestSerializer(serializers.Serializer):
         if not stripped:
             raise serializers.ValidationError("Message cannot be empty or whitespace-only.")
         return stripped
+
+
+class ChatTurnStatusSerializer(serializers.ModelSerializer):
+    """Owner-visible Turn state; raw prompts and operational exceptions stay private."""
+
+    answer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatTurn
+        fields = [
+            "id",
+            "client_request_id",
+            "session",
+            "status",
+            "answer_mode",
+            "model_id",
+            "attempt_count",
+            "last_event_seq",
+            "error_code",
+            "started_at",
+            "updated_at",
+            "completed_at",
+            "answer",
+        ]
+        read_only_fields = fields
+
+    def get_answer(self, obj):
+        if obj.status != ChatTurn.STATUS_COMPLETED or obj.assistant_message is None:
+            return None
+        return MessageSerializer(obj.assistant_message, context=self.context).data
 
 
 class FeedbackSerializer(serializers.ModelSerializer):

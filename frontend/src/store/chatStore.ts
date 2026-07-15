@@ -118,6 +118,7 @@ export interface SessionTurnState {
   error: string | null;
   aiStatusText: string | null;
   generationId: string | null;
+  clientRequestId?: string | null;
 }
 
 interface ChatState {
@@ -215,6 +216,7 @@ function idleTurn(): SessionTurnState {
     error: null,
     aiStatusText: null,
     generationId: null,
+    clientRequestId: null,
   };
 }
 
@@ -745,6 +747,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return;
     }
 
+    const clientRequestId = crypto.randomUUID();
     const generationId = crypto.randomUUID();
     set((current) => withTurnUpdate(current, sessionId, null, {
       phase: 'connecting',
@@ -755,6 +758,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       error: null,
       aiStatusText: null,
       generationId,
+      clientRequestId,
     }));
 
     const userMessage: Message = {
@@ -892,7 +896,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         const response = await fetch(`/api/v1/chat/sessions/${sessionId}/send/`, {
           method: 'POST',
           headers: sendHeaders,
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({
+            content,
+            client_request_id: clientRequestId,
+            answer_mode: 'fast',
+            protocol_version: 2,
+          }),
           signal: controller.signal, // V3.5: AbortController signal
         });
 
