@@ -2,7 +2,7 @@
 
 ## Status
 
-Complete and verified; ready for commit.
+Complete, verified, committed, and handed off.
 
 ## Implementation
 
@@ -73,3 +73,20 @@ Complete and verified; ready for commit.
   are separately supplied and deployment work is authorized.
 - `memory.md` records the immutable starting baseline commit (`1e408df`); the
   final Task 1 commit SHA is reported to the coordinating agent after commit.
+
+## Review correction (2026-07-16)
+
+### Fixes
+
+- Closed the completed Task 1 SHA handoff checklist item in `memory.md`, leaving
+  Task 2 session-reselection test coverage as the single next action.
+- Replaced the stale pre-commit status in this report with the committed and
+  handed-off state.
+
+### Verification
+
+| Command/check | Result |
+|---|---|
+| `git diff --name-only` plus PowerShell assertions for `Single next action`, unchecked checklist items, and stale pre-commit status | PASS: 2 scoped files, exactly 1 next action, 0 unchecked handoff items, and 0 stale status matches. |
+| PowerShell `Test-Path` plus relative Markdown-link resolution | PASS: 5 required paths and 3 relative links resolved. |
+| `git diff --check` | PASS, exit 0. |

@@ -103,7 +103,7 @@ Enable in the table order. Roll back in reverse order.
 
 ### In Progress
 
-- None. Task 1 is ready for commit and coordinator handoff.
+- None. Task 1 is committed and handed off.
 
 ### Next
 
@@ -168,4 +168,4 @@ Enable in the table order. Roll back in reverse order.
 - [x] Exactly one next action identified.
 - [x] Documentation path/link checks pass.
 - [x] `git diff --check` passes with the Task 1 report included.
-- [ ] Task 1 commit SHA is handed back to the coordinating agent.
+- [x] Task 1 commit SHA was handed back to the coordinating agent.
