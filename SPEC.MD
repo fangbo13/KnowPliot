@@ -1264,3 +1264,11 @@ Audit evidence:
 
 V9.2 Docker validation status: actual PASS with no phase-level non-PASS
 environment limitation remaining.
+
+## 15. Versioned Optimization Addendum (2026-07-16)
+
+The approved post-V11 optimization baseline is maintained in
+[`docs/specs/2026-07-16-knowpilot-optimization-spec.md`](docs/specs/2026-07-16-knowpilot-optimization-spec.md).
+It is a versioned addendum to this specification and defines the audited issue
+register, ChatTurn/SSE v2 contracts, four-level capability model, model policy,
+design direction, phased acceptance gates, compatibility, and rollback rules.
