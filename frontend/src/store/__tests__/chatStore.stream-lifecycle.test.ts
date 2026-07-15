@@ -107,22 +107,43 @@ afterEach(() => {
 });
 
 describe('sendMessage stream lifecycle', () => {
-  it('sends and retains one client request identity for later recovery', async () => {
-    mocks.fetch.mockResolvedValue(streamResponse([
-      `event: token\ndata: {"token":"answer"}\nevent: done\ndata: {"message_id":"55555555-5555-4555-8555-555555555555","session_id":"${SESSION_ID}"}\n`,
-    ]));
-
-    await useChatStore.getState().sendMessage('identity question');
-
-    const request = mocks.fetch.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(request.body))).toEqual({
-      content: 'identity question',
-      client_request_id: '22222222-2222-4222-8222-222222222222',
-      answer_mode: 'fast',
-      protocol_version: 2,
+  it('keeps distinct request identities with their owning sessions across error and switch', async () => {
+    const ids = [
+      '10000000-0000-4000-8000-000000000001',
+      '10000000-0000-4000-8000-000000000002',
+      '10000000-0000-4000-8000-000000000003',
+      '20000000-0000-4000-8000-000000000001',
+      '20000000-0000-4000-8000-000000000002',
+      '20000000-0000-4000-8000-000000000003',
+    ];
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => ids.shift()) });
+    mocks.fetch.mockImplementation(async (url) => {
+      if (String(url).includes(SESSION_B)) {
+        return streamResponse([
+          `event: token\ndata: {"token":"B answer"}\nevent: done\ndata: {"message_id":"55555555-5555-4555-8555-555555555555","session_id":"${SESSION_B}"}\n`,
+        ]);
+      }
+      return { ok: false, status: 500 };
     });
-    expect(useChatStore.getState().turnsBySession[SESSION_ID]?.clientRequestId)
-      .toBe('22222222-2222-4222-8222-222222222222');
+
+    await useChatStore.getState().sendMessage('question A');
+    useChatStore.getState().setActiveSession(SESSION_B);
+    await useChatStore.getState().sendMessage('question B');
+
+    const firstBody = JSON.parse(String((mocks.fetch.mock.calls[0]?.[1] as RequestInit).body));
+    const secondBody = JSON.parse(String((mocks.fetch.mock.calls[1]?.[1] as RequestInit).body));
+    expect(firstBody.client_request_id).toBe('10000000-0000-4000-8000-000000000001');
+    expect(secondBody.client_request_id).toBe('20000000-0000-4000-8000-000000000001');
+    expect(firstBody.client_request_id).not.toBe(secondBody.client_request_id);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'error',
+      clientRequestId: firstBody.client_request_id,
+    });
+    expect(useChatStore.getState().turnsBySession[SESSION_B]).toMatchObject({
+      phase: 'idle',
+      clientRequestId: secondBody.client_request_id,
+    });
   });
 
   it('ignores a terminal callback from a stale generation', () => {

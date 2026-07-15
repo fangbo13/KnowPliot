@@ -46,6 +46,13 @@ class BeginTurnDisposition(StrEnum):
     CONFLICT = "conflict"
 
 
+class SessionResolutionDisposition(StrEnum):
+    CREATED = "created"
+    EXISTING = "existing"
+    ACCESS_DENIED = "access_denied"
+    SCOPE_UNAVAILABLE = "scope_unavailable"
+
+
 @dataclass(frozen=True)
 class BeginTurnResult:
     turn: ChatTurn
@@ -59,8 +66,18 @@ class BeginTurnResult:
         }
 
 
+@dataclass(frozen=True)
+class SessionResolutionResult:
+    session: ChatSession | None
+    disposition: SessionResolutionDisposition
+
+
 class InvalidTurnTransitionError(ValueError):
     """Raised when code attempts an invalid Turn lifecycle transition."""
+
+
+class ChatTurnScopeError(ValueError):
+    """Raised when a Turn cannot derive an owned, non-null session scope."""
 
 
 _ALLOWED_TRANSITIONS = {
@@ -159,6 +176,14 @@ class DjangoTurnRepository:
     def lock_user(self, user_id):
         get_user_model().objects.select_for_update().only("pk").get(pk=user_id)
 
+    def lock_session(self, session_id):
+        return (
+            ChatSession.objects.select_for_update()
+            .select_related("user", "space")
+            .filter(pk=session_id)
+            .first()
+        )
+
     def find_turn(self, user, client_request_id):
         return (
             ChatTurn.objects.select_for_update()
@@ -197,9 +222,94 @@ class DjangoTurnRepository:
         ChatSession.objects.filter(pk=session.pk).update(updated_at=timezone.now())
 
 
-def _same_request_identity(turn, *, session, content, answer_mode) -> bool:
+class DjangoSessionRepository:
+    """Serialize legacy session lookup/backfill/create for one user."""
+
+    def lock_user(self, user_id):
+        get_user_model().objects.select_for_update().only("pk").get(pk=user_id)
+
+    def find_session(self, session_id):
+        return (
+            ChatSession.objects.select_for_update()
+            .select_related("user", "space")
+            .filter(pk=session_id)
+            .first()
+        )
+
+    def create_session(self, *, session_id, user, title, space):
+        return ChatSession.objects.create(
+            id=session_id,
+            user=user,
+            title=title,
+            space=space,
+        )
+
+    def save_space(self, session, space):
+        session.space = space
+        session.save(update_fields=["space"])
+
+
+def resolve_chat_session(
+    *,
+    user,
+    session_id,
+    title: str,
+    request_space,
+    fallback_space_factory,
+    repository: Any | None = None,
+    atomic_factory=None,
+) -> SessionResolutionResult:
+    """Resolve/create one session after serializing concurrent legacy requests."""
+
+    repository = repository or DjangoSessionRepository()
+    atomic_factory = atomic_factory or transaction.atomic
+
+    with atomic_factory():
+        repository.lock_user(user.pk)
+        session = repository.find_session(session_id)
+        if session is not None and session.user_id != user.pk:
+            return SessionResolutionResult(
+                None,
+                SessionResolutionDisposition.ACCESS_DENIED,
+            )
+
+        if session is not None:
+            if session.space_id is None:
+                space = request_space or fallback_space_factory()
+                if space is None:
+                    return SessionResolutionResult(
+                        None,
+                        SessionResolutionDisposition.SCOPE_UNAVAILABLE,
+                    )
+                repository.save_space(session, space)
+            return SessionResolutionResult(
+                session,
+                SessionResolutionDisposition.EXISTING,
+            )
+
+        space = request_space or fallback_space_factory()
+        if space is None:
+            return SessionResolutionResult(
+                None,
+                SessionResolutionDisposition.SCOPE_UNAVAILABLE,
+            )
+        session = repository.create_session(
+            session_id=session_id,
+            user=user,
+            title=title,
+            space=space,
+        )
+        return SessionResolutionResult(
+            session,
+            SessionResolutionDisposition.CREATED,
+        )
+
+
+def _same_request_identity(turn, *, session, user, space, content, answer_mode) -> bool:
     return (
         turn.session_id == session.id
+        and turn.user_id == user.pk
+        and turn.space_id == space.id
         and turn.question_message.content == content
         and turn.answer_mode == answer_mode
     )
@@ -207,9 +317,7 @@ def _same_request_identity(turn, *, session, content, answer_mode) -> bool:
 
 def begin_chat_turn(
     *,
-    user,
     session,
-    space,
     client_request_id,
     content: str,
     answer_mode: str,
@@ -222,8 +330,26 @@ def begin_chat_turn(
     atomic_factory = atomic_factory or transaction.atomic
 
     with atomic_factory():
-        # Locking the user closes the absent-row race for the per-user unique key.
-        repository.lock_user(user.pk)
+        expected_user_id = getattr(session, "user_id", None)
+        if expected_user_id is None:
+            raise ChatTurnScopeError("session_owner_unavailable")
+
+        # User then session is the shared lock order for session resolution and
+        # Turn creation. The locked session is the authority for user and space.
+        repository.lock_user(expected_user_id)
+        locked_session = repository.lock_session(session.pk)
+        if (
+            locked_session is None
+            or locked_session.user_id != expected_user_id
+            or locked_session.id != session.id
+        ):
+            raise ChatTurnScopeError("session_owner_mismatch")
+        if locked_session.space_id is None or locked_session.space is None:
+            raise ChatTurnScopeError("session_scope_unavailable")
+
+        session = locked_session
+        user = locked_session.user
+        space = locked_session.space
         turn = repository.find_turn(user, client_request_id)
         if turn is None:
             question_message = repository.create_question(
@@ -245,6 +371,8 @@ def begin_chat_turn(
         if not _same_request_identity(
             turn,
             session=session,
+            user=user,
+            space=space,
             content=content,
             answer_mode=answer_mode,
         ):

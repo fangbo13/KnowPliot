@@ -11,8 +11,23 @@ from django.urls import reverse
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.chat.models import ChatSession, ChatTurn
-from apps.chat.services import BeginTurnDisposition, BeginTurnResult
+from apps.chat.services import (
+    BeginTurnDisposition,
+    BeginTurnResult,
+    SessionResolutionDisposition,
+    SessionResolutionResult,
+)
 from apps.chat.views import chat_turn_status, send_message
+from apps.spaces.models import KnowledgeSpace
+
+
+def scoped_session(user):
+    return ChatSession(
+        id=uuid.uuid4(),
+        user=user,
+        title="Existing",
+        space=KnowledgeSpace(id=uuid.uuid4()),
+    )
 
 
 class ChatTurnStatusViewTest(SimpleTestCase):
@@ -44,9 +59,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
 
     def test_completed_duplicate_replays_saved_result_without_constructing_rag(self):
         user = get_user_model()(id=8, email="owner@example.com")
-        session = ChatSession(
-            id=uuid.uuid4(), user=user, title="Existing", space=None
-        )
+        session = scoped_session(user)
         turn = SimpleNamespace(
             id=uuid.uuid4(),
             client_request_id=uuid.uuid4(),
@@ -65,9 +78,15 @@ class ChatTurnStatusViewTest(SimpleTestCase):
         rag_pipeline = SimpleNamespace(RAGPipeline=Mock())
 
         with (
-            patch("apps.chat.views.ChatSession.objects.get", return_value=session),
             patch("apps.chat.views.resolve_request_space", return_value=None),
-            patch("apps.chat.views._default_space_for", return_value=None),
+            patch(
+                "apps.chat.views.resolve_chat_session",
+                return_value=SessionResolutionResult(
+                    session,
+                    SessionResolutionDisposition.EXISTING,
+                ),
+            ),
+            patch("apps.chat.views.effective_space_role", return_value="member"),
             patch(
                 "apps.chat.views.begin_chat_turn",
                 return_value=BeginTurnResult(
@@ -90,7 +109,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
 
     def test_active_duplicate_has_stable_conflict_code_and_turn_id(self):
         user = get_user_model()(id=9, email="owner@example.com")
-        session = ChatSession(id=uuid.uuid4(), user=user, title="Existing")
+        session = scoped_session(user)
         turn = SimpleNamespace(id=uuid.uuid4())
         request = APIRequestFactory().post(
             reverse("chat-send-message", kwargs={"session_id": session.id}),
@@ -100,9 +119,15 @@ class ChatTurnStatusViewTest(SimpleTestCase):
         force_authenticate(request, user=user)
 
         with (
-            patch("apps.chat.views.ChatSession.objects.get", return_value=session),
             patch("apps.chat.views.resolve_request_space", return_value=None),
-            patch("apps.chat.views._default_space_for", return_value=None),
+            patch(
+                "apps.chat.views.resolve_chat_session",
+                return_value=SessionResolutionResult(
+                    session,
+                    SessionResolutionDisposition.EXISTING,
+                ),
+            ),
+            patch("apps.chat.views.effective_space_role", return_value="member"),
             patch(
                 "apps.chat.views.begin_chat_turn",
                 return_value=BeginTurnResult(
@@ -116,3 +141,60 @@ class ChatTurnStatusViewTest(SimpleTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data["code"], "turn_in_progress")
         self.assertEqual(response.data["turn_id"], str(turn.id))
+
+    def test_history_failure_marks_accepted_turn_failed_and_emits_safe_error(self):
+        user = get_user_model()(id=10, email="owner@example.com")
+        session = scoped_session(user)
+        question = SimpleNamespace(pk=uuid.uuid4())
+        turn = SimpleNamespace(
+            id=uuid.uuid4(),
+            client_request_id=uuid.uuid4(),
+            session_id=session.id,
+            status=ChatTurn.STATUS_ACCEPTED,
+            model_id="",
+            error_code="",
+            completed_at=None,
+            assistant_message=None,
+            question_message=question,
+            save=Mock(),
+        )
+        request = APIRequestFactory().post(
+            reverse("chat-send-message", kwargs={"session_id": session.id}),
+            {
+                "content": "same question",
+                "client_request_id": str(turn.client_request_id),
+            },
+            format="json",
+        )
+        force_authenticate(request, user=user)
+
+        with (
+            patch("apps.chat.views.resolve_request_space", return_value=None),
+            patch(
+                "apps.chat.views.resolve_chat_session",
+                return_value=SessionResolutionResult(
+                    session,
+                    SessionResolutionDisposition.EXISTING,
+                ),
+            ),
+            patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch(
+                "apps.chat.views.begin_chat_turn",
+                return_value=BeginTurnResult(
+                    turn=turn,
+                    disposition=BeginTurnDisposition.CREATED,
+                ),
+            ),
+            patch(
+                "apps.chat.views._conversation_history",
+                side_effect=RuntimeError("raw database secret"),
+            ),
+            patch("apps.chat.models.ModelInvocation.objects.create"),
+        ):
+            response = send_message(request, session.id)
+            body = b"".join(response.streaming_content).decode()
+
+        self.assertEqual(turn.status, ChatTurn.STATUS_FAILED)
+        self.assertEqual(turn.error_code, "stream_error")
+        self.assertIn('"error": "stream_error"', body)
+        self.assertNotIn("raw database secret", body)

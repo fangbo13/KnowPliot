@@ -138,8 +138,6 @@ class ChatTurn(models.Model):
     )
     space = models.ForeignKey(
         "spaces.KnowledgeSpace",
-        null=True,
-        blank=True,
         on_delete=models.CASCADE,
         related_name="chat_turns",
     )

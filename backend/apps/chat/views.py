@@ -36,8 +36,11 @@ from .serializers import (
 )
 from .services import (
     BeginTurnDisposition,
+    ChatTurnScopeError,
     InvalidTurnTransitionError,
+    SessionResolutionDisposition,
     begin_chat_turn,
+    resolve_chat_session,
     transition_chat_turn,
 )
 
@@ -288,6 +291,17 @@ def _completed_turn_events(turn):
     yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
 
+def _conversation_history(session, question_message, window_rounds=10):
+    history = list(
+        Message.objects.filter(session=session)
+        .exclude(pk=question_message.pk)
+        .order_by("-created_at")[: window_rounds * 2]
+        .values_list("role", "content")
+    )
+    history.reverse()
+    return history
+
+
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def chat_turn_status(request, turn_id):
@@ -333,30 +347,32 @@ def send_message(request, session_id):
     # (authoritative for isolation — you cannot move a session between spaces).
     request_space = resolve_request_space(request, require_perm=CHAT_ASK, required=False)
 
-    # Get or create session with ownership verification
-    try:
-        session = ChatSession.objects.get(id=session_id, user=user)
-        created = False
-    except ChatSession.DoesNotExist:
-        # Check if session exists under another user
-        if ChatSession.objects.filter(id=session_id).exists():
-            return Response(
-                {"error": "Session not found or access denied"},
-                status=403,
-            )
-        # Session doesn't exist at all; create it
-        session = ChatSession.objects.create(
-            id=session_id, user=user, title=content[:50],
-            space=request_space or _default_space_for(user),
+    session_result = resolve_chat_session(
+        user=user,
+        session_id=session_id,
+        title=content[:50],
+        request_space=request_space,
+        fallback_space_factory=lambda: _default_space_for(user),
+    )
+    if session_result.disposition == SessionResolutionDisposition.ACCESS_DENIED:
+        return Response(
+            {"error": "Session not found or access denied"},
+            status=403,
         )
-        created = True
+    if session_result.disposition == SessionResolutionDisposition.SCOPE_UNAVAILABLE:
+        return Response(
+            {"code": "session_scope_unavailable"},
+            status=status.HTTP_409_CONFLICT,
+        )
 
-    # V6.0: a session is bound to one space. Backfill legacy null space, then
-    # verify the user still has access to that space (e.g. membership revoked).
-    space = session.space or request_space or _default_space_for(user)
-    if session.space_id is None and space is not None:
-        session.space = space
-        session.save(update_fields=["space"])
+    session = session_result.session
+    if session is None or session.user_id != user.pk:
+        return Response(
+            {"error": "Session not found or access denied"},
+            status=403,
+        )
+    created = session_result.disposition == SessionResolutionDisposition.CREATED
+    space = session.space
     if space is not None and effective_space_role(user, space) is None:
         return Response(
             {"error": "You no longer have access to this space."},
@@ -368,14 +384,18 @@ def send_message(request, session_id):
         session.title = content[:50]
         session.save(update_fields=["title"])
 
-    begin_result = begin_chat_turn(
-        user=user,
-        session=session,
-        space=space,
-        client_request_id=client_request_id,
-        content=content,
-        answer_mode=answer_mode,
-    )
+    try:
+        begin_result = begin_chat_turn(
+            session=session,
+            client_request_id=client_request_id,
+            content=content,
+            answer_mode=answer_mode,
+        )
+    except ChatTurnScopeError:
+        return Response(
+            {"code": "session_scope_unavailable"},
+            status=status.HTTP_409_CONFLICT,
+        )
     turn = begin_result.turn
 
     if begin_result.disposition == BeginTurnDisposition.CONFLICT:
@@ -409,17 +429,6 @@ def send_message(request, session_id):
         return _streaming_response(_completed_turn_events(turn))
 
     question_message = turn.question_message
-
-    # V3.5 HIGH-006: Sliding window aligned with frontend — 10 rounds (20 messages)
-    # (was fixed 16 messages = 8 rounds, misaligned with frontend's 10-round default)
-    window_rounds = 10
-    history = list(
-        Message.objects.filter(session=session)
-        .exclude(pk=question_message.pk)
-        .order_by("-created_at")[:window_rounds * 2]
-        .values_list("role", "content")
-    )
-    history.reverse()
 
     def event_stream():
         start_time = time.time()
@@ -461,6 +470,9 @@ def send_message(request, session_id):
                 )
 
         try:
+            # History evaluation is deliberately inside the guarded stream. A
+            # database/read failure after Turn acceptance must become retryable.
+            history = _conversation_history(session, question_message)
             from apps.rag.pipeline import RAGPipeline
 
             pipeline = RAGPipeline()

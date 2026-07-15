@@ -10,8 +10,11 @@ from apps.chat.models import ChatTurn
 from apps.chat.serializers import ChatMessageRequestSerializer
 from apps.chat.services import (
     BeginTurnDisposition,
+    ChatTurnScopeError,
     InvalidTurnTransitionError,
+    SessionResolutionDisposition,
     begin_chat_turn,
+    resolve_chat_session,
     transition_chat_turn,
 )
 
@@ -26,6 +29,7 @@ class ChatTurnModelContractTest(SimpleTestCase):
         self.assertEqual(fields["question_message"].one_to_one, True)
         self.assertEqual(fields["assistant_message"].one_to_one, True)
         self.assertTrue(fields["assistant_message"].null)
+        self.assertFalse(fields["space"].null)
         self.assertEqual(
             {value for value, _label in fields["status"].choices},
             {
@@ -87,16 +91,22 @@ class ChatMessageRequestSerializerTest(SimpleTestCase):
 
 
 class FakeTurnRepository:
-    def __init__(self, existing=None):
+    def __init__(self, existing=None, locked_session=None):
         self.existing = existing
+        self.locked_session = locked_session
         self.questions = []
         self.created_turns = []
         self.touched_sessions = []
         self.locked_users = []
+        self.locked_sessions = []
         self.saved_turns = []
 
     def lock_user(self, user_id):
         self.locked_users.append(user_id)
+
+    def lock_session(self, session_id):
+        self.locked_sessions.append(session_id)
+        return self.locked_session
 
     def find_turn(self, user, client_request_id):
         return self.existing
@@ -120,6 +130,8 @@ class FakeTurnRepository:
             "assistant_message": None,
             "completed_at": None,
             "session_id": values["session"].id,
+            "space_id": values["space"].id,
+            "user_id": values["user"].pk,
         }
         turn = SimpleNamespace(**turn_values)
         self.created_turns.append(turn)
@@ -135,7 +147,16 @@ class FakeTurnRepository:
 class ChatTurnBeginServiceTest(SimpleTestCase):
     def setUp(self):
         self.user = SimpleNamespace(pk=7)
-        self.session = SimpleNamespace(id=uuid.uuid4(), space="space")
+        self.space = SimpleNamespace(id=uuid.uuid4())
+        self.session = SimpleNamespace(
+            id=uuid.uuid4(),
+            pk=None,
+            user=self.user,
+            user_id=self.user.pk,
+            space=self.space,
+            space_id=self.space.id,
+        )
+        self.session.pk = self.session.id
         self.request_id = uuid.uuid4()
         self.atomic_entries = 0
 
@@ -145,10 +166,10 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
         yield
 
     def begin(self, repository):
+        if repository.locked_session is None:
+            repository.locked_session = self.session
         return begin_chat_turn(
-            user=self.user,
             session=self.session,
-            space=self.session.space,
             client_request_id=self.request_id,
             content="same question",
             answer_mode="fast",
@@ -167,6 +188,8 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
             "assistant_message": None,
             "completed_at": None,
             "session_id": self.session.id,
+            "space_id": self.space.id,
+            "user_id": self.user.pk,
             "question_message": SimpleNamespace(content="same question"),
             "answer_mode": "fast",
         }
@@ -183,7 +206,10 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
         self.assertEqual(len(repository.created_turns), 1)
         self.assertIs(result.turn.question_message, repository.questions[0])
         self.assertEqual(repository.locked_users, [self.user.pk])
+        self.assertEqual(repository.locked_sessions, [self.session.id])
         self.assertEqual(repository.touched_sessions, [self.session.id])
+        self.assertIs(result.turn.user, self.user)
+        self.assertIs(result.turn.space, self.space)
         self.assertEqual(self.atomic_entries, 1)
 
     def test_completed_and_active_duplicates_create_no_question(self):
@@ -233,6 +259,160 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
 
         self.assertEqual(result.disposition, BeginTurnDisposition.CONFLICT)
         self.assertEqual(repository.questions, [])
+
+        wrong_scope_repository = FakeTurnRepository(
+            self.existing(space_id=uuid.uuid4())
+        )
+        wrong_scope_result = self.begin(wrong_scope_repository)
+        self.assertEqual(
+            wrong_scope_result.disposition,
+            BeginTurnDisposition.CONFLICT,
+        )
+        self.assertEqual(wrong_scope_repository.questions, [])
+
+    def test_rejects_null_or_mismatched_locked_session_scope(self):
+        missing_space = SimpleNamespace(
+            **{**vars(self.session), "space": None, "space_id": None}
+        )
+        missing_repository = FakeTurnRepository(locked_session=missing_space)
+        with self.assertRaises(ChatTurnScopeError):
+            self.begin(missing_repository)
+        self.assertEqual(missing_repository.questions, [])
+
+        other_user = SimpleNamespace(pk=99)
+        mismatched = SimpleNamespace(
+            **{
+                **vars(self.session),
+                "user": other_user,
+                "user_id": other_user.pk,
+            }
+        )
+        mismatch_repository = FakeTurnRepository(locked_session=mismatched)
+        with self.assertRaises(ChatTurnScopeError):
+            self.begin(mismatch_repository)
+        self.assertEqual(mismatch_repository.questions, [])
+
+
+class FakeSessionRepository:
+    def __init__(self, session=None):
+        self.session = session
+        self.locked_users = []
+        self.lookups = []
+        self.created = []
+        self.saved_spaces = []
+
+    def lock_user(self, user_id):
+        self.locked_users.append(user_id)
+
+    def find_session(self, session_id):
+        self.lookups.append(session_id)
+        return self.session
+
+    def create_session(self, **values):
+        session = SimpleNamespace(
+            id=values["session_id"],
+            pk=values["session_id"],
+            user=values["user"],
+            user_id=values["user"].pk,
+            space=values["space"],
+            space_id=values["space"].id,
+            title=values["title"],
+        )
+        self.created.append(session)
+        self.session = session
+        return session
+
+    def save_space(self, session, space):
+        session.space = space
+        session.space_id = space.id
+        self.saved_spaces.append((session.id, space.id))
+
+
+class ChatSessionResolutionServiceTest(SimpleTestCase):
+    def setUp(self):
+        self.user = SimpleNamespace(pk=11)
+        self.space = SimpleNamespace(id=uuid.uuid4())
+        self.session_id = uuid.uuid4()
+        self.atomic_entries = 0
+
+    @contextmanager
+    def atomic(self):
+        self.atomic_entries += 1
+        yield
+
+    def resolve(self, repository, *, request_space=None, fallback=None):
+        return resolve_chat_session(
+            user=self.user,
+            session_id=self.session_id,
+            title="Question",
+            request_space=request_space,
+            fallback_space_factory=fallback or (lambda: self.space),
+            repository=repository,
+            atomic_factory=self.atomic,
+        )
+
+    def test_serializes_recheck_and_creates_one_session_for_repeated_resolution(self):
+        repository = FakeSessionRepository()
+
+        first = self.resolve(repository)
+        second = self.resolve(repository)
+
+        self.assertEqual(first.disposition, SessionResolutionDisposition.CREATED)
+        self.assertEqual(second.disposition, SessionResolutionDisposition.EXISTING)
+        self.assertIs(first.session, second.session)
+        self.assertEqual(len(repository.created), 1)
+        self.assertEqual(repository.locked_users, [self.user.pk, self.user.pk])
+        self.assertEqual(repository.lookups, [self.session_id, self.session_id])
+        self.assertEqual(self.atomic_entries, 2)
+
+    def test_foreign_session_is_non_disclosing_and_never_recreated(self):
+        other = SimpleNamespace(pk=44)
+        foreign_session = SimpleNamespace(
+            id=self.session_id,
+            user=other,
+            user_id=other.pk,
+            space=self.space,
+            space_id=self.space.id,
+        )
+        repository = FakeSessionRepository(foreign_session)
+
+        result = self.resolve(repository)
+
+        self.assertEqual(result.disposition, SessionResolutionDisposition.ACCESS_DENIED)
+        self.assertIsNone(result.session)
+        self.assertEqual(repository.created, [])
+
+    def test_rejects_new_or_legacy_session_when_no_space_can_be_resolved(self):
+        new_repository = FakeSessionRepository()
+        new_result = self.resolve(
+            new_repository,
+            request_space=None,
+            fallback=lambda: None,
+        )
+        self.assertEqual(
+            new_result.disposition,
+            SessionResolutionDisposition.SCOPE_UNAVAILABLE,
+        )
+        self.assertEqual(new_repository.created, [])
+
+        legacy = SimpleNamespace(
+            id=self.session_id,
+            user=self.user,
+            user_id=self.user.pk,
+            space=None,
+            space_id=None,
+        )
+        legacy_repository = FakeSessionRepository(legacy)
+        legacy_result = self.resolve(
+            legacy_repository,
+            request_space=None,
+            fallback=lambda: None,
+        )
+        self.assertEqual(
+            legacy_result.disposition,
+            SessionResolutionDisposition.SCOPE_UNAVAILABLE,
+        )
+        self.assertEqual(legacy_repository.saved_spaces, [])
 
 
 class ChatTurnTransitionTest(SimpleTestCase):
