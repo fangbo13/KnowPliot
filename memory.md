@@ -2,7 +2,7 @@
 
 - **Last updated:** 2026-07-16
 - **Current phase:** Task 3A — durable ChatTurn identity and idempotency (complete and verified); Task 3B is next.
-- **Active branch/commit:** `codex/knowpilot-optimization` / Task 3A implementation `f2650a7`
+- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; reviewed implementation parent `ca77299`
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
@@ -49,6 +49,9 @@ recovery while preserving the current v1 stream contract.
   `client_request_id`, session/space/user, question/assistant messages, status,
   answer mode, model ID, attempt count, last sequence, safe error code, and
   timestamps.
+- Turn space is required. User and space are derived from the user-locked,
+  session-locked database row; independently supplied scope values are not
+  accepted.
 - Database uniqueness: `(user, client_request_id)`.
 - Completed duplicates return the existing result; active duplicates return
   `turn_in_progress`; retryable failures reuse the question and increment the
@@ -78,12 +81,13 @@ recovery while preserving the current v1 stream contract.
 
 | Flag | Current state | Enable gate |
 |---|---|---|
-| `CHAT_TURN_IDEMPOTENCY` | Implementation complete; not enabled in the unstarted deployment | Apply `0013`, pass PostgreSQL-backed concurrency tests, then enable. |
+| `CHAT_TURN_IDEMPOTENCY` | No flag is implemented. Deploying this backend after applying `0013` activates idempotency immediately. | Pass PostgreSQL-backed concurrency tests; add a compatibility flag before deployment if staged activation is required. |
 | `CHAT_STREAM_V2` | Planned; disabled/not implemented | Turn durability/recovery and dual-protocol tests pass. |
 | `CAPABILITY_NAV` | Planned; disabled/not implemented | Role matrix, scoped API, route, and navigation tests pass. |
 | `DEEP_ANSWER_MODE` | Planned; disabled/not implemented | Governed model/privacy/mode tests and fast fallback pass. |
 
-Enable in the table order. Roll back in reverse order.
+The idempotency row documents rollout state, not a callable flag. Actual
+deployment and rollback order is recorded in section 10.
 
 ## 5 Role and Capability State
 
@@ -108,10 +112,13 @@ Enable in the table order. Roll back in reverse order.
 - Task 2 frontend containment: session-keyed stream state, stale-load guards,
   pagination/deduplication, recoverable partials, History routing, and no POST
   retry. Full frontend suite reached 109 passing before Task 3A.
-- Task 3A implementation `f2650a7`: additive ChatTurn model/migration,
+- Task 3A implementation `f2650a7`, amended by `ca77299`: additive ChatTurn model/migration,
   transactionally serialized begin/reuse service, stable duplicate outcomes,
   owner recovery endpoint, primary-key history exclusion, session timestamp
   touches, completed-result v1 replay, and frontend request identity.
+- Task 3A review amendment serializes legacy session creation under the user
+  lock, requires/derives Turn scope from the locked session, guards history
+  evaluation, and verifies distinct request IDs remain session-owned.
 
 ### In Progress
 
@@ -145,7 +152,8 @@ Enable in the table order. Roll back in reverse order.
 ## 8 Database and Migration State
 
 - Additive migration `backend/apps/chat/migrations/0013_chatturn.py` creates the
-  durable record and its `(user, client_request_id)` unique constraint.
+  durable record, required space relation, and its
+  `(user, client_request_id)` unique constraint.
 - Migration model state is consistent: `makemigrations --check --dry-run`
   reported `No changes detected`; its database-history probe separately warned
   that host `db` could not be resolved.
@@ -158,13 +166,13 @@ Enable in the table order. Roll back in reverse order.
 
 | Evidence | Result | Provenance / limitation |
 |---|---|---|
-| Task 3A backend pure/SimpleTestCase | 12 passed | Model, serializer, transition, atomic begin/reuse, duplicate, status-owner, and no-RAG replay contracts; no PostgreSQL required. |
+| Task 3A backend pure/SimpleTestCase | 17 passed | Includes locked session resolution, required/derived scope, history-failure recovery, model, serializer, transition, duplicate, status-owner, and no-RAG replay contracts. |
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
-| Frontend full suite | 110 passed in 18 files | Includes retained `client_request_id` and v2 request-body coverage. |
+| Frontend full suite | 110 passed in 18 files | Two separate sends receive distinct IDs; IDs survive an error/session switch under their owning session. |
 | Frontend typecheck | PASS | `tsc --noEmit`. |
-| Frontend production build | PASS | `tsc -b && vite build`; 4000 modules transformed. Generated `tsconfig.tsbuildinfo` was restored and not committed. |
+| Frontend production build | PASS | `tsc -b && vite build`; 4000 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
 | Ruff changed-file check | PASS | All Task 3A Python implementation/test files passed. |
 | `git diff --check` | PASS | Exit 0 before the Task 3A implementation commit. |
 
@@ -172,24 +180,27 @@ Enable in the table order. Roll back in reverse order.
 
 - Deployment target: 筼筜（远端运行环境；主机、路径与凭据未提供）.
 - Environment remains unstarted; no deployment or remote mutation is authorized.
-- Enable order: `CHAT_TURN_IDEMPOTENCY` → `CHAT_STREAM_V2` → `CAPABILITY_NAV`
-  → `DEEP_ANSWER_MODE`.
-- Rollback reverses that order and preserves additive `ChatTurn` data,
-  migrations, v1 streaming, and the one-release legacy authorization fallback.
-- Code rollback may disable the idempotent path while leaving the additive
+- Idempotency deployment order is migration `0013` first, then backend code;
+  there is currently no flag gate between those steps. Later flags remain
+  `CHAT_STREAM_V2` → `CAPABILITY_NAV` → `DEEP_ANSWER_MODE`.
+- Idempotency rollback requires redeploying the prior backend code while
+  preserving additive `ChatTurn` data and v1 streaming. A compatibility flag
+  remains pending if staged activation or instant flag rollback is required.
+- Backend rollback leaves the additive
   `chat_chatturn` table intact; do not reverse `0013` after production data is
   written without a separate data-retention decision.
 - Do not delete v1 routes or legacy fallback in this branch.
 
 ## 11 Handoff Checklist
 
-- [x] Active branch and Task 3A implementation commit recorded.
+- [x] Active branch, reviewed implementation parent, and self-referential handoff HEAD recorded without a stale hash.
 - [x] Primary addendum and implementation plan identified.
 - [x] 筼筜 target recorded without inventing host, path, or credentials.
 - [x] Environment-not-started state recorded.
 - [x] Locked decisions, contracts, matrix, feature flags, and issues recorded.
 - [x] Task 2 and Task 3A evidence plus DB-test limitation recorded honestly.
 - [x] Additive migration and owner-visible recovery contract recorded.
+- [x] Absence of an idempotency feature flag and its real rollback consequence recorded.
 - [x] Exactly one bounded Task 3B action identified.
 - [x] Generated build metadata excluded from the implementation commit.
 - [x] Task 3A commit SHA is ready for coordinating-agent review.
