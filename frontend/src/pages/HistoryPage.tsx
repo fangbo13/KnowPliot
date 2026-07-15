@@ -116,7 +116,11 @@ export default function HistoryPage() {
         content: m.content || '',
         citations: m.citations || [],
         createdAt: m.created_at || m.createdAt || new Date().toISOString(),
-      }));
+      })).sort((a, b) => {
+        const aTime = Date.parse(a.createdAt);
+        const bTime = Date.parse(b.createdAt);
+        return Number.isNaN(aTime) || Number.isNaN(bTime) ? 0 : aTime - bTime;
+      });
       setViewMessages(messages);
     } catch {
       setViewMessages([]);
