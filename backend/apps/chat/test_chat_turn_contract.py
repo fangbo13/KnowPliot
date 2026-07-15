@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from apps.chat.models import ChatTurn
 from apps.chat.serializers import ChatMessageRequestSerializer
@@ -454,3 +455,23 @@ class ChatTurnTransitionTest(SimpleTestCase):
 
         with self.assertRaises(InvalidTurnTransitionError):
             transition_chat_turn(turn, "answering", save=False)
+
+    def test_failed_terminal_transition_records_a_terminal_timestamp(self):
+        turn = SimpleNamespace(
+            status="accepted",
+            error_code="",
+            completed_at=None,
+            assistant_message=None,
+            model_id="",
+        )
+        finished_at = timezone.now()
+
+        transition_chat_turn(
+            turn,
+            "failed",
+            error_code="stream_error",
+            save=False,
+            now=finished_at,
+        )
+
+        self.assertEqual(turn.completed_at, finished_at)

@@ -27,8 +27,11 @@ RETRYABLE_ERROR_CODES = frozenset(
         "answer_save_error",
         "client_disconnected",
         "connection_error",
+        "coordination_unavailable",
+        "lease_lost",
         "provider_timeout",
         "provider_unavailable",
+        "session_busy",
         "stream_error",
         "stream_timeout",
         "worker_lost",
@@ -149,11 +152,18 @@ def transition_chat_turn(
         turn.error_code = normalize_error_code(error_code)
     elif target_status != ChatTurn.STATUS_CANCELLED:
         turn.error_code = ""
-    if target_status == ChatTurn.STATUS_COMPLETED:
-        if turn.assistant_message is None:
-            raise InvalidTurnTransitionError(
-                "completed Turn requires an assistant message"
-            )
+    if (
+        target_status == ChatTurn.STATUS_COMPLETED
+        and turn.assistant_message is None
+    ):
+        raise InvalidTurnTransitionError(
+            "completed Turn requires an assistant message"
+        )
+    if target_status in {
+        ChatTurn.STATUS_COMPLETED,
+        ChatTurn.STATUS_FAILED,
+        ChatTurn.STATUS_CANCELLED,
+    }:
         turn.completed_at = now or timezone.now()
 
     if save:

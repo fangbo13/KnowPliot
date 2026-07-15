@@ -7,8 +7,10 @@
 import json
 import logging
 import time
+from contextlib import suppress
 from html import escape
 
+from django.conf import settings
 from django.db import transaction
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
@@ -23,9 +25,17 @@ from rest_framework.throttling import UserRateThrottle
 from apps.spaces.permissions import (
     CHAT_ASK,
     effective_space_role,
+    has_space_permission,
     resolve_request_space,
 )
 
+from .coordination import (
+    CoordinationUnavailableError,
+    LeaseLostError,
+    RedisSessionLease,
+    create_redis_client,
+    lease_exists,
+)
 from .models import ChatSession, ChatTurn, Citation, Feedback, Message
 from .serializers import (
     ChatMessageRequestSerializer,
@@ -42,6 +52,12 @@ from .services import (
     begin_chat_turn,
     resolve_chat_session,
     transition_chat_turn,
+)
+from .stream_events import (
+    EventStoreUnavailableError,
+    ManagedStream,
+    RedisTurnEventStore,
+    converge_stale_turn,
 )
 
 logger = logging.getLogger(__name__)
@@ -242,11 +258,78 @@ class SendMessageRateThrottle(UserRateThrottle):
     rate = '10/minute'  # Normal users: 5-10 msg/hr; Active: 1-2 msg/min; Blocks cost explosion
 
 
-def _streaming_response(events):
+def _stream_v2_enabled(protocol_version):
+    """Negotiate v2 only when both the server flag and client opt-in agree."""
+
+    return bool(getattr(settings, "CHAT_STREAM_V2", False)) and protocol_version == 2
+
+
+def _streaming_response(events, *, turn=None):
     response = StreamingHttpResponse(events, content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
+    if turn is not None:
+        response["X-Chat-Turn-Id"] = str(turn.id)
+        response["X-Chat-Client-Request-Id"] = str(turn.client_request_id)
     return response
+
+
+def _turn_response(data, *, response_status, turn):
+    return Response(
+        data,
+        status=response_status,
+        headers={
+            "X-Chat-Turn-Id": str(turn.id),
+            "X-Chat-Client-Request-Id": str(turn.client_request_id),
+        },
+    )
+
+
+def _mark_turn_failed(turn, error_code):
+    """Best-effort safe failure convergence for an already accepted Turn."""
+
+    try:
+        transition_chat_turn(
+            turn,
+            ChatTurn.STATUS_FAILED,
+            error_code=error_code,
+        )
+    except InvalidTurnTransitionError:
+        logger.info("Turn %s was already terminal", turn.id)
+    except Exception:
+        logger.exception("Could not persist safe failure state for Turn %s", turn.id)
+
+
+def _checkpoint_turn_sequence(turn_id, sequence):
+    ChatTurn.objects.filter(pk=turn_id).update(last_event_seq=sequence)
+
+
+def _owned_recovery_turn(request, turn_id):
+    turn = get_object_or_404(
+        ChatTurn.objects.select_related(
+            "space",
+            "space__organization",
+            "space__business_line",
+            "assistant_message",
+        ).prefetch_related("assistant_message__citations__document"),
+        id=turn_id,
+        user=request.user,
+    )
+    if turn.space_id and effective_space_role(request.user, turn.space) is None:
+        from rest_framework.exceptions import NotFound
+
+        raise NotFound("Turn not found.")
+
+    try:
+        client = create_redis_client()
+    except CoordinationUnavailableError:
+        return turn, None
+    converge_stale_turn(
+        turn,
+        lease_exists=lambda session_id: lease_exists(client, session_id),
+        now=timezone.now(),
+    )
+    return turn, client
 
 
 def _completed_turn_events(turn):
@@ -291,6 +374,76 @@ def _completed_turn_events(turn):
     yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
 
+def _completed_turn_events_v2(turn, store):
+    """Replay or safely reconstruct a completed Turn in the v2 envelope."""
+
+    replay = store.replay(after=0)
+    if replay and replay[-1].name == "done":
+        return replay
+
+    message = turn.assistant_message
+    if not replay:
+        events = [
+            store.append(
+                "meta",
+                {
+                    "turn_id": str(turn.id),
+                    "session_id": str(turn.session_id),
+                    "client_request_id": str(turn.client_request_id),
+                    "protocol_version": 2,
+                    "answer_mode": turn.answer_mode,
+                },
+            )
+        ]
+        citations = [
+            {
+                "document_id": str(citation.document_id),
+                "document_title": citation.document.title,
+                "page_number": citation.page_number,
+                "score": citation.relevance_score,
+                "quoted_text": citation.quoted_text,
+            }
+            for citation in message.citations.select_related("document").all()
+        ]
+        if citations:
+            events.append(store.append("citations", citations))
+        quality = {
+            "score": message.confidence_score,
+            "confidence": message.confidence_label,
+            "needs_human_review": message.needs_human_review,
+            "retrieval_mode": message.retrieval_mode,
+            "retrieval_latency_ms": message.retrieval_latency_ms,
+        }
+        if any(value not in (None, "", False) for value in quality.values()):
+            events.append(store.append("quality", quality))
+        events.append(store.append("answer_delta", {"text": message.content}))
+    else:
+        events = replay
+    events.append(
+        store.append(
+            "usage",
+            {
+                "output_tokens": message.token_count,
+                "latency_ms": message.response_time_ms,
+            },
+        )
+    )
+    events.append(
+        store.append(
+            "done",
+            {
+                "message_id": str(message.id),
+                "session_id": str(turn.session_id),
+                "model": turn.model_id or message.model_used or "",
+                "turn_id": str(turn.id),
+                "client_request_id": str(turn.client_request_id),
+            },
+            terminal=True,
+        )
+    )
+    return events
+
+
 def _conversation_history(session, question_message, window_rounds=10):
     history = list(
         Message.objects.filter(session=session)
@@ -307,21 +460,45 @@ def _conversation_history(session, question_message, window_rounds=10):
 def chat_turn_status(request, turn_id):
     """Return an owned Turn's safe recovery state without revealing other users."""
 
-    turn = get_object_or_404(
-        ChatTurn.objects.select_related(
-            "space",
-            "space__organization",
-            "space__business_line",
-            "assistant_message",
-        ).prefetch_related("assistant_message__citations__document"),
-        id=turn_id,
-        user=request.user,
-    )
-    if turn.space_id and effective_space_role(request.user, turn.space) is None:
-        from rest_framework.exceptions import NotFound
-
-        raise NotFound("Turn not found.")
+    turn, _client = _owned_recovery_turn(request, turn_id)
     return Response(ChatTurnStatusSerializer(turn, context={"request": request}).data)
+
+
+def _replay_cursor(request):
+    value = request.query_params.get("after")
+    if value in (None, ""):
+        value = request.headers.get("Last-Event-ID", "0")
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def chat_turn_events(request, turn_id):
+    """Replay safe v2 events for an owned, currently accessible Turn."""
+
+    turn, client = _owned_recovery_turn(request, turn_id)
+    if client is None:
+        return Response(
+            {"code": "event_store_unavailable", "turn_id": str(turn.id)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    store = RedisTurnEventStore(client, turn.id)
+    try:
+        events = store.replay(after=_replay_cursor(request))
+    except EventStoreUnavailableError:
+        return Response(
+            {"code": "event_store_unavailable", "turn_id": str(turn.id)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    response = _streaming_response(
+        (event.to_sse() for event in events),
+        turn=turn,
+    )
+    response["X-Chat-Turn-Status"] = turn.status
+    return response
 
 
 @api_view(["POST"])
@@ -339,6 +516,8 @@ def send_message(request, session_id):
     content = serializer.validated_data["content"]
     client_request_id = serializer.validated_data["client_request_id"]
     answer_mode = serializer.validated_data["answer_mode"]
+    protocol_version = serializer.validated_data["protocol_version"]
+    use_v2 = _stream_v2_enabled(protocol_version)
     user = request.user
     language = getattr(user, "language_preference", "en")
 
@@ -373,7 +552,10 @@ def send_message(request, session_id):
         )
     created = session_result.disposition == SessionResolutionDisposition.CREATED
     space = session.space
-    if space is not None and effective_space_role(user, space) is None:
+    if space is not None and (
+        effective_space_role(user, space) is None
+        or not has_space_permission(user, space, CHAT_ASK)
+    ):
         return Response(
             {"error": "You no longer have access to this space."},
             status=403,
@@ -399,36 +581,163 @@ def send_message(request, session_id):
     turn = begin_result.turn
 
     if begin_result.disposition == BeginTurnDisposition.CONFLICT:
-        return Response(
+        return _turn_response(
             {
                 "code": "client_request_conflict",
                 "turn_id": str(turn.id),
             },
-            status=status.HTTP_409_CONFLICT,
+            response_status=status.HTTP_409_CONFLICT,
+            turn=turn,
         )
     if begin_result.disposition == BeginTurnDisposition.IN_PROGRESS:
-        return Response(
+        return _turn_response(
             {"code": "turn_in_progress", "turn_id": str(turn.id)},
-            status=status.HTTP_409_CONFLICT,
+            response_status=status.HTTP_409_CONFLICT,
+            turn=turn,
         )
     if begin_result.disposition == BeginTurnDisposition.TERMINAL:
-        return Response(
+        return _turn_response(
             {
                 "code": "turn_not_retryable",
                 "turn_id": str(turn.id),
                 "turn_status": turn.status,
             },
-            status=status.HTTP_409_CONFLICT,
+            response_status=status.HTTP_409_CONFLICT,
+            turn=turn,
         )
     if begin_result.disposition == BeginTurnDisposition.COMPLETED:
         if turn.assistant_message is None:
-            return Response(
+            return _turn_response(
                 {"code": "turn_result_unavailable", "turn_id": str(turn.id)},
-                status=status.HTTP_409_CONFLICT,
+                response_status=status.HTTP_409_CONFLICT,
+                turn=turn,
             )
-        return _streaming_response(_completed_turn_events(turn))
+        if use_v2:
+            try:
+                client = create_redis_client()
+                store = RedisTurnEventStore(
+                    client,
+                    turn.id,
+                    checkpoint=lambda sequence: _checkpoint_turn_sequence(
+                        turn.id,
+                        sequence,
+                    ),
+                )
+                events = _completed_turn_events_v2(turn, store)
+            except (EventStoreUnavailableError, CoordinationUnavailableError):
+                return _turn_response(
+                    {
+                        "code": "event_store_unavailable",
+                        "turn_id": str(turn.id),
+                        "retryable": True,
+                    },
+                    response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    turn=turn,
+                )
+            return _streaming_response(
+                (event.to_sse() for event in events),
+                turn=turn,
+            )
+        return _streaming_response(_completed_turn_events(turn), turn=turn)
 
     question_message = turn.question_message
+
+    try:
+        client = create_redis_client()
+        lease = RedisSessionLease(client, session.id)
+        acquired = lease.acquire()
+    except CoordinationUnavailableError:
+        _mark_turn_failed(turn, "coordination_unavailable")
+        return _turn_response(
+            {
+                "code": "coordination_unavailable",
+                "turn_id": str(turn.id),
+                "retryable": True,
+            },
+            response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            turn=turn,
+        )
+    if not acquired:
+        _mark_turn_failed(turn, "session_busy")
+        return _turn_response(
+            {
+                "code": "session_busy",
+                "turn_id": str(turn.id),
+                "retryable": True,
+            },
+            response_status=status.HTTP_409_CONFLICT,
+            turn=turn,
+        )
+
+    if begin_result.disposition == BeginTurnDisposition.RETRY:
+        try:
+            RedisTurnEventStore(client, turn.id).clear_events()
+        except EventStoreUnavailableError:
+            _mark_turn_failed(turn, "coordination_unavailable")
+            with suppress(CoordinationUnavailableError):
+                lease.release()
+            return _turn_response(
+                {
+                    "code": "coordination_unavailable",
+                    "turn_id": str(turn.id),
+                    "retryable": True,
+                },
+                response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                turn=turn,
+            )
+
+    event_store = None
+    meta_event = None
+    if use_v2:
+        event_store = RedisTurnEventStore(
+            client,
+            turn.id,
+            checkpoint=lambda sequence: _checkpoint_turn_sequence(turn.id, sequence),
+        )
+        try:
+            meta_event = event_store.append(
+                "meta",
+                {
+                    "turn_id": str(turn.id),
+                    "session_id": str(session.id),
+                    "client_request_id": str(turn.client_request_id),
+                    "protocol_version": 2,
+                    "answer_mode": turn.answer_mode,
+                },
+            )
+        except EventStoreUnavailableError:
+            _mark_turn_failed(turn, "coordination_unavailable")
+            with suppress(CoordinationUnavailableError):
+                lease.release()
+            return _turn_response(
+                {
+                    "code": "coordination_unavailable",
+                    "turn_id": str(turn.id),
+                    "retryable": True,
+                },
+                response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                turn=turn,
+            )
+    lease.start_renewal()
+
+    def v2_event(name, data, *, terminal=False):
+        return event_store.append(name, data, terminal=terminal).to_sse()
+
+    def terminal_error(code):
+        if use_v2:
+            return event_store.append_error(code).to_sse()
+        return (
+            "event: error\n"
+            f"data: {json.dumps({'error': code}, ensure_ascii=False)}\n\n"
+        )
+
+    def persist_terminal_event(code):
+        if event_store is None:
+            return
+        try:
+            event_store.append_error(code)
+        except Exception:
+            logger.warning("Could not persist terminal event for Turn %s", turn.id)
 
     def event_stream():
         start_time = time.time()
@@ -440,6 +749,11 @@ def send_message(request, session_id):
         quality_data = {}
         client_disconnected = False
         pipeline = None
+        answering_announced = False
+
+        if meta_event is not None:
+            # First application event: history/RAG/model work has not started.
+            yield meta_event.to_sse()
 
         def record_invocation(
             invocation_status,
@@ -476,11 +790,14 @@ def send_message(request, session_id):
             from apps.rag.pipeline import RAGPipeline
 
             pipeline = RAGPipeline()
+            lease.ensure_owned()
             transition_chat_turn(
                 turn,
                 ChatTurn.STATUS_RETRIEVING,
                 model_id=pipeline.model_name,
             )
+            if use_v2:
+                yield v2_event("phase", {"phase": "retrieving"})
             for event in pipeline.retrieve_and_generate(
                 query=content,
                 user_profile=user,
@@ -488,6 +805,7 @@ def send_message(request, session_id):
                 language=language,
                 space_id=str(space.id) if space else None,  # V6.0 space isolation
             ):
+                lease.ensure_owned()
                 # H-04: Check if client disconnected
                 # Django's StreamingHttpResponse will raise GeneratorExit
                 # when the client closes the connection
@@ -496,13 +814,19 @@ def send_message(request, session_id):
 
                 if event_type == "citations":
                     citations_data = data
-                    yield "event: citations\n"
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    if use_v2:
+                        yield v2_event("citations", data)
+                    else:
+                        yield "event: citations\n"
+                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "quality":
                     quality_data = data
-                    yield "event: quality\n"
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    if use_v2:
+                        yield v2_event("quality", data)
+                    else:
+                        yield "event: quality\n"
+                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "token":
                     # V4.2 SYS-V4.2-014: Check SSE timeout — abort if stream exceeds limit
@@ -512,13 +836,8 @@ def send_message(request, session_id):
                             session_id, sse_timeout_seconds,
                         )
                         record_invocation("timeout", error_code="stream_timeout")
-                        transition_chat_turn(
-                            turn,
-                            ChatTurn.STATUS_FAILED,
-                            error_code="stream_timeout",
-                        )
-                        yield "event: error\n"
-                        yield f"data: {json.dumps({'error': 'stream_timeout'}, ensure_ascii=False)}\n\n"
+                        _mark_turn_failed(turn, "stream_timeout")
+                        yield terminal_error("stream_timeout")
                         return
 
                     token = data.get("token", "")
@@ -528,9 +847,15 @@ def send_message(request, session_id):
                             ChatTurn.STATUS_ANSWERING,
                             model_id=pipeline.model_name,
                         )
+                    if use_v2 and not answering_announced:
+                        answering_announced = True
+                        yield v2_event("phase", {"phase": "answering"})
                     response_tokens.append(token)
-                    yield "event: token\n"
-                    yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+                    if use_v2:
+                        yield v2_event("answer_delta", {"text": token})
+                    else:
+                        yield "event: token\n"
+                        yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
 
         except GeneratorExit:
             # H-04: Client disconnected during streaming
@@ -545,21 +870,25 @@ def send_message(request, session_id):
                 )
             except InvalidTurnTransitionError:
                 logger.info("Turn %s was already terminal on disconnect", turn.id)
+            persist_terminal_event("client_disconnected")
             return
-        except Exception as e:
-            # V4.0 DEFECT-013: SSE error event must NOT leak str(e) to frontend
-            logger.error("Stream error for session %s: %s", session_id, e, exc_info=True)
+        except LeaseLostError:
+            logger.warning("Session lease was lost for Turn %s", turn.id)
+            record_invocation("failure", error_code="lease_lost")
+            _mark_turn_failed(turn, "lease_lost")
+            yield terminal_error("lease_lost")
+            return
+        except EventStoreUnavailableError:
+            logger.warning("Event store became unavailable for Turn %s", turn.id)
+            record_invocation("failure", error_code="coordination_unavailable")
+            _mark_turn_failed(turn, "coordination_unavailable")
+            return
+        except Exception:
+            logger.exception("Stream failed for session %s", session_id)
             record_invocation("failure", error_code="stream_error")
-            try:
-                transition_chat_turn(
-                    turn,
-                    ChatTurn.STATUS_FAILED,
-                    error_code="stream_error",
-                )
-            except InvalidTurnTransitionError:
-                logger.exception("Could not mark Turn %s failed", turn.id)
-            yield "event: error\n"
-            yield f"data: {json.dumps({'error': 'stream_error'}, ensure_ascii=False)}\n\n"
+            _mark_turn_failed(turn, "stream_error")
+            with suppress(EventStoreUnavailableError):
+                yield terminal_error("stream_error")
             return
 
         # H-04: Don't save message if client disconnected before streaming completed
@@ -571,8 +900,12 @@ def send_message(request, session_id):
         try:
             # Persist the answer before declaring the Turn complete. Save failures
             # remain recoverable under the same client_request_id.
+            lease.ensure_owned()
+            transition_chat_turn(turn, ChatTurn.STATUS_SAVING)
+            if use_v2:
+                yield v2_event("phase", {"phase": "saving"})
+            lease.ensure_owned()
             with transaction.atomic():
-                transition_chat_turn(turn, ChatTurn.STATUS_SAVING)
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 assistant_content = "".join(response_tokens)
 
@@ -619,6 +952,17 @@ def send_message(request, session_id):
                 )
             except InvalidTurnTransitionError:
                 logger.info("Turn %s was already terminal on disconnect", turn.id)
+            persist_terminal_event("client_disconnected")
+            return
+        except LeaseLostError:
+            record_invocation("failure", error_code="lease_lost")
+            turn.status = pre_save_status
+            _mark_turn_failed(turn, "lease_lost")
+            yield terminal_error("lease_lost")
+            return
+        except EventStoreUnavailableError:
+            turn.status = pre_save_status
+            _mark_turn_failed(turn, "coordination_unavailable")
             return
         except Exception:
             logger.exception("Answer persistence failed for Turn %s", turn.id)
@@ -629,15 +973,11 @@ def send_message(request, session_id):
                 turn.status = pre_save_status
                 turn.assistant_message = None
                 turn.completed_at = None
-                transition_chat_turn(
-                    turn,
-                    ChatTurn.STATUS_FAILED,
-                    error_code="answer_save_error",
-                )
+                _mark_turn_failed(turn, "answer_save_error")
             except Exception:
                 logger.exception("Could not mark Turn %s failed", turn.id)
-            yield "event: error\n"
-            yield f"data: {json.dumps({'error': 'answer_save_error'}, ensure_ascii=False)}\n\n"
+            with suppress(EventStoreUnavailableError):
+                yield terminal_error("answer_save_error")
             return
 
         done_data = {
@@ -647,10 +987,37 @@ def send_message(request, session_id):
             "turn_id": str(turn.id),
             "client_request_id": str(turn.client_request_id),
         }
-        yield "event: done\n"
-        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+        if use_v2:
+            yield v2_event(
+                "usage",
+                {"output_tokens": token_count, "latency_ms": elapsed_ms},
+            )
+            yield v2_event("done", done_data, terminal=True)
+        else:
+            yield "event: done\n"
+            yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
-    return _streaming_response(event_stream())
+    def close_stream_resources():
+        try:
+            if turn.status in {
+                ChatTurn.STATUS_ACCEPTED,
+                ChatTurn.STATUS_RETRIEVING,
+                ChatTurn.STATUS_REASONING,
+                ChatTurn.STATUS_ANSWERING,
+                ChatTurn.STATUS_SAVING,
+            }:
+                _mark_turn_failed(turn, "client_disconnected")
+                persist_terminal_event("client_disconnected")
+        except Exception:
+            logger.warning("Could not persist stream-close event for Turn %s", turn.id)
+        finally:
+            try:
+                lease.release()
+            except CoordinationUnavailableError:
+                logger.warning("Could not confirm lease release for Turn %s", turn.id)
+
+    managed_stream = ManagedStream(event_stream(), close_stream_resources)
+    return _streaming_response(managed_stream, turn=turn)
 
 
 def _feedback_question_for(message):

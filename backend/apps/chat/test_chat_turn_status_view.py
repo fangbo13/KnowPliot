@@ -17,6 +17,7 @@ from apps.chat.services import (
     SessionResolutionDisposition,
     SessionResolutionResult,
 )
+from apps.chat.test_stream_coordination import FakeRedis
 from apps.chat.views import chat_turn_status, send_message
 from apps.spaces.models import KnowledgeSpace
 
@@ -87,6 +88,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
                 ),
             ),
             patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch("apps.chat.views.has_space_permission", return_value=True),
             patch(
                 "apps.chat.views.begin_chat_turn",
                 return_value=BeginTurnResult(
@@ -110,7 +112,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
     def test_active_duplicate_has_stable_conflict_code_and_turn_id(self):
         user = get_user_model()(id=9, email="owner@example.com")
         session = scoped_session(user)
-        turn = SimpleNamespace(id=uuid.uuid4())
+        turn = SimpleNamespace(id=uuid.uuid4(), client_request_id=uuid.uuid4())
         request = APIRequestFactory().post(
             reverse("chat-send-message", kwargs={"session_id": session.id}),
             {"content": "same question", "client_request_id": str(uuid.uuid4())},
@@ -128,6 +130,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
                 ),
             ),
             patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch("apps.chat.views.has_space_permission", return_value=True),
             patch(
                 "apps.chat.views.begin_chat_turn",
                 return_value=BeginTurnResult(
@@ -178,6 +181,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
                 ),
             ),
             patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch("apps.chat.views.has_space_permission", return_value=True),
             patch(
                 "apps.chat.views.begin_chat_turn",
                 return_value=BeginTurnResult(
@@ -189,6 +193,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
                 "apps.chat.views._conversation_history",
                 side_effect=RuntimeError("raw database secret"),
             ),
+            patch("apps.chat.views.create_redis_client", return_value=FakeRedis()),
             patch("apps.chat.models.ModelInvocation.objects.create"),
         ):
             response = send_message(request, session.id)

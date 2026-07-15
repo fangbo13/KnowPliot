@@ -1,18 +1,17 @@
 # KnowPilot Delivery Memory
 
 - **Last updated:** 2026-07-16
-- **Current phase:** Task 3A — durable ChatTurn identity and idempotency (complete and verified); Task 3B is next.
-- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; reviewed implementation parent `ca77299`
+- **Current phase:** Task 3B1 — backend Redis lease, SSE v2, and event recovery (complete and verified); Task 3B2 frontend recovery is next.
+- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; reviewed Task 3A parent `86e5bf5`
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
 
 ## 1 Current Objective
 
-Continue from the verified frontend chat stability containment and durable
-ChatTurn identity. The next bounded objective is Task 3B: add the renewable
-Redis session lock, SSE v2 event identity/replay, and explicit worker-loss
-recovery while preserving the current v1 stream contract.
+Continue from the verified ChatTurn identity and backend stream coordination.
+The next bounded objective is Task 3B2: add frontend v1/v2 parsing and GET-only
+status/event recovery after unexpected EOF without ever repeating the POST.
 
 ## 2 Locked Decisions
 
@@ -58,6 +57,9 @@ recovery while preserving the current v1 stream contract.
   attempt count.
 - `GET /api/v1/chat/turns/{turn_id}/` returns owner-scoped safe status and the
   completed answer. Other users are filtered at lookup and are not revealed.
+- Status and event recovery converge an active Turn older than 180 seconds to
+  `failed/worker_lost` only when Redis definitively proves its session lease is
+  absent. Redis failure is not treated as lease absence.
 - The frontend sends and retains one `client_request_id` per send invocation;
   it still never automatically retries the POST.
 
@@ -66,6 +68,14 @@ recovery while preserving the current v1 stream contract.
 - v2 events: `meta`, `phase`, `answer_delta`, `citations`, `quality`, `usage`,
   `done`, `error`.
 - `meta` precedes retrieval. Event IDs increase monotonically and support replay.
+- `GET /api/v1/chat/turns/{turn_id}/events/?after={seq}` replays safe events;
+  `Last-Event-ID` is the fallback cursor. Owner and current space access are
+  rechecked with non-disclosing 404 responses.
+- Redis keys are `chat:session:{session_id}:turn` for the renewable lease and
+  `chat:turn:{turn_id}:events|seq` for the 15-minute event buffer/sequence.
+- Retry attempts clear prior-attempt event payloads while retaining the Redis
+  sequence counter, so per-Turn IDs stay monotonic without replaying a stale
+  terminal error before the new attempt.
 - EOF, parse failure, cancellation, navigation, and unmount retain partial
   content and expose recovery/terminal state without a replacement POST.
 
@@ -82,7 +92,7 @@ recovery while preserving the current v1 stream contract.
 | Flag | Current state | Enable gate |
 |---|---|---|
 | `CHAT_TURN_IDEMPOTENCY` | No flag is implemented. Deploying this backend after applying `0013` activates idempotency immediately. | Pass PostgreSQL-backed concurrency tests; add a compatibility flag before deployment if staged activation is required. |
-| `CHAT_STREAM_V2` | Planned; disabled/not implemented | Turn durability/recovery and dual-protocol tests pass. |
+| `CHAT_STREAM_V2` | Implemented; environment-parsed and default `false`. v2 requires both this flag and request `protocol_version=2`; all other requests preserve v1. | Keep disabled until Task 3B2 dual-parser/GET recovery and PostgreSQL/Redis integration validation pass. |
 | `CAPABILITY_NAV` | Planned; disabled/not implemented | Role matrix, scoped API, route, and navigation tests pass. |
 | `DEEP_ANSWER_MODE` | Planned; disabled/not implemented | Governed model/privacy/mode tests and fast fallback pass. |
 
@@ -119,22 +129,27 @@ deployment and rollback order is recorded in section 10.
 - Task 3A review amendment serializes legacy session creation under the user
   lock, requires/derives Turn scope from the locked session, guards history
   evaluation, and verifies distinct request IDs remain session-owned.
+- Task 3B1 backend coordination/recovery: injectable Redis lease with a
+  180-second TTL and 30-second background renewal, compare-token Lua renew and
+  release, fail-closed 409/503 outcomes, managed never-started/terminal cleanup,
+  v1/v2 negotiation, monotonic safe SSE events, 15-minute replay, Turn sequence
+  checkpoints, terminal timestamps, stale-worker convergence, recovery headers,
+  and owner/membership-scoped event replay.
 
 ### In Progress
 
-- None. Task 3A is committed and verified within the available environment.
+- None. Task 3B1 is implemented and verified within the available environment.
 
 ### Next
 
-- **Single next action:** Start Task 3B with failing database-free tests for a
-  180-second Redis session lock that renews every 30 seconds and releases on
-  every stream exit path, followed by SSE v2 event IDs and 15-minute replay.
+- **Single next action:** Start Task 3B2 with failing frontend tests for v2
+  `meta`/`phase`/`answer_delta` parsing and GET-only status/event recovery after
+  unexpected EOF, retaining the existing v1 parser and never retrying POST.
 
 ### Deferred
 
-- Task 3B and Tasks 4–8: Redis locking/SSE v2 replay, capability consoles,
-  fast/deep execution, design convergence, product closure, and compatibility
-  cleanup.
+- Task 3B2 and Tasks 4–8: frontend dual-protocol recovery, capability consoles,
+  fast/deep execution, design convergence, product closure, and compatibility cleanup.
 - Deployed 筼筜 validation and deployment-server migration require separate
   authorization and environment details.
 
@@ -143,7 +158,7 @@ deployment and rollback order is recorded in section 10.
 | Group | Open IDs | State |
 |---|---|---|
 | Chat stability/data | `KP-C01`–`KP-C06`, `KP-C08`–`KP-C10` | Implemented with database-free/frontend coverage; deployed validation remains. |
-| Chat lock/replay | `KP-C07`, remaining `KP-C11` recovery | Task 3B pending: Redis lease/renewal, event replay, and worker-loss closure. |
+| Chat lock/replay | `KP-C07`, remaining `KP-C11` recovery | Backend Task 3B1 implemented with database-free coverage; frontend Task 3B2 and deployed Redis/PostgreSQL validation remain. |
 | Authorization/governance | `KP-A01`–`KP-A04` | Audited; implementation not started. |
 | Product closure | `KP-U01`, `KP-U02` | Audited; implementation not started. |
 | Design system | `KP-D01`, `KP-D02` | Audited; implementation not started. |
@@ -167,22 +182,34 @@ deployment and rollback order is recorded in section 10.
 | Evidence | Result | Provenance / limitation |
 |---|---|---|
 | Task 3A backend pure/SimpleTestCase | 17 passed | Includes locked session resolution, required/derived scope, history-failure recovery, model, serializer, transition, duplicate, status-owner, and no-RAG replay contracts. |
+| Task 3A + Task 3B1 backend pure/SimpleTestCase | 53 passed | Includes NX/compare-token lease behavior, blocked-provider renewal, every stream cleanup class, v1 bytes, v2 negotiation/event mapping, meta-first ordering, safe replay/cursors, expiry, sequence checkpointing, retry pruning, owner/membership denial, Redis failure, and stale-worker convergence. |
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
 | Frontend full suite | 110 passed in 18 files | Two separate sends receive distinct IDs; IDs survive an error/session switch under their owning session. |
 | Frontend typecheck | PASS | `tsc --noEmit`. |
 | Frontend production build | PASS | `tsc -b && vite build`; 4000 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
-| Ruff changed-file check | PASS | All Task 3A Python implementation/test files passed. |
-| `git diff --check` | PASS | Exit 0 before the Task 3A implementation commit. |
+| Ruff changed-file check | PASS | All changed chat implementation/test files passed; `base.py` passed with its pre-existing B028/UP031/E402 findings excluded. |
+| `git diff --check` | PASS | Exit 0 after implementation and handoff updates. |
 
 ## 10 Deployment and Rollback
 
 - Deployment target: 筼筜（远端运行环境；主机、路径与凭据未提供）.
 - Environment remains unstarted; no deployment or remote mutation is authorized.
 - Idempotency deployment order is migration `0013` first, then backend code;
-  there is currently no flag gate between those steps. Later flags remain
+  there is currently no flag gate between those steps. Keep `CHAT_STREAM_V2=false`
+  through the Task 3B1 backend rollout; later flags remain
   `CHAT_STREAM_V2` → `CAPABILITY_NAV` → `DEEP_ANSWER_MODE`.
+- `CHAT_COORDINATION_REDIS_URL` defaults to `CELERY_BROKER_URL`. Session locking
+  is always active for newly generated Turns and deliberately fails closed when
+  Redis is unavailable; `CHAT_STREAM_V2=false` disables only the v2 envelope,
+  not the lease.
+- Enabling v2 requires setting `CHAT_STREAM_V2=true` and having the client send
+  `protocol_version=2`. Roll back the envelope instantly with
+  `CHAT_STREAM_V2=false`; v1 response bytes remain supported for one release.
+- If the lease itself must be rolled back, redeploy the reviewed Task 3A backend
+  rather than changing the v2 flag. Preserve migration `0013` and ChatTurn data.
+  Redis lease/event keys are ephemeral and expire/release without a data migration.
 - Idempotency rollback requires redeploying the prior backend code while
   preserving additive `ChatTurn` data and v1 streaming. A compatibility flag
   remains pending if staged activation or instant flag rollback is required.
@@ -198,9 +225,10 @@ deployment and rollback order is recorded in section 10.
 - [x] 筼筜 target recorded without inventing host, path, or credentials.
 - [x] Environment-not-started state recorded.
 - [x] Locked decisions, contracts, matrix, feature flags, and issues recorded.
-- [x] Task 2 and Task 3A evidence plus DB-test limitation recorded honestly.
+- [x] Task 2, Task 3A, and Task 3B1 evidence plus DB-test limitation recorded honestly.
 - [x] Additive migration and owner-visible recovery contract recorded.
 - [x] Absence of an idempotency feature flag and its real rollback consequence recorded.
-- [x] Exactly one bounded Task 3B action identified.
+- [x] Exact v2 flag, Redis fallback, recovery route, and rollback boundaries recorded.
+- [x] Exactly one bounded Task 3B2 action identified.
 - [x] Generated build metadata excluded from the implementation commit.
-- [x] Task 3A commit SHA is ready for coordinating-agent review.
+- [x] Task 3B1 implementation is ready for coordinating-agent review.
