@@ -49,7 +49,7 @@ let activeStreamSessionId: string | null = null;
 
 /**
  * Create a new AbortController for a stream, aborting any previously active stream.
- * Called at the start of sendMessage and on each retry attempt.
+ * Called at the start of sendMessage.
  */
 export function createStreamAbortController(sessionId: string): AbortController {
   // Abort any previous stream before starting new one

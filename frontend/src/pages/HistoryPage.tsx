@@ -286,8 +286,7 @@ export default function HistoryPage() {
           overflowX: 'hidden',
           paddingRight: 4,
         }}>
-          // V3.6 HIGH-001: Unified date grouping — uses getDateGroupKey + computeGroupOrder from dateGroup.ts
-          // Same grouping logic as AppLayout sidebar — no more hardcoded '昨天' or weekly-based inconsistency
+          {/* Unified date grouping uses the same helpers as the AppLayout sidebar. */}
           {(() => {
             const groupedSessions: Record<string, typeof paginatedSessions> = {};
             for (const s of paginatedSessions) {

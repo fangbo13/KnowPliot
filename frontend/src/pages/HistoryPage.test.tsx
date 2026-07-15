@@ -106,4 +106,12 @@ describe('HistoryPage', () => {
 
     expect(messages.map((message) => message.textContent)).toEqual(['older', 'newer']);
   });
+
+  it('does not render implementation comments in the history list', async () => {
+    render(<HistoryPage />);
+
+    await screen.findByText('Review session');
+    expect(screen.queryByText(/V3\.6 HIGH-001/)).toBeNull();
+    expect(screen.queryByText(/Same grouping logic/)).toBeNull();
+  });
 });

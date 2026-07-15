@@ -543,8 +543,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     get().addMessage(userMessage);
 
     const token = getAuthToken();
-    const maxRetries = 2;
-
     // V3.5: Initialize token batch renderer for this stream
     // V4.2 SYS-V4.2-015: Changed from (fullContent: string) to incremental diff mode.
     // appendTokens mode: only passes new tokens → Zustand appends to existing streamContent
@@ -559,20 +557,23 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       }
     });
 
-    const streamWithRetry = async (attempt: number): Promise<boolean> => {
-      // V3.5 CRIT-001: Create/recreate AbortController per attempt
-      // On retry > 0, the old controller was aborted, so we need a fresh one
+    const streamOnce = async (): Promise<boolean> => {
       const controller = createStreamAbortController(sessionId);
 
       // Progressive thinking phases + connection status tracking
       let abortInterval: ReturnType<typeof setInterval> | undefined;
       let phaseTimerSearching: ReturnType<typeof setTimeout> | undefined;
       let phaseTimerGenerating: ReturnType<typeof setTimeout> | undefined;
+      let assistantContent = '';
+
+      const clearPhaseTimers = () => {
+        if (phaseTimerSearching) clearTimeout(phaseTimerSearching);
+        if (phaseTimerGenerating) clearTimeout(phaseTimerGenerating);
+      };
 
       const clearAllTimers = () => {
         if (abortInterval) clearInterval(abortInterval);
-        if (phaseTimerSearching) clearTimeout(phaseTimerSearching);
-        if (phaseTimerGenerating) clearTimeout(phaseTimerGenerating);
+        clearPhaseTimers();
       };
 
       try {
@@ -602,7 +603,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let assistantContent = '';
         let currentEvent = '';
 
         // Progressive thinking phase timers
@@ -649,7 +649,28 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           const { done, value } = await reader.read();
           if (done) {
             clearAllTimers();
-            break;
+            flushImmediate();
+            if (assistantContent.trim() && get().activeSessionId === sessionId) {
+              get().addMessage({
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: assistantContent,
+                citations: get().citations,
+                createdAt: new Date().toISOString(),
+              });
+            }
+            clearStreamOnComplete();
+            set({
+              streamPhase: 'error',
+              streamContent: '',
+              citations: [],
+              streamQuality: null,
+              streamingSessionId: null,
+              sendError: 'error_network',
+            });
+            get().unlockSend();
+            setTimeout(() => set({ streamPhase: 'idle' }), 100);
+            return false;
           }
 
           buffer += decoder.decode(value, { stream: true });
@@ -664,7 +685,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               switch (currentEvent) {
                 case 'token':
                   lastTokenTime = Date.now();
-                  clearAllTimers();
+                  clearPhaseTimers();
                   // V3.5: Transition to 'streaming' on first token
                   if (get().streamPhase !== 'streaming') {
                     set({ streamPhase: 'streaming' });
@@ -696,8 +717,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 case 'error':
                   clearAllTimers();
                   flushImmediate();
+                  if (assistantContent.trim() && get().activeSessionId === sessionId) {
+                    get().addMessage({
+                      id: crypto.randomUUID(),
+                      role: 'assistant',
+                      content: assistantContent,
+                      citations: get().citations,
+                      createdAt: new Date().toISOString(),
+                    });
+                  }
+                  clearStreamOnComplete();
                   // V3.6 MED-002: Use consistent i18n error key instead of raw server string
-                  set({ streamPhase: 'error', sendError: 'error_generic', streamingSessionId: null });
+                  set({
+                    streamPhase: 'error',
+                    streamContent: '',
+                    citations: [],
+                    streamQuality: null,
+                    sendError: 'error_generic',
+                    streamingSessionId: null,
+                  });
                   // V4.3 UAT FIX: Refresh sidebar sessions even when stream fails.
                   // Previously, _pendingSessionRefresh was only cleared in finishStreamingMessage(),
                   // which is NOT called on SSE error events. This meant the sidebar never
@@ -714,8 +752,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             }
           }
         }
-        clearAllTimers();
-        return true;
       } catch (error) {
         clearAllTimers();
 
@@ -766,14 +802,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           return false; // Return false but don't treat as error
         }
 
-        console.error(`Streaming error (attempt ${attempt + 1}):`, error);
-        if (attempt < maxRetries) {
-          const delay = (attempt + 1) * 1000;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          return streamWithRetry(attempt + 1);
-        }
+        console.error('Streaming error:', error);
 
         flushImmediate();
+
+        if (assistantContent.trim() && get().activeSessionId === sessionId) {
+          get().addMessage({
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: assistantContent,
+            citations: get().citations,
+            createdAt: new Date().toISOString(),
+          });
+        }
+        clearStreamOnComplete();
 
         // P0-2: Combine streamPhase + sendError into single set() call to prevent
         // a one-frame gap where streamPhase='error' but sendError=null.
@@ -792,8 +834,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           errorKey = 'error_generic';
         }
 
-        set({ streamPhase: 'error', sendError: errorKey, streamingSessionId: null });
-        // V4.3 UAT FIX: Refresh sidebar sessions after all retries exhausted
+        set({
+          streamPhase: 'error',
+          streamContent: '',
+          citations: [],
+          streamQuality: null,
+          sendError: errorKey,
+          streamingSessionId: null,
+        });
+        // Refresh sidebar sessions after the request fails.
         if (get()._pendingSessionRefresh) {
           set({ _pendingSessionRefresh: false });
           get().loadSessions();
@@ -806,10 +855,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       }
     };
 
-    await streamWithRetry(0);
-    // V3.6 LOW-001: All terminal paths of streamWithRetry guarantee unlockSend():
+    await streamOnce();
+    // V3.6 LOW-001: All terminal paths of streamOnce guarantee unlockSend():
     // - finishStreamingMessage (success + session mismatch)
-    // - AbortError handler, timeout handler, SSE error event, exhausted retries
+    // - AbortError handler, timeout handler, SSE error event, request errors
     // - Session creation/validation failures also call unlockSend before returning
     // No safety net needed — removed redundant double-unlock.
   },

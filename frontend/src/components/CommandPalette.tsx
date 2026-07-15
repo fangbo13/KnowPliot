@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import {
   SearchOutlined, PlusOutlined, BulbOutlined, MessageOutlined,
   BookOutlined, AppstoreOutlined, UserOutlined, TeamOutlined, SwapOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
@@ -90,6 +91,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
 
     if (hasHRAccess) list.push({ id: 'nav-kb', group: 'navigate', icon: <BookOutlined />, label: t('knowledge_base') || 'Knowledge base', keywords: 'kb documents', run: () => { navigate('/admin/knowledge'); close(); } });
     if (hasAdminAccess) list.push({ id: 'nav-admin', group: 'navigate', icon: <AppstoreOutlined />, label: t('admin_dashboard') || 'Admin dashboard', keywords: 'admin users', run: () => { navigate('/admin/dashboard'); close(); } });
+    list.push({ id: 'nav-history', group: 'navigate', icon: <HistoryOutlined />, label: t('nav_history') || 'History', keywords: 'history conversations 历史', run: () => { navigate('/history'); close(); } });
     list.push({ id: 'nav-spaces', group: 'navigate', icon: <TeamOutlined />, label: t('space_management') || 'Space management', keywords: 'space members', run: () => { navigate('/spaces/manage'); close(); } });
     list.push({ id: 'nav-profile', group: 'navigate', icon: <UserOutlined />, label: t('user_settings') || 'Settings', keywords: 'profile settings 设置', run: () => { navigate('/profile'); close(); } });
 

@@ -9,6 +9,7 @@ import { useEffect } from 'react';
 import AppLayout from './layout/AppLayout';
 import AdminLayout from './layout/AdminLayout';
 import ChatPage from './pages/ChatPage';
+import HistoryPage from './pages/HistoryPage';
 import ProfilePage from './pages/ProfilePage';
 import SpaceManagementPage from './pages/SpaceManagementPage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
@@ -85,6 +86,7 @@ function App() {
       >
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
+        <Route path="history" element={<HistoryPage />} />
         <Route path="profile" element={<ProfilePage />} />
         {/* V6.0: space management (members, email invites, access codes, settings) */}
         <Route path="spaces/manage" element={<SpaceManagementPage />} />

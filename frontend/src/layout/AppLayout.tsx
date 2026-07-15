@@ -14,7 +14,7 @@ import {
   DeleteOutlined, SearchOutlined, MoreOutlined, MenuOutlined, AppstoreOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
-  PushpinOutlined, DownloadOutlined, FileTextOutlined,
+  PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
 } from '@ant-design/icons';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
@@ -132,6 +132,7 @@ export default function AppLayout() {
     if (showAdminConsole) items.push({ key: 'admin-console', icon: <AppstoreOutlined />, label: t('admin_console'), onClick: () => navigate('/admin') });
     if (canManageSpace) items.push({ key: 'space-manage', icon: <TeamOutlined />, label: t('space_management') || 'Space Management', onClick: () => navigate('/spaces/manage') });
     if (showAdminConsole || canManageSpace) items.push({ type: 'divider' as const });
+    items.push({ key: 'history', icon: <HistoryOutlined />, label: t('nav_history'), onClick: () => navigate('/history') });
     items.push({ key: 'profile', icon: <SettingOutlined />, label: t('user_settings'), onClick: () => navigate('/profile') });
     items.push({ type: 'divider' as const });
     items.push({

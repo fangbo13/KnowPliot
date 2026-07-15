@@ -13,7 +13,6 @@ import type { VirtuosoHandle } from 'react-virtuoso';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
 import { abortActiveStream } from '../stream/StreamLifecycleManager';
-import { cleanupTokenBatcher } from '../stream/TokenBatchRenderer';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 import ChatComposer from '../components/chat/ChatComposer';
@@ -54,7 +53,12 @@ export default function ChatPageContainer() {
 
   const streamPhase = useChatStore((s) => s.streamPhase);
   const isSendLocked = useChatStore((s) => s.isSendLocked);
-  const isStreaming = streamPhase !== 'idle';
+  const ownsActiveStream = streamingSessionId === activeSessionId;
+  const isStreaming = streamPhase !== 'idle' && ownsActiveStream;
+  const visibleStreamContent = isStreaming ? streamContent : '';
+  const visibleCitations = isStreaming ? citations : [];
+  const visibleStreamPhase = isStreaming ? streamPhase : 'idle';
+  const visibleAiStatusText = isStreaming ? aiStatusText : null;
 
   const activeSpace = useSpaceStore((s) => s.getActiveSpace());
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
@@ -82,7 +86,6 @@ export default function ChatPageContainer() {
   }, [activeSessionTitle, isRenamingTitle]);
 
   useEffect(() => { loadedSessionRef.current = null; }, [location.pathname]);
-  useEffect(() => () => cleanupTokenBatcher(), []);
 
   useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
@@ -169,17 +172,17 @@ export default function ChatPageContainer() {
         />
         <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
           <div style={{
-            opacity: aiStatusText ? 1 : 0,
-            transform: aiStatusText ? 'translateY(0)' : 'translateY(8px)',
+            opacity: visibleAiStatusText ? 1 : 0,
+            transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
             transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
             marginBottom: 10,
             display: 'flex',
             justifyContent: 'center',
-            pointerEvents: aiStatusText ? 'auto' : 'none'
+            pointerEvents: visibleAiStatusText ? 'auto' : 'none'
           }}>
             <div className="gemini-status-indicator" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.6))' }}>
               <span className="gemini-status-spinner" />
-              <span>{aiStatusText}</span>
+              <span>{visibleAiStatusText}</span>
             </div>
           </div>
         </div>
@@ -229,8 +232,8 @@ export default function ChatPageContainer() {
 
       <div className="chat-stream-wrap">
         <div aria-live="polite" aria-atomic="false" className="sr-only">
-          {isStreaming && streamContent && `AI is typing: ${clipForScreenReader(streamContent)}`}
-          {isStreaming && !streamContent &&
+          {isStreaming && visibleStreamContent && `AI is typing: ${clipForScreenReader(visibleStreamContent)}`}
+          {isStreaming && !visibleStreamContent &&
             (streamPhase === 'connecting' ? t('thinking_connecting')
               : streamPhase === 'searching' ? t('thinking_searching')
               : t('thinking_generating'))}
@@ -271,9 +274,9 @@ export default function ChatPageContainer() {
             hasOlderMessages={hasOlderMessages}
             onLoadOlder={handleLoadOlder}
             isStreaming={isStreaming}
-            streamContent={streamContent}
-            citations={citations}
-            streamPhase={streamPhase}
+            streamContent={visibleStreamContent}
+            citations={visibleCitations}
+            streamPhase={visibleStreamPhase}
             onRegenerate={handleRetry}
             onScrollToBottomChange={setShowScrollFab}
           />
@@ -288,17 +291,17 @@ export default function ChatPageContainer() {
 
       <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
         <div style={{
-          opacity: aiStatusText ? 1 : 0,
-          transform: aiStatusText ? 'translateY(0)' : 'translateY(8px)',
+          opacity: visibleAiStatusText ? 1 : 0,
+          transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
           transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
           marginBottom: 10,
           display: 'flex',
           justifyContent: 'center',
-          pointerEvents: aiStatusText ? 'auto' : 'none'
+          pointerEvents: visibleAiStatusText ? 'auto' : 'none'
         }}>
           <div className="gemini-status-indicator" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.6))' }}>
             <span className="gemini-status-spinner" />
-            <span>{aiStatusText}</span>
+            <span>{visibleAiStatusText}</span>
           </div>
         </div>
 
@@ -311,7 +314,7 @@ export default function ChatPageContainer() {
             placeholder={t('placeholder')}
             ariaLabel={t('chat_input_label') || 'Type your message'}
             isStreaming={isStreaming}
-            disabled={isSendLocked || !isOnline}
+            disabled={(isSendLocked && ownsActiveStream) || !isOnline}
             inputRef={inputRef}
             multiline
             maxRows={6}

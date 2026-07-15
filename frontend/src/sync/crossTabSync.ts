@@ -56,15 +56,7 @@ export function initCrossTabSync() {
         import('antd').then(({ message: antMessage }) => {
           const ourStreamId = getActiveStreamSessionId();
           if (ourStreamId && ourStreamId !== sessionId) {
-            // Another tab switched sessions — abort our stream if different
-            abortActiveStream();
-            resetTokenBatcher();
-            const store = useChatStore.getState();
-            store.setStreamPhase('idle');
-            store.unlockSend();
-            useChatStore.setState({ streamContent: '', sendError: null });
-            // V4.1 BUG-010: Toast feedback
-            antMessage.info('另一个标签页正在查看不同会话，当前流已暂停');
+            antMessage.info('另一个标签页切换了会话');
           }
         });
         break;
