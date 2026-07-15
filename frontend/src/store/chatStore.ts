@@ -5,7 +5,7 @@
  */
 
 import { create } from 'zustand';
-import { chatApi } from '../api/chat';
+import { chatApi, type ChatMessageRecord } from '../api/chat';
 import { getAuthToken, getActiveSpaceId } from '../api/client';
 import {
   createStreamAbortController,
@@ -110,8 +110,10 @@ type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completi
 
 interface ChatState {
   sessions: ChatSession[];
+  sessionNextCursor: string | null;
   activeSessionId: string | null;
   messages: Message[];
+  messageNextCursor: string | null;
   // V3.5: allMessages holds full history for sliding window; messages is the visible slice
   allMessages: Message[];
   visibleRoundCount: number;
@@ -150,7 +152,9 @@ interface ChatState {
   lockSend: () => void;
   unlockSend: () => void;
   loadSessions: () => Promise<void>;
+  loadMoreSessions: () => Promise<void>;
   loadMessages: (sessionId: string) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   finishStreamingMessage: (messageId: string, sessionId: string) => void;
   loadOlderRounds: (count: number) => void;
@@ -187,17 +191,44 @@ function extractVisibleMessages(rounds: { id: string; messages: Message[] }[], v
   return rounds.slice(startIdx).flatMap(r => r.messages);
 }
 
+function mapApiMessage(message: ChatMessageRecord): Message {
+  return {
+    id: message.id || crypto.randomUUID(),
+    role: message.role,
+    content: message.content || '',
+    citations: message.citations || [],
+    confidenceScore: message.confidence_score,
+    confidenceLabel: message.confidence_label,
+    needsHumanReview: message.needs_human_review,
+    retrievalMode: message.retrieval_mode,
+    retrievalLatencyMs: message.retrieval_latency_ms,
+    createdAt: message.created_at || message.createdAt || new Date().toISOString(),
+  };
+}
+
+function sortMessagesChronologically(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    const aTime = Date.parse(a.createdAt);
+    const bTime = Date.parse(b.createdAt);
+    return Number.isNaN(aTime) || Number.isNaN(bTime) ? 0 : aTime - bTime;
+  });
+}
+
 const DEFAULT_VISIBLE_ROUNDS = 10;
 // V3.6 MED-001 / V3.7 P1.3: Hard cap on allMessages to prevent unbounded memory growth
 // V3.7: Reduced from 500 to 100 — 100 messages ≈ 50 rounds of conversation,
 // sufficient for most use cases while keeping JS Heap stable.
 // Messages beyond this cap are pruned from front and can be loaded via "load older".
 const MAX_ALL_MESSAGES = 100;
+let messageLoadSequence = 0;
+let messageLoadController: AbortController | null = null;
 
 export const useChatStore = create<ChatState>()((set, get) => ({
   sessions: [],
+  sessionNextCursor: null,
   activeSessionId: null,
   messages: [],
+  messageNextCursor: null,
   allMessages: [],
   visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
   hasOlderMessages: false,
@@ -220,6 +251,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   // the session mismatch by discarding local data (server already saved the message).
   // When user switches back, loadMessages fetches the completed response from server.
   setActiveSession: (id) => {
+    if (get().activeSessionId === id) return;
+
+    messageLoadSequence += 1;
+    messageLoadController?.abort();
+    messageLoadController = null;
+
     // V4.6 FIX: Do NOT resetTokenBatcher() here. Resetting it nulls the batch
     // callback and wipes the buffer, which severs the in-flight stream's rendering
     // pipeline: the network stream keeps running (setActiveSession does not abort it),
@@ -236,6 +273,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       activeSessionId: id,
       messages: [],
       allMessages: [],
+      messageNextCursor: null,
       sendError: null,
       // V4.6: DON'T reset streamPhase/streamContent/streamingSessionId here.
       // The stream continues in background; the UI uses streamingSessionId to
@@ -250,6 +288,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   // V3.5 CRIT-002: resetSession aborts old stream (user explicitly starts new chat)
   resetSession: () => {
+    messageLoadSequence += 1;
+    messageLoadController?.abort();
+    messageLoadController = null;
     abortActiveStream(); // Kill stream on new chat — user explicitly wants a fresh start
     resetTokenBatcher();
     broadcastSessionSwitch(null); // V4.0 DEFECT-008: notify other tabs (null = no active session)
@@ -257,6 +298,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       activeSessionId: null,
       messages: [],
       allMessages: [],
+      messageNextCursor: null,
       streamContent: '',
       citations: [],
       streamQuality: null,
@@ -322,63 +364,124 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   loadSessions: async () => {
     try {
-      const sessions = await chatApi.getSessions();
-      set({ sessions });
+      const page = await chatApi.getSessions();
+      set({ sessions: page.results, sessionNextCursor: page.next });
     } catch (error) {
       console.error('Failed to load sessions:', error);
     }
   },
 
+  loadMoreSessions: async () => {
+    const cursor = get().sessionNextCursor;
+    if (!cursor) return;
+
+    try {
+      const page = await chatApi.getSessions({ cursor });
+      const existingIds = new Set(get().sessions.map((session) => session.id));
+      set({
+        sessions: [
+          ...get().sessions,
+          ...page.results.filter((session) => !existingIds.has(session.id)),
+        ],
+        sessionNextCursor: page.next,
+      });
+    } catch (error) {
+      console.error('Failed to load more sessions:', error);
+    }
+  },
+
   loadMessages: async (sessionId: string) => {
+    messageLoadController?.abort();
+    const controller = new AbortController();
+    messageLoadController = controller;
+    const requestSequence = ++messageLoadSequence;
     set({ isLoadingMessages: true, sendError: null });
     try {
-      const msgs = await chatApi.getMessages(sessionId);
-      const allMessages: Message[] = msgs.map((m: any) => ({
-        id: m.id || crypto.randomUUID(),
-        role: m.role,
-        content: m.content || '',
-        citations: m.citations || [],
-        confidenceScore: m.confidence_score,
-        confidenceLabel: m.confidence_label,
-        needsHumanReview: m.needs_human_review,
-        retrievalMode: m.retrieval_mode,
-        retrievalLatencyMs: m.retrieval_latency_ms,
-        createdAt: m.created_at || m.createdAt || new Date().toISOString(),
-      }));
+      const page = await chatApi.getMessages(sessionId, { signal: controller.signal });
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
+      const allMessages = page.results.map(mapApiMessage);
 
       // V3.5: Sliding window — compute rounds, extract visible slice
       const rounds = computeRounds(allMessages);
       const visibleMessages = extractVisibleMessages(rounds, DEFAULT_VISIBLE_ROUNDS);
-      const hasOlder = rounds.length > DEFAULT_VISIBLE_ROUNDS;
+      const hasOlder = rounds.length > DEFAULT_VISIBLE_ROUNDS || page.next !== null;
 
       set({
         activeSessionId: sessionId,
         allMessages,
         messages: visibleMessages,
+        messageNextCursor: page.next,
         hasOlderMessages: hasOlder,
         visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
         isLoadingMessages: false,
         // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks
         totalRoundCount: rounds.length,
       });
+      if (messageLoadController === controller) messageLoadController = null;
     } catch (error) {
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
       console.error('Failed to load messages:', error);
       // V3.6 MED-002: Use i18n error key instead of raw string
       set({ isLoadingMessages: false, sendError: 'error_session' });
+      if (messageLoadController === controller) messageLoadController = null;
+    }
+  },
+
+  loadOlderMessages: async () => {
+    const sessionId = get().activeSessionId;
+    const cursor = get().messageNextCursor;
+    if (!sessionId || !cursor) return;
+
+    messageLoadController?.abort();
+    const controller = new AbortController();
+    messageLoadController = controller;
+    const requestSequence = ++messageLoadSequence;
+    set({ isLoadingMessages: true, sendError: null });
+
+    try {
+      const page = await chatApi.getMessages(sessionId, { cursor, signal: controller.signal });
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
+      const existingMessages = get().allMessages;
+      const existingIds = new Set(existingMessages.map((message) => message.id));
+      const olderMessages = page.results
+        .map(mapApiMessage)
+        .filter((message) => !existingIds.has(message.id));
+      const allMessages = sortMessagesChronologically([...existingMessages, ...olderMessages]);
+      const rounds = computeRounds(allMessages);
+      const visibleRoundCount = get().visibleRoundCount;
+
+      set({
+        allMessages,
+        messages: extractVisibleMessages(rounds, visibleRoundCount),
+        messageNextCursor: page.next,
+        hasOlderMessages: visibleRoundCount < rounds.length || page.next !== null,
+        totalRoundCount: rounds.length,
+        isLoadingMessages: false,
+      });
+      if (messageLoadController === controller) messageLoadController = null;
+    } catch (error) {
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
+      console.error('Failed to load older messages:', error);
+      set({ isLoadingMessages: false, sendError: 'error_session' });
+      if (messageLoadController === controller) messageLoadController = null;
     }
   },
 
   // V3.5: Load older rounds (expand sliding window)
   // V3.6 MED-003: Use cached totalRoundCount for hasOlderMessages comparison
   loadOlderRounds: (count: number) => {
-    const { allMessages, visibleRoundCount, totalRoundCount } = get();
+    const { allMessages, visibleRoundCount, totalRoundCount, messageNextCursor } = get();
     const rounds = computeRounds(allMessages);
     const newVisibleCount = Math.min(visibleRoundCount + count, totalRoundCount);
     const visibleMessages = extractVisibleMessages(rounds, newVisibleCount);
     set({
       messages: visibleMessages,
       visibleRoundCount: newVisibleCount,
-      hasOlderMessages: newVisibleCount < totalRoundCount,
+      hasOlderMessages: newVisibleCount < totalRoundCount || messageNextCursor !== null,
     });
   },
 

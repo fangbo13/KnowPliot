@@ -5,7 +5,40 @@
  */
 
 import apiClient from './client';
-import type { ChatSession } from '../store/chatStore';
+import type { ChatSession, Citation, Message } from '../store/chatStore';
+
+export interface CursorPage<T> {
+  results: T[];
+  next: string | null;
+  previous: string | null;
+}
+
+interface CursorRequest {
+  cursor?: string | null;
+  signal?: AbortSignal;
+}
+
+function cursorToken(cursor: string): string {
+  try {
+    return new URL(cursor, 'http://localhost').searchParams.get('cursor') ?? cursor;
+  } catch {
+    return cursor;
+  }
+}
+
+export interface ChatMessageRecord {
+  id?: string;
+  role: Message['role'];
+  content?: string;
+  citations?: Citation[];
+  confidence_score?: number | null;
+  confidence_label?: Message['confidenceLabel'];
+  needs_human_review?: boolean;
+  retrieval_mode?: string;
+  retrieval_latency_ms?: number | null;
+  created_at?: string;
+  createdAt?: string;
+}
 
 /**
  * Map a raw backend session object (snake_case keys) to the frontend ChatSession
@@ -26,11 +59,20 @@ function mapSession(raw: any): ChatSession {
 }
 
 export const chatApi = {
-  async getSessions(): Promise<ChatSession[]> {
-    const { data } = await apiClient.get('/chat/sessions/');
-    // Pagination disabled on backend; expect a plain array
-    if (Array.isArray(data)) return data.map(mapSession);
-    if (Array.isArray(data.results)) return data.results.map(mapSession);
+  async getSessions(options: CursorRequest = {}): Promise<CursorPage<ChatSession>> {
+    const { data } = options.cursor
+      ? await apiClient.get('/chat/sessions/', { params: { cursor: cursorToken(options.cursor) } })
+      : await apiClient.get('/chat/sessions/');
+    if (Array.isArray(data)) {
+      return { results: data.map(mapSession), next: null, previous: null };
+    }
+    if (Array.isArray(data.results)) {
+      return {
+        results: data.results.map(mapSession),
+        next: data.next ?? null,
+        previous: data.previous ?? null,
+      };
+    }
     throw new Error('Unexpected sessions response format');
   },
 
@@ -68,11 +110,30 @@ export const chatApi = {
     return data;
   },
 
-  async getMessages(sessionId: string): Promise<any[]> {
-    const { data } = await apiClient.get(`/chat/sessions/${sessionId}/messages/`);
-    // Pagination disabled on backend; expect a plain array
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data.results)) return data.results;
+  async getMessages(
+    sessionId: string,
+    options: CursorRequest = {},
+  ): Promise<CursorPage<ChatMessageRecord>> {
+    const url = `/chat/sessions/${sessionId}/messages/`;
+    const config = options.cursor || options.signal
+      ? {
+          ...(options.cursor ? { params: { cursor: cursorToken(options.cursor) } } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        }
+      : null;
+    const { data } = config
+      ? await apiClient.get(url, config)
+      : await apiClient.get(url);
+    if (Array.isArray(data)) {
+      return { results: data, next: null, previous: null };
+    }
+    if (Array.isArray(data.results)) {
+      return {
+        results: data.results,
+        next: data.next ?? null,
+        previous: data.previous ?? null,
+      };
+    }
     throw new Error('Unexpected messages response format');
   },
 

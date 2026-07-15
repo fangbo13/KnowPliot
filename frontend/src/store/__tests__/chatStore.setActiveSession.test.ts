@@ -38,6 +38,7 @@ import {
   flushImmediate,
   resetTokenBatcher,
 } from '../../stream/TokenBatchRenderer';
+import { broadcastSessionSwitch } from '../../sync/crossTabSync';
 
 // Register a batch callback (as sendMessage does) and capture everything it emits.
 function collectBatcher(): string[] {
@@ -65,6 +66,37 @@ beforeEach(() => {
 });
 
 describe('setActiveSession — keeps background stream rendering alive (V4.6)', () => {
+  it('is a true no-op when selecting the active session again', () => {
+    const message = {
+      id: 'message-1',
+      role: 'user' as const,
+      content: 'keep me',
+      createdAt: '2026-07-16T00:00:00Z',
+    };
+    useChatStore.setState({
+      activeSessionId: 'sess-A',
+      messages: [message],
+      allMessages: [message],
+      sessionNextCursor: 'session-next',
+      messageNextCursor: 'message-next',
+      visibleRoundCount: 7,
+      hasOlderMessages: true,
+      totalRoundCount: 9,
+      isLoadingMessages: true,
+      streamPhase: 'streaming',
+      streamingSessionId: 'sess-A',
+      streamContent: 'partial answer',
+      sendError: 'error_network',
+      isSendLocked: true,
+    });
+
+    const before = useChatStore.getState();
+    before.setActiveSession('sess-A');
+
+    expect(useChatStore.getState()).toBe(before);
+    expect(broadcastSessionSwitch).not.toHaveBeenCalled();
+  });
+
   it('does NOT sever the token-batch callback when switching sessions mid-stream', () => {
     const received = collectBatcher();
 

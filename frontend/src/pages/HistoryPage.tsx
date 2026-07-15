@@ -109,8 +109,8 @@ export default function HistoryPage() {
     setViewingSessionId(id);
     setViewLoading(true);
     try {
-      const rawMessages = await chatApi.getMessages(id);
-      const messages: Message[] = rawMessages.map((m: any) => ({
+      const { results: rawMessages } = await chatApi.getMessages(id);
+      const messages: Message[] = rawMessages.map((m) => ({
         id: m.id || crypto.randomUUID(),
         role: m.role,
         content: m.content || '',
