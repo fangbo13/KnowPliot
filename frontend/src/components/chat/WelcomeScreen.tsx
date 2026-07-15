@@ -24,11 +24,11 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isChinese = i18n.language?.startsWith('zh');
-  const isSendLocked = useChatStore((s) => s.isSendLocked);
-  const streamPhase = useChatStore((s) => s.streamPhase);
-  const streamingSessionId = useChatStore((s) => s.streamingSessionId);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
+  const activeTurn = useChatStore((s) => activeSessionId ? s.turnsBySession[activeSessionId] : undefined);
+  const pendingSessionCreation = useChatStore((s) => activeSessionId ? false : s.isSendLocked);
+  const isSendLocked = activeTurn?.isLocked ?? pendingSessionCreation;
+  const isStreaming = Boolean(activeTurn?.isLocked && activeTurn.phase !== 'error');
 
   const defaultQuickActions = useMemo(() => (
     isChinese

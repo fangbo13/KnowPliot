@@ -70,6 +70,18 @@ describe('ChatPage stream ownership gating', () => {
       messages: [{ id: 'message-b', role: 'user', content: 'B question', createdAt: '2026-07-16T00:00:00Z' }],
       streamContent: 'private partial from A',
       citations: [],
+      turnsBySession: {
+        'session-a': {
+          phase: 'streaming',
+          isLocked: true,
+          content: 'private partial from A',
+          citations: [],
+          quality: null,
+          error: null,
+          aiStatusText: 'Generating',
+          generationId: 'generation-a',
+        },
+      },
       activeSessionId: 'session-b',
       streamingSessionId: 'session-a',
       isLoadingMessages: false,

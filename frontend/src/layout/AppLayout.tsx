@@ -30,7 +30,6 @@ import SessionRenameModal from '../components/chat/SessionRenameModal';
 import CommandPalette from '../components/CommandPalette';
 import { chatApi } from '../api/chat';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
-import { abortActiveStream } from '../stream/StreamLifecycleManager';
 import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -48,8 +47,7 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessions, activeSessionId, streamPhase, loadSessions, setActiveSession, resetSession } = useChatStore();
-  const isStreaming = streamPhase !== 'idle';
+  const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
   const activeSpaceRole = useSpaceStore((s) => s.spaces.find((x) => x.id === s.activeSpaceId)?.my_role ?? null);
   const canManageSpace = ['owner', 'super_admin', 'org_admin', 'business_admin'].includes(activeSpaceRole || '');
   const { effective, setThemeMode } = useTheme();
@@ -197,9 +195,8 @@ export default function AppLayout() {
   }, [setActiveSession, navigate, closeMenu]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
-    if (activeSessionId === id && isStreaming) abortActiveStream();
     const chatState = useChatStore.getState();
-    if (chatState.isSendLocked) { chatState.unlockSend(); chatState.setStreamPhase('idle'); }
+    chatState.abortSessionStream(id);
     try {
       await chatApi.deleteSession(id);
       broadcastSessionDelete(id);
@@ -209,7 +206,7 @@ export default function AppLayout() {
       console.error('Failed to delete session:', err);
     }
     closeMenu();
-  }, [activeSessionId, isStreaming, loadSessions, resetSession, closeMenu]);
+  }, [activeSessionId, loadSessions, resetSession, closeMenu]);
 
   const openRenameSession = useCallback((session: { id: string; title: string }) => { setRenameSessionTarget(session); closeMenu(); }, [closeMenu]);
 

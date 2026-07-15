@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   controller: null as AbortController | null,
+  controllers: new Map<string, AbortController>(),
 }));
 
 vi.mock('../../api/chat', () => ({
@@ -23,22 +24,27 @@ vi.mock('../../sync/crossTabSync', () => ({
 }));
 
 vi.mock('../../stream/StreamLifecycleManager', () => ({
-  createStreamAbortController: () => {
+  createStreamAbortController: (sessionId: string) => {
     mocks.controller = new AbortController();
+    mocks.controllers.set(sessionId, mocks.controller);
     return mocks.controller;
   },
-  abortActiveStream: () => {
-    mocks.controller?.abort();
-    mocks.controller = null;
+  abortActiveStream: (sessionId: string) => {
+    mocks.controllers.get(sessionId)?.abort();
+    mocks.controllers.delete(sessionId);
   },
-  clearStreamOnComplete: () => {
-    mocks.controller = null;
+  clearStreamOnComplete: (sessionId: string) => {
+    const controller = mocks.controllers.get(sessionId);
+    mocks.controllers.delete(sessionId);
+    if (mocks.controller === controller) mocks.controller = null;
   },
 }));
 
 import { useChatStore } from '../chatStore';
+import { chatApi } from '../../api/chat';
 
 const SESSION_ID = '11111111-1111-4111-8111-111111111111';
+const SESSION_B = '44444444-4444-4444-8444-444444444444';
 const encoder = new TextEncoder();
 
 function streamResponse(chunks: string[]) {
@@ -66,7 +72,9 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
   mocks.fetch.mockReset();
+  vi.mocked(chatApi.getMessages).mockReset();
   mocks.controller = null;
+  mocks.controllers.clear();
   useChatStore.setState({
     sessions: [],
     sessionNextCursor: null,
@@ -77,6 +85,8 @@ beforeEach(() => {
     visibleRoundCount: 5,
     hasOlderMessages: false,
     totalRoundCount: 0,
+    turnsBySession: {},
+    localPartialsBySession: {},
     streamPhase: 'idle',
     streamingSessionId: null,
     streamContent: '',
@@ -86,7 +96,6 @@ beforeEach(() => {
     sendError: null,
     isSendLocked: false,
     _pendingSessionRefresh: false,
-    _isTimeoutAbort: false,
     aiStatusText: null,
   });
 });
@@ -97,6 +106,135 @@ afterEach(() => {
 });
 
 describe('sendMessage stream lifecycle', () => {
+  it('ignores a terminal callback from a stale generation', () => {
+    useChatStore.setState({
+      turnsBySession: {
+        [SESSION_ID]: {
+          phase: 'streaming',
+          isLocked: true,
+          content: 'new generation',
+          citations: [],
+          quality: null,
+          error: null,
+          aiStatusText: null,
+          generationId: 'generation-new',
+        },
+      },
+    });
+
+    useChatStore.getState().finishStreamingMessage('message-old', SESSION_ID, 'generation-old');
+
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'streaming',
+      isLocked: true,
+      content: 'new generation',
+      generationId: 'generation-new',
+    });
+    expect(useChatStore.getState().messages.some((message) => message.id === 'message-old')).toBe(false);
+  });
+
+  it('actually submits from session B while session A is still streaming', async () => {
+    let markReaderStalled!: () => void;
+    const readerStalled = new Promise<void>((resolve) => { markReaderStalled = resolve; });
+    mocks.fetch.mockImplementation(async (url, init?: RequestInit) => {
+      if (String(url).includes(SESSION_B)) {
+        return streamResponse([
+          `event: token\ndata: {"token":"B answer"}\nevent: done\ndata: {"message_id":"55555555-5555-4555-8555-555555555555","session_id":"${SESSION_B}"}\n`,
+        ]);
+      }
+      const signal = init?.signal as AbortSignal;
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              markReaderStalled();
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+              });
+            }),
+          }),
+        },
+      };
+    });
+
+    const sendA = useChatStore.getState().sendMessage('question A');
+    await readerStalled;
+    useChatStore.getState().setActiveSession(SESSION_B);
+    await useChatStore.getState().sendMessage('question B');
+    const postCount = mocks.fetch.mock.calls.length;
+    mocks.controllers.get(SESSION_ID)?.abort();
+    await sendA;
+
+    expect(postCount).toBe(2);
+  });
+
+  it('keeps session A terminal error out of B and restores its partial after remount', async () => {
+    let releaseA!: () => void;
+    let markAWaiting!: () => void;
+    const aWaiting = new Promise<void>((resolve) => { markAWaiting = resolve; });
+    mocks.fetch.mockImplementation(async (url) => {
+      if (String(url).includes(SESSION_B)) {
+        return streamResponse([
+          `event: token\ndata: {"token":"B answer"}\nevent: done\ndata: {"message_id":"55555555-5555-4555-8555-555555555555","session_id":"${SESSION_B}"}\n`,
+        ]);
+      }
+      let readCount = 0;
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              if (readCount++ === 0) {
+                return Promise.resolve({
+                  done: false,
+                  value: encoder.encode('event: token\ndata: {"token":"A partial"}\n'),
+                });
+              }
+              if (readCount === 2) {
+                markAWaiting();
+                return new Promise((resolve) => {
+                  releaseA = () => resolve({
+                    done: false,
+                    value: encoder.encode('event: token\ndata: not-json\n'),
+                  });
+                });
+              }
+              return Promise.resolve({ done: true, value: undefined });
+            }),
+          }),
+        },
+      };
+    });
+
+    const sendA = useChatStore.getState().sendMessage('question A');
+    await aWaiting;
+    useChatStore.getState().setActiveSession(SESSION_B);
+    await useChatStore.getState().sendMessage('question B');
+    const bMessagesBeforeAError = useChatStore.getState().messages.map((message) => message.content);
+    releaseA();
+    await sendA;
+
+    const state = useChatStore.getState();
+    expect(state.turnsBySession[SESSION_B]).toMatchObject({ phase: 'idle', isLocked: false, error: null });
+    expect(state.messages.map((message) => message.content)).toEqual(bMessagesBeforeAError);
+    expect(state.messages.some((message) => message.content === 'A partial')).toBe(false);
+    expect(state.turnsBySession[SESSION_ID]).toMatchObject({ phase: 'error', isLocked: false, error: 'error_generic' });
+    expect(state.localPartialsBySession[SESSION_ID]?.map((message) => message.content)).toContain('A partial');
+
+    vi.mocked(chatApi.getMessages).mockResolvedValue({
+      results: [],
+      next: null,
+      previous: null,
+    });
+    useChatStore.getState().setActiveSession(SESSION_ID);
+    await useChatStore.getState().loadMessages(SESSION_ID);
+
+    expect(useChatStore.getState().messages.map((message) => message.content)).toContain('A partial');
+  });
+
   it('issues one POST and exposes a recoverable error when the initial send fails', async () => {
     mocks.fetch.mockResolvedValue({ ok: false, status: 500 });
 
@@ -108,6 +246,67 @@ describe('sendMessage stream lifecycle', () => {
     expect(useChatStore.getState().sendError).toBe('error_server');
     expect(useChatStore.getState().isSendLocked).toBe(false);
     expect(useChatStore.getState().streamingSessionId).toBeNull();
+  });
+
+  it('times out while the initial fetch is still pending', async () => {
+    let pendingSignal!: AbortSignal;
+    mocks.fetch.mockImplementation((_url, init?: RequestInit) => {
+      pendingSignal = init?.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        pendingSignal.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const send = useChatStore.getState().sendMessage('hello');
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(30_001);
+    const didTimeout = pendingSignal.aborted;
+    if (!didTimeout) mocks.controller?.abort();
+    await send;
+
+    expect(didTimeout).toBe(true);
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'error',
+      isLocked: false,
+      error: 'error_timeout',
+    });
+  });
+
+  it('does not let a prior generation watchdog abort a newer generation', async () => {
+    vi.mocked(crypto.randomUUID)
+      .mockReturnValueOnce('22222222-2222-4222-8222-222222222221')
+      .mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+      .mockReturnValueOnce('22222222-2222-4222-8222-222222222223');
+    let secondSignal!: AbortSignal;
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `event: done\ndata: {"message_id":"33333333-3333-4333-8333-333333333333","session_id":"${SESSION_ID}"}\n`,
+      ]))
+      .mockImplementationOnce((_url, init?: RequestInit) => {
+        secondSignal = init?.signal as AbortSignal;
+        return new Promise((_resolve, reject) => {
+          secondSignal.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      });
+
+    await useChatStore.getState().sendMessage('first');
+    await vi.advanceTimersByTimeAsync(20_000);
+    const secondSend = useChatStore.getState().sendMessage('second');
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10_001);
+
+    const staleTimerAbortedNewGeneration = secondSignal.aborted;
+    mocks.controllers.get(SESSION_ID)?.abort();
+    await secondSend;
+    expect(staleTimerAbortedNewGeneration).toBe(false);
   });
 
   it('treats EOF without done as recoverable and preserves partial content', async () => {
@@ -242,6 +441,21 @@ describe('sendMessage stream lifecycle', () => {
     expect(state.sendError).toBeNull();
     expect(state.isSendLocked).toBe(false);
     expect(state.streamingSessionId).toBeNull();
+  });
+
+  it('flushes and parses a complete final SSE data line at EOF', async () => {
+    mocks.fetch.mockResolvedValue(streamResponse([
+      `event: token\ndata: {"token":"tail answer"}\nevent: done\ndata: {"message_id":"33333333-3333-4333-8333-333333333333","session_id":"${SESSION_ID}"}`,
+    ]));
+
+    await useChatStore.getState().sendMessage('hello');
+
+    const state = useChatStore.getState();
+    expect(state.messages[state.messages.length - 1]).toMatchObject({
+      id: '33333333-3333-4333-8333-333333333333',
+      content: 'tail answer',
+    });
+    expect(state.turnsBySession[SESSION_ID]).toMatchObject({ phase: 'idle', error: null });
   });
 
   it('makes an explicit SSE error recoverable and preserves partial content', async () => {

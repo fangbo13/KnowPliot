@@ -12,7 +12,6 @@ import { CheckOutlined, CloseOutlined, ArrowDownOutlined, EditOutlined, ReloadOu
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
-import { abortActiveStream } from '../stream/StreamLifecycleManager';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 import ChatComposer from '../components/chat/ChatComposer';
@@ -46,19 +45,20 @@ export default function ChatPageContainer() {
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
-    sessions, messages, streamContent, citations, activeSessionId, streamingSessionId,
-    isLoadingMessages, sendError, hasOlderMessages, setSendError, sendMessage,
-    loadSessions, loadMessages, loadOlderRounds, aiStatusText,
+    sessions, messages, activeSessionId, isLoadingMessages, hasOlderMessages,
+    setSendError, sendMessage, loadSessions, loadMessages, loadOlderRounds,
+    abortSessionStream,
   } = useChatStore();
 
-  const streamPhase = useChatStore((s) => s.streamPhase);
-  const isSendLocked = useChatStore((s) => s.isSendLocked);
-  const ownsActiveStream = streamingSessionId === activeSessionId;
-  const isStreaming = streamPhase !== 'idle' && ownsActiveStream;
-  const visibleStreamContent = isStreaming ? streamContent : '';
-  const visibleCitations = isStreaming ? citations : [];
+  const activeTurn = useChatStore((s) => activeSessionId ? s.turnsBySession[activeSessionId] : undefined);
+  const streamPhase = activeTurn?.phase ?? 'idle';
+  const isSendLocked = activeTurn?.isLocked ?? false;
+  const sendError = activeTurn?.error ?? null;
+  const isStreaming = isSendLocked && streamPhase !== 'error';
+  const visibleStreamContent = isStreaming ? activeTurn?.content ?? '' : '';
+  const visibleCitations = isStreaming ? activeTurn?.citations ?? [] : [];
   const visibleStreamPhase = isStreaming ? streamPhase : 'idle';
-  const visibleAiStatusText = isStreaming ? aiStatusText : null;
+  const visibleAiStatusText = isStreaming ? activeTurn?.aiStatusText ?? null : null;
 
   const activeSpace = useSpaceStore((s) => s.getActiveSpace());
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
@@ -89,7 +89,7 @@ export default function ChatPageContainer() {
 
   useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
-      if (streamPhase !== 'idle' && streamingSessionId === activeSessionId) {
+      if (activeTurn?.isLocked) {
         loadedSessionRef.current = activeSessionId;
         return;
       }
@@ -97,7 +97,7 @@ export default function ChatPageContainer() {
       loadedSessionRef.current = activeSessionId;
       loadMessages(activeSessionId).finally(() => setIsTransitioning(false));
     }
-  }, [activeSessionId, loadMessages, streamPhase, streamingSessionId]);
+  }, [activeSessionId, activeTurn?.isLocked, loadMessages]);
 
   const scrollToBottom = () => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth', align: 'end' });
 
@@ -159,7 +159,7 @@ export default function ChatPageContainer() {
     }
   };
 
-  const handleStop = () => abortActiveStream();
+  const handleStop = () => { if (activeSessionId) abortSessionStream(activeSessionId); };
   const handleLoadOlder = () => loadOlderRounds(5);
 
   if (!activeSessionId && messages.length === 0) {
@@ -314,7 +314,7 @@ export default function ChatPageContainer() {
             placeholder={t('placeholder')}
             ariaLabel={t('chat_input_label') || 'Type your message'}
             isStreaming={isStreaming}
-            disabled={(isSendLocked && ownsActiveStream) || !isOnline}
+            disabled={isSendLocked || !isOnline}
             inputRef={inputRef}
             multiline
             maxRows={6}

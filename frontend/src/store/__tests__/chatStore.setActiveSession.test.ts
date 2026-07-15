@@ -41,9 +41,9 @@ import {
 import { broadcastSessionSwitch } from '../../sync/crossTabSync';
 
 // Register a batch callback (as sendMessage does) and capture everything it emits.
-function collectBatcher(): string[] {
+function collectBatcher(sessionId = 'sess-A', generationId = 'gen-A'): string[] {
   const received: string[] = [];
-  initTokenBatcher((update) => {
+  initTokenBatcher(sessionId, generationId, (update) => {
     received.push('appendTokens' in update ? update.appendTokens : update.fullContent);
   });
   return received;
@@ -53,11 +53,14 @@ beforeEach(() => {
   // Node test env has no rAF; stub so appendToken() can schedule without throwing.
   (globalThis as any).requestAnimationFrame = (_cb: unknown) => 1;
   (globalThis as any).cancelAnimationFrame = () => {};
-  resetTokenBatcher();
+  resetTokenBatcher('sess-A');
+  resetTokenBatcher('sess-B');
   useChatStore.setState({
     activeSessionId: null,
     messages: [],
     allMessages: [],
+    turnsBySession: {},
+    localPartialsBySession: {},
     streamPhase: 'idle',
     streamContent: '',
     streamingSessionId: null,
@@ -101,22 +104,37 @@ describe('setActiveSession — keeps background stream rendering alive (V4.6)', 
     const received = collectBatcher();
 
     // A stream is in progress for session A.
-    useChatStore.setState({ streamingSessionId: 'sess-A', streamPhase: 'streaming' });
-    appendToken('Hello');
+    useChatStore.setState({
+      activeSessionId: 'sess-A',
+      turnsBySession: {
+        'sess-A': {
+          phase: 'streaming', isLocked: true, content: '', citations: [], quality: null,
+          error: null, aiStatusText: null, generationId: 'gen-A',
+        },
+      },
+    });
+    appendToken('sess-A', 'gen-A', 'Hello');
 
     // User switches to a different conversation while A is still streaming.
     useChatStore.getState().setActiveSession('sess-B');
 
     // The still-running background stream keeps delivering tokens.
-    appendToken(' world');
-    flushImmediate();
+    appendToken('sess-A', 'gen-A', ' world');
+    flushImmediate('sess-A', 'gen-A');
 
     // Before the fix this was '' — resetTokenBatcher() nulled the callback + wiped the buffer.
     expect(received.join('')).toContain('Hello world');
   });
 
-  it('preserves streamPhase / streamContent / streamingSessionId across a switch', () => {
+  it('preserves session A turn while mirroring idle state for session B', () => {
     useChatStore.setState({
+      activeSessionId: 'sess-A',
+      turnsBySession: {
+        'sess-A': {
+          phase: 'streaming', isLocked: true, content: 'partial answer', citations: [], quality: null,
+          error: null, aiStatusText: null, generationId: 'gen-A',
+        },
+      },
       streamingSessionId: 'sess-A',
       streamPhase: 'streaming',
       streamContent: 'partial answer',
@@ -126,24 +144,29 @@ describe('setActiveSession — keeps background stream rendering alive (V4.6)', 
 
     const s = useChatStore.getState();
     expect(s.activeSessionId).toBe('sess-B');        // the view switched
-    expect(s.streamPhase).toBe('streaming');         // the stream keeps running
-    expect(s.streamContent).toBe('partial answer');  // partial output not discarded
-    expect(s.streamingSessionId).toBe('sess-A');     // stream still owned by A
+    expect(s.streamPhase).toBe('idle');
+    expect(s.streamContent).toBe('');
+    expect(s.streamingSessionId).toBeNull();
+    expect(s.turnsBySession['sess-A']).toMatchObject({
+      phase: 'streaming', content: 'partial answer', generationId: 'gen-A',
+    });
   });
 });
 
 describe('resetSession — still tears the batcher down (new chat)', () => {
   it('drops buffered tokens and detaches the callback', () => {
     const received = collectBatcher();
-    appendToken('partial');
+    useChatStore.setState({ activeSessionId: 'sess-A' });
+    appendToken('sess-A', 'gen-A', 'partial');
 
     useChatStore.getState().resetSession();
 
-    appendToken(' more');
-    flushImmediate();
+    appendToken('sess-A', 'gen-A', ' more');
+    flushImmediate('sess-A', 'gen-A');
 
     expect(received.join('')).toBe('');
     expect(useChatStore.getState().streamPhase).toBe('idle');
     expect(useChatStore.getState().streamingSessionId).toBeNull();
+    expect(useChatStore.getState().isSendLocked).toBe(false);
   });
 });
