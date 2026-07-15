@@ -61,7 +61,7 @@ class SessionCursorPagination(CursorPagination):
 
 # V3.5 HIGH-004: Cursor pagination for messages
 class MessageCursorPagination(CursorPagination):
-    ordering = 'created_at'
+    ordering = '-created_at'
     page_size = 40  # ~20 rounds
 
 

@@ -214,6 +214,17 @@ function sortMessagesChronologically(messages: Message[]): Message[] {
   });
 }
 
+function appendUniqueById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+  const seen = new Set(existing.map((item) => item.id));
+  const merged = [...existing];
+  for (const item of incoming) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
+}
+
 const DEFAULT_VISIBLE_ROUNDS = 10;
 // V3.6 MED-001 / V3.7 P1.3: Hard cap on allMessages to prevent unbounded memory growth
 // V3.7: Reduced from 500 to 100 — 100 messages ≈ 50 rounds of conversation,
@@ -274,6 +285,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       messages: [],
       allMessages: [],
       messageNextCursor: null,
+      isLoadingMessages: false,
       sendError: null,
       // V4.6: DON'T reset streamPhase/streamContent/streamingSessionId here.
       // The stream continues in background; the UI uses streamingSessionId to
@@ -299,6 +311,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       messages: [],
       allMessages: [],
       messageNextCursor: null,
+      isLoadingMessages: false,
       streamContent: '',
       citations: [],
       streamQuality: null,
@@ -377,12 +390,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
     try {
       const page = await chatApi.getSessions({ cursor });
-      const existingIds = new Set(get().sessions.map((session) => session.id));
       set({
-        sessions: [
-          ...get().sessions,
-          ...page.results.filter((session) => !existingIds.has(session.id)),
-        ],
+        sessions: appendUniqueById(get().sessions, page.results),
         sessionNextCursor: page.next,
       });
     } catch (error) {
@@ -400,7 +409,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       const page = await chatApi.getMessages(sessionId, { signal: controller.signal });
       if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
 
-      const allMessages = page.results.map(mapApiMessage);
+      const allMessages = sortMessagesChronologically(page.results.map(mapApiMessage));
 
       // V3.5: Sliding window — compute rounds, extract visible slice
       const rounds = computeRounds(allMessages);
@@ -445,11 +454,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
 
       const existingMessages = get().allMessages;
-      const existingIds = new Set(existingMessages.map((message) => message.id));
-      const olderMessages = page.results
-        .map(mapApiMessage)
-        .filter((message) => !existingIds.has(message.id));
-      const allMessages = sortMessagesChronologically([...existingMessages, ...olderMessages]);
+      const allMessages = sortMessagesChronologically(
+        appendUniqueById(existingMessages, page.results.map(mapApiMessage)),
+      );
       const rounds = computeRounds(allMessages);
       const visibleRoundCount = get().visibleRoundCount;
 

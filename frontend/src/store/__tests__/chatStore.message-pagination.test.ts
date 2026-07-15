@@ -91,6 +91,13 @@ describe('session pagination', () => {
           isPinned: false,
           updatedAt: '2026-07-15T02:00:00Z',
         },
+        {
+          id: 'session-b',
+          title: 'Duplicate within page',
+          is_active: true,
+          isPinned: false,
+          updatedAt: '2026-07-15T02:00:00Z',
+        },
       ],
       next: 'session-final',
       previous: null,
@@ -110,12 +117,20 @@ describe('session pagination', () => {
 describe('message loading', () => {
   it('stores the first message page and next cursor', async () => {
     vi.mocked(chatApi.getMessages).mockResolvedValue({
-      results: [{
-        id: 'message-a',
-        role: 'assistant',
-        content: 'first page',
-        created_at: '2026-07-16T02:00:00Z',
-      }],
+      results: [
+        {
+          id: 'message-newer',
+          role: 'assistant',
+          content: 'newer',
+          created_at: '2026-07-16T02:00:00Z',
+        },
+        {
+          id: 'message-older',
+          role: 'user',
+          content: 'older',
+          created_at: '2026-07-16T01:00:00Z',
+        },
+      ],
       next: 'message-next',
       previous: null,
     });
@@ -123,7 +138,10 @@ describe('message loading', () => {
     useChatStore.getState().setActiveSession('session-a');
     await useChatStore.getState().loadMessages('session-a');
 
-    expect(useChatStore.getState().allMessages.map((message) => message.id)).toEqual(['message-a']);
+    expect(useChatStore.getState().allMessages.map((message) => message.id)).toEqual([
+      'message-older',
+      'message-newer',
+    ]);
     expect(useChatStore.getState().messageNextCursor).toBe('message-next');
     expect(useChatStore.getState().hasOlderMessages).toBe(true);
   });
@@ -146,6 +164,12 @@ describe('message loading', () => {
         id: 'message-middle',
         role: 'assistant',
         content: 'middle',
+        created_at: '2026-07-16T01:00:00Z',
+      },
+      {
+        id: 'message-middle',
+        role: 'assistant',
+        content: 'duplicate within page',
         created_at: '2026-07-16T01:00:00Z',
       },
       {
@@ -213,6 +237,36 @@ describe('message loading', () => {
 
     expect(vi.mocked(chatApi.getMessages).mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
 
+    pending.resolve(messagePage([]));
+    await load;
+  });
+
+  it('clears message loading when selecting another session during a pending load', async () => {
+    const pending = deferred<MessagePage>();
+    vi.mocked(chatApi.getMessages).mockReturnValueOnce(pending.promise);
+
+    useChatStore.getState().setActiveSession('session-a');
+    const load = useChatStore.getState().loadMessages('session-a');
+    expect(useChatStore.getState().isLoadingMessages).toBe(true);
+
+    useChatStore.getState().setActiveSession('session-b');
+
+    expect(useChatStore.getState().isLoadingMessages).toBe(false);
+    pending.resolve(messagePage([]));
+    await load;
+  });
+
+  it('clears message loading when resetting during a pending load', async () => {
+    const pending = deferred<MessagePage>();
+    vi.mocked(chatApi.getMessages).mockReturnValueOnce(pending.promise);
+
+    useChatStore.getState().setActiveSession('session-a');
+    const load = useChatStore.getState().loadMessages('session-a');
+    expect(useChatStore.getState().isLoadingMessages).toBe(true);
+
+    useChatStore.getState().resetSession();
+
+    expect(useChatStore.getState().isLoadingMessages).toBe(false);
     pending.resolve(messagePage([]));
     await load;
   });
