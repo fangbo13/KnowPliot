@@ -87,6 +87,7 @@ beforeEach(() => {
     totalRoundCount: 0,
     turnsBySession: {},
     localPartialsBySession: {},
+    messageCacheBySession: {},
     streamPhase: 'idle',
     streamingSessionId: null,
     streamContent: '',
@@ -276,6 +277,47 @@ describe('sendMessage stream lifecycle', () => {
     });
   });
 
+  it('arms the idle watchdog before the first reader read resolves', async () => {
+    let markFirstRead!: () => void;
+    const firstRead = new Promise<void>((resolve) => { markFirstRead = resolve; });
+    mocks.fetch.mockImplementation(async (_url, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal;
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              markFirstRead();
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener(
+                  'abort',
+                  () => reject(new DOMException('aborted', 'AbortError')),
+                  { once: true },
+                );
+              });
+            }),
+          }),
+        },
+      };
+    });
+
+    const send = useChatStore.getState().sendMessage('hello');
+    await firstRead;
+    const streamSignal = mocks.controller!.signal;
+    await vi.advanceTimersByTimeAsync(30_001);
+    const didTimeout = streamSignal.aborted;
+    if (!didTimeout) mocks.controller?.abort();
+    await send;
+
+    expect(didTimeout).toBe(true);
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'error',
+      isLocked: false,
+      error: 'error_timeout',
+    });
+  });
+
   it('does not let a prior generation watchdog abort a newer generation', async () => {
     vi.mocked(crypto.randomUUID)
       .mockReturnValueOnce('22222222-2222-4222-8222-222222222221')
@@ -321,6 +363,11 @@ describe('sendMessage stream lifecycle', () => {
     expect(state.sendError).toBe('error_network');
     expect(state.isSendLocked).toBe(false);
     expect(state.streamingSessionId).toBeNull();
+
+    useChatStore.getState().setActiveSession(SESSION_B);
+    useChatStore.getState().setActiveSession(SESSION_ID);
+    expect(useChatStore.getState().messages.map((message) => message.content)).toContain('partial answer');
+
   });
 
   it('terminates a parse failure without retrying and preserves partial content', async () => {
@@ -336,6 +383,7 @@ describe('sendMessage stream lifecycle', () => {
     expect(state.sendError).toBe('error_generic');
     expect(state.isSendLocked).toBe(false);
     expect(state.streamingSessionId).toBeNull();
+
   });
 
   it('times out a stalled stream after partial output and preserves that partial', async () => {
@@ -423,6 +471,52 @@ describe('sendMessage stream lifecycle', () => {
     expect(state.streamingSessionId).toBeNull();
   });
 
+  it('flushes and stores the owner partial before resetting to a new chat', async () => {
+    let markReaderStalled!: () => void;
+    const readerStalled = new Promise<void>((resolve) => { markReaderStalled = resolve; });
+    mocks.fetch.mockImplementation(async (_url, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal;
+      let readCount = 0;
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              if (readCount++ === 0) {
+                return Promise.resolve({
+                  done: false,
+                  value: encoder.encode('event: token\ndata: {"token":"partial before new chat"}\n'),
+                });
+              }
+              markReaderStalled();
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener(
+                  'abort',
+                  () => reject(new DOMException('aborted', 'AbortError')),
+                  { once: true },
+                );
+              });
+            }),
+          }),
+        },
+      };
+    });
+
+    const send = useChatStore.getState().sendMessage('question before reset');
+    await readerStalled;
+    useChatStore.getState().resetSession();
+    await send;
+
+    expect((useChatStore.getState().localPartialsBySession[SESSION_ID] ?? []).map(
+      (message) => message.content,
+    )).toContain('partial before new chat');
+    useChatStore.getState().setActiveSession(SESSION_ID);
+    expect(useChatStore.getState().messages.map((message) => message.content)).toEqual(
+      expect.arrayContaining(['question before reset', 'partial before new chat']),
+    );
+  });
+
   it('commits an explicit done event as the successful terminal state', async () => {
     mocks.fetch.mockResolvedValue(streamResponse([
       `event: token\ndata: {"token":"complete answer"}\nevent: done\ndata: {"message_id":"33333333-3333-4333-8333-333333333333","session_id":"${SESSION_ID}"}\n`,
@@ -441,6 +535,12 @@ describe('sendMessage stream lifecycle', () => {
     expect(state.sendError).toBeNull();
     expect(state.isSendLocked).toBe(false);
     expect(state.streamingSessionId).toBeNull();
+
+    useChatStore.getState().setActiveSession(SESSION_B);
+    useChatStore.getState().setActiveSession(SESSION_ID);
+    expect(useChatStore.getState().messages.some(
+      (message) => message.id === '33333333-3333-4333-8333-333333333333',
+    )).toBe(true);
   });
 
   it('flushes and parses a complete final SSE data line at EOF', async () => {

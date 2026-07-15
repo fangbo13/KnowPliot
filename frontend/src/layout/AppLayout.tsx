@@ -30,6 +30,7 @@ import SessionRenameModal from '../components/chat/SessionRenameModal';
 import CommandPalette from '../components/CommandPalette';
 import { chatApi } from '../api/chat';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
+import { hasActiveStream } from '../stream/StreamLifecycleManager';
 import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -196,17 +197,17 @@ export default function AppLayout() {
 
   const handleDeleteSession = useCallback(async (id: string) => {
     const chatState = useChatStore.getState();
-    chatState.abortSessionStream(id);
+    if (hasActiveStream(id)) chatState.abortSessionStream(id);
     try {
       await chatApi.deleteSession(id);
+      chatState.removeSessionState(id);
       broadcastSessionDelete(id);
       loadSessions();
-      if (activeSessionId === id) resetSession();
     } catch (err) {
       console.error('Failed to delete session:', err);
     }
     closeMenu();
-  }, [activeSessionId, loadSessions, resetSession, closeMenu]);
+  }, [loadSessions, closeMenu]);
 
   const openRenameSession = useCallback((session: { id: string; title: string }) => { setRenameSessionTarget(session); closeMenu(); }, [closeMenu]);
 

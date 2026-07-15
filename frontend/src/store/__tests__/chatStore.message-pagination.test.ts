@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../api/chat', () => ({
   chatApi: {
@@ -34,6 +34,7 @@ function messagePage(results: MessagePage['results'], next: string | null = null
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   useChatStore.setState({
     sessions: [],
     sessionNextCursor: null,
@@ -46,7 +47,14 @@ beforeEach(() => {
     visibleRoundCount: 10,
     hasOlderMessages: false,
     totalRoundCount: 0,
+    turnsBySession: {},
+    localPartialsBySession: {},
+    messageCacheBySession: {},
   });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('session pagination', () => {
@@ -115,6 +123,130 @@ describe('session pagination', () => {
 });
 
 describe('message loading', () => {
+  it('does not clear a recoverable turn error while refreshing messages', async () => {
+    useChatStore.getState().setActiveSession('session-a');
+    useChatStore.setState({
+      turnsBySession: {
+        'session-a': {
+          phase: 'error', isLocked: false, content: '', citations: [], quality: null,
+          error: 'error_network', aiStatusText: null, generationId: 'generation-a',
+        },
+      },
+    });
+    vi.mocked(chatApi.getMessages).mockResolvedValue(messagePage([]));
+
+    await useChatStore.getState().loadMessages('session-a');
+
+    expect(useChatStore.getState().turnsBySession['session-a']).toMatchObject({
+      phase: 'error',
+      error: 'error_network',
+      generationId: 'generation-a',
+    });
+  });
+
+  it('does not replace a recoverable turn error when loading older messages fails', async () => {
+    useChatStore.getState().setActiveSession('session-a');
+    useChatStore.setState({
+      messageNextCursor: 'older',
+      turnsBySession: {
+        'session-a': {
+          phase: 'error', isLocked: false, content: '', citations: [], quality: null,
+          error: 'error_timeout', aiStatusText: null, generationId: 'generation-a',
+        },
+      },
+    });
+    vi.mocked(chatApi.getMessages).mockRejectedValue(new Error('load failed'));
+
+    await useChatStore.getState().loadOlderMessages();
+
+    expect(useChatStore.getState().turnsBySession['session-a']).toMatchObject({
+      phase: 'error',
+      error: 'error_timeout',
+      generationId: 'generation-a',
+    });
+  });
+
+  it('reconciles a recent local partial with its completed server assistant', async () => {
+    const localPartial = {
+      id: 'local-generation-a',
+      role: 'assistant' as const,
+      content: 'partial answer',
+      createdAt: '2026-07-16T01:00:00Z',
+    };
+    useChatStore.getState().setActiveSession('session-a');
+    useChatStore.setState({
+      localPartialsBySession: { 'session-a': [localPartial] },
+      messageCacheBySession: { 'session-a': [localPartial] },
+    });
+    vi.mocked(chatApi.getMessages).mockResolvedValue(messagePage([{
+      id: 'server-answer',
+      role: 'assistant',
+      content: 'partial answer with the completed ending',
+      created_at: '2026-07-16T01:02:00Z',
+    }]));
+
+    await useChatStore.getState().loadMessages('session-a');
+
+    expect(useChatStore.getState().allMessages.map((message) => message.id)).toEqual(['server-answer']);
+    expect(useChatStore.getState().localPartialsBySession['session-a']).toEqual([]);
+    expect(useChatStore.getState().messageCacheBySession['session-a'].map((message) => message.id)).toEqual([
+      'server-answer',
+    ]);
+  });
+
+  it('keeps a prefix-matching local partial outside the reconciliation window', async () => {
+    const oldPartial = {
+      id: 'local-old',
+      role: 'assistant' as const,
+      content: 'repeated prefix',
+      createdAt: '2026-07-16T00:00:00Z',
+    };
+    useChatStore.getState().setActiveSession('session-a');
+    useChatStore.setState({ localPartialsBySession: { 'session-a': [oldPartial] } });
+    vi.mocked(chatApi.getMessages).mockResolvedValue(messagePage([{
+      id: 'server-new',
+      role: 'assistant',
+      content: 'repeated prefix with unrelated later answer',
+      created_at: '2026-07-16T01:00:00Z',
+    }]));
+
+    await useChatStore.getState().loadMessages('session-a');
+
+    expect(useChatStore.getState().allMessages.map((message) => message.id)).toEqual([
+      'local-old',
+      'server-new',
+    ]);
+    expect(useChatStore.getState().localPartialsBySession['session-a']).toEqual([oldPartial]);
+  });
+
+  it('reconciles a local partial when the matching assistant arrives in an older page', async () => {
+    const localPartial = {
+      id: 'local-older-page',
+      role: 'assistant' as const,
+      content: 'older page partial',
+      createdAt: '2026-07-16T01:00:00Z',
+    };
+    useChatStore.setState({
+      activeSessionId: 'session-a',
+      messages: [localPartial],
+      allMessages: [localPartial],
+      messageNextCursor: 'older',
+      localPartialsBySession: { 'session-a': [localPartial] },
+      messageCacheBySession: { 'session-a': [localPartial] },
+    });
+    vi.mocked(chatApi.getMessages).mockResolvedValue(messagePage([{
+      id: 'server-older-page',
+      role: 'assistant',
+      content: 'older page partial completed',
+      created_at: '2026-07-16T01:01:00Z',
+    }]));
+
+    await useChatStore.getState().loadOlderMessages();
+
+    expect(useChatStore.getState().allMessages.map((message) => message.id)).toEqual(['server-older-page']);
+    expect(useChatStore.getState().localPartialsBySession['session-a']).toEqual([]);
+  });
+
   it('stores the first message page and next cursor', async () => {
     vi.mocked(chatApi.getMessages).mockResolvedValue({
       results: [
@@ -144,6 +276,13 @@ describe('message loading', () => {
     ]);
     expect(useChatStore.getState().messageNextCursor).toBe('message-next');
     expect(useChatStore.getState().hasOlderMessages).toBe(true);
+
+    useChatStore.getState().setActiveSession('session-b');
+    useChatStore.getState().setActiveSession('session-a');
+    expect(useChatStore.getState().allMessages.map((message) => message.id)).toEqual([
+      'message-older',
+      'message-newer',
+    ]);
   });
 
   it('appends an older server page without replacing duplicates and sorts chronologically', async () => {

@@ -29,7 +29,6 @@
 
 // V4.2 SYS-V4.2-017: Static imports — eliminates 4-layer dynamic import delay
 import { hasActiveStream } from '../stream/StreamLifecycleManager';
-import { resetTokenBatcher } from '../stream/TokenBatchRenderer';
 import { useChatStore } from '../store/chatStore';
 
 const channel = new BroadcastChannel('ey-onboarding-sync');
@@ -64,12 +63,9 @@ export function initCrossTabSync() {
 
       case 'session-delete':
         import('antd').then(({ message: antMessage }) => {
-          if (hasActiveStream(sessionId)) {
-            // Another tab deleted our active session — abort + reset
-            const chatState = useChatStore.getState();
-            chatState.abortSessionStream(sessionId);
-            resetTokenBatcher(sessionId);
-            if (chatState.activeSessionId === sessionId) chatState.resetSession();
+          const ownedStreamWasDeleted = hasActiveStream(sessionId);
+          useChatStore.getState().removeSessionState(sessionId);
+          if (ownedStreamWasDeleted) {
             // V4.1 BUG-010: Toast feedback
             antMessage.info('另一个标签页删除了当前会话');
           }

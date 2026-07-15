@@ -11,6 +11,7 @@ import {
   createStreamAbortController,
   abortActiveStream,
   clearStreamOnComplete,
+  hasActiveStream,
 } from '../stream/StreamLifecycleManager';
 import { initTokenBatcher, appendToken, flushImmediate, resetTokenBatcher } from '../stream/TokenBatchRenderer';
 // V4.0 DEFECT-008: BroadcastChannel cross-tab sync
@@ -133,6 +134,7 @@ interface ChatState {
   totalRoundCount: number;
   turnsBySession: Record<string, SessionTurnState>;
   localPartialsBySession: Record<string, Message[]>;
+  messageCacheBySession: Record<string, Message[]>;
   // V3.5: Unified stream phase replaces three separate fields
   streamPhase: StreamPhase;
   // V4.6: Track which session owns the stream so streaming UI only shows for matching session.
@@ -161,6 +163,7 @@ interface ChatState {
   lockSend: () => void;
   unlockSend: () => void;
   abortSessionStream: (sessionId: string) => void;
+  removeSessionState: (sessionId: string) => void;
   dismissSessionError: (sessionId: string) => void;
   loadSessions: () => Promise<void>;
   loadMoreSessions: () => Promise<void>;
@@ -277,6 +280,21 @@ function appendUniqueById<T extends { id: string }>(existing: T[], incoming: T[]
   return merged;
 }
 
+const LOCAL_PARTIAL_RECONCILIATION_WINDOW_MS = 5 * 60 * 1000;
+
+function isReconciledLocalPartial(partial: Message, serverMessage: Message): boolean {
+  if (partial.role !== 'assistant' || serverMessage.role !== 'assistant') return false;
+  const partialContent = partial.content.trim();
+  const serverContent = serverMessage.content.trim();
+  if (!partialContent || !serverContent) return false;
+  if (!serverContent.startsWith(partialContent) && !partialContent.startsWith(serverContent)) return false;
+  const partialTime = Date.parse(partial.createdAt);
+  const serverTime = Date.parse(serverMessage.createdAt);
+  return Number.isFinite(partialTime)
+    && Number.isFinite(serverTime)
+    && Math.abs(serverTime - partialTime) <= LOCAL_PARTIAL_RECONCILIATION_WINDOW_MS;
+}
+
 const DEFAULT_VISIBLE_ROUNDS = 10;
 // V3.6 MED-001 / V3.7 P1.3: Hard cap on allMessages to prevent unbounded memory growth
 // V3.7: Reduced from 500 to 100 — 100 messages ≈ 50 rounds of conversation,
@@ -298,6 +316,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   totalRoundCount: 0,
   turnsBySession: {},
   localPartialsBySession: {},
+  messageCacheBySession: {},
   // V3.5: Unified stream phase (replaces isStreaming/thinkingPhase/connectionStatus)
   streamPhase: 'idle',
   streamingSessionId: null,
@@ -320,15 +339,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     messageLoadController = null;
 
     const turn = get().turnsBySession[id] ?? idleTurn();
+    const cachedMessages = get().messageCacheBySession[id] ?? [];
+    const cachedRounds = computeRounds(cachedMessages);
     broadcastSessionSwitch(id); // V4.0 DEFECT-008: notify other tabs of session switch
     set({
       activeSessionId: id,
-      messages: [],
-      allMessages: [],
+      messages: extractVisibleMessages(cachedRounds, DEFAULT_VISIBLE_ROUNDS),
+      allMessages: cachedMessages,
       messageNextCursor: null,
       isLoadingMessages: false,
-      hasOlderMessages: false,
-      totalRoundCount: 0,
+      hasOlderMessages: cachedRounds.length > DEFAULT_VISIBLE_ROUNDS,
+      totalRoundCount: cachedRounds.length,
       visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
       _pendingSessionRefresh: false,
       ...legacyMirror(turn, id),
@@ -338,18 +359,50 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   // Starting a new chat explicitly aborts and clears only the active session's turn.
   resetSession: () => {
     const owningSessionId = get().activeSessionId;
+    let retainedOwnerTurn: SessionTurnState | null = null;
     messageLoadSequence += 1;
     messageLoadController?.abort();
     messageLoadController = null;
     if (owningSessionId) {
-      abortActiveStream(owningSessionId);
-      resetTokenBatcher(owningSessionId);
+      const owningGeneration = get().turnsBySession[owningSessionId]?.generationId;
+      if (owningGeneration) flushImmediate(owningSessionId, owningGeneration);
+      const owningTurn = get().turnsBySession[owningSessionId];
+      retainedOwnerTurn = owningTurn?.error
+        ? { ...owningTurn, isLocked: false }
+        : idleTurn();
+      if (owningGeneration && owningTurn?.generationId === owningGeneration && owningTurn.content.trim()) {
+        const partialMessage: Message = {
+          id: `local-${owningGeneration}`,
+          role: 'assistant',
+          content: owningTurn.content,
+          citations: owningTurn.citations,
+          createdAt: new Date().toISOString(),
+        };
+        set((state) => ({
+          localPartialsBySession: {
+            ...state.localPartialsBySession,
+            [owningSessionId]: appendUniqueById(
+              state.localPartialsBySession[owningSessionId] ?? [],
+              [partialMessage],
+            ),
+          },
+          messageCacheBySession: {
+            ...state.messageCacheBySession,
+            [owningSessionId]: appendUniqueById(
+              state.messageCacheBySession[owningSessionId] ?? [],
+              [partialMessage],
+            ).slice(-MAX_ALL_MESSAGES),
+          },
+        }));
+      }
+      abortActiveStream(owningSessionId, owningGeneration ?? undefined);
+      resetTokenBatcher(owningSessionId, owningGeneration ?? undefined);
     }
     broadcastSessionSwitch(null); // V4.0 DEFECT-008: notify other tabs (null = no active session)
     set({
       activeSessionId: null,
       turnsBySession: owningSessionId
-        ? { ...get().turnsBySession, [owningSessionId]: idleTurn() }
+        ? { ...get().turnsBySession, [owningSessionId]: retainedOwnerTurn ?? idleTurn() }
         : get().turnsBySession,
       messages: [],
       allMessages: [],
@@ -385,6 +438,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   // finishStreamingMessage() is the sole point that computes rounds + visibleMessages.
   addMessage: (message) => set((state) => {
     const newAllMessages = [...state.allMessages, message];
+    const sessionId = state.activeSessionId;
+    const cacheMessages = sessionId
+      ? [...(state.messageCacheBySession[sessionId] ?? []), message].slice(-MAX_ALL_MESSAGES)
+      : null;
+    const cacheUpdate = sessionId && cacheMessages
+      ? { messageCacheBySession: { ...state.messageCacheBySession, [sessionId]: cacheMessages } }
+      : {};
     // Prune front if exceeding cap — prevents unbounded memory growth
     // V4.2 SYS-V4.2-016: No computeRounds here — just prune raw array
     if (newAllMessages.length > MAX_ALL_MESSAGES) {
@@ -395,12 +455,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         messages: [...state.messages, message],
         allMessages: pruned,
         hasOlderMessages: true,
+        ...cacheUpdate,
       };
     }
     const newMessages = [...state.messages, message];
     return {
       messages: newMessages,
       allMessages: newAllMessages,
+      ...cacheUpdate,
     };
   }),
 
@@ -450,6 +512,40 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   abortSessionStream: (sessionId) => { abortActiveStream(sessionId); },
 
+  removeSessionState: (sessionId) => {
+    if (hasActiveStream(sessionId)) abortActiveStream(sessionId);
+    resetTokenBatcher(sessionId);
+    if (get().activeSessionId === sessionId) {
+      messageLoadSequence += 1;
+      messageLoadController?.abort();
+      messageLoadController = null;
+    }
+    set((state) => {
+      const { [sessionId]: _turn, ...turnsBySession } = state.turnsBySession;
+      const { [sessionId]: _cache, ...messageCacheBySession } = state.messageCacheBySession;
+      const { [sessionId]: _partial, ...localPartialsBySession } = state.localPartialsBySession;
+      const activeUpdates = state.activeSessionId === sessionId
+        ? {
+            activeSessionId: null,
+            messages: [],
+            allMessages: [],
+            messageNextCursor: null,
+            isLoadingMessages: false,
+            hasOlderMessages: false,
+            totalRoundCount: 0,
+            visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
+            ...legacyMirror(idleTurn(), null),
+          }
+        : {};
+      return {
+        turnsBySession,
+        messageCacheBySession,
+        localPartialsBySession,
+        ...activeUpdates,
+      };
+    });
+  },
+
   dismissSessionError: (sessionId) => {
     set((state) => withTurnUpdate(state, sessionId, null, { phase: 'idle', error: null }));
   },
@@ -483,37 +579,44 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const controller = new AbortController();
     messageLoadController = controller;
     const requestSequence = ++messageLoadSequence;
-    set((state) => ({
-      isLoadingMessages: true,
-      ...withTurnUpdate(state, sessionId, null, {
-        error: null,
-        ...(state.turnsBySession[sessionId]?.phase === 'error' ? { phase: 'idle' as const } : {}),
-      }),
-    }));
+    set({ isLoadingMessages: true });
     try {
       const page = await chatApi.getMessages(sessionId, { signal: controller.signal });
       if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
 
       const serverMessages = page.results.map(mapApiMessage);
       const localPartials = get().localPartialsBySession[sessionId] ?? [];
-      const allMessages = sortMessagesChronologically(appendUniqueById(serverMessages, localPartials));
+      const remainingLocalPartials = localPartials.filter((partial) => (
+        !serverMessages.some((serverMessage) => isReconciledLocalPartial(partial, serverMessage))
+      ));
+      const allMessages = sortMessagesChronologically(
+        appendUniqueById(serverMessages, remainingLocalPartials),
+      );
 
       // V3.5: Sliding window — compute rounds, extract visible slice
       const rounds = computeRounds(allMessages);
       const visibleMessages = extractVisibleMessages(rounds, DEFAULT_VISIBLE_ROUNDS);
       const hasOlder = rounds.length > DEFAULT_VISIBLE_ROUNDS || page.next !== null;
 
-      set({
+      set((state) => ({
         activeSessionId: sessionId,
         allMessages,
         messages: visibleMessages,
+        messageCacheBySession: {
+          ...state.messageCacheBySession,
+          [sessionId]: allMessages.slice(-MAX_ALL_MESSAGES),
+        },
+        localPartialsBySession: {
+          ...state.localPartialsBySession,
+          [sessionId]: remainingLocalPartials,
+        },
         messageNextCursor: page.next,
         hasOlderMessages: hasOlder,
         visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
         isLoadingMessages: false,
         // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks
         totalRoundCount: rounds.length,
-      });
+      }));
       if (messageLoadController === controller) messageLoadController = null;
     } catch (error) {
       if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
@@ -522,7 +625,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // V3.6 MED-002: Use i18n error key instead of raw string
       set((state) => ({
         isLoadingMessages: false,
-        ...withTurnUpdate(state, sessionId, null, { phase: 'error', error: 'error_session' }),
+        ...(state.turnsBySession[sessionId]?.error
+          ? {}
+          : withTurnUpdate(state, sessionId, null, { phase: 'error', error: 'error_session' })),
       }));
       if (messageLoadController === controller) messageLoadController = null;
     }
@@ -537,33 +642,49 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const controller = new AbortController();
     messageLoadController = controller;
     const requestSequence = ++messageLoadSequence;
-    set((state) => ({
-      isLoadingMessages: true,
-      ...withTurnUpdate(state, sessionId, null, {
-        error: null,
-        ...(state.turnsBySession[sessionId]?.phase === 'error' ? { phase: 'idle' as const } : {}),
-      }),
-    }));
+    set({ isLoadingMessages: true });
 
     try {
       const page = await chatApi.getMessages(sessionId, { cursor, signal: controller.signal });
       if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
 
-      const existingMessages = get().allMessages;
+      const serverMessages = page.results.map(mapApiMessage);
+      const localPartials = get().localPartialsBySession[sessionId] ?? [];
+      const reconciledLocalIds = new Set(
+        localPartials
+          .filter((partial) => serverMessages.some(
+            (serverMessage) => isReconciledLocalPartial(partial, serverMessage),
+          ))
+          .map((partial) => partial.id),
+      );
+      const remainingLocalPartials = localPartials.filter(
+        (partial) => !reconciledLocalIds.has(partial.id),
+      );
+      const existingMessages = get().allMessages.filter(
+        (message) => !reconciledLocalIds.has(message.id),
+      );
       const allMessages = sortMessagesChronologically(
-        appendUniqueById(existingMessages, page.results.map(mapApiMessage)),
+        appendUniqueById(existingMessages, serverMessages),
       );
       const rounds = computeRounds(allMessages);
       const visibleRoundCount = get().visibleRoundCount;
 
-      set({
+      set((state) => ({
         allMessages,
         messages: extractVisibleMessages(rounds, visibleRoundCount),
+        messageCacheBySession: {
+          ...state.messageCacheBySession,
+          [sessionId]: allMessages.slice(-MAX_ALL_MESSAGES),
+        },
+        localPartialsBySession: {
+          ...state.localPartialsBySession,
+          [sessionId]: remainingLocalPartials,
+        },
         messageNextCursor: page.next,
         hasOlderMessages: visibleRoundCount < rounds.length || page.next !== null,
         totalRoundCount: rounds.length,
         isLoadingMessages: false,
-      });
+      }));
       if (messageLoadController === controller) messageLoadController = null;
     } catch (error) {
       if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
@@ -571,7 +692,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       console.error('Failed to load older messages:', error);
       set((state) => ({
         isLoadingMessages: false,
-        ...withTurnUpdate(state, sessionId, null, { phase: 'error', error: 'error_session' }),
+        ...(state.turnsBySession[sessionId]?.error
+          ? {}
+          : withTurnUpdate(state, sessionId, null, { phase: 'error', error: 'error_session' })),
       }));
       if (messageLoadController === controller) messageLoadController = null;
     }
@@ -685,6 +808,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             ...current.localPartialsBySession,
             [sessionId]: localPartials,
           },
+          messageCacheBySession: {
+            ...current.messageCacheBySession,
+            [sessionId]: appendUniqueById(
+              current.messageCacheBySession[sessionId] ?? [],
+              [partialMessage],
+            ).slice(-MAX_ALL_MESSAGES),
+          },
           ...activeUpdates,
         };
       });
@@ -782,6 +912,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         const decoder = new TextDecoder();
         let buffer = '';
         let currentEvent = '';
+        armEventIdleWatchdog();
 
         // Phase 1: After 3s of no tokens → "searching" phase (already set on connection)
         phaseTimerSearching = setTimeout(() => {
@@ -925,6 +1056,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
     set((current) => {
       const activeUpdates: Partial<ChatState> = {};
+      const ownerMessages = appendUniqueById(
+        current.messageCacheBySession[sessionId] ?? [],
+        [assistantMessage],
+      ).slice(-MAX_ALL_MESSAGES);
       if (current.activeSessionId === sessionId) {
         const newAllMessages = appendUniqueById(current.allMessages, [assistantMessage]);
         const prunedAllMessages = newAllMessages.length > MAX_ALL_MESSAGES
@@ -942,6 +1077,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
       return {
         ...activeUpdates,
+        messageCacheBySession: {
+          ...current.messageCacheBySession,
+          [sessionId]: ownerMessages,
+        },
         ...withTurnUpdate(current, sessionId, ownerGeneration, {
           phase: 'idle',
           isLocked: false,

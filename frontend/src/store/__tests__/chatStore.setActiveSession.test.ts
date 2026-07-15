@@ -50,6 +50,7 @@ function collectBatcher(sessionId = 'sess-A', generationId = 'gen-A'): string[] 
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   // Node test env has no rAF; stub so appendToken() can schedule without throwing.
   (globalThis as any).requestAnimationFrame = (_cb: unknown) => 1;
   (globalThis as any).cancelAnimationFrame = () => {};
@@ -61,6 +62,7 @@ beforeEach(() => {
     allMessages: [],
     turnsBySession: {},
     localPartialsBySession: {},
+    messageCacheBySession: {},
     streamPhase: 'idle',
     streamContent: '',
     streamingSessionId: null,
@@ -69,6 +71,26 @@ beforeEach(() => {
 });
 
 describe('setActiveSession — keeps background stream rendering alive (V4.6)', () => {
+  it('restores a bounded session message cache immediately on switch back', () => {
+    useChatStore.setState({ activeSessionId: 'sess-A' });
+    for (let index = 0; index < 105; index += 1) {
+      useChatStore.getState().addMessage({
+        id: `message-${index}`,
+        role: 'user',
+        content: `question ${index}`,
+        createdAt: new Date(2026, 6, 16, 0, index).toISOString(),
+      });
+    }
+
+    useChatStore.getState().setActiveSession('sess-B');
+    useChatStore.getState().setActiveSession('sess-A');
+
+    const state = useChatStore.getState();
+    expect(state.allMessages).toHaveLength(100);
+    expect(state.allMessages[0]?.id).toBe('message-5');
+    expect(state.messages[state.messages.length - 1]?.content).toBe('question 104');
+  });
+
   it('is a true no-op when selecting the active session again', () => {
     const message = {
       id: 'message-1',
@@ -154,6 +176,25 @@ describe('setActiveSession — keeps background stream rendering alive (V4.6)', 
 });
 
 describe('resetSession — still tears the batcher down (new chat)', () => {
+  it('does not dismiss an existing recoverable error for the prior session', () => {
+    useChatStore.setState({
+      activeSessionId: 'sess-A',
+      turnsBySession: {
+        'sess-A': {
+          phase: 'error', isLocked: false, content: '', citations: [], quality: null,
+          error: 'error_network', aiStatusText: null, generationId: 'gen-A',
+        },
+      },
+    });
+
+    useChatStore.getState().resetSession();
+    useChatStore.getState().setActiveSession('sess-A');
+
+    expect(useChatStore.getState().turnsBySession['sess-A']).toMatchObject({
+      phase: 'error', error: 'error_network', generationId: 'gen-A',
+    });
+  });
+
   it('drops buffered tokens and detaches the callback', () => {
     const received = collectBatcher();
     useChatStore.setState({ activeSessionId: 'sess-A' });

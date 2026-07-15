@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   hasActiveStream: vi.fn(),
   abortSessionStream: vi.fn(),
+  removeSessionState: vi.fn(),
   resetTokenBatcher: vi.fn(),
   resetSession: vi.fn(),
   loadSessions: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../store/chatStore', () => ({
       activeSessionId: 'session-a',
       turnsBySession: { 'session-a': { isLocked: true } },
       abortSessionStream: mocks.abortSessionStream,
+      removeSessionState: mocks.removeSessionState,
       resetSession: mocks.resetSession,
       loadSessions: mocks.loadSessions,
       setStreamPhase: mocks.setStreamPhase,
@@ -77,9 +79,7 @@ describe('cross-tab stream isolation', () => {
   it('still safely resets and refreshes when another tab deletes the owning session', async () => {
     await receive({ type: 'session-delete', sessionId: 'session-a' });
 
-    expect(mocks.abortSessionStream).toHaveBeenCalledWith('session-a');
-    expect(mocks.resetTokenBatcher).toHaveBeenCalledWith('session-a');
-    expect(mocks.resetSession).toHaveBeenCalledOnce();
+    expect(mocks.removeSessionState).toHaveBeenCalledWith('session-a');
     expect(mocks.loadSessions).toHaveBeenCalledOnce();
   });
 
@@ -92,5 +92,6 @@ describe('cross-tab stream isolation', () => {
     expect(mocks.abortSessionStream).not.toHaveBeenCalled();
     expect(mocks.resetTokenBatcher).not.toHaveBeenCalled();
     expect(mocks.resetSession).not.toHaveBeenCalled();
+    expect(mocks.removeSessionState).toHaveBeenCalledWith('session-b');
   });
 });
