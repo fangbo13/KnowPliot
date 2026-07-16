@@ -440,7 +440,7 @@ describe('sendMessage stream lifecycle', () => {
               if (readCount++ === 0) {
                 return Promise.resolve({
                   done: false,
-                  value: encoder.encode('event: token\ndata: {"token":"partial answer"}\n'),
+                  value: encoder.encode('event: token\ndata: {"token":"partial answer"}\n\n'),
                 });
               }
               markReaderStalled();
@@ -484,7 +484,7 @@ describe('sendMessage stream lifecycle', () => {
               if (readCount++ === 0) {
                 return Promise.resolve({
                   done: false,
-                  value: encoder.encode('event: token\ndata: {"token":"partial answer"}\n'),
+                  value: encoder.encode('event: token\ndata: {"token":"partial answer"}\n\n'),
                 });
               }
               markReaderStalled();
@@ -525,7 +525,7 @@ describe('sendMessage stream lifecycle', () => {
               if (readCount++ === 0) {
                 return Promise.resolve({
                   done: false,
-                  value: encoder.encode('event: token\ndata: {"token":"partial before new chat"}\n'),
+                  value: encoder.encode('event: token\ndata: {"token":"partial before new chat"}\n\n'),
                 });
               }
               markReaderStalled();

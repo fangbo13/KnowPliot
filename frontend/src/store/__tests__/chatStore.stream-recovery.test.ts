@@ -65,6 +65,14 @@ function streamResponse(chunks: string[], headers: Record<string, string> = {}) 
   };
 }
 
+function jsonResponse(data: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    json: vi.fn(async () => data),
+  };
+}
+
 beforeEach(() => {
   vi.stubGlobal('fetch', mocks.fetch);
   const ids = [CLIENT_ID, GENERATION_ID, USER_MESSAGE_ID];
@@ -154,39 +162,57 @@ describe('chat stream v2 and recovery', () => {
   });
 
   it('rejects a response whose header and meta identities disagree', async () => {
-    mocks.fetch.mockResolvedValue(streamResponse([
-      `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
-    ], {
-      'X-Chat-Turn-Id': '66666666-6666-4666-8666-666666666666',
-      'X-Chat-Client-Request-Id': CLIENT_ID,
-    }));
+    const headerTurnId = '66666666-6666-4666-8666-666666666666';
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': headerTurnId,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${headerTurnId}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': headerTurnId,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
 
     await useChatStore.getState().sendMessage('hello');
 
-    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
     expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
-      phase: 'error',
+      turnId: headerTurnId,
+      phase: 'idle',
       isLocked: false,
-      error: 'error_generic',
+      recoveryState: 'recovered',
+      error: null,
     });
-    expect(useChatStore.getState().messages.some((message) => message.role === 'assistant')).toBe(false);
+    expect(useChatStore.getState().messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
   });
 
   it('rejects a meta event for another session or client request', async () => {
     const otherSession = '77777777-7777-4777-8777-777777777777';
-    mocks.fetch.mockResolvedValue(streamResponse([
-      `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${otherSession}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
-    ], {
-      'X-Chat-Turn-Id': TURN_ID,
-      'X-Chat-Client-Request-Id': CLIENT_ID,
-    }));
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${otherSession}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
 
     await useChatStore.getState().sendMessage('hello');
 
-    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
     expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
-      phase: 'error',
-      error: 'error_generic',
+      phase: 'idle',
+      recoveryState: 'recovered',
+      error: null,
     });
   });
 
@@ -603,6 +629,174 @@ describe('chat stream v2 and recovery', () => {
     expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
       recoveryState: 'failed',
       error: 'error_timeout',
+    });
+    vi.useRealTimers();
+  });
+
+  it('recovers instead of accepting a v2 done with missing identities', async () => {
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
+        'id: 2\nevent: answer_delta\ndata: {"text":"kept"}\n\n',
+        `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
+
+    await useChatStore.getState().sendMessage('hello');
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch.mock.calls[1][1]).toMatchObject({ method: 'GET' });
+    expect(useChatStore.getState().messages[useChatStore.getState().messages.length - 1]).toMatchObject({
+      id: ASSISTANT_ID,
+      content: 'kept',
+    });
+  });
+
+  it('recovers when the initial v2 meta omits an identity', async () => {
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","protocol_version":2}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
+
+    await useChatStore.getState().sendMessage('hello');
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      recoveryState: 'recovered',
+      lastEventSeq: 1,
+    });
+  });
+
+  it('rejects recovery events without both identity headers and retries', async () => {
+    vi.useFakeTimers();
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: done\ndata: {"message_id":"66666666-6666-4666-8666-666666666666","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], { 'X-Chat-Turn-Id': TURN_ID }))
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
+
+    const send = useChatStore.getState().sendMessage('hello');
+    await vi.runAllTimersAsync();
+    await send;
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+    expect(useChatStore.getState().messages.some(
+      (message) => message.id === '66666666-6666-4666-8666-666666666666',
+    )).toBe(false);
+    expect(useChatStore.getState().messages.some((message) => message.id === ASSISTANT_ID)).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('does not advance the cursor for an unknown recovered event', async () => {
+    vi.useFakeTimers();
+    let eventRequestCount = 0;
+    mocks.fetch.mockImplementation(async (url, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return streamResponse([
+          `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
+          'id: 2\nevent: answer_delta\ndata: {"text":"kept"}\n\n',
+        ], {
+          'X-Chat-Turn-Id': TURN_ID,
+          'X-Chat-Client-Request-Id': CLIENT_ID,
+        });
+      }
+      if (String(url).includes('/events/')) {
+        eventRequestCount += 1;
+        return eventRequestCount === 1
+          ? streamResponse(['id: 3\nevent: provider_reasoning\ndata: {"text":"private"}\n\n'], {
+              'X-Chat-Turn-Id': TURN_ID,
+              'X-Chat-Client-Request-Id': CLIENT_ID,
+            })
+          : streamResponse([
+              `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+            ], {
+              'X-Chat-Turn-Id': TURN_ID,
+              'X-Chat-Client-Request-Id': CLIENT_ID,
+            });
+      }
+      return jsonResponse({
+        id: TURN_ID,
+        client_request_id: CLIENT_ID,
+        session: SESSION_ID,
+        status: 'answering',
+        last_event_seq: 2,
+        answer: null,
+      });
+    });
+
+    const send = useChatStore.getState().sendMessage('hello');
+    await vi.runAllTimersAsync();
+    await send;
+
+    const eventUrls = mocks.fetch.mock.calls
+      .filter(([url]) => String(url).includes('/events/'))
+      .map(([url]) => String(url));
+    expect(eventUrls).toEqual([
+      `/api/v1/chat/turns/${TURN_ID}/events/?after=2`,
+      `/api/v1/chat/turns/${TURN_ID}/events/?after=2`,
+    ]);
+    expect(useChatStore.getState().messages[useChatStore.getState().messages.length - 1]).toMatchObject({
+      id: ASSISTANT_ID,
+      content: 'kept',
+    });
+    vi.useRealTimers();
+  });
+
+  it('retries a recovered v2 event without an id instead of applying it', async () => {
+    vi.useFakeTimers();
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        'event: answer_delta\ndata: {"text":"bad"}\n\n',
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        'id: 1\nevent: answer_delta\ndata: {"text":"good"}\n\n',
+        `id: 2\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
+
+    const send = useChatStore.getState().sendMessage('hello');
+    await vi.runAllTimersAsync();
+    await send;
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+    expect(useChatStore.getState().messages[useChatStore.getState().messages.length - 1]).toMatchObject({
+      id: ASSISTANT_ID,
+      content: 'good',
     });
     vi.useRealTimers();
   });

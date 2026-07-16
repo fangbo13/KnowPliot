@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SSEParser } from './SSEParser';
+import { SSEParser, StoreSSEDecoder } from './SSEParser';
 
 describe('SSEParser', () => {
   it('parses CRLF, split chunks, ids, comments, and multiline data', () => {
@@ -34,6 +34,40 @@ describe('SSEParser', () => {
     expect(parser.feed('id: 7\ndata: first\n\nid: bad\u0000id\ndata: second\n\n')).toEqual([
       { id: '7', event: 'message', data: 'first' },
       { id: '7', event: 'message', data: 'second' },
+    ]);
+  });
+
+  it('does not dispatch merely because another event field follows data', () => {
+    const parser = new SSEParser();
+
+    expect(parser.feed('event: token\ndata: first\nevent: done\n')).toEqual([]);
+    expect(parser.feed('data: second\n\n')).toEqual([
+      { id: null, event: 'done', data: 'first\nsecond' },
+    ]);
+  });
+
+  it('keeps multiline citations, quality, and done intact across chunks', () => {
+    const decoder = new StoreSSEDecoder();
+
+    expect(decoder.feed('event: citations\r\ndata: [\r\ndata: {"document_id":"d-1"}\r')).toEqual([]);
+    expect(decoder.feed('\ndata: ]\r\n\r\nevent: quality\r\ndata: {\r\ndata: "score": 0.9\r\ndata: }\r\n\r\nevent: done\r\ndata: {\r\ndata: "message_id":"m-1"\r')).toEqual([
+      { id: null, event: 'citations', data: '[\n{"document_id":"d-1"}\n]' },
+      { id: null, event: 'quality', data: '{\n"score": 0.9\n}' },
+    ]);
+    expect(decoder.feed('\ndata: }\r\n\r\n')).toEqual([
+      { id: null, event: 'done', data: '{\n"message_id":"m-1"\n}' },
+    ]);
+  });
+
+  it('adapts adjacent legacy v1 events only at a recognized next-event boundary', () => {
+    const decoder = new StoreSSEDecoder();
+
+    expect(decoder.feed('event: token\ndata: {"token":"hello"}\nevent: citations\ndata: []\nevent: done\ndata: {"message_id":"m-1"}\n')).toEqual([
+      { id: null, event: 'token', data: '{"token":"hello"}' },
+      { id: null, event: 'citations', data: '[]' },
+    ]);
+    expect(decoder.end()).toEqual([
+      { id: null, event: 'done', data: '{"message_id":"m-1"}' },
     ]);
   });
 });

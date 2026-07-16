@@ -18,18 +18,6 @@ export class SSEParser {
     return this.consumeCompleteLines();
   }
 
-  /** Flush one legacy v1 event that omitted the required blank delimiter. */
-  flushLegacyEvent(): SSEMessage[] {
-    if (this.buffer.length > 0
-      || this.dataLines.length === 0
-      || !['token', 'citations', 'quality', 'done', 'error'].includes(this.eventName)) {
-      return [];
-    }
-    const events: SSEMessage[] = [];
-    this.dispatch(events);
-    return events;
-  }
-
   end(): SSEMessage[] {
     if (this.ended) return [];
     this.ended = true;
@@ -69,9 +57,6 @@ export class SSEParser {
 
     switch (field) {
       case 'event':
-        // Preserve the legacy backend/client fixtures that omitted the SSE
-        // blank-line delimiter between events.
-        if (this.dataLines.length > 0) this.dispatch(events);
         this.eventName = value;
         break;
       case 'data':
@@ -95,5 +80,73 @@ export class SSEParser {
     });
     this.eventName = '';
     this.dataLines = [];
+  }
+}
+
+const LEGACY_V1_EVENTS = new Set(['token', 'citations', 'quality', 'done', 'error']);
+
+/** Store-facing decoder with an explicit adapter for delimiter-less legacy v1. */
+export class StoreSSEDecoder {
+  private readonly parser = new SSEParser();
+  private lineBuffer = '';
+  private currentEvent = '';
+  private currentHasData = false;
+  private currentHasId = false;
+  private ended = false;
+
+  feed(chunk: string): SSEMessage[] {
+    if (this.ended || chunk.length === 0) return [];
+    this.lineBuffer += chunk;
+    const events: SSEMessage[] = [];
+    let newline = this.lineBuffer.indexOf('\n');
+    while (newline >= 0) {
+      const rawLine = this.lineBuffer.slice(0, newline);
+      this.lineBuffer = this.lineBuffer.slice(newline + 1);
+      events.push(...this.consumeLine(rawLine));
+      newline = this.lineBuffer.indexOf('\n');
+    }
+    return events;
+  }
+
+  end(): SSEMessage[] {
+    if (this.ended) return [];
+    this.ended = true;
+    const events = this.lineBuffer.length > 0
+      ? this.consumeLine(this.lineBuffer, false)
+      : [];
+    this.lineBuffer = '';
+    events.push(...this.parser.end());
+    return events;
+  }
+
+  private consumeLine(rawLine: string, terminated = true): SSEMessage[] {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    const events: SSEMessage[] = [];
+    if (line.startsWith('event:')) {
+      const nextEvent = line.slice(6).replace(/^ /, '');
+      const isLegacyBoundary = this.currentHasData
+        && !this.currentHasId
+        && LEGACY_V1_EVENTS.has(this.currentEvent)
+        && LEGACY_V1_EVENTS.has(nextEvent);
+      if (isLegacyBoundary) {
+        events.push(...this.parser.feed('\n'));
+        this.resetEventTracking();
+      }
+      this.currentEvent = nextEvent;
+    } else if (line.startsWith('data:')) {
+      this.currentHasData = true;
+    } else if (line.startsWith('id:')) {
+      this.currentHasId = true;
+    } else if (line === '') {
+      this.resetEventTracking();
+    }
+    events.push(...this.parser.feed(rawLine + (terminated ? '\n' : '')));
+    return events;
+  }
+
+  private resetEventTracking(): void {
+    this.currentEvent = '';
+    this.currentHasData = false;
+    this.currentHasId = false;
   }
 }

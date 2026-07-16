@@ -14,7 +14,11 @@ import {
   hasActiveStream,
 } from '../stream/StreamLifecycleManager';
 import { initTokenBatcher, appendToken, flushImmediate, resetTokenBatcher } from '../stream/TokenBatchRenderer';
-import { SSEParser } from '../stream/SSEParser';
+import { StoreSSEDecoder } from '../stream/SSEParser';
+import {
+  validateChatStreamMessage,
+  validateRecoveryResponseIdentity,
+} from '../stream/ChatStreamProtocol';
 // V4.0 DEFECT-008: BroadcastChannel cross-tab sync
 import { broadcastSessionSwitch } from '../sync/crossTabSync';
 
@@ -948,7 +952,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
-        const parser = new SSEParser();
+        const parser = new StoreSSEDecoder();
         armEventIdleWatchdog();
 
         // Phase 1: After 3s of no tokens → "searching" phase (already set on connection)
@@ -1029,17 +1033,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               );
               releaseRecoveryResponse = releaseReplayResponse;
               if (!replayResponse.ok) throw new Error(`HTTP ${replayResponse.status}`);
-              const replayTurnId: string = replayResponse.headers?.get?.('X-Chat-Turn-Id') || turn.turnId;
-              const replayClientId = replayResponse.headers?.get?.('X-Chat-Client-Request-Id') || clientRequestId;
-              if (replayTurnId !== turn.turnId || replayClientId !== clientRequestId) {
-                finishRecoverable('error_generic');
-                set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
-                return false;
-              }
+              validateRecoveryResponseIdentity(
+                replayResponse.headers,
+                turn.turnId,
+                clientRequestId,
+              );
 
               const replayReader = replayResponse.body?.getReader();
               if (!replayReader) throw new Error('missing recovery stream');
-              const replayParser = new SSEParser();
+              const replayParser = new StoreSSEDecoder();
               const replayDecoder = new TextDecoder();
               while (true) {
                 const { done, value } = await replayReader.read();
@@ -1048,21 +1050,19 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   : replayParser.feed(replayDecoder.decode(value, { stream: true }));
                 for (const message of replayMessages) {
                   if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
-                  const sequence = message.id && /^\d+$/.test(message.id) ? Number(message.id) : null;
-                  if (sequence === null || sequence <= (get().turnsBySession[sessionId]?.lastEventSeq ?? 0)) {
+                  const event = validateChatStreamMessage(message, {
+                    protocolVersion: 2,
+                    expectedSessionId: sessionId,
+                    expectedTurnId: turn.turnId,
+                    expectedClientRequestId: clientRequestId,
+                  });
+                  const sequence = event.sequence!;
+                  if (sequence <= (get().turnsBySession[sessionId]?.lastEventSeq ?? 0)) {
                     continue;
                   }
-                  const data = JSON.parse(message.data);
-                  switch (message.event) {
+                  const data = event.data;
+                  switch (event.name) {
                     case 'meta':
-                      if (data.turn_id !== turn.turnId
-                        || data.session_id !== sessionId
-                        || data.client_request_id !== clientRequestId
-                        || data.protocol_version !== 2) {
-                        finishRecoverable('error_generic');
-                        set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
-                        return false;
-                      }
                       break;
                     case 'phase':
                       set((current) => withTurnUpdate(current, sessionId, generationId, {
@@ -1081,13 +1081,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                       set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
                       break;
                     case 'done':
-                      if (data.session_id !== sessionId
-                        || (data.turn_id && data.turn_id !== turn.turnId)
-                        || (data.client_request_id && data.client_request_id !== clientRequestId)) {
-                        finishRecoverable('error_generic');
-                        set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
-                        return false;
-                      }
                       set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
                       flushImmediate(sessionId, generationId);
                       get().finishStreamingMessage(data.message_id, data.session_id, generationId);
@@ -1175,28 +1168,28 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           if (!done && value.length > 0) armEventIdleWatchdog();
           const messages = done
             ? [...parser.feed(decoder.decode()), ...parser.end()]
-            : [
-                ...parser.feed(decoder.decode(value, { stream: true })),
-                ...parser.flushLegacyEvent(),
-              ];
+            : parser.feed(decoder.decode(value, { stream: true }));
 
           for (const message of messages) {
             armEventIdleWatchdog();
-            const sequence = message.id && /^\d+$/.test(message.id) ? Number(message.id) : null;
             const currentTurn = get().turnsBySession[sessionId];
+            const event = validateChatStreamMessage(message, {
+              protocolVersion: currentTurn?.protocolVersion ?? null,
+              expectedSessionId: sessionId,
+              expectedTurnId: currentTurn?.turnId,
+              expectedClientRequestId: clientRequestId,
+            });
+            if (currentTurn?.protocolVersion == null) {
+              set((current) => withTurnUpdate(current, sessionId, generationId, {
+                protocolVersion: event.protocolVersion,
+              }));
+            }
+            const sequence = event.sequence;
             if (sequence !== null && sequence <= (currentTurn?.lastEventSeq ?? 0)) continue;
-            const data = JSON.parse(message.data);
+            const data = event.data;
             {
-              switch (message.event) {
+              switch (event.name) {
                 case 'meta': {
-                  const knownTurnId = get().turnsBySession[sessionId]?.turnId;
-                  if (data.protocol_version !== 2
-                    || data.session_id !== sessionId
-                    || data.client_request_id !== clientRequestId
-                    || (knownTurnId && data.turn_id !== knownTurnId)) {
-                    finishRecoverable('error_generic');
-                    return false;
-                  }
                   set((current) => withTurnUpdate(current, sessionId, generationId, {
                     turnId: data.turn_id,
                     protocolVersion: 2,
@@ -1215,22 +1208,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 }
                 case 'token':
                 case 'answer_delta':
-                  if (get().turnsBySession[sessionId]?.protocolVersion === null) {
-                    set((current) => withTurnUpdate(current, sessionId, generationId, {
-                      protocolVersion: message.event === 'answer_delta' ? 2 : 1,
-                    }));
-                  }
                   clearPhaseTimers();
                   // V3.5: Transition to 'streaming' on first token
                   if (get().turnsBySession[sessionId]?.phase !== 'streaming') {
                     set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'streaming' }));
                   }
-                  assistantContent += (message.event === 'answer_delta' ? data.text : data.token) || '';
+                  assistantContent += (event.name === 'answer_delta' ? data.text : data.token) || '';
                   // V3.5 HIGH-005: Batch token updates via rAF instead of per-token set()
                   appendToken(
                     sessionId,
                     generationId,
-                    (message.event === 'answer_delta' ? data.text : data.token) || '',
+                    (event.name === 'answer_delta' ? data.text : data.token) || '',
                   );
                   break;
                 case 'citations':
@@ -1250,12 +1238,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   break;
                 case 'done':
                   clearAllTimers();
-                  if (data.session_id !== sessionId
-                    || (data.turn_id && data.turn_id !== get().turnsBySession[sessionId]?.turnId)
-                    || (data.client_request_id && data.client_request_id !== clientRequestId)) {
-                    finishRecoverable('error_generic');
-                    return false;
-                  }
                   if (sequence !== null) {
                     set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
                   }

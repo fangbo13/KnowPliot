@@ -1,6 +1,6 @@
 # KnowPilot Delivery Memory
 
-- **Last updated:** 2026-07-16
+- **Last updated:** 2026-07-17
 - **Current phase:** Task 3B2 — frontend dual-protocol stream consumption and GET-only recovery (complete and verified); Task 4 capability service is next.
 - **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; Task 3B2 is layered on the reviewed Task 3B1 backend
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
@@ -154,6 +154,12 @@ deployment and rollback order is recorded in section 10.
   phase/event handling, monotonic event deduplication, per-session Turn state,
   GET-only events/status convergence, completed-answer fallback after replay
   expiry, bounded request/body deadlines, cancellation, and session isolation.
+- Task 3B2 independent-review amendment: standards-correct event dispatch no
+  longer treats network chunks as SSE boundaries; a bounded legacy-v1 adapter
+  preserves delimiter-less adjacent events; shared live/replay validation now
+  rejects missing/unsafe IDs, unknown events, malformed payloads, incomplete
+  v2 meta/done identities, and missing recovery identity headers before any
+  content or replay cursor can advance.
 
 ### In Progress
 
@@ -205,9 +211,9 @@ deployment and rollback order is recorded in section 10.
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
-| Frontend full suite | 129 passed in 20 files | Covers v1/v2 happy paths, identity mismatch denial, chunk/CRLF/multiline parsing, replay deduplication, events/status recovery, POST-once proof, bounded header/body stalls, cancellation, deletion, and cross-session isolation. |
+| Frontend full suite | 148 passed in 21 files | Covers v1/v2 happy paths, strict live/replay event and identity validation, chunk/CRLF/multiline parsing without chunk-boundary dispatch, legacy adjacent-event adaptation, unsafe/unknown event denial without cursor advance, replay deduplication, events/status recovery, POST-once proof, bounded header/body stalls, cancellation, deletion, and cross-session isolation. |
 | Frontend typecheck | PASS | `tsc --noEmit` after Task 3B2. |
-| Frontend production build | PASS | `tsc -b && vite build`; 4001 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
+| Frontend production build | PASS | `tsc -b && vite build`; 4002 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
 | Ruff changed-file check | PASS | All changed chat implementation/test files passed; `base.py` passed with its pre-existing B028/UP031/E402 findings excluded. |
 | `git diff --check` | PASS | Exit 0 after implementation and handoff updates. |
 
