@@ -14,22 +14,21 @@ import logging
 import secrets
 
 from django.core.files.base import ContentFile
-
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .models import (
     InviteCode,
     KnowledgeSpace,
     Organization,
-    SpaceEmailInvite,
     SpaceAccessRequest,
+    SpaceEmailInvite,
     SpaceMembership,
 )
 from .permissions import (
@@ -39,12 +38,13 @@ from .permissions import (
     SPACE_UPDATE,
     SPACE_VIEW,
     accessible_spaces,
+    admin_scope,
     can_create_space,
+    can_restore_space,
     effective_space_role,
     get_space_or_404,
     has_space_permission,
     is_platform_admin,
-    admin_scope,
 )
 from .serializers import (
     AddMemberByEmailSerializer,
@@ -52,14 +52,14 @@ from .serializers import (
     InviteCodeSerializer,
     JoinByCodeSerializer,
     KnowledgeSpaceSerializer,
-    SpaceCreateSerializer,
-    SpaceMembershipSerializer,
-    UpdateMemberRoleSerializer,
     SpaceAccessRequestCreateSerializer,
     SpaceAccessRequestSerializer,
-    SpaceTransferSerializer,
     SpaceCloneSerializer,
+    SpaceCreateSerializer,
+    SpaceMembershipSerializer,
     SpaceOwnerTransferSerializer,
+    SpaceTransferSerializer,
+    UpdateMemberRoleSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -201,8 +201,7 @@ def space_archive(request, pk):
 @permission_classes([IsAuthenticated])
 def space_restore(request, pk):
     space = get_space_or_404(pk)
-    role = effective_space_role(request.user, space)
-    if role not in {"owner", "super_admin", "org_admin", "business_admin"}:
+    if not can_restore_space(request.user, space):
         raise PermissionDenied("You cannot restore this space.")
     space.status = "active"
     space.save(update_fields=["status", "updated_at"])

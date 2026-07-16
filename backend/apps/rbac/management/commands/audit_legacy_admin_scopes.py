@@ -14,7 +14,8 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
+from django.utils import timezone
 
 from apps.audit.models import AuditLog
 from apps.spaces.models import (
@@ -24,6 +25,7 @@ from apps.spaces.models import (
     OrganizationMembership,
     SpaceMembership,
 )
+from apps.spaces.permissions import active_space_lifecycle_q
 
 User = get_user_model()
 MAPPING_VERSION = 1
@@ -142,55 +144,103 @@ def _resolve_scope(mapping: ScopeMapping):
         raise CommandError("Mapped space is unavailable.") from exc
 
 
-def _apply_mapping(user, mapping: ScopeMapping, scope) -> tuple[object, bool]:
+def _mapping_memberships(user, mapping: ScopeMapping, scope, *, lock: bool):
     if mapping.scope_type == "space":
-        membership = SpaceMembership.objects.filter(user=user, space=scope).first()
-        if membership is None:
-            return (
-                SpaceMembership.objects.create(
-                    user=user,
-                    space=scope,
-                    role=mapping.role,
-                    status="active",
-                ),
-                True,
-            )
-        if (
+        manager = (
+            SpaceMembership.objects.select_for_update()
+            if lock
+            else SpaceMembership.objects
+        )
+        return list(manager.filter(user=user, space=scope)[:2])
+
+    manager = (
+        OrganizationMembership.objects.select_for_update()
+        if lock
+        else OrganizationMembership.objects
+    )
+    organization = scope if mapping.scope_type == "organization" else scope.organization
+    business_line = None if mapping.scope_type == "organization" else scope
+    return list(
+        manager.filter(
+            user=user,
+            organization=organization,
+            business_line=business_line,
+        )[:2]
+    )
+
+
+def _plan_mapping(user, mapping: ScopeMapping, scope, *, lock: bool) -> str:
+    memberships = _mapping_memberships(user, mapping, scope, lock=lock)
+    if not memberships:
+        return "create"
+    if len(memberships) != 1:
+        raise CommandError("Existing scoped memberships conflict with the mapping.")
+    membership = memberships[0]
+    if mapping.scope_type == "space":
+        exact = (
             membership.role == mapping.role
             and membership.status == "active"
             and membership.expires_at is None
-        ):
-            return membership, False
-        membership.role = mapping.role
-        membership.status = "active"
-        membership.expires_at = None
-        membership.save(update_fields=["role", "status", "expires_at", "updated_at"])
-        return membership, True
+        )
+    else:
+        exact = (
+            membership.role == mapping.role
+            and membership.is_active
+            and membership.expires_at is None
+        )
+    if not exact:
+        raise CommandError("Existing scoped membership conflicts with the mapping.")
+    return "unchanged"
 
+
+def _create_mapping(user, mapping: ScopeMapping, scope):
+    if mapping.scope_type == "space":
+        return SpaceMembership.objects.create(
+            user=user,
+            space=scope,
+            role=mapping.role,
+            status="active",
+        )
     organization = scope if mapping.scope_type == "organization" else scope.organization
     business_line = None if mapping.scope_type == "organization" else scope
-    membership = OrganizationMembership.objects.filter(
+    return OrganizationMembership.objects.create(
         user=user,
         organization=organization,
         business_line=business_line,
         role=mapping.role,
-    ).first()
-    if membership is None:
-        return (
-            OrganizationMembership.objects.create(
-                user=user,
-                organization=organization,
-                business_line=business_line,
-                role=mapping.role,
-            ),
-            True,
+    )
+
+
+def _effectively_scoped_user_ids(candidate_ids: set[UUID]) -> set[UUID]:
+    if not candidate_ids:
+        return set()
+    now = timezone.now()
+    space_user_ids = SpaceMembership.objects.filter(
+        active_space_lifecycle_q(prefix="space__"),
+        user_id__in=candidate_ids,
+        status="active",
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gte=now)).values_list(
+        "user_id", flat=True
+    )
+    governance_user_ids = (
+        OrganizationMembership.objects.filter(
+            user_id__in=candidate_ids,
+            is_active=True,
+            organization__status="active",
         )
-    if membership.is_active and membership.expires_at is None:
-        return membership, False
-    membership.is_active = True
-    membership.expires_at = None
-    membership.save(update_fields=["is_active", "expires_at", "updated_at"])
-    return membership, True
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=now))
+        .filter(
+            Q(role=OrganizationMembership.ROLE_ORG_ADMIN)
+            | Q(
+                role=OrganizationMembership.ROLE_BUSINESS_ADMIN,
+                business_line__isnull=False,
+                business_line__status="active",
+                business_line__organization_id=F("organization_id"),
+            )
+        )
+        .values_list("user_id", flat=True)
+    )
+    return set(space_user_ids) | set(governance_user_ids)
 
 
 def _write_audit(user, mapping: ScopeMapping, membership, scope) -> None:
@@ -249,20 +299,40 @@ class Command(BaseCommand):
 
         resolved = [(mapping, _resolve_scope(mapping)) for mapping in mappings]
         mapped_user_ids = {mapping.user_id for mapping in mappings}
+        existing_scope_ids = _effectively_scoped_user_ids(set(candidate_by_id))
+        already_scoped_ids = existing_scope_ids - mapped_user_ids
         exception_ids = sorted(
-            (candidate.id for candidate in candidates if candidate.id not in mapped_user_ids),
+            (
+                candidate.id
+                for candidate in candidates
+                if candidate.id not in mapped_user_ids
+                and candidate.id not in already_scoped_ids
+            ),
             key=str,
         )
-        self.stdout.write(f"mode={'apply' if apply_changes else 'dry-run'}")
 
         created = 0
         unchanged = 0
         if apply_changes:
             with transaction.atomic():
-                for mapping, scope in resolved:
+                plans = [
+                    (
+                        mapping,
+                        scope,
+                        _plan_mapping(
+                            candidate_by_id[mapping.user_id],
+                            mapping,
+                            scope,
+                            lock=True,
+                        ),
+                    )
+                    for mapping, scope in resolved
+                ]
+                self.stdout.write("mode=apply")
+                for mapping, scope, plan in plans:
                     user = candidate_by_id[mapping.user_id]
-                    membership, changed = _apply_mapping(user, mapping, scope)
-                    if changed:
+                    if plan == "create":
+                        membership = _create_mapping(user, mapping, scope)
                         created += 1
                         _write_audit(user, mapping, membership, scope)
                         action = "created"
@@ -274,12 +344,30 @@ class Command(BaseCommand):
                         f"role={mapping.role} action={action}"
                     )
         else:
-            for mapping, _scope in resolved:
+            plans = [
+                (
+                    mapping,
+                    _plan_mapping(
+                        candidate_by_id[mapping.user_id],
+                        mapping,
+                        scope,
+                        lock=False,
+                    ),
+                )
+                for mapping, scope in resolved
+            ]
+            self.stdout.write("mode=dry-run")
+            for mapping, plan in plans:
+                action = "would-create" if plan == "create" else "unchanged"
+                if plan == "unchanged":
+                    unchanged += 1
                 self.stdout.write(
                     f"candidate={mapping.user_id} scope={mapping.scope_type}:{mapping.scope_id} "
-                    f"role={mapping.role} action=would-apply"
+                    f"role={mapping.role} action={action}"
                 )
 
+        for user_id in sorted(already_scoped_ids, key=str):
+            self.stdout.write(f"candidate={user_id} action=already-scoped")
         for user_id in exception_ids:
             self.stdout.write(f"candidate={user_id} action=exception reason=unscoped")
 
@@ -298,6 +386,7 @@ class Command(BaseCommand):
             "summary "
             f"candidates={len(candidates)} "
             f"mapped={len(mapped_user_ids)} "
+            f"already_scoped={len(already_scoped_ids)} "
             f"exceptions={len(exception_ids)} "
             f"created={created} "
             f"unchanged={unchanged}"

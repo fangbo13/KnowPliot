@@ -5,6 +5,7 @@
 """Migration-command contracts for unscoped legacy administrator flags."""
 
 import json
+from datetime import timedelta
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,6 +13,7 @@ from tempfile import TemporaryDirectory
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.audit.models import AuditLog
 from apps.rbac.models import Role, UserRole
@@ -262,6 +264,133 @@ class LegacyAdministratorScopeCommandTest(TestCase):
             )
 
         self.assertFalse(SpaceMembership.objects.filter(user=self.space_user).exists())
+        self.assertEqual(AuditLog.objects.filter(action="role_assign").count(), 0)
+
+    def test_existing_different_role_rejects_the_entire_apply_before_any_write(self):
+        existing = SpaceMembership.objects.create(
+            user=self.space_user,
+            space=self.space,
+            role=SpaceMembership.ROLE_OWNER,
+            status="active",
+        )
+        mapping_path = self.write_mapping(
+            [
+                {
+                    "user_id": str(self.space_user.id),
+                    "scope_type": "space",
+                    "scope_id": str(self.space.id),
+                    "role": "reviewer",
+                },
+                {
+                    "user_id": str(self.organization_user.id),
+                    "scope_type": "organization",
+                    "scope_id": str(self.organization.id),
+                    "role": "org_admin",
+                },
+            ]
+        )
+
+        with self.assertRaises(CommandError):
+            call_command(
+                "audit_legacy_admin_scopes",
+                mapping_file=str(mapping_path),
+                apply=True,
+                stdout=StringIO(),
+            )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.role, SpaceMembership.ROLE_OWNER)
+        self.assertEqual(existing.status, "active")
+        self.assertFalse(
+            OrganizationMembership.objects.filter(user=self.organization_user).exists()
+        )
+        self.assertEqual(AuditLog.objects.filter(action="role_assign").count(), 0)
+
+    def test_revoked_or_expired_existing_grants_are_conflicts_not_reactivated(self):
+        revoked = SpaceMembership.objects.create(
+            user=self.space_user,
+            space=self.space,
+            role=SpaceMembership.ROLE_KNOWLEDGE_ADMIN,
+            status="revoked",
+        )
+        expired_space = SpaceMembership.objects.create(
+            user=self.business_user,
+            space=self.space,
+            role=SpaceMembership.ROLE_KNOWLEDGE_ADMIN,
+            status="active",
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        expired_org = OrganizationMembership.objects.create(
+            user=self.organization_user,
+            organization=self.organization,
+            role=OrganizationMembership.ROLE_ORG_ADMIN,
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        mapping_path = self.write_mapping(
+            [
+                {
+                    "user_id": str(self.space_user.id),
+                    "scope_type": "space",
+                    "scope_id": str(self.space.id),
+                    "role": "knowledge_admin",
+                },
+                {
+                    "user_id": str(self.business_user.id),
+                    "scope_type": "space",
+                    "scope_id": str(self.space.id),
+                    "role": "knowledge_admin",
+                },
+                {
+                    "user_id": str(self.organization_user.id),
+                    "scope_type": "organization",
+                    "scope_id": str(self.organization.id),
+                    "role": "org_admin",
+                },
+            ]
+        )
+
+        with self.assertRaises(CommandError):
+            call_command(
+                "audit_legacy_admin_scopes",
+                mapping_file=str(mapping_path),
+                apply=True,
+                stdout=StringIO(),
+            )
+
+        revoked.refresh_from_db()
+        expired_space.refresh_from_db()
+        expired_org.refresh_from_db()
+        self.assertEqual(revoked.status, "revoked")
+        self.assertIsNotNone(expired_space.expires_at)
+        self.assertIsNotNone(expired_org.expires_at)
+        self.assertEqual(AuditLog.objects.filter(action="role_assign").count(), 0)
+
+    def test_existing_effective_explicit_scopes_are_not_reported_as_unscoped(self):
+        SpaceMembership.objects.create(
+            user=self.unscoped_user,
+            space=self.space,
+            role=SpaceMembership.ROLE_MEMBER,
+            status="active",
+        )
+        OrganizationMembership.objects.create(
+            user=self.organization_user,
+            organization=self.organization,
+            role=OrganizationMembership.ROLE_ORG_ADMIN,
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        exception_path = Path(self.temporary_directory.name) / "existing-scopes.json"
+        stdout = StringIO()
+
+        call_command(
+            "audit_legacy_admin_scopes",
+            exception_report=str(exception_path),
+            stdout=stdout,
+        )
+
+        report = json.loads(exception_path.read_text(encoding="utf-8"))
+        self.assertNotIn(str(self.unscoped_user.id), report["unscoped_user_ids"])
+        self.assertNotIn(str(self.organization_user.id), report["unscoped_user_ids"])
+        self.assertIn("already_scoped=2", stdout.getvalue())
         self.assertEqual(AuditLog.objects.filter(action="role_assign").count(), 0)
 
     @override_settings(SERVICE_LINE_DEFAULT_SPACE={})

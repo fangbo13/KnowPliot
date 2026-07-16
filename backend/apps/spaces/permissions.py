@@ -22,6 +22,7 @@ All checks here are **server-side**. Frontend role guards are UX only.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -93,6 +94,47 @@ ROLE_BUSINESS_ADMIN = "business_admin"  # full access within one business line
 _FULL_ACCESS_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_BUSINESS_ADMIN}
 
 
+def active_space_lifecycle_q(*, prefix: str = "") -> Q:
+    """One reusable lifecycle predicate for spaces and joined memberships."""
+
+    return (
+        Q(**{f"{prefix}status": "active"})
+        & Q(**{f"{prefix}organization__status": "active"})
+        & (
+            Q(**{f"{prefix}business_line__isnull": True})
+            | Q(**{f"{prefix}business_line__status": "active"})
+        )
+    )
+
+
+def active_spaces():
+    """Spaces whose complete tenant lifecycle chain is active."""
+
+    return KnowledgeSpace.objects.filter(active_space_lifecycle_q())
+
+
+def effective_space_memberships(user):
+    """Active, unexpired memberships under an active tenant lifecycle chain."""
+
+    now = timezone.now()
+    return (
+        SpaceMembership.objects.filter(
+            active_space_lifecycle_q(prefix="space__"),
+            user=user,
+            status="active",
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=now))
+    )
+
+
+def _space_lifecycle_is_active(space: KnowledgeSpace) -> bool:
+    return bool(
+        space.status == "active"
+        and space.organization.status == "active"
+        and (space.business_line_id is None or space.business_line.status == "active")
+    )
+
+
 def is_platform_admin(user) -> bool:
     """A platform Super Admin: Django superuser or global RBAC 'admin' role."""
     if not user or not user.is_authenticated:
@@ -158,6 +200,39 @@ def can_create_space(user) -> bool:
     return bool(org_ids)
 
 
+def can_restore_space(user, space: KnowledgeSpace) -> bool:
+    """Authorize the exceptional transition from archived to active.
+
+    Archived spaces are intentionally outside the normal effective-role
+    boundary. Restoration therefore rechecks an explicit owner/governance grant
+    while still requiring active organization and business-line parents.
+    """
+
+    if not user or not user.is_authenticated:
+        return False
+    if space.organization.status != "active":
+        return False
+    if space.business_line_id and space.business_line.status != "active":
+        return False
+    if is_platform_admin(user):
+        return True
+    organization_ids, business_line_ids = admin_scope(user)
+    if space.organization_id in organization_ids:
+        return True
+    if space.business_line_id and space.business_line_id in business_line_ids:
+        return True
+    membership = (
+        SpaceMembership.objects.filter(
+            user=user,
+            space=space,
+            role=SpaceMembership.ROLE_OWNER,
+        )
+        .only("status", "expires_at")
+        .first()
+    )
+    return bool(membership and membership.is_effective)
+
+
 def effective_space_role(user, space: KnowledgeSpace) -> str | None:
     """Resolve the user's effective role in ``space``.
 
@@ -165,6 +240,8 @@ def effective_space_role(user, space: KnowledgeSpace) -> str | None:
     active members, ``guest`` for public-demo spaces, else ``None`` (no access).
     """
     if not user or not user.is_authenticated:
+        return None
+    if not _space_lifecycle_is_active(space):
         return None
     if is_platform_admin(user):
         return ROLE_SUPER_ADMIN
@@ -175,13 +252,17 @@ def effective_space_role(user, space: KnowledgeSpace) -> str | None:
     if space.business_line_id and space.business_line_id in bl_ids:
         return ROLE_BUSINESS_ADMIN
     membership = (
-        SpaceMembership.objects.filter(space=space, user=user, status="active")
+        effective_space_memberships(user)
+        .filter(space=space)
         .only("role", "status", "expires_at")
         .first()
     )
-    if membership and membership.is_effective:
+    if membership:
         return membership.role
-    if space.visibility == "public_demo" and space.status == "active":
+    if (
+        getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False)
+        and space.visibility == "public_demo"
+    ):
         return SpaceMembership.ROLE_GUEST
     return None
 
@@ -191,17 +272,6 @@ def has_space_permission(user, space: KnowledgeSpace, perm: str) -> bool:
     role = effective_space_role(user, space)
     if role is None:
         return False
-    # An archived tenant, business line, or space is read-only for everyone,
-    # including scoped and platform administrators.  This prevents a parent
-    # lifecycle action from being bypassed by an inherited full-access role.
-    if (
-        space.status != "active"
-        or space.organization.status != "active"
-        or (space.business_line_id and space.business_line.status != "active")
-    ) and perm not in {
-        SPACE_VIEW, DOCUMENT_VIEW, DOCUMENT_DOWNLOAD, CHAT_VIEW_HISTORY, AUDIT_VIEW,
-    }:
-        return False
     if role in _FULL_ACCESS_ROLES:
         return True
     return perm in ROLE_PERMISSIONS.get(role, set())
@@ -209,18 +279,21 @@ def has_space_permission(user, space: KnowledgeSpace, perm: str) -> bool:
 
 def accessible_spaces(user):
     """Queryset of spaces the user may see."""
+    spaces = active_spaces()
     if is_platform_admin(user):
-        return KnowledgeSpace.objects.all()
-    member_space_ids = SpaceMembership.objects.filter(
-        user=user, status="active"
-    ).values_list("space_id", flat=True)
+        return spaces
+    member_space_ids = effective_space_memberships(user).values_list(
+        "space_id", flat=True
+    )
     org_ids, bl_ids = admin_scope(user)
-    return KnowledgeSpace.objects.filter(
-        Q(id__in=list(member_space_ids))
-        | Q(visibility="public_demo", status="active")
+    access = (
+        Q(id__in=member_space_ids)
         | Q(organization_id__in=list(org_ids))
         | Q(business_line_id__in=list(bl_ids))
-    ).distinct()
+    )
+    if getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False):
+        access |= Q(visibility="public_demo")
+    return spaces.filter(access).distinct()
 
 
 def get_space_or_404(space_id) -> KnowledgeSpace:

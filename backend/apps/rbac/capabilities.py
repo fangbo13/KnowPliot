@@ -21,11 +21,8 @@ from django.utils import timezone
 from rest_framework.exceptions import NotFound
 
 from apps.rbac.models import UserRole
-from apps.spaces.models import (
-    KnowledgeSpace,
-    OrganizationMembership,
-    SpaceMembership,
-)
+from apps.spaces.models import OrganizationMembership
+from apps.spaces.permissions import active_spaces, effective_space_memberships
 
 BASE_CHAT_CAPABILITIES = frozenset({"chat.ask", "chat.history"})
 
@@ -226,24 +223,10 @@ def _active_space_roles(
     organization_ids: set[UUID],
     business_line_ids: set[UUID],
 ) -> dict[UUID, str]:
-    now = timezone.now()
-    membership_rows = (
-        SpaceMembership.objects.filter(
-            user=user,
-            status="active",
-            space__status="active",
-            space__organization__status="active",
-        )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=now))
-        .filter(Q(space__business_line__isnull=True) | Q(space__business_line__status="active"))
-        .values_list("space_id", "role")
-    )
+    membership_rows = effective_space_memberships(user).values_list("space_id", "role")
     membership_roles = dict(membership_rows)
 
-    active_spaces = KnowledgeSpace.objects.filter(
-        status="active",
-        organization__status="active",
-    ).filter(Q(business_line__isnull=True) | Q(business_line__status="active"))
+    spaces = active_spaces()
     if not platform:
         access = (
             Q(id__in=membership_roles)
@@ -252,10 +235,10 @@ def _active_space_roles(
         )
         if getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False):
             access |= Q(visibility="public_demo")
-        active_spaces = active_spaces.filter(access)
+        spaces = spaces.filter(access)
 
     roles: dict[UUID, str] = {}
-    for space in active_spaces.only(
+    for space in spaces.only(
         "id",
         "organization_id",
         "business_line_id",
