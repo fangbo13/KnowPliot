@@ -1,17 +1,18 @@
 # KnowPilot Delivery Memory
 
 - **Last updated:** 2026-07-17
-- **Current phase:** Task 3B2 — frontend dual-protocol stream consumption and GET-only recovery (complete and verified); Task 4 capability service is next.
-- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; Task 3B2 is layered on the reviewed Task 3B1 backend
+- **Current phase:** Task 4 — server capabilities, scoped consoles, and compatibility rollout (complete and independently reviewed); Task 5 fast/deep execution and chat performance is in progress.
+- **Active branch/commit:** `codex/knowpilot-optimization` / Task 4 reviewed HEAD `2aa43c7`, with Task 5 work layered afterward
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
 
 ## 1 Current Objective
 
-Continue from the verified end-to-end ChatTurn stream and recovery contract.
-The next bounded objective is Task 4: implement the server capability endpoint
-and capability-derived frontend authorization before creating scoped consoles.
+Continue from the verified ChatTurn recovery and scoped capability contracts.
+The current bounded objective is Task 5: resolve governed fast/deep generation
+per Turn, keep provider reasoning private, and remove ingestion-only startup work
+from the chat path without changing the default-off/v1/fast compatibility path.
 
 ## 2 Locked Decisions
 
@@ -90,11 +91,21 @@ and capability-derived frontend authorization before creating scoped consoles.
 
 ### Capability
 
-- Planned authority endpoint:
+- Implemented authority endpoint:
   `GET /api/v1/rbac/me/capabilities/?space_id={id}`.
-- Response fields: `scopes`, flat `capabilities`, and `default_console`.
+- The server derives active platform, organization, business-line, and space
+  scopes, then returns sorted flat `capabilities` and a safe `default_console`.
+- Expired memberships and archived organization/business-line/space ancestors
+  are excluded consistently. Inaccessible explicit spaces return a
+  non-disclosing 404.
 - Workbench families: `/platform-admin/*`, `/governance/*`, and
-  `/workspace/:spaceId/manage/*`.
+  `/workspace/:spaceId/manage/*`; legacy `/admin/*` redirects are rollout-only.
+- Workspace direct routes validate the exact route space before persisting it.
+  A revoked persisted space falls back to an unscoped snapshot so global
+  platform/governance consoles remain reachable while all workspace-bound
+  capabilities fail closed.
+- Workspace audit uses exact `?space=` authorization and queryset scoping;
+  `X-Space-Id` cannot authorize a different query space.
 
 ### Feature flags
 
@@ -102,8 +113,8 @@ and capability-derived frontend authorization before creating scoped consoles.
 |---|---|---|
 | `CHAT_TURN_IDEMPOTENCY` | No flag is implemented. Deploying this backend after applying `0013` activates idempotency immediately. | Pass PostgreSQL-backed concurrency tests; add a compatibility flag before deployment if staged activation is required. |
 | `CHAT_STREAM_V2` | Implemented; environment-parsed and default `false`. v2 requires both this flag and request `protocol_version=2`; all other requests preserve v1. | Frontend dual-parser/GET recovery is complete; keep disabled until PostgreSQL/Redis integration validation passes. |
-| `CAPABILITY_NAV` | Planned; disabled/not implemented | Role matrix, scoped API, route, and navigation tests pass. |
-| `DEEP_ANSWER_MODE` | Planned; disabled/not implemented | Governed model/privacy/mode tests and fast fallback pass. |
+| `CAPABILITY_NAV` | Implemented in backend and frontend; default `false`. The frontend build switch is `VITE_CAPABILITY_NAV=true`. | Keep disabled until deployment-backed role/scope smoke tests pass; legacy authorization remains for one release. |
+| `DEEP_ANSWER_MODE` | In progress; must remain default `false`. | Governed model/privacy/mode tests and fast fallback pass. |
 
 The idempotency row documents rollout state, not a callable flag. Actual
 deployment and rollback order is recorded in section 10.
@@ -112,14 +123,14 @@ deployment and rollback order is recorded in section 10.
 
 | Level | Role | Approved authority | Current delivery state |
 |---|---|---|---|
-| 1 | Super admin | Platform global. | Matrix specified; capability service not implemented. |
-| 2 | Organization admin | Own organization settings, business lines, scoped users, templates, metrics, audit, and model binding; never super grant. | Matrix specified; capability service not implemented. |
-| 3 | Business-line admin | Own business-line spaces, users, templates, metrics, and audit; no cross-line or upward grant. | Matrix specified; capability service not implemented. |
-| 4 | Space owner | Members, invites, access requests, knowledge, quality, audit, settings, and lifecycle in one space. | Matrix specified; capability service not implemented. |
-| 4 | Knowledge admin | Document ingestion/index and quality in one space. | Matrix specified; capability service not implemented. |
-| 4 | Reviewer | Quality and read-only audit in one space. | Matrix specified; capability service not implemented. |
-| 4 | Member | Chat, history, share, and export; deep only with governed `chat.deep`. | Existing behavior requires capability convergence. |
-| 4 | Guest | Fast chat only. | Existing behavior requires capability convergence. |
+| 1 | Super admin | Platform global. | Implemented as platform capabilities plus subordinate governance/space access. |
+| 2 | Organization admin | Own organization settings, business lines, scoped users, templates, metrics, audit, and model binding; never super grant. | Implemented with active organization scope and no upward grant. |
+| 3 | Business-line admin | Own business-line spaces, users, templates, metrics, and audit; no cross-line or upward grant. | Implemented with exact business-line scope and no cross-line grant. |
+| 4 | Space owner | Members, invites, access requests, knowledge, quality, audit, settings, and lifecycle in one space. | Implemented through workspace capabilities and scoped console routes. |
+| 4 | Knowledge admin | Document ingestion/index and quality in one space. | Implemented; knowledge read/manage/index/download UI actions are independently gated. |
+| 4 | Reviewer | Quality and read-only audit in one space. | Implemented; exact workspace audit is allowed without global audit access. |
+| 4 | Member | Chat, history, share, and export; deep only with governed `chat.deep`. | Base capabilities implemented; `chat.deep` delivery is Task 5. |
+| 4 | Guest | Fast chat only. | Base guest capability denial implemented; deep denial is reinforced in Task 5. |
 
 ## 6 Delivery State
 
@@ -161,21 +172,31 @@ deployment and rollback order is recorded in section 10.
   v2 meta/done identities, and missing recovery identity headers before any
   content or replay cursor can advance. A per-event explicit-ID marker prevents
   SSE's sticky last-event-id value from disguising a missing v2 `id:` field.
+- Task 4 backend capability delivery: `295cac2`, `3751ed9`, and `0b256e9`
+  implement effective-scope resolution, default-off rollout, the capability
+  endpoint, active/expiry lifecycle state, scoped legacy migration reporting,
+  archived-space restore boundaries, non-overwriting legacy mappings, and exact
+  workspace audit authorization. Independent review found no Critical/Important.
+- Task 4 frontend delivery: `1b4dded` and `2aa43c7` implement capability-derived
+  route/navigation/action gates, three scoped console families, safe legacy
+  redirects, revoked-space recovery, direct-route preflight, `chat.share`,
+  knowledge action separation, and default-off `/spaces/manage` compatibility.
+  Independent review found no Critical/Important.
 
 ### In Progress
 
-- None. Task 3B2 is implemented and verified within the available environment.
+- Task 5 backend and frontend TDD for governed fast/deep generation, reasoning
+  privacy, chat-path client reuse, safe progress, and timeout separation.
 
 ### Next
 
-- **Single next action:** Start Task 4 with failing backend capability-matrix
-  tests for `GET /api/v1/rbac/me/capabilities/?space_id={id}` before changing
-  frontend routes or navigation.
+- **Single next action:** Complete Task 5 policy/provider/frontend mode tests and
+  independently review the fast/deep privacy and fallback boundaries.
 
 ### Deferred
 
-- Tasks 4–8: capability consoles, fast/deep execution, design convergence,
-  product closure, and compatibility cleanup.
+- Tasks 6–8: design convergence, product closure, compatibility cleanup, and
+  whole-branch verification.
 - Deployed 筼筜 validation and deployment-server migration require separate
   authorization and environment details.
 
@@ -185,7 +206,8 @@ deployment and rollback order is recorded in section 10.
 |---|---|---|
 | Chat stability/data | `KP-C01`–`KP-C06`, `KP-C08`–`KP-C10` | Implemented with database-free/frontend coverage; deployed validation remains. |
 | Chat lock/replay | `KP-C07`, `KP-C11` recovery | Backend Task 3B1 and frontend Task 3B2 are implemented with database-free/frontend coverage; deployed Redis/PostgreSQL validation remains. |
-| Authorization/governance | `KP-A01`–`KP-A04` | Audited; implementation not started. |
+| Authorization/governance | `KP-A01`–`KP-A03` | Implemented and independently reviewed; deployment-backed scope validation remains. |
+| Model/performance authorization | `KP-A04` | Task 5 in progress. |
 | Product closure | `KP-U01`, `KP-U02` | Audited; implementation not started. |
 | Design system | `KP-D01`, `KP-D02` | Audited; implementation not started. |
 | Environment | Backend DB tests blocked because hostname `db` is unavailable. | Do not claim PostgreSQL coverage until the host is available. |
@@ -195,6 +217,8 @@ deployment and rollback order is recorded in section 10.
 - Additive migration `backend/apps/chat/migrations/0013_chatturn.py` creates the
   durable record, required space relation, and its
   `(user, client_request_id)` unique constraint.
+- Additive migration `backend/apps/spaces/migrations/0008_organizationmembership_effectiveness.py`
+  adds active/expiry lifecycle fields used by effective organization scope.
 - Migration model state is consistent: `makemigrations --check --dry-run`
   reported `No changes detected`; its database-history probe separately warned
   that host `db` could not be resolved.
@@ -213,6 +237,10 @@ deployment and rollback order is recorded in section 10.
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
 | Frontend full suite | 151 passed in 21 files | Covers v1/v2 happy paths, strict live/replay event and identity validation, explicit per-v2-event IDs despite sticky SSE last-event-id semantics, chunk/CRLF/multiline parsing without chunk-boundary dispatch, legacy adjacent-event adaptation, unsafe/unknown event denial without cursor advance, replay deduplication, events/status recovery, POST-once proof, bounded header/body stalls, cancellation, deletion, and cross-session isolation. |
+| Task 4 backend combined capability/scope gate | 82 passed (+ 33 subtests) | Capability matrix, active/expired/archived ancestry, public-demo flag parity, restore exception, and atomic non-overwriting legacy mapping. |
+| Task 4 workspace-audit related gate | 58 passed (+ 31 subtests) | Exact query-space authorization, header/query anti-confusion, role denial, lifecycle 404, and governance/platform compatibility. |
+| Task 4 frontend full suite | 210 passed in 38 files | Includes scoped routes, revoked-space global fallback/workspace denial, direct-route preflight, compatibility route, share, and fine-grained knowledge actions. |
+| Task 4 independent frontend re-review | 43 passed in 10 files; Ready | Zero Critical/Important; typecheck and amendment diff checks passed. |
 | Frontend typecheck | PASS | `tsc --noEmit` after Task 3B2. |
 | Frontend production build | PASS | `tsc -b && vite build`; 4002 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
 | Ruff changed-file check | PASS | All changed chat implementation/test files passed; `base.py` passed with its pre-existing B028/UP031/E402 findings excluded. |
@@ -233,6 +261,10 @@ deployment and rollback order is recorded in section 10.
 - Enabling v2 requires setting `CHAT_STREAM_V2=true` and having the client send
   `protocol_version=2`. Roll back the envelope instantly with
   `CHAT_STREAM_V2=false`; v1 response bytes remain supported for one release.
+- Enable `CAPABILITY_NAV` only after the backend capability endpoint and scoped
+  routes are deployed together. Roll back navigation with the flag while
+  preserving the additive membership fields and capability endpoint; do not
+  remove the legacy adapter during this release.
 - If the lease itself must be rolled back, redeploy the reviewed Task 3A backend
   rather than changing the v2 flag. Preserve migration `0013` and ChatTurn data.
   Redis lease/event keys are ephemeral and expire/release without a data migration.
@@ -251,10 +283,10 @@ deployment and rollback order is recorded in section 10.
 - [x] 筼筜 target recorded without inventing host, path, or credentials.
 - [x] Environment-not-started state recorded.
 - [x] Locked decisions, contracts, matrix, feature flags, and issues recorded.
-- [x] Task 2, Task 3A, Task 3B1, and Task 3B2 evidence plus DB-test limitation recorded honestly.
+- [x] Task 2, Task 3A, Task 3B1, Task 3B2, and Task 4 evidence plus DB-test limitation recorded honestly.
 - [x] Additive migration and owner-visible recovery contract recorded.
 - [x] Absence of an idempotency feature flag and its real rollback consequence recorded.
 - [x] Exact v2 flag, Redis fallback, recovery route, and rollback boundaries recorded.
-- [x] Exactly one bounded Task 4 action identified.
+- [x] Exactly one bounded Task 5 action identified.
 - [x] Generated build metadata excluded from the implementation commit.
-- [x] Task 3B2 implementation is ready for coordinating-agent review.
+- [x] Task 4 frontend and backend independent reviews are Ready with zero Critical/Important.
