@@ -172,6 +172,7 @@ class ChatTurnStatusViewTest(SimpleTestCase):
         force_authenticate(request, user=user)
 
         with (
+            self.assertLogs("apps.chat.views", level="ERROR") as captured,
             patch("apps.chat.views.resolve_request_space", return_value=None),
             patch(
                 "apps.chat.views.resolve_chat_session",
@@ -191,7 +192,9 @@ class ChatTurnStatusViewTest(SimpleTestCase):
             ),
             patch(
                 "apps.chat.views._conversation_history",
-                side_effect=RuntimeError("raw database secret"),
+                side_effect=RuntimeError(
+                    "raw database secret password=secret"
+                ),
             ),
             patch("apps.chat.views.create_redis_client", return_value=FakeRedis()),
             patch("apps.chat.models.ModelInvocation.objects.create"),
@@ -203,3 +206,4 @@ class ChatTurnStatusViewTest(SimpleTestCase):
         self.assertEqual(turn.error_code, "stream_error")
         self.assertIn('"error": "stream_error"', body)
         self.assertNotIn("raw database secret", body)
+        self.assertNotIn("password=secret", "\n".join(captured.output))

@@ -219,7 +219,6 @@ class DjangoTurnRepository:
                 "status",
                 "answer_mode",
                 "attempt_count",
-                "last_event_seq",
                 "error_code",
                 "model_id",
                 "assistant_message",
@@ -399,7 +398,6 @@ def begin_chat_turn(
             turn.status = ChatTurn.STATUS_ACCEPTED
             turn.answer_mode = answer_mode
             turn.attempt_count += 1
-            turn.last_event_seq = 0
             turn.error_code = ""
             turn.model_id = ""
             turn.assistant_message = None

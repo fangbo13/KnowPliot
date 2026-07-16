@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 from django.urls import NoReverseMatch, reverse
 from rest_framework.test import APIRequestFactory, force_authenticate
@@ -84,6 +85,7 @@ class StreamNegotiationTest(SimpleTestCase):
 
 class SendMessageCoordinationTest(SimpleTestCase):
     def setUp(self):
+        cache.clear()
         self.user = get_user_model()(id=101, email="owner@example.com")
         self.session = scoped_session(self.user)
         self.turn = accepted_turn(self.session)
@@ -286,6 +288,11 @@ class SendMessageCoordinationTest(SimpleTestCase):
             ),
         ):
             response = send_message(self._request(), self.session.id)
+            self.assertEqual(
+                response.status_code,
+                200,
+                getattr(response, "data", None),
+            )
             body = b"".join(response.streaming_content).decode()
 
         names = [line.removeprefix("event: ") for line in body.splitlines() if line.startswith("event: ")]
@@ -366,6 +373,31 @@ class SendMessageCoordinationTest(SimpleTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data["code"], "coordination_unavailable")
         self.assertEqual(self.turn.status, ChatTurn.STATUS_FAILED)
+
+    @override_settings(CHAT_STREAM_V2=True)
+    def test_renewal_start_failure_marks_retryable_releases_and_returns_503(self):
+        redis = FakeRedis()
+        patches = self._base_patches()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patch("apps.chat.views.create_redis_client", return_value=redis),
+            patch(
+                "apps.chat.views.RedisSessionLease.start_renewal",
+                side_effect=CoordinationUnavailableError(),
+            ),
+        ):
+            response = send_message(self._request(), self.session.id)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data["code"], "coordination_unavailable")
+        self.assertTrue(response.data["retryable"])
+        self.assertEqual(self.turn.status, ChatTurn.STATUS_FAILED)
+        self.assertEqual(self.turn.error_code, "coordination_unavailable")
+        self.assertNotIn(f"chat:session:{self.session.id}:turn", redis.values)
 
     def test_completed_and_active_duplicates_do_not_acquire_a_lease(self):
         completed = accepted_turn(self.session)
@@ -467,6 +499,10 @@ class TurnEventsViewTest(SimpleTestCase):
         with (
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch(
+                "apps.chat.views._has_active_space_membership",
+                return_value=True,
+            ),
             patch("apps.chat.views.create_redis_client", return_value=redis),
             patch("apps.chat.views.converge_stale_turn", return_value=False),
         ):
@@ -489,6 +525,10 @@ class TurnEventsViewTest(SimpleTestCase):
         with (
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch(
+                "apps.chat.views._has_active_space_membership",
+                return_value=True,
+            ),
             patch("apps.chat.views.create_redis_client", return_value=redis),
             patch("apps.chat.views.converge_stale_turn", return_value=False),
         ):
@@ -503,7 +543,11 @@ class TurnEventsViewTest(SimpleTestCase):
         create_client = Mock()
         with (
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
-            patch("apps.chat.views.effective_space_role", return_value=None),
+            patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch(
+                "apps.chat.views._has_active_space_membership",
+                return_value=False,
+            ),
             patch("apps.chat.views.create_redis_client", create_client),
         ):
             response = chat_turn_events(request, self.turn.id)
@@ -516,6 +560,10 @@ class TurnEventsViewTest(SimpleTestCase):
         with (
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
+            patch(
+                "apps.chat.views._has_active_space_membership",
+                return_value=True,
+            ),
             patch(
                 "apps.chat.views.create_redis_client",
                 side_effect=CoordinationUnavailableError(),

@@ -246,7 +246,7 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
         self.assertEqual(result.turn.attempt_count, 3)
         self.assertEqual(result.turn.status, "accepted")
         self.assertEqual(result.turn.error_code, "")
-        self.assertEqual(result.turn.last_event_seq, 0)
+        self.assertEqual(result.turn.last_event_seq, 9)
         self.assertIsNone(result.turn.assistant_message)
         self.assertEqual(repository.questions, [])
         self.assertEqual(repository.saved_turns, [failed])

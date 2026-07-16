@@ -138,12 +138,17 @@ class RedisSessionLease:
     def start_renewal(self) -> None:
         if not self._acquired or self._thread is not None:
             return
-        self._thread = threading.Thread(
+        thread = threading.Thread(
             target=self._renew_loop,
             name="chat-session-lease-renewal",
             daemon=True,
         )
-        self._thread.start()
+        try:
+            thread.start()
+        except Exception as exc:
+            self._lost.set()
+            raise CoordinationUnavailableError() from exc
+        self._thread = thread
 
     def ensure_owned(self) -> None:
         if not self._acquired or self._lost.is_set():

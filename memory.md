@@ -2,7 +2,7 @@
 
 - **Last updated:** 2026-07-16
 - **Current phase:** Task 3B1 — backend Redis lease, SSE v2, and event recovery (complete and verified); Task 3B2 frontend recovery is next.
-- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; reviewed Task 3A parent `86e5bf5`
+- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; Task 3B1 base implementation `20903bd` plus the review amendment in this handoff
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
@@ -69,13 +69,16 @@ status/event recovery after unexpected EOF without ever repeating the POST.
   `done`, `error`.
 - `meta` precedes retrieval. Event IDs increase monotonically and support replay.
 - `GET /api/v1/chat/turns/{turn_id}/events/?after={seq}` replays safe events;
-  `Last-Event-ID` is the fallback cursor. Owner and current space access are
-  rechecked with non-disclosing 404 responses.
+  `Last-Event-ID` is the fallback cursor. Owner and an active, unexpired
+  `SpaceMembership` are rechecked before Redis access, with non-disclosing 404
+  responses.
 - Redis keys are `chat:session:{session_id}:turn` for the renewable lease and
-  `chat:turn:{turn_id}:events|seq` for the 15-minute event buffer/sequence.
-- Retry attempts clear prior-attempt event payloads while retaining the Redis
-  sequence counter, so per-Turn IDs stay monotonic without replaying a stale
-  terminal error before the new attempt.
+  `chat:turn:{turn_id}:events|seq` for replay and sequence identity. Event
+  payloads expire after 15 minutes; the safe integer sequence counter does not
+  share that TTL and is seeded from the durable Turn checkpoint if recreated.
+- Retry attempts clear prior-attempt event payloads without resetting the Turn
+  checkpoint or Redis sequence counter, so per-Turn IDs stay monotonic without
+  replaying a stale terminal error before the new attempt.
 - EOF, parse failure, cancellation, navigation, and unmount retain partial
   content and expose recovery/terminal state without a replacement POST.
 
@@ -135,6 +138,10 @@ deployment and rollback order is recorded in section 10.
   v1/v2 negotiation, monotonic safe SSE events, 15-minute replay, Turn sequence
   checkpoints, terminal timestamps, stale-worker convergence, recovery headers,
   and owner/membership-scoped event replay.
+- Task 3B1 independent-review amendment: atomic Lua event append/retention,
+  durable monotonic sequence seeding, renewal-start cleanup, optimistic stale
+  convergence, strict active-membership recovery, untrusted replay validation,
+  and stable-code logging without raw exception text.
 
 ### In Progress
 
@@ -182,7 +189,7 @@ deployment and rollback order is recorded in section 10.
 | Evidence | Result | Provenance / limitation |
 |---|---|---|
 | Task 3A backend pure/SimpleTestCase | 17 passed | Includes locked session resolution, required/derived scope, history-failure recovery, model, serializer, transition, duplicate, status-owner, and no-RAG replay contracts. |
-| Task 3A + Task 3B1 backend pure/SimpleTestCase | 53 passed | Includes NX/compare-token lease behavior, blocked-provider renewal, every stream cleanup class, v1 bytes, v2 negotiation/event mapping, meta-first ordering, safe replay/cursors, expiry, sequence checkpointing, retry pruning, owner/membership denial, Redis failure, and stale-worker convergence. |
+| Task 3A + Task 3B1 backend pure/SimpleTestCase | 60 passed (+ 5 subtests) | Includes NX/compare-token lease behavior, renewal-start failure, blocked-provider renewal, every stream cleanup class, v1 bytes, v2 negotiation/event mapping, meta-first ordering, atomic replay retention, durable sequence seeding, malicious-record denial, retry pruning, active-membership denial, log sanitization, Redis failure, and optimistic stale-worker convergence. |
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |

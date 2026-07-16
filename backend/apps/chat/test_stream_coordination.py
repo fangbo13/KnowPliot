@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 from django.utils import timezone
@@ -50,6 +51,8 @@ class FakeRedis:
         self.sorted_sets = {}
         self.eval_calls = []
         self.fail = False
+        self.fail_event_append = False
+        self.event_append_calls = []
 
     def _check(self):
         if self.fail:
@@ -67,8 +70,48 @@ class FakeRedis:
         self._check()
         return self.values.get(key)
 
-    def eval(self, script, number_of_keys, key, token, ttl=None):
+    def eval(self, script, number_of_keys, *args):
         self._check()
+        if "CHAT_EVENT_APPEND_V2" in script:
+            self.event_append_calls.append((script, number_of_keys, args))
+            if self.fail_event_append:
+                raise ConnectionError("atomic append rejected")
+            (
+                sequence_key,
+                events_key,
+                durable_sequence,
+                event_name,
+                data_json,
+                now,
+                cutoff,
+                ttl,
+            ) = args
+            current = int(self.values.get(sequence_key, 0))
+            sequence = max(current, int(durable_sequence)) + 1
+            data = json.loads(data_json)
+            record = json.dumps(
+                {"id": sequence, "event": event_name, "data": data},
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            member = f"{sequence:020d}:{record}"
+            next_entries = dict(self.sorted_sets.get(events_key, {}))
+            next_entries[member] = float(now)
+            next_entries = {
+                item: score
+                for item, score in next_entries.items()
+                if score > float(cutoff)
+            }
+            # Commit the modeled script only after all work succeeds.
+            self.values[sequence_key] = sequence
+            self.sorted_sets[events_key] = next_entries
+            self.expiries[events_key] = int(ttl)
+            self.expiries.pop(sequence_key, None)
+            return [sequence, record]
+
+        key, token, *remaining = args
+        ttl = remaining[0] if remaining else None
         self.eval_calls.append((script, number_of_keys, key, token, ttl))
         if self.values.get(key) != token:
             return 0
@@ -111,6 +154,18 @@ class FakeRedis:
         self.expiries.pop(key, None)
         self.sorted_sets.pop(key, None)
         return 1
+
+
+class BrokenStartThread:
+    def __init__(self, *args, **kwargs):
+        self.started = False
+
+    def start(self):
+        raise RuntimeError("thread start password=secret")
+
+    def join(self, timeout=None):
+        if not self.started:
+            raise RuntimeError("cannot join thread before it is started")
 
 
 class RedisSessionLeaseTest(SimpleTestCase):
@@ -183,6 +238,21 @@ class RedisSessionLeaseTest(SimpleTestCase):
         with self.assertRaises(CoordinationUnavailableError) as error:
             lease.acquire()
         self.assertNotIn("secret", str(error.exception))
+
+    def test_thread_start_failure_is_normalized_and_release_remains_safe(self):
+        redis = FakeRedis()
+        lease = RedisSessionLease(redis, "session-1", token_factory=lambda: "owner-a")
+        self.assertTrue(lease.acquire())
+
+        with (
+            patch("apps.chat.coordination.threading.Thread", BrokenStartThread),
+            self.assertRaises(CoordinationUnavailableError) as error,
+        ):
+            lease.start_renewal()
+        self.assertEqual(str(error.exception), "chat_coordination_unavailable")
+
+        self.assertTrue(lease.release())
+        self.assertNotIn(lease.key, redis.values)
 
 
 class ManagedStreamTest(SimpleTestCase):
@@ -265,6 +335,36 @@ class RedisTurnEventStoreTest(SimpleTestCase):
             [(3, "meta")],
         )
 
+    def test_sequence_recreation_advances_from_durable_checkpoint_without_ttl(self):
+        redis = FakeRedis()
+        turn_id = uuid.uuid4()
+        first = RedisTurnEventStore(redis, turn_id)
+        first.initial_sequence = 41
+        previous = first.append("done", {"message_id": "old"}, terminal=True)
+        self.assertEqual(previous.sequence, 42)
+
+        redis.delete(first.events_key)
+        redis.values.pop(first.sequence_key, None)  # Simulate Redis key loss/restart.
+        recreated = RedisTurnEventStore(redis, turn_id)
+        recreated.initial_sequence = previous.sequence
+        current = recreated.append("meta", {"attempt": 2})
+
+        self.assertEqual(current.sequence, 43)
+        self.assertNotIn(recreated.sequence_key, redis.expiries)
+
+    def test_event_append_uses_one_atomic_script_and_failure_leaves_no_partial_state(self):
+        redis = FakeRedis()
+        store = RedisTurnEventStore(redis, uuid.uuid4())
+        redis.fail_event_append = True
+
+        with self.assertRaises(EventStoreUnavailableError):
+            store.append("answer_delta", {"text": "private answer"})
+
+        self.assertEqual(redis.event_append_calls[0][1], 2)
+        self.assertNotIn(store.sequence_key, redis.values)
+        self.assertNotIn(store.events_key, redis.sorted_sets)
+        self.assertNotIn(store.events_key, redis.expiries)
+
     def test_corrupt_replay_record_fails_with_safe_store_error(self):
         redis = FakeRedis()
         store = RedisTurnEventStore(redis, uuid.uuid4())
@@ -275,6 +375,40 @@ class RedisTurnEventStoreTest(SimpleTestCase):
 
         self.assertNotIn("secret", str(error.exception))
 
+    def test_syntactically_valid_untrusted_records_are_rejected(self):
+        redis = FakeRedis()
+        store = RedisTurnEventStore(redis, uuid.uuid4())
+        malicious_records = [
+            (
+                "00000000000000000001",
+                {"id": 1, "event": "done\nid: 999", "data": {}},
+            ),
+            (
+                "00000000000000000002",
+                {"id": 2, "event": "phase", "data": {"nested": {"reasoning": "secret"}}},
+            ),
+            (
+                "00000000000000000003",
+                {"id": 0, "event": "meta", "data": {}},
+            ),
+            (
+                "00000000000000000004",
+                {"id": 5, "event": "done", "data": {}},
+            ),
+            (
+                "00000000000000000006",
+                {"id": 6, "event": "done", "data": "not-an-object"},
+            ),
+        ]
+
+        for prefix, record in malicious_records:
+            with self.subTest(record=record):
+                redis.sorted_sets[store.events_key] = {
+                    f"{prefix}:{json.dumps(record)}": 1.0
+                }
+                with self.assertRaises(EventStoreUnavailableError) as error:
+                    store.replay()
+                self.assertEqual(str(error.exception), "chat_event_store_unavailable")
     def test_expired_members_are_removed_and_payload_rejects_reasoning(self):
         redis = FakeRedis()
         now = [1_000.0]
@@ -321,6 +455,21 @@ class RedisTurnEventStoreTest(SimpleTestCase):
         store.append("done", {"message_id": "m"}, terminal=True)
         self.assertEqual(checkpoints, [25, 26])
 
+    def test_successful_checkpoint_becomes_seed_after_sequence_key_loss(self):
+        redis = FakeRedis()
+        store = RedisTurnEventStore(
+            redis,
+            uuid.uuid4(),
+            checkpoint=Mock(),
+        )
+        for _ in range(25):
+            store.append("answer_delta", {"text": "x"})
+
+        redis.values.pop(store.sequence_key, None)
+        after_loss = store.append("phase", {"phase": "saving"})
+
+        self.assertEqual(after_loss.sequence, 26)
+
     def test_checkpoint_failure_is_safe_while_redis_event_remains_recoverable(self):
         redis = FakeRedis()
         store = RedisTurnEventStore(
@@ -351,19 +500,30 @@ class StaleTurnRecoveryTest(SimpleTestCase):
 
     def test_definitely_absent_lease_marks_old_active_turn_worker_lost(self):
         turn = self._turn()
-        save = Mock()
-        turn.save = save
+
+        class SuccessfulRepository:
+            calls = 0
+
+            def mark_failed_if_unchanged(self, _turn, *, cutoff, now):
+                self.calls += 1
+                return 1
+
+            def refresh(self, _turn):
+                raise AssertionError("successful convergence must not refresh")
+
+        repository = SuccessfulRepository()
 
         changed = converge_stale_turn(
             turn,
             lease_exists=lambda _session_id: False,
             now=timezone.now(),
+            repository=repository,
         )
 
         self.assertTrue(changed)
         self.assertEqual(turn.status, "failed")
         self.assertEqual(turn.error_code, "worker_lost")
-        save.assert_called_once()
+        self.assertEqual(repository.calls, 1)
 
     def test_redis_error_is_not_mistaken_for_absent_lease(self):
         turn = self._turn()
@@ -380,3 +540,26 @@ class StaleTurnRecoveryTest(SimpleTestCase):
         self.assertFalse(changed)
         self.assertEqual(turn.status, "answering")
         turn.save.assert_not_called()
+
+    def test_concurrent_completion_is_refreshed_not_overwritten(self):
+        turn = self._turn()
+
+        class ConcurrentCompletionRepository:
+            def mark_failed_if_unchanged(self, _turn, *, cutoff, now):
+                return 0
+
+            def refresh(self, current):
+                current.status = "completed"
+                current.error_code = ""
+                current.completed_at = timezone.now()
+
+        changed = converge_stale_turn(
+            turn,
+            lease_exists=lambda _session_id: False,
+            now=timezone.now(),
+            repository=ConcurrentCompletionRepository(),
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(turn.status, "completed")
+        self.assertEqual(turn.error_code, "")

@@ -247,8 +247,11 @@ def _save_citations(assistant_message, citations_data, space=None):
                 quoted_text=cit.get("quoted_text", ""),
                 space=space,
             )
-        except Exception as e:
-            logger.warning("Citation save failed for message %s: %s", assistant_message.id, e)
+        except Exception:
+            logger.warning(
+                "citation_save_failed message_id=%s code=persistence_error",
+                assistant_message.id,
+            )
 
 
 # V4.0 DEFECT-001: SSE endpoint must be throttled — @api_view bypasses DEFAULT_THROTTLE_CLASSES
@@ -297,11 +300,31 @@ def _mark_turn_failed(turn, error_code):
     except InvalidTurnTransitionError:
         logger.info("Turn %s was already terminal", turn.id)
     except Exception:
-        logger.exception("Could not persist safe failure state for Turn %s", turn.id)
+        logger.error(
+            "turn_failure_state_persist_failed turn_id=%s code=persistence_error",
+            turn.id,
+        )
 
 
 def _checkpoint_turn_sequence(turn_id, sequence):
     ChatTurn.objects.filter(pk=turn_id).update(last_event_seq=sequence)
+
+
+def _has_active_space_membership(user, space) -> bool:
+    """Recovery requires an active, unexpired membership in the Turn space."""
+
+    from apps.spaces.models import SpaceMembership
+
+    membership = (
+        SpaceMembership.objects.filter(
+            user=user,
+            space=space,
+            status="active",
+        )
+        .only("status", "expires_at")
+        .first()
+    )
+    return bool(membership and membership.is_effective)
 
 
 def _owned_recovery_turn(request, turn_id):
@@ -315,7 +338,10 @@ def _owned_recovery_turn(request, turn_id):
         id=turn_id,
         user=request.user,
     )
-    if turn.space_id and effective_space_role(request.user, turn.space) is None:
+    if turn.space_id and not _has_active_space_membership(
+        request.user,
+        turn.space,
+    ):
         from rest_framework.exceptions import NotFound
 
         raise NotFound("Turn not found.")
@@ -618,6 +644,7 @@ def send_message(request, session_id):
                 store = RedisTurnEventStore(
                     client,
                     turn.id,
+                    initial_sequence=turn.last_event_seq,
                     checkpoint=lambda sequence: _checkpoint_turn_sequence(
                         turn.id,
                         sequence,
@@ -692,6 +719,7 @@ def send_message(request, session_id):
         event_store = RedisTurnEventStore(
             client,
             turn.id,
+            initial_sequence=turn.last_event_seq,
             checkpoint=lambda sequence: _checkpoint_turn_sequence(turn.id, sequence),
         )
         try:
@@ -718,7 +746,21 @@ def send_message(request, session_id):
                 response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 turn=turn,
             )
-    lease.start_renewal()
+    try:
+        lease.start_renewal()
+    except CoordinationUnavailableError:
+        _mark_turn_failed(turn, "coordination_unavailable")
+        with suppress(CoordinationUnavailableError):
+            lease.release()
+        return _turn_response(
+            {
+                "code": "coordination_unavailable",
+                "turn_id": str(turn.id),
+                "retryable": True,
+            },
+            response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            turn=turn,
+        )
 
     def v2_event(name, data, *, terminal=False):
         return event_store.append(name, data, terminal=terminal).to_sse()
@@ -778,9 +820,11 @@ def send_message(request, session_id):
                     error_code=error_code,
                 )
             except Exception:
-                logger.exception(
-                    "Could not persist model invocation telemetry for session %s",
+                logger.error(
+                    "model_invocation_persist_failed session_id=%s turn_id=%s "
+                    "code=persistence_error",
                     session_id,
+                    turn.id,
                 )
 
         try:
@@ -884,7 +928,11 @@ def send_message(request, session_id):
             _mark_turn_failed(turn, "coordination_unavailable")
             return
         except Exception:
-            logger.exception("Stream failed for session %s", session_id)
+            logger.error(
+                "chat_stream_failed session_id=%s turn_id=%s code=stream_error",
+                session_id,
+                turn.id,
+            )
             record_invocation("failure", error_code="stream_error")
             _mark_turn_failed(turn, "stream_error")
             with suppress(EventStoreUnavailableError):
@@ -965,7 +1013,10 @@ def send_message(request, session_id):
             _mark_turn_failed(turn, "coordination_unavailable")
             return
         except Exception:
-            logger.exception("Answer persistence failed for Turn %s", turn.id)
+            logger.error(
+                "answer_persist_failed turn_id=%s code=answer_save_error",
+                turn.id,
+            )
             record_invocation("failure", error_code="answer_save_error")
             try:
                 # The atomic save rolled the database back to this lifecycle
@@ -975,7 +1026,11 @@ def send_message(request, session_id):
                 turn.completed_at = None
                 _mark_turn_failed(turn, "answer_save_error")
             except Exception:
-                logger.exception("Could not mark Turn %s failed", turn.id)
+                logger.error(
+                    "answer_failure_state_persist_failed turn_id=%s "
+                    "code=persistence_error",
+                    turn.id,
+                )
             with suppress(EventStoreUnavailableError):
                 yield terminal_error("answer_save_error")
             return
@@ -1079,7 +1134,10 @@ def _audit_feedback(request, feedback, action, *, result="success", reason=""):
             },
         )
     except Exception:
-        logger.exception("Could not persist feedback audit event %s", action)
+        logger.error(
+            "feedback_audit_persist_failed action=%s code=persistence_error",
+            action,
+        )
 
 
 @api_view(["GET", "POST", "PUT", "DELETE"])

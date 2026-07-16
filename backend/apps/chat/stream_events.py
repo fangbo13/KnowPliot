@@ -42,6 +42,40 @@ _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_]{1,64}$")
 _ACTIVE_STATUSES = frozenset(
     {"accepted", "retrieving", "reasoning", "answering", "saving"}
 )
+_APPEND_SCRIPT = """
+-- CHAT_EVENT_APPEND_V2
+local sequence_type = redis.call('TYPE', KEYS[1])['ok']
+local events_type = redis.call('TYPE', KEYS[2])['ok']
+if sequence_type ~= 'none' and sequence_type ~= 'string' then
+  return redis.error_reply('invalid sequence key type')
+end
+if events_type ~= 'none' and events_type ~= 'zset' then
+  return redis.error_reply('invalid events key type')
+end
+
+local durable_sequence = tonumber(ARGV[1])
+local now = tonumber(ARGV[4])
+local cutoff = tonumber(ARGV[5])
+local ttl = tonumber(ARGV[6])
+local data = cjson.decode(ARGV[3])
+if durable_sequence == nil or now == nil or cutoff == nil or ttl == nil then
+  return redis.error_reply('invalid event append arguments')
+end
+
+local redis_sequence = tonumber(redis.call('GET', KEYS[1]) or '0')
+if redis_sequence == nil then
+  return redis.error_reply('invalid sequence value')
+end
+local sequence = math.max(redis_sequence, durable_sequence) + 1
+local record = cjson.encode({id=sequence, event=ARGV[2], data=data})
+local member = string.format('%020d', sequence) .. ':' .. record
+
+redis.call('SET', KEYS[1], sequence)
+redis.call('ZADD', KEYS[2], now, member)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', cutoff)
+redis.call('EXPIRE', KEYS[2], ttl)
+return {sequence, record}
+"""
 
 
 class EventStoreUnavailableError(RuntimeError):
@@ -83,10 +117,22 @@ class SSEEvent:
         if isinstance(value, bytes):
             value = value.decode("utf-8")
         record = json.loads(value)
+        if not isinstance(record, dict):
+            raise ValueError("invalid SSE record")
+        sequence = record.get("id")
+        name = record.get("event")
+        data = record.get("data")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
+            raise ValueError("invalid SSE sequence")
+        if name not in EVENT_NAMES:
+            raise ValueError("invalid SSE event type")
+        if not isinstance(data, (dict, list)):
+            raise ValueError("invalid SSE event payload")
+        _validate_safe_payload(data)
         return cls(
-            sequence=int(record["id"]),
-            name=record["event"],
-            data=record["data"],
+            sequence=sequence,
+            name=name,
+            data=data,
         )
 
 
@@ -100,6 +146,7 @@ class RedisTurnEventStore:
         *,
         clock: Callable[[], float] | None = None,
         checkpoint: Callable[[int], None] | None = None,
+        initial_sequence: int = 0,
     ):
         self.client = client
         self.turn_id = str(turn_id)
@@ -107,6 +154,7 @@ class RedisTurnEventStore:
         self.sequence_key = f"chat:turn:{self.turn_id}:seq"
         self.clock = clock or time.time
         self.checkpoint = checkpoint
+        self.initial_sequence = max(0, int(initial_sequence))
 
     def append(
         self,
@@ -120,17 +168,20 @@ class RedisTurnEventStore:
         _validate_safe_payload(data)
         now = self.clock()
         try:
-            sequence = int(self.client.incr(self.sequence_key))
-            event = SSEEvent(sequence, name, data)
-            member = f"{sequence:020d}:{event.to_record()}"
-            self.client.zadd(self.events_key, {member: now})
-            self.client.zremrangebyscore(
+            result = self.client.eval(
+                _APPEND_SCRIPT,
+                2,
+                self.sequence_key,
                 self.events_key,
-                float("-inf"),
+                self.initial_sequence,
+                name,
+                json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+                now,
                 now - EVENT_TTL_SECONDS,
+                EVENT_TTL_SECONDS,
             )
-            self.client.expire(self.events_key, EVENT_TTL_SECONDS)
-            self.client.expire(self.sequence_key, EVENT_TTL_SECONDS)
+            sequence = int(result[0])
+            event = SSEEvent(sequence, name, data)
         except Exception as exc:
             raise EventStoreUnavailableError() from exc
         if self.checkpoint and (
@@ -140,6 +191,7 @@ class RedisTurnEventStore:
                 self.checkpoint(sequence)
             except Exception as exc:
                 raise EventStoreUnavailableError() from exc
+            self.initial_sequence = max(self.initial_sequence, sequence)
         return event
 
     def append_error(self, code: str, _exception: Exception | None = None) -> SSEEvent:
@@ -165,8 +217,12 @@ class RedisTurnEventStore:
             for member in members:
                 if isinstance(member, bytes):
                     member = member.decode("utf-8")
-                _, record = member.split(":", 1)
+                prefix, record = member.split(":", 1)
+                if len(prefix) != 20 or not prefix.isdigit():
+                    raise ValueError("invalid event member prefix")
                 event = SSEEvent.from_record(record)
+                if int(prefix) != event.sequence:
+                    raise ValueError("event sequence mismatch")
                 if event.sequence > after:
                     events.append(event)
         except Exception as exc:
@@ -208,15 +264,39 @@ class ManagedStream(Iterator[Any]):
             self._on_close()
 
 
+class DjangoStaleTurnRepository:
+    """Optimistically converge only the same still-stale database row."""
+
+    def mark_failed_if_unchanged(self, turn, *, cutoff, now) -> int:
+        from .models import ChatTurn
+
+        return ChatTurn.objects.filter(
+            pk=turn.pk,
+            status=turn.status,
+            updated_at=turn.updated_at,
+            updated_at__lte=cutoff,
+        ).update(
+            status=ChatTurn.STATUS_FAILED,
+            error_code="worker_lost",
+            completed_at=now,
+            updated_at=now,
+        )
+
+    def refresh(self, turn) -> None:
+        turn.refresh_from_db()
+
+
 def converge_stale_turn(
     turn: Any,
     *,
     lease_exists: Callable[[object], bool],
     now,
     lease_ttl_seconds: int = LEASE_TTL_SECONDS,
+    repository: Any | None = None,
 ) -> bool:
     """Fail an old active Turn only when Redis proves its lease is absent."""
 
+    repository = repository or DjangoStaleTurnRepository()
     if turn.status not in _ACTIVE_STATUSES:
         return False
     if turn.updated_at is None:
@@ -229,10 +309,17 @@ def converge_stale_turn(
         return False
     if present:
         return False
+    cutoff = now - timedelta(seconds=lease_ttl_seconds)
+    updated = repository.mark_failed_if_unchanged(
+        turn,
+        cutoff=cutoff,
+        now=now,
+    )
+    if not updated:
+        repository.refresh(turn)
+        return False
     turn.status = "failed"
     turn.error_code = "worker_lost"
     turn.completed_at = now
-    turn.save(
-        update_fields=["status", "error_code", "completed_at", "updated_at"]
-    )
+    turn.updated_at = now
     return True
