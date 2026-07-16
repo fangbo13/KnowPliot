@@ -10,6 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
+import { CapabilityProvider } from './auth/CapabilityProvider';
 import { useTheme, eyTheme } from './hooks/useTheme';
 import './i18n';
 import './styles/tokens.css';
@@ -35,9 +36,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <ThemeRoot>
-          <App />
-        </ThemeRoot>
+        <CapabilityProvider>
+          <ThemeRoot>
+            <App />
+          </ThemeRoot>
+        </CapabilityProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>

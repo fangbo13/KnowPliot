@@ -8,16 +8,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  SearchOutlined, PlusOutlined, BulbOutlined, MessageOutlined,
-  BookOutlined, AppstoreOutlined, UserOutlined, TeamOutlined, SwapOutlined,
+  AppstoreOutlined,
+  BookOutlined,
+  BulbOutlined,
   HistoryOutlined,
+  MessageOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SwapOutlined,
+  TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+
+import { useAuthorization } from '../auth/CapabilityProvider';
+import { buildManagementEntries } from '../auth/managementEntries';
+import { useTheme } from '../hooks/useTheme';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
-import { useAuth } from '../auth/AuthProvider';
-import { useTheme } from '../hooks/useTheme';
 
-interface Cmd {
+interface Command {
   id: string;
   group: 'actions' | 'recent' | 'spaces' | 'navigate';
   label: string;
@@ -27,169 +36,210 @@ interface Cmd {
   run: () => void;
 }
 
-const GROUP_ORDER: Cmd['group'][] = ['actions', 'recent', 'spaces', 'navigate'];
+const GROUP_ORDER: Command['group'][] = ['actions', 'recent', 'spaces', 'navigate'];
 
 export default function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation('common');
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const access = useAuthorization();
   const { effective, setThemeMode } = useTheme();
-  const sessions = useChatStore((s) => s.sessions);
-  const setActiveSession = useChatStore((s) => s.setActiveSession);
-  const resetSession = useChatStore((s) => s.resetSession);
-  const spaces = useSpaceStore((s) => s.spaces);
-  const activeSpaceId = useSpaceStore((s) => s.activeSpaceId);
-  const setActiveSpace = useSpaceStore((s) => s.setActiveSpace);
-
+  const sessions = useChatStore((state) => state.sessions);
+  const setActiveSession = useChatStore((state) => state.setActiveSession);
+  const resetSession = useChatStore((state) => state.resetSession);
+  const spaces = useSpaceStore((state) => state.spaces);
+  const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
+  const setActiveSpace = useSpaceStore((state) => state.setActiveSpace);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const groupLabels: Record<Cmd['group'], string> = {
-    actions: t('cmdk_actions', { defaultValue: 'Actions' }),
-    recent: t('cmdk_recent', { defaultValue: 'Recent conversations' }),
-    spaces: t('cmdk_spaces', { defaultValue: 'Spaces' }),
-    navigate: t('cmdk_navigate', { defaultValue: 'Go to' }),
-  };
+  const commands = useMemo<Command[]>(() => {
+    const list: Command[] = [];
+    const close = () => onClose();
 
-  const hasHRAccess = user?.roles?.includes('hr') || user?.roles?.includes('admin') || user?.is_hr_admin;
-  const hasAdminAccess = user?.roles?.includes('admin') || (user?.is_hr_admin && user?.is_superuser);
-
-  const close = () => { onClose(); };
-
-  const commands = useMemo<Cmd[]>(() => {
-    const list: Cmd[] = [];
+    if (access.has('chat.ask')) {
+      list.push({
+        id: 'new-chat',
+        group: 'actions',
+        icon: <PlusOutlined />,
+        label: t('sidebar_new_chat') || 'New chat',
+        hint: '⇧⌘O',
+        keywords: 'new conversation',
+        run: () => { resetSession(); navigate('/chat'); close(); },
+      });
+    }
     list.push({
-      id: 'new-chat', group: 'actions', icon: <PlusOutlined />,
-      label: t('sidebar_new_chat') || 'New chat', hint: '⌘⇧O', keywords: 'new conversation 新建',
-      run: () => { resetSession(); navigate('/chat'); close(); },
-    });
-    list.push({
-      id: 'toggle-theme', group: 'actions', icon: <BulbOutlined />,
-      label: effective === 'dark' ? (t('switch_to_light') || 'Light theme') : (t('switch_to_dark') || 'Dark theme'),
-      keywords: 'theme dark light 主题 暗色',
+      id: 'toggle-theme',
+      group: 'actions',
+      icon: <BulbOutlined />,
+      label: effective === 'dark'
+        ? (t('switch_to_light') || 'Light theme')
+        : (t('switch_to_dark') || 'Dark theme'),
+      keywords: 'theme dark light',
       run: () => { setThemeMode(effective === 'dark' ? 'light' : 'dark'); close(); },
     });
 
-    for (const s of sessions) {
+    if (access.has('chat.history')) {
+      for (const session of sessions) {
+        list.push({
+          id: `session-${session.id}`,
+          group: 'recent',
+          icon: <MessageOutlined />,
+          label: session.title || (t('new_conversation') || 'New conversation'),
+          keywords: session.title || '',
+          run: () => { setActiveSession(session.id); navigate('/chat'); close(); },
+        });
+      }
+    }
+
+    for (const space of spaces) {
       list.push({
-        id: `session-${s.id}`, group: 'recent', icon: <MessageOutlined />,
-        label: s.title || (t('new_conversation') || 'New conversation'), keywords: s.title || '',
-        run: () => { setActiveSession(s.id); navigate('/chat'); close(); },
+        id: `space-${space.id}`,
+        group: 'spaces',
+        icon: <SwapOutlined />,
+        label: space.name,
+        hint: space.id === activeSpaceId ? t('active', { defaultValue: 'Active' }) : undefined,
+        keywords: `space ${space.name}`,
+        run: () => { void setActiveSpace(space.id); navigate('/chat'); close(); },
       });
     }
 
-    for (const sp of spaces) {
+    for (const entry of buildManagementEntries(access, activeSpaceId)) {
+      const icon = entry.id === 'knowledge'
+        ? <BookOutlined />
+        : entry.id === 'workspace'
+          ? <TeamOutlined />
+          : <AppstoreOutlined />;
       list.push({
-        id: `space-${sp.id}`, group: 'spaces', icon: <SwapOutlined />,
-        label: sp.name, hint: sp.id === activeSpaceId ? t('active', { defaultValue: 'Active' }) : undefined,
-        keywords: `space ${sp.name}`,
-        run: () => { setActiveSpace(sp.id); navigate('/chat'); close(); },
+        id: `nav-${entry.id}`,
+        group: 'navigate',
+        icon,
+        label: entry.label,
+        keywords: `${entry.id} management admin`,
+        run: () => { navigate(entry.to); close(); },
       });
     }
-
-    if (hasHRAccess) list.push({ id: 'nav-kb', group: 'navigate', icon: <BookOutlined />, label: t('knowledge_base') || 'Knowledge base', keywords: 'kb documents', run: () => { navigate('/admin/knowledge'); close(); } });
-    if (hasAdminAccess) list.push({ id: 'nav-admin', group: 'navigate', icon: <AppstoreOutlined />, label: t('admin_dashboard') || 'Admin dashboard', keywords: 'admin users', run: () => { navigate('/admin/dashboard'); close(); } });
-    list.push({ id: 'nav-history', group: 'navigate', icon: <HistoryOutlined />, label: t('nav_history') || 'History', keywords: 'history conversations 历史', run: () => { navigate('/history'); close(); } });
-    list.push({ id: 'nav-spaces', group: 'navigate', icon: <TeamOutlined />, label: t('space_management') || 'Space management', keywords: 'space members', run: () => { navigate('/spaces/manage'); close(); } });
-    list.push({ id: 'nav-profile', group: 'navigate', icon: <UserOutlined />, label: t('user_settings') || 'Settings', keywords: 'profile settings 设置', run: () => { navigate('/profile'); close(); } });
-
+    if (access.has('chat.history')) {
+      list.push({
+        id: 'nav-history',
+        group: 'navigate',
+        icon: <HistoryOutlined />,
+        label: t('nav_history') || 'History',
+        keywords: 'history conversations',
+        run: () => { navigate('/history'); close(); },
+      });
+    }
+    list.push({
+      id: 'nav-profile',
+      group: 'navigate',
+      icon: <UserOutlined />,
+      label: t('user_settings') || 'Settings',
+      keywords: 'profile settings',
+      run: () => { navigate('/profile'); close(); },
+    });
     return list;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, spaces, activeSpaceId, effective, user, t]);
+  }, [
+    access,
+    activeSpaceId,
+    effective,
+    navigate,
+    onClose,
+    resetSession,
+    sessions,
+    setActiveSession,
+    setActiveSpace,
+    setThemeMode,
+    spaces,
+    t,
+  ]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let items = commands;
-    if (q) {
-      items = commands.filter((c) => (c.label + ' ' + (c.keywords || '')).toLowerCase().includes(q));
-    } else {
-      // no query: cap recent conversations to keep the list focused
-      let recentCount = 0;
-      items = commands.filter((c) => {
-        if (c.group === 'recent') { recentCount += 1; return recentCount <= 6; }
+    const normalized = query.trim().toLowerCase();
+    let recentCount = 0;
+    return commands
+      .filter((command) => {
+        if (normalized) {
+          return `${command.label} ${command.keywords ?? ''}`.toLowerCase().includes(normalized);
+        }
+        if (command.group === 'recent') {
+          recentCount += 1;
+          return recentCount <= 6;
+        }
         return true;
-      });
-    }
-    return [...items].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
+      })
+      .sort((left, right) => GROUP_ORDER.indexOf(left.group) - GROUP_ORDER.indexOf(right.group));
   }, [commands, query]);
 
-  useEffect(() => { setActiveIndex(0); }, [query]);
-
+  useEffect(() => setActiveIndex(0), [query]);
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setActiveIndex(0);
-      const id = window.setTimeout(() => inputRef.current?.focus(), 30);
-      return () => window.clearTimeout(id);
-    }
+    if (!open) return;
+    setQuery('');
+    setActiveIndex(0);
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 30);
+    return () => window.clearTimeout(timer);
   }, [open]);
-
   useEffect(() => {
-    const el = listRef.current?.querySelector('.cmdk-item.is-active') as HTMLElement | null;
-    el?.scrollIntoView({ block: 'nearest' });
-  }, [activeIndex, filtered]);
+    listRef.current?.querySelector<HTMLElement>('.cmdk-item.is-active')?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
 
   if (!open) return null;
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, filtered.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); }
-    else if (e.key === 'Enter') { e.preventDefault(); filtered[activeIndex]?.run(); }
-    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((index) => Math.min(index + 1, filtered.length - 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((index) => Math.max(index - 1, 0));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      filtered[activeIndex]?.run();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+    }
   };
 
-  let lastGroup: Cmd['group'] | null = null;
-
+  let previousGroup: Command['group'] | null = null;
   return (
-    <div className="cmdk-overlay" style={{ backdropFilter: 'blur(6px)' }} onMouseDown={close} role="dialog" aria-modal="true" aria-label={t('cmdk_placeholder', { defaultValue: 'Search and commands' })}>
-      <div className="cmdk-panel section-enter" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="cmdk-overlay" onMouseDown={onClose} role="dialog" aria-modal="true" aria-label="Search and commands">
+      <div className="cmdk-panel section-enter" onMouseDown={(event) => event.stopPropagation()}>
         <div className="cmdk-input-wrap">
           <SearchOutlined />
           <input
             ref={inputRef}
             className="cmdk-input"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKeyDown}
             placeholder={t('cmdk_placeholder', { defaultValue: 'Search conversations or run a command…' })}
-            aria-label={t('cmdk_placeholder', { defaultValue: 'Search and commands' })}
+            aria-label="Search and commands"
           />
         </div>
-
         <div className="cmdk-list" ref={listRef}>
-          {filtered.length === 0 && (
-            <div className="cmdk-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', color: 'var(--color-text-placeholder)' }}>
-              <div style={{ fontFamily: 'var(--font-family-serif)', fontSize: 48, opacity: 0.5, marginBottom: 16 }}>K</div>
-              <span>{t('cmdk_empty', { defaultValue: 'No results' })}</span>
-            </div>
-          )}
-          {filtered.map((cmd, i) => {
-            const header = cmd.group !== lastGroup ? <div className="cmdk-group-label" key={`h-${cmd.group}`}>{groupLabels[cmd.group]}</div> : null;
-            lastGroup = cmd.group;
+          {filtered.length === 0 && <div className="cmdk-empty">{t('cmdk_empty', { defaultValue: 'No results' })}</div>}
+          {filtered.map((command, index) => {
+            const header = command.group !== previousGroup
+              ? <div className="cmdk-group-label">{command.group}</div>
+              : null;
+            previousGroup = command.group;
             return (
-              <div key={`g-${cmd.id}`}>
+              <div key={command.id}>
                 {header}
-                <div
-                  className={`cmdk-item${i === activeIndex ? ' is-active' : ''}`}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  onClick={cmd.run}
-                  role="button"
+                <button
+                  type="button"
+                  className={`cmdk-item${index === activeIndex ? ' is-active' : ''}`}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={command.run}
                 >
-                  <span className="cmdk-item-icon">{cmd.icon}</span>
-                  <span className="cmdk-item-label">{cmd.label}</span>
-                  {cmd.hint && <span className="cmdk-item-hint">{cmd.hint}</span>}
-                </div>
+                  <span className="cmdk-item-icon">{command.icon}</span>
+                  <span className="cmdk-item-label">{command.label}</span>
+                  {command.hint && <span className="cmdk-item-hint">{command.hint}</span>}
+                </button>
               </div>
             );
           })}
-        </div>
-
-        <div className="cmdk-footer">
-          <span><span className="kbd">↑</span><span className="kbd">↓</span> {t('cmdk_nav_hint', { defaultValue: 'navigate' })}</span>
-          <span><span className="kbd">↵</span> {t('cmdk_select_hint', { defaultValue: 'select' })}</span>
-          <span><span className="kbd">esc</span> {t('cmdk_close_hint', { defaultValue: 'close' })}</span>
         </div>
       </div>
     </div>

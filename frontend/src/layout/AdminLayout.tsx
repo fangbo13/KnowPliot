@@ -16,7 +16,8 @@ import {
   GlobalOutlined, SunOutlined, MoonOutlined, LayoutOutlined, MessageOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
+import { useAuth } from '../auth/AuthProvider';
+import { useAuthorization } from '../auth/CapabilityProvider';
 import { useTheme } from '../hooks/useTheme';
 import NotificationBell from '../components/NotificationBell';
 
@@ -40,13 +41,14 @@ function initials(email?: string) {
 export default function AdminLayout() {
   const { t, i18n } = useTranslation('common');
   const { user } = useAuth();
+  const access = useAuthorization();
   const navigate = useNavigate();
   const location = useLocation();
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
 
   // Gate: only admins enter the console.
-  if (!isAnyAdmin(user)) {
+  if (!access.hasAny(['platform.access', 'governance.access'])) {
     return <Navigate to="/chat" replace />;
   }
 

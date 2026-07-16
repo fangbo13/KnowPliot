@@ -35,15 +35,6 @@ interface User {
   admin_scope?: AdminScope;
 }
 
-/** V7.0: is this user any kind of admin (platform / org / business line)? */
-export function isAnyAdmin(user?: User | null): boolean {
-  if (!user) return false;
-  return Boolean(
-    user.is_super_admin || user.is_org_admin || user.is_business_admin ||
-    user.is_superuser || user.roles?.includes('admin')
-  );
-}
-
 interface AuthState {
   isAuthenticated: boolean;
   user: User | null;

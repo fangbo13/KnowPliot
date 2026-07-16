@@ -29,16 +29,19 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSpaceStore } from '../store/spaceStore';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuthorization } from '../auth/CapabilityProvider';
 
 const { Text } = Typography;
 
 export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boolean }) {
   const { t } = useTranslation('common');
-  const { user } = useAuth();
+  const access = useAuthorization();
   const { spaces, activeSpaceId, setActiveSpace, joinByCode, createSpace } = useSpaceStore();
 
-  const isAdmin = !!(user?.roles?.includes('admin') || user?.is_superuser);
+  const canCreateSpace = access.hasAny([
+    'platform.organizations.manage',
+    'governance.spaces.manage',
+  ]);
   const active = spaces.find((s) => s.id === activeSpaceId) || null;
 
   const [joinOpen, setJoinOpen] = useState(false);
@@ -118,7 +121,7 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
       label: t('join_space') || 'Join with access code',
       onClick: () => setJoinOpen(true),
     },
-    ...(isAdmin
+    ...(canCreateSpace
       ? [
           {
             key: 'create',

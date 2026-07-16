@@ -17,7 +17,9 @@ import {
   PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
 } from '@ant-design/icons';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
+import { useAuth } from '../auth/AuthProvider';
+import { useAuthorization } from '../auth/CapabilityProvider';
+import { buildManagementEntries } from '../auth/managementEntries';
 import { useTheme } from '../hooks/useTheme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { useDebounce } from '../hooks/useDebounce';
@@ -46,11 +48,15 @@ function initials(email?: string) {
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
+  const access = useAuthorization();
   const navigate = useNavigate();
   const location = useLocation();
   const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
-  const activeSpaceRole = useSpaceStore((s) => s.spaces.find((x) => x.id === s.activeSpaceId)?.my_role ?? null);
-  const canManageSpace = ['owner', 'super_admin', 'org_admin', 'business_admin'].includes(activeSpaceRole || '');
+  const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
+  const managementEntries = buildManagementEntries(access, activeSpaceId);
+  const canAsk = access.has('chat.ask');
+  const canUseHistory = access.has('chat.history');
+  const canExport = access.has('chat.export');
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
@@ -90,7 +96,7 @@ export default function AppLayout() {
   useHotkeys([
     { key: 'k', meta: true, allowInInput: true, handler: () => setCmdkOpen((o) => !o) },
     { key: 'b', meta: true, allowInInput: true, handler: () => setSidebarCollapsed((p) => !p) },
-    { key: 'o', meta: true, shift: true, allowInInput: true, handler: () => handleNewChat() },
+    { key: 'o', meta: true, shift: true, allowInInput: true, handler: () => { if (canAsk) handleNewChat(); } },
   ]);
 
   useEffect(() => {
@@ -104,10 +110,10 @@ export default function AppLayout() {
   useEffect(() => {
     (async () => {
       try { await useSpaceStore.getState().loadSpaces(); } catch { /* default-space fallback */ }
-      loadSessions();
+      if (canUseHistory) await loadSessions();
     })();
     initCrossTabSync();
-  }, [loadSessions]);
+  }, [canUseHistory, loadSessions]);
 
   useEffect(() => {
     if (isMobile && !localStorage.getItem('ey-mobile-drawer-seen')) {
@@ -126,12 +132,23 @@ export default function AppLayout() {
 
   const userMenu = useMemo(() => {
     const items: any[] = [];
-    // V7.0: a single entry into the dedicated admin console for any admin.
-    const showAdminConsole = isAnyAdmin(user);
-    if (showAdminConsole) items.push({ key: 'admin-console', icon: <AppstoreOutlined />, label: t('admin_console'), onClick: () => navigate('/admin') });
-    if (canManageSpace) items.push({ key: 'space-manage', icon: <TeamOutlined />, label: t('space_management') || 'Space Management', onClick: () => navigate('/spaces/manage') });
-    if (showAdminConsole || canManageSpace) items.push({ type: 'divider' as const });
-    items.push({ key: 'history', icon: <HistoryOutlined />, label: t('nav_history'), onClick: () => navigate('/history') });
+    for (const entry of managementEntries) {
+      const icon = entry.id === 'console'
+        ? <AppstoreOutlined />
+        : entry.id === 'workspace'
+          ? <TeamOutlined />
+          : <BookOutlined />;
+      items.push({
+        key: `management-${entry.id}`,
+        icon,
+        label: entry.label,
+        onClick: () => navigate(entry.to),
+      });
+    }
+    if (managementEntries.length) items.push({ type: 'divider' as const });
+    if (canUseHistory) {
+      items.push({ key: 'history', icon: <HistoryOutlined />, label: t('nav_history'), onClick: () => navigate('/history') });
+    }
     items.push({ key: 'profile', icon: <SettingOutlined />, label: t('user_settings'), onClick: () => navigate('/profile') });
     items.push({ type: 'divider' as const });
     items.push({
@@ -143,7 +160,7 @@ export default function AppLayout() {
       },
     });
     return { items };
-  }, [logout, navigate, t, user, canManageSpace]);
+  }, [canUseHistory, logout, managementEntries, navigate, t]);
 
   const currentLang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const handleLangChange = useCallback((lang: 'zh' | 'en') => { i18n.changeLanguage(lang); localStorage.setItem('ey-language', lang); }, []);
@@ -314,11 +331,11 @@ export default function AppLayout() {
     </div>
   );
 
-  const newChatBtn = (
+  const newChatBtn = canAsk ? (
     <div className="sidebar-section">
       <button className="new-chat-btn" onClick={handleNewChat}><PlusOutlined />{t('sidebar_new_chat')}</button>
     </div>
-  );
+  ) : null;
 
   return (
     <div className="app-shell">
@@ -364,8 +381,8 @@ export default function AppLayout() {
           </div>
           <div className="sidebar-section"><SpaceSwitcher collapsed={false} /></div>
           {newChatBtn}
-          {renderSearch()}
-          {renderList()}
+          {canUseHistory && renderSearch()}
+          {canUseHistory && renderList()}
           {renderFooter()}
         </aside>
       )}
@@ -384,8 +401,8 @@ export default function AppLayout() {
           </div>
           <div className="sidebar-section"><SpaceSwitcher collapsed={false} /></div>
           {newChatBtn}
-          {renderSearch()}
-          {renderList()}
+          {canUseHistory && renderSearch()}
+          {canUseHistory && renderList()}
           {renderFooter()}
         </Drawer>
       )}
@@ -452,8 +469,8 @@ export default function AppLayout() {
             <>
               <div className="menu-pop-label">{sessionMenu.title}</div>
               <div className="menu-pop-item" onClick={() => handlePinSession(sessionMenu.id, sessionMenu.isPinned)}><PushpinOutlined />{sessionMenu.isPinned ? t('sidebar_unpin') : t('sidebar_pin')}</div>
-              <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'markdown')}><FileTextOutlined />{t('sidebar_export_markdown')}</div>
-              <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'html')}><DownloadOutlined />{t('sidebar_export_html')}</div>
+              {canExport && <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'markdown')}><FileTextOutlined />{t('sidebar_export_markdown')}</div>}
+              {canExport && <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'html')}><DownloadOutlined />{t('sidebar_export_html')}</div>}
               <div className="menu-pop-item" onClick={() => openRenameSession({ id: sessionMenu.id, title: sessionMenu.title })}><EditOutlined />{t('sidebar_rename')}</div>
               <div className="menu-pop-item danger" onClick={() => setConfirmingDelete(true)}><DeleteOutlined />{t('sidebar_delete')}</div>
             </>
