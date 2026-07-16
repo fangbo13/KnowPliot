@@ -307,7 +307,10 @@ def _mark_turn_failed(turn, error_code):
 
 
 def _checkpoint_turn_sequence(turn_id, sequence):
-    ChatTurn.objects.filter(pk=turn_id).update(last_event_seq=sequence)
+    ChatTurn.objects.filter(
+        pk=turn_id,
+        last_event_seq__lt=sequence,
+    ).update(last_event_seq=sequence)
 
 
 def _has_active_space_membership(user, space) -> bool:

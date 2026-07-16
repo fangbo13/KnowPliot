@@ -28,12 +28,14 @@ from apps.spaces.models import KnowledgeSpace
 
 try:
     from apps.chat.views import (
+        _checkpoint_turn_sequence,
         _stream_v2_enabled,
         chat_turn_events,
         send_message,
     )
 except ImportError:
     _stream_v2_enabled = None
+    _checkpoint_turn_sequence = None
     chat_turn_events = None
     from apps.chat.views import send_message
 
@@ -81,6 +83,21 @@ class StreamNegotiationTest(SimpleTestCase):
     def test_v2_requires_both_flag_and_protocol_two(self):
         self.assertFalse(_stream_v2_enabled(1))
         self.assertTrue(_stream_v2_enabled(2))
+
+    def test_sequence_checkpoint_never_regresses_a_newer_database_cursor(self):
+        turn_id = uuid.uuid4()
+        queryset = Mock()
+        with patch(
+            "apps.chat.views.ChatTurn.objects.filter",
+            return_value=queryset,
+        ) as filtered:
+            _checkpoint_turn_sequence(turn_id, 25)
+
+        filtered.assert_called_once_with(
+            pk=turn_id,
+            last_event_seq__lt=25,
+        )
+        queryset.update.assert_called_once_with(last_event_seq=25)
 
 
 class SendMessageCoordinationTest(SimpleTestCase):

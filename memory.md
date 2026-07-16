@@ -141,7 +141,8 @@ deployment and rollback order is recorded in section 10.
 - Task 3B1 independent-review amendment: atomic Lua event append/retention,
   durable monotonic sequence seeding, renewal-start cleanup, optimistic stale
   convergence, strict active-membership recovery, untrusted replay validation,
-  and stable-code logging without raw exception text.
+  stable-code logging without raw exception text, and a conditional database
+  checkpoint that cannot regress when stream callbacks finish out of order.
 
 ### In Progress
 
@@ -189,7 +190,7 @@ deployment and rollback order is recorded in section 10.
 | Evidence | Result | Provenance / limitation |
 |---|---|---|
 | Task 3A backend pure/SimpleTestCase | 17 passed | Includes locked session resolution, required/derived scope, history-failure recovery, model, serializer, transition, duplicate, status-owner, and no-RAG replay contracts. |
-| Task 3A + Task 3B1 backend pure/SimpleTestCase | 60 passed (+ 5 subtests) | Includes NX/compare-token lease behavior, renewal-start failure, blocked-provider renewal, every stream cleanup class, v1 bytes, v2 negotiation/event mapping, meta-first ordering, atomic replay retention, durable sequence seeding, malicious-record denial, retry pruning, active-membership denial, log sanitization, Redis failure, and optimistic stale-worker convergence. |
+| Task 3A + Task 3B1 backend pure/SimpleTestCase | 61 passed (+ 5 subtests) | Includes NX/compare-token lease behavior, renewal-start failure, blocked-provider renewal, every stream cleanup class, v1 bytes, v2 negotiation/event mapping, meta-first ordering, atomic replay retention, durable sequence seeding, non-regressing database checkpoints, malicious-record denial, retry pruning, active-membership denial, log sanitization, Redis failure, and optimistic stale-worker convergence. |
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
