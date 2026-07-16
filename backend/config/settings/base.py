@@ -6,6 +6,8 @@ import os
 import warnings
 from pathlib import Path
 
+from .parsing import env_bool
+
 # Load .env file
 try:
     from dotenv import load_dotenv
@@ -248,6 +250,7 @@ CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "yes",
     "on",
 }
+CAPABILITY_NAV = env_bool("CAPABILITY_NAV", default=False)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

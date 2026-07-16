@@ -1,0 +1,377 @@
+# Copyright (c) 2026 Haibo Fang.
+# Licensed under the CC BY-NC-SA 4.0 License.
+# See LICENSE file in the project root for full license details.
+
+"""API contracts for the tenant-safe capability resolver."""
+
+from datetime import timedelta
+from uuid import UUID
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from apps.rbac.capabilities import (
+    BUSINESS_ADMIN_CAPABILITIES,
+    ORGANIZATION_ADMIN_CAPABILITIES,
+    PLATFORM_CAPABILITIES,
+    SPACE_ROLE_CAPABILITIES,
+)
+from apps.rbac.models import Role, UserRole
+from apps.spaces.models import (
+    BusinessLine,
+    KnowledgeSpace,
+    Organization,
+    OrganizationMembership,
+    SpaceMembership,
+)
+from apps.spaces.permissions import admin_scope, is_platform_admin
+
+User = get_user_model()
+ENDPOINT = "/api/v1/rbac/me/capabilities/"
+
+
+class CapabilityEndpointTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = Organization.objects.create(
+            name="Active organization",
+            slug="capabilities-active",
+        )
+        cls.business_line = BusinessLine.objects.create(
+            organization=cls.organization,
+            name="Active line",
+            code="CAP-A",
+        )
+        cls.space = KnowledgeSpace.objects.create(
+            organization=cls.organization,
+            business_line=cls.business_line,
+            name="Private capability space",
+            code="capabilities-private",
+            visibility="private",
+        )
+        cls.other_organization = Organization.objects.create(
+            name="Other organization",
+            slug="capabilities-other",
+        )
+        cls.other_space = KnowledgeSpace.objects.create(
+            organization=cls.other_organization,
+            name="Other private space",
+            code="capabilities-other-private",
+            visibility="private",
+        )
+
+        cls.users = {}
+        for role in ("owner", "knowledge_admin", "reviewer", "member", "guest"):
+            user = User.objects.create_user(
+                email=f"cap-{role}@example.test",
+                username=f"cap-{role}",
+                password="not-used",
+            )
+            SpaceMembership.objects.create(user=user, space=cls.space, role=role)
+            cls.users[role] = user
+
+        cls.org_admin = User.objects.create_user(
+            email="cap-org@example.test",
+            username="cap-org",
+            password="not-used",
+        )
+        OrganizationMembership.objects.create(
+            user=cls.org_admin,
+            organization=cls.organization,
+            role=OrganizationMembership.ROLE_ORG_ADMIN,
+        )
+
+        cls.business_admin = User.objects.create_user(
+            email="cap-business@example.test",
+            username="cap-business",
+            password="not-used",
+        )
+        OrganizationMembership.objects.create(
+            user=cls.business_admin,
+            organization=cls.organization,
+            business_line=cls.business_line,
+            role=OrganizationMembership.ROLE_BUSINESS_ADMIN,
+        )
+
+        cls.superuser = User.objects.create_superuser(
+            email="cap-super@example.test",
+            username="cap-super",
+            password="not-used",
+        )
+        cls.global_admin = User.objects.create_user(
+            email="cap-global@example.test",
+            username="cap-global",
+            password="not-used",
+        )
+        cls.admin_role = Role.objects.create(
+            name="admin",
+            label="Global administrator",
+            scope="system",
+        )
+        UserRole.objects.create(user=cls.global_admin, role=cls.admin_role)
+
+        cls.unscoped_legacy = User.objects.create_user(
+            email="cap-legacy@example.test",
+            username="cap-legacy",
+            password="not-used",
+            is_hr_admin=True,
+            role_level="manager",
+        )
+        cls.hr_role = Role.objects.create(
+            name="hr",
+            label="Legacy HR",
+            scope="content",
+        )
+        UserRole.objects.create(user=cls.unscoped_legacy, role=cls.hr_role)
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def get_capabilities(self, user=None, space_id=None):
+        self.client.force_authenticate(user=user)
+        query = {} if space_id is None else {"space_id": str(space_id)}
+        return self.client.get(ENDPOINT, query)
+
+    def test_authentication_is_required(self):
+        response = self.get_capabilities()
+        self.assertEqual(response.status_code, 401)
+
+    def test_every_space_role_returns_the_locked_allow_and_deny_matrix(self):
+        for role, user in self.users.items():
+            with self.subTest(role=role):
+                response = self.get_capabilities(user, self.space.id)
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(
+                    response.data["capabilities"],
+                    sorted(SPACE_ROLE_CAPABILITIES[role]),
+                )
+                self.assertEqual(response.data["scopes"]["space_ids"], [str(self.space.id)])
+                expected_console = (
+                    f"/workspace/{self.space.id}/manage"
+                    if role in {"owner", "knowledge_admin", "reviewer"}
+                    else "/chat"
+                )
+                self.assertEqual(response.data["default_console"], expected_console)
+
+        for role in ("knowledge_admin", "reviewer", "guest"):
+            response = self.get_capabilities(self.users[role], self.space.id)
+            self.assertNotIn("chat.share", response.data["capabilities"])
+            self.assertNotIn("chat.export", response.data["capabilities"])
+
+    def test_organization_admin_is_governance_scoped_and_gets_selected_space_operations(self):
+        response = self.get_capabilities(self.org_admin, self.space.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["scopes"]["organization_ids"], [str(self.organization.id)])
+        self.assertEqual(response.data["scopes"]["business_line_ids"], [])
+        self.assertEqual(
+            response.data["capabilities"],
+            sorted(ORGANIZATION_ADMIN_CAPABILITIES | SPACE_ROLE_CAPABILITIES["owner"]),
+        )
+        self.assertEqual(response.data["default_console"], "/governance")
+        self.assertNotIn("platform.access", response.data["capabilities"])
+
+    def test_business_admin_cannot_receive_organization_or_platform_authority(self):
+        response = self.get_capabilities(self.business_admin, self.space.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["scopes"]["organization_ids"], [])
+        self.assertEqual(
+            response.data["scopes"]["business_line_ids"],
+            [str(self.business_line.id)],
+        )
+        self.assertEqual(
+            response.data["capabilities"],
+            sorted(BUSINESS_ADMIN_CAPABILITIES | SPACE_ROLE_CAPABILITIES["owner"]),
+        )
+        self.assertEqual(response.data["default_console"], "/governance")
+        self.assertNotIn("governance.organization.settings.manage", response.data["capabilities"])
+        self.assertNotIn("platform.access", response.data["capabilities"])
+
+    def test_superuser_and_active_global_admin_role_are_platform_authority(self):
+        for user in (self.superuser, self.global_admin):
+            with self.subTest(user=user.username):
+                response = self.get_capabilities(user, self.space.id)
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertTrue(response.data["scopes"]["platform"])
+                self.assertEqual(response.data["default_console"], "/platform-admin")
+                self.assertTrue(
+                    set(response.data["capabilities"]).issuperset(PLATFORM_CAPABILITIES)
+                )
+                self.assertTrue(
+                    set(response.data["capabilities"]).issuperset(
+                        SPACE_ROLE_CAPABILITIES["owner"]
+                    )
+                )
+
+    def test_inactive_global_role_does_not_grant_platform_authority(self):
+        self.admin_role.is_active = False
+        self.admin_role.save(update_fields=["is_active"])
+
+        response = self.get_capabilities(self.global_admin)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(response.data["scopes"]["platform"])
+        self.assertEqual(response.data["capabilities"], [])
+        self.assertEqual(response.data["default_console"], "/chat")
+
+    def test_authoritative_platform_check_rejects_an_inactive_global_role(self):
+        self.admin_role.is_active = False
+        self.admin_role.save(update_fields=["is_active"])
+
+        self.assertFalse(is_platform_admin(self.global_admin))
+
+    def test_authoritative_admin_scope_rejects_inactive_expired_and_archived_grants(self):
+        organization_membership = OrganizationMembership.objects.get(user=self.org_admin)
+        organization_membership.is_active = False
+        organization_membership.save(update_fields=["is_active"])
+        self.assertEqual(admin_scope(self.org_admin), (set(), set()))
+
+        organization_membership.is_active = True
+        organization_membership.expires_at = timezone.now() - timedelta(seconds=1)
+        organization_membership.save(update_fields=["is_active", "expires_at"])
+        self.assertEqual(admin_scope(self.org_admin), (set(), set()))
+
+        self.business_line.status = "archived"
+        self.business_line.save(update_fields=["status"])
+        self.assertEqual(admin_scope(self.business_admin), (set(), set()))
+
+        self.organization.status = "archived"
+        self.organization.save(update_fields=["status"])
+        self.assertEqual(admin_scope(self.org_admin), (set(), set()))
+
+    def test_unscoped_legacy_flags_and_role_level_never_grant_new_capabilities(self):
+        response = self.get_capabilities(self.unscoped_legacy)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data,
+            {
+                "scopes": {
+                    "platform": False,
+                    "organization_ids": [],
+                    "business_line_ids": [],
+                    "space_ids": [],
+                },
+                "capabilities": [],
+                "default_console": "/chat",
+            },
+        )
+        hidden = self.get_capabilities(self.unscoped_legacy, self.space.id)
+        self.assertEqual(hidden.status_code, 404)
+
+    def test_inactive_and_expired_space_memberships_are_not_accessible(self):
+        user = self.users["member"]
+        membership = SpaceMembership.objects.get(user=user, space=self.space)
+
+        membership.status = "revoked"
+        membership.save(update_fields=["status"])
+        inactive = self.get_capabilities(user, self.space.id)
+        self.assertEqual(inactive.status_code, 404)
+
+        membership.status = "active"
+        membership.expires_at = timezone.now() - timedelta(seconds=1)
+        membership.save(update_fields=["status", "expires_at"])
+        expired = self.get_capabilities(user, self.space.id)
+        self.assertEqual(expired.status_code, 404)
+
+    def test_inactive_and_expired_governance_memberships_are_not_scopes(self):
+        membership = OrganizationMembership.objects.get(user=self.org_admin)
+        membership.is_active = False
+        membership.save(update_fields=["is_active"])
+        inactive = self.get_capabilities(self.org_admin)
+        self.assertEqual(inactive.status_code, 200, inactive.data)
+        self.assertEqual(inactive.data["scopes"]["organization_ids"], [])
+        self.assertNotIn("governance.access", inactive.data["capabilities"])
+
+        membership.is_active = True
+        membership.expires_at = timezone.now() - timedelta(seconds=1)
+        membership.save(update_fields=["is_active", "expires_at"])
+        expired = self.get_capabilities(self.org_admin, self.space.id)
+        self.assertEqual(expired.status_code, 404)
+
+    def test_archived_organization_business_line_or_space_is_never_an_effective_scope(self):
+        self.space.status = "archived"
+        self.space.save(update_fields=["status"])
+        archived_space = self.get_capabilities(self.users["owner"])
+        self.assertNotIn(str(self.space.id), archived_space.data["scopes"]["space_ids"])
+        self.assertEqual(self.get_capabilities(self.users["owner"], self.space.id).status_code, 404)
+
+        self.space.status = "active"
+        self.space.save(update_fields=["status"])
+        self.business_line.status = "archived"
+        self.business_line.save(update_fields=["status"])
+        archived_line = self.get_capabilities(self.business_admin)
+        self.assertEqual(archived_line.data["scopes"]["business_line_ids"], [])
+        self.assertNotIn(str(self.space.id), archived_line.data["scopes"]["space_ids"])
+
+        self.business_line.status = "active"
+        self.business_line.save(update_fields=["status"])
+        self.organization.status = "archived"
+        self.organization.save(update_fields=["status"])
+        archived_org = self.get_capabilities(self.org_admin)
+        self.assertEqual(archived_org.data["scopes"]["organization_ids"], [])
+        self.assertNotIn(str(self.space.id), archived_org.data["scopes"]["space_ids"])
+
+    def test_inaccessible_invalid_and_nonexistent_space_ids_share_not_found_policy(self):
+        outsider = User.objects.create_user(
+            email="cap-outsider@example.test",
+            username="cap-outsider",
+            password="not-used",
+        )
+        responses = [
+            self.get_capabilities(outsider, self.space.id),
+            self.get_capabilities(outsider, "not-a-uuid"),
+            self.get_capabilities(
+                outsider,
+                UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            ),
+        ]
+        baseline = responses[0].data
+
+        for response in responses:
+            with self.subTest(status=response.status_code):
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.data, baseline)
+                self.assertEqual(response.data["detail"], "Space not found.")
+
+    @override_settings(ENABLE_PUBLIC_DEMO_SPACES=True)
+    def test_active_public_demo_is_a_guest_scope_only(self):
+        public_space = KnowledgeSpace.objects.create(
+            organization=self.other_organization,
+            name="Public demo",
+            code="capabilities-public",
+            visibility="public_demo",
+        )
+        outsider = User.objects.create_user(
+            email="cap-public@example.test",
+            username="cap-public",
+            password="not-used",
+        )
+
+        response = self.get_capabilities(outsider, public_space.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["capabilities"], ["chat.ask"])
+        self.assertEqual(response.data["scopes"]["space_ids"], [str(public_space.id)])
+        self.assertEqual(response.data["default_console"], "/chat")
+
+    @override_settings(ENABLE_PUBLIC_DEMO_SPACES=False)
+    def test_public_demo_flag_disabled_does_not_create_guest_authority(self):
+        public_space = KnowledgeSpace.objects.create(
+            organization=self.other_organization,
+            name="Disabled public demo",
+            code="capabilities-public-disabled",
+            visibility="public_demo",
+        )
+        outsider = User.objects.create_user(
+            email="cap-public-off@example.test",
+            username="cap-public-off",
+            password="not-used",
+        )
+
+        response = self.get_capabilities(outsider, public_space.id)
+
+        self.assertEqual(response.status_code, 404)

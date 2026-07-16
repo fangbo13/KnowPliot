@@ -234,6 +234,8 @@ class OrganizationMembership(models.Model):
         related_name="org_memberships",
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -244,6 +246,14 @@ class OrganizationMembership(models.Model):
     def __str__(self):
         scope = self.business_line.code if self.business_line else self.organization.slug
         return f"{self.user} = {self.role} @ {scope}"
+
+    @property
+    def is_effective(self) -> bool:
+        """An explicit governance grant must be active and unexpired."""
+
+        if not self.is_active:
+            return False
+        return not self.expires_at or self.expires_at >= timezone.now()
 
 
 class InviteCode(models.Model):

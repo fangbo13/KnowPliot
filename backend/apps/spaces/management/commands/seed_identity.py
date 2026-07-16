@@ -127,18 +127,4 @@ class Command(BaseCommand):
         else:
             out.write("  = Admin registration codes already exist (skipped)")
 
-        # 6. Backfill: legacy is_hr_admin users -> knowledge_admin of 'general'
-        #    (V7 deprecation of the global hr flag — see spec §10). Best-effort.
-        from apps.spaces.models import SpaceMembership
-        backfilled = 0
-        for u in User.objects.filter(is_hr_admin=True, is_superuser=False):
-            _, created = SpaceMembership.objects.get_or_create(
-                space=general, user=u,
-                defaults={"role": SpaceMembership.ROLE_KNOWLEDGE_ADMIN, "status": "active"},
-            )
-            if created:
-                backfilled += 1
-        if backfilled:
-            out.write(f"  + Backfilled {backfilled} is_hr_admin user(s) as knowledge_admin of 'general'")
-
         out.write(self.style.SUCCESS("\n[OK] seed_identity complete."))

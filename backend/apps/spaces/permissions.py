@@ -23,6 +23,7 @@ All checks here are **server-side**. Frontend role guards are UX only.
 from __future__ import annotations
 
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import BasePermission
 
@@ -99,7 +100,14 @@ def is_platform_admin(user) -> bool:
     if user.is_superuser:
         return True
     try:
-        return user.has_role("admin")
+        from apps.rbac.models import UserRole
+
+        return UserRole.objects.filter(
+            user=user,
+            is_active=True,
+            role__name="admin",
+            role__is_active=True,
+        ).exists()
     except Exception:
         return False
 
@@ -113,14 +121,29 @@ def admin_scope(user) -> tuple[set, set]:
         return set(), set()
     org_ids: set = set()
     bl_ids: set = set()
-    rows = OrganizationMembership.objects.filter(user=user).values_list(
-        "role", "organization_id", "business_line_id"
+    now = timezone.now()
+    rows = (
+        OrganizationMembership.objects.filter(
+            user=user,
+            is_active=True,
+            organization__status="active",
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=now))
+        .select_related("business_line")
     )
-    for role, org_id, bl_id in rows:
+    for membership in rows:
+        role = membership.role
+        org_id = membership.organization_id
+        business_line = membership.business_line
         if role == OrganizationMembership.ROLE_ORG_ADMIN:
             org_ids.add(org_id)
-        elif role == OrganizationMembership.ROLE_BUSINESS_ADMIN and bl_id:
-            bl_ids.add(bl_id)
+        elif (
+            role == OrganizationMembership.ROLE_BUSINESS_ADMIN
+            and business_line is not None
+            and business_line.organization_id == org_id
+            and business_line.status == "active"
+        ):
+            bl_ids.add(business_line.id)
     return org_ids, bl_ids
 
 
@@ -203,8 +226,8 @@ def accessible_spaces(user):
 def get_space_or_404(space_id) -> KnowledgeSpace:
     try:
         return KnowledgeSpace.objects.get(id=space_id)
-    except (KnowledgeSpace.DoesNotExist, ValueError, TypeError):
-        raise NotFound("Space not found.")
+    except (KnowledgeSpace.DoesNotExist, ValueError, TypeError) as exc:
+        raise NotFound("Space not found.") from exc
 
 
 def resolve_request_space(request, *, require_perm: str | None = None, required: bool = True):

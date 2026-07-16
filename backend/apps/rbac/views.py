@@ -20,23 +20,25 @@ V4.2 SYS-V4.2-022: Added self-deactivation prevention.
   - /api/v1/users/<id>/deactivate/     POST   HasPermission('user.deactivate')
 """
 
-from rest_framework import generics, status, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
-from apps.core.permissions import HasPermission, HasRole
 from apps.audit.views import create_audit_log
-from .models import Role, Permission, RolePermission, UserRole
-from .serializers import (
-    RoleSerializer,
-    PermissionSerializer,
-    RolePermissionSerializer,
-    UserRoleSerializer,
-    UserRoleAssignSerializer,
-)
+from apps.core.permissions import HasPermission, HasRole
 from apps.users.models import User
 from apps.users.serializers import UserManageSerializer
+
+from .capabilities import resolve_capabilities
+from .models import Permission, Role, RolePermission, UserRole
+from .serializers import (
+    PermissionSerializer,
+    RolePermissionSerializer,
+    RoleSerializer,
+    UserRoleAssignSerializer,
+    UserRoleSerializer,
+)
 
 
 # V4.2 SYS-V4.2-008: Dedicated throttle for admin_user_deactivate
@@ -51,6 +53,19 @@ class DeactivateUserRateThrottle(UserRateThrottle):
 # Now: 5/min per user — prevents rapid bulk role escalation attacks.
 class RoleAssignmentRateThrottle(UserRateThrottle):
     rate = "5/minute"
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def my_capabilities(request):
+    """Return the caller's effective, scope-bound capability contract."""
+
+    return Response(
+        resolve_capabilities(
+            request.user,
+            space_id=request.query_params.get("space_id"),
+        )
+    )
 
 
 # ── RBAC Management Endpoints ──────────────────────────────────────────

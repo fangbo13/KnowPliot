@@ -5,20 +5,24 @@
 """RBAC URL routes — V4.0 dual-track permission system."""
 
 from django.urls import path
+
 from .views import (
-    RoleListView,
-    PermissionListView,
-    RolePermissionsView,
-    UserRoleListView,
-    UserRoleDetailView,
-    AdminUserListView,
     AdminUserCreateView,
+    AdminUserListView,
     AdminUserUpdateView,
+    PermissionListView,
+    RoleListView,
+    RolePermissionsView,
+    UserRoleDetailView,
+    UserRoleListView,
     admin_user_activate,
     admin_user_deactivate,
+    my_capabilities,
 )
 
 urlpatterns = [
+    path("me/capabilities/", my_capabilities, name="rbac-my-capabilities"),
+
     # ── RBAC Management ──
     path("roles/", RoleListView.as_view(), name="rbac-roles"),
     path("permissions/", PermissionListView.as_view(), name="rbac-permissions"),
