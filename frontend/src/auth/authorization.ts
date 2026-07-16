@@ -76,6 +76,14 @@ const WORKSPACE_MANAGE_ROLES = new Set<SpaceRole>([
   'business_admin',
 ]);
 
+function isWorkspaceBoundCapability(capability: Capability): boolean {
+  return capability.startsWith('chat.') ||
+    capability.startsWith('workspace.') ||
+    capability.startsWith('knowledge.') ||
+    capability.startsWith('quality.') ||
+    capability === 'audit.read';
+}
+
 export function safeConsolePath(path: string): string {
   if (path === '/chat' || path === '/platform-admin' || path === '/governance') return path;
   if (/^\/workspace\/[^/]+\/manage$/.test(path)) return path;
@@ -141,7 +149,11 @@ export function createAuthorizationAdapter({
   const capabilitySet = new Set(snapshot?.capabilities ?? []);
   const has = (capability: Capability): boolean => {
     if (capabilityNavigationEnabled) {
-      return status === 'ready' && capabilitySet.has(capability);
+      if (status !== 'ready' || !capabilitySet.has(capability)) return false;
+      const activeWorkspaceIsScoped = Boolean(
+        activeSpaceId && snapshot?.scopes.space_ids.includes(activeSpaceId),
+      );
+      return !isWorkspaceBoundCapability(capability) || activeWorkspaceIsScoped;
     }
     return legacyHas(capability, legacyUser, activeSpaceRole);
   };

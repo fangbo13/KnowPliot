@@ -82,4 +82,60 @@ describe('authorization compatibility adapter', () => {
 
     expect(access.defaultConsole).toBe('/chat');
   });
+
+  it('keeps global capabilities but denies workspace-bound capabilities for a revoked active space', () => {
+    const access = createAuthorizationAdapter({
+      capabilityNavigationEnabled: true,
+      status: 'ready',
+      snapshot: {
+        ...workspaceSnapshot,
+        scopes: { ...workspaceSnapshot.scopes, platform: true, space_ids: [] },
+        capabilities: [
+          'platform.access',
+          'governance.access',
+          'chat.ask',
+          'workspace.manage',
+          'knowledge.read',
+        ],
+        default_console: '/platform-admin',
+      },
+      legacyUser: legacyAdmin,
+      activeSpaceRole: 'owner',
+      activeSpaceId: 'revoked-space',
+    });
+
+    expect(access.has('platform.access')).toBe(true);
+    expect(access.has('governance.access')).toBe(true);
+    expect(access.has('chat.ask')).toBe(false);
+    expect(access.has('workspace.manage')).toBe(false);
+    expect(access.has('knowledge.read')).toBe(false);
+  });
+
+  it('fails workspace-bound capabilities closed until an active space is selected', () => {
+    const access = createAuthorizationAdapter({
+      capabilityNavigationEnabled: true,
+      status: 'ready',
+      snapshot: {
+        ...workspaceSnapshot,
+        scopes: { ...workspaceSnapshot.scopes, platform: true },
+        capabilities: [
+          'platform.access',
+          'governance.access',
+          'chat.ask',
+          'workspace.manage',
+          'knowledge.read',
+        ],
+        default_console: '/platform-admin',
+      },
+      legacyUser: legacyAdmin,
+      activeSpaceRole: null,
+      activeSpaceId: null,
+    });
+
+    expect(access.has('platform.access')).toBe(true);
+    expect(access.has('governance.access')).toBe(true);
+    expect(access.has('chat.ask')).toBe(false);
+    expect(access.has('workspace.manage')).toBe(false);
+    expect(access.has('knowledge.read')).toBe(false);
+  });
 });

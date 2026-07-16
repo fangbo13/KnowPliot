@@ -4,7 +4,7 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, Table, Button, Space, Upload, message, Modal } from 'antd';
 import {
   InboxOutlined,
@@ -19,6 +19,7 @@ import {
   documentApi,
   isSupportedDocumentFile,
 } from '../../api/documents';
+import { useAuthorization } from '../../auth/CapabilityProvider';
 
 interface Document {
   id: string;
@@ -43,10 +44,16 @@ const tagStyleMap: Record<string, { bg: string; text: string; border: string }> 
 
 export default function KnowledgeBasePage() {
   const { t } = useTranslation('common');
+  const access = useAuthorization();
+  const canRead = access.has('knowledge.read');
+  const canManage = access.has('knowledge.manage');
+  const canIndex = access.has('knowledge.index');
+  const canDownload = access.has('knowledge.download');
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
+    if (!canRead) return;
     setLoading(true);
     try {
       const data = await documentApi.getDocuments();
@@ -56,13 +63,14 @@ export default function KnowledgeBasePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [canRead, t]);
 
   useEffect(() => {
-    loadDocuments();
-  }, []);
+    void loadDocuments();
+  }, [loadDocuments]);
 
   const handleReindex = async (id: string) => {
+    if (!canIndex) return;
     try {
       await documentApi.reindexDocument(id);
       message.success(t('reindex_success'));
@@ -73,6 +81,7 @@ export default function KnowledgeBasePage() {
   };
 
   const handleArchive = async (id: string) => {
+    if (!canManage) return;
     try {
       await documentApi.archiveDocument(id);
       message.success(t('archive_success'));
@@ -83,6 +92,7 @@ export default function KnowledgeBasePage() {
   };
 
   const handleDownload = async (record: Document) => {
+    if (!canDownload) return;
     try {
       const { blob, filename } = await documentApi.downloadDocument(
         record.id,
@@ -106,6 +116,7 @@ export default function KnowledgeBasePage() {
   };
 
   const confirmArchive = (id: string, title: string) => {
+    if (!canManage) return;
     Modal.confirm({
       title: t('archive_confirm'),
       content: t('archive_confirm_content').replace('%s', title),
@@ -118,6 +129,7 @@ export default function KnowledgeBasePage() {
   const MAX_FILE_SIZE_MB = 50;
 
   const beforeUpload = (file: File) => {
+    if (!canManage) return Upload.LIST_IGNORE;
     if (!isSupportedDocumentFile(file.name)) {
       message.error(t('file_type_error'));
       return Upload.LIST_IGNORE;
@@ -129,6 +141,8 @@ export default function KnowledgeBasePage() {
     }
     return true;
   };
+
+  if (!canRead) return null;
 
   const statusLabels: Record<string, string> = {
     active: t('status_active'),
@@ -174,42 +188,51 @@ export default function KnowledgeBasePage() {
       },
     },
     { title: t('kb_created'), dataIndex: 'created_at', key: 'created_at', width: 180 },
-    {
+  ];
+
+  if (canDownload || canIndex || canManage) {
+    columns.push({
       title: t('kb_actions'),
       key: 'actions',
       width: 190,
       render: (_: unknown, record: Document) => (
         <Space size="middle">
-          <Button
-            size="small"
-            icon={<DownloadOutlined />}
-            aria-label={t('download')}
-            title={t('download')}
-            onClick={() => handleDownload(record)}
-            style={{ borderRadius: 6 }}
-          />
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            onClick={() => handleReindex(record.id)}
-            disabled={record.status === 'processing'}
-            aria-label={t('reindex')}
-            title={t('reindex')}
-            style={{ borderRadius: 6 }}
-          />
-          <Button
-            size="small"
-            icon={<InboxOutlined />}
-            onClick={() => confirmArchive(record.id, record.title)}
-            disabled={record.status === 'archived'}
-            aria-label={t('archive')}
-            title={t('archive')}
-            style={{ borderRadius: 6 }}
-          />
+          {canDownload && (
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              aria-label={t('download')}
+              title={t('download')}
+              onClick={() => handleDownload(record)}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canIndex && (
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => handleReindex(record.id)}
+              disabled={record.status === 'processing'}
+              aria-label={t('reindex')}
+              title={t('reindex')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canManage && (
+            <Button
+              size="small"
+              icon={<InboxOutlined />}
+              onClick={() => confirmArchive(record.id, record.title)}
+              disabled={record.status === 'archived'}
+              aria-label={t('archive')}
+              title={t('archive')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
         </Space>
       ),
-    },
-  ];
+    });
+  }
 
   return (
     <div className="page" style={{ background: 'transparent' }}>
@@ -227,57 +250,59 @@ export default function KnowledgeBasePage() {
               {t('document_list') || 'Document List'}
             </span>
             <Space size="middle">
-          <Upload
-            customRequest={async ({ file, onError, onSuccess }) => {
-              try {
-                const result = await documentApi.uploadDocument(file as File);
-                onSuccess?.(result);
-              } catch (error) {
-                onError?.(
-                  error instanceof Error
-                    ? error
-                    : new Error('Document upload failed'),
-                );
-              }
-            }}
-            accept={ALLOWED_DOCUMENT_EXTENSIONS.join(',')}
-            beforeUpload={beforeUpload}
-            showUploadList={false}
-            onChange={(info) => {
-              if (info.file.status === 'done') {
-                message.success(t('upload_success'));
-                loadDocuments();
-              } else if (info.file.status === 'error') {
-                message.error(t('upload_error'));
-              }
-            }}
-          >
-            <Button type="primary" icon={<UploadOutlined />} style={{ borderRadius: 8 }} className="btn-press">
-              {t('upload')}
-            </Button>
-          </Upload>
-          <Button icon={<ReloadOutlined />} onClick={loadDocuments} style={{ borderRadius: 8 }} className="btn-press">
-            {t('refresh')}
-          </Button>
-        </Space>
-      </div>
+              {canManage && (
+                <Upload
+                  customRequest={async ({ file, onError, onSuccess }) => {
+                    try {
+                      const result = await documentApi.uploadDocument(file as File);
+                      onSuccess?.(result);
+                    } catch (error) {
+                      onError?.(
+                        error instanceof Error
+                          ? error
+                          : new Error('Document upload failed'),
+                      );
+                    }
+                  }}
+                  accept={ALLOWED_DOCUMENT_EXTENSIONS.join(',')}
+                  beforeUpload={beforeUpload}
+                  showUploadList={false}
+                  onChange={(info) => {
+                    if (info.file.status === 'done') {
+                      message.success(t('upload_success'));
+                      loadDocuments();
+                    } else if (info.file.status === 'error') {
+                      message.error(t('upload_error'));
+                    }
+                  }}
+                >
+                  <Button type="primary" icon={<UploadOutlined />} aria-label={t('upload')} style={{ borderRadius: 8 }} className="btn-press">
+                    {t('upload')}
+                  </Button>
+                </Upload>
+              )}
+              <Button icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={loadDocuments} style={{ borderRadius: 8 }} className="btn-press">
+                {t('refresh')}
+              </Button>
+            </Space>
+          </div>
 
-      <Table
-        columns={columns}
-        dataSource={documents}
-        loading={loading}
-        rowKey="id"
-        pagination={{ pageSize: 10 }}
-        scroll={{ x: 'max-content' }}
-        locale={{
-          emptyText: (
-            <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
-              <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-              <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('no_documents') || 'No documents'}</div>
-            </div>
-          ),
-        }}
-      />
+          <Table
+            columns={columns}
+            dataSource={documents}
+            loading={loading}
+            rowKey="id"
+            pagination={{ pageSize: 10 }}
+            scroll={{ x: 'max-content' }}
+            locale={{
+              emptyText: (
+                <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
+                  <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+                  <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('no_documents') || 'No documents'}</div>
+                </div>
+              ),
+            }}
+          />
         </Card>
       </div>
     </div>

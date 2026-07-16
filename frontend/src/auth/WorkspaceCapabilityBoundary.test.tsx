@@ -9,6 +9,10 @@ import { useSpaceStore } from '../store/spaceStore';
 import { CapabilityProvider } from './CapabilityProvider';
 import { WorkspaceCapabilityBoundary } from './WorkspaceCapabilityBoundary';
 
+const setActiveSpace = vi.fn(async (spaceId: string) => {
+  useSpaceStore.setState({ activeSpaceId: spaceId });
+});
+
 vi.mock('./AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'user-1' } }),
 }));
@@ -35,10 +39,9 @@ describe('WorkspaceCapabilityBoundary', () => {
     useSpaceStore.setState({
       activeSpaceId: 'space-a',
       spaces: [],
-      setActiveSpace: async (spaceId: string) => {
-        useSpaceStore.setState({ activeSpaceId: spaceId });
-      },
+      setActiveSpace,
     });
+    setActiveSpace.mockClear();
   });
 
   afterEach(() => {
@@ -78,12 +81,50 @@ describe('WorkspaceCapabilityBoundary', () => {
     await waitFor(() => {
       expect(me).toHaveBeenCalledWith('space-b', expect.any(AbortSignal));
     });
+    expect(setActiveSpace).not.toHaveBeenCalled();
 
     await act(async () => a.resolve(workspace('space-a')));
     expect(screen.queryByText('Workspace B content')).toBeNull();
 
     await act(async () => b.resolve(workspace('space-b')));
     await waitFor(() => expect(screen.getByText('Workspace B content')).toBeTruthy());
+    expect(setActiveSpace).toHaveBeenCalledWith('space-b');
     expect(me.mock.calls[me.mock.calls.length - 1]?.[0]).toBe('space-b');
+  });
+
+  it('does not switch or persist an inaccessible workspace URL', async () => {
+    vi.spyOn(capabilitiesApi, 'me').mockImplementation((spaceId) => {
+      if (spaceId === 'revoked-space') {
+        return Promise.reject({ response: { status: 404 } });
+      }
+      return Promise.resolve(workspace('space-a'));
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={['/workspace/revoked-space/manage']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <CapabilityProvider enabled>
+          <Routes>
+            <Route
+              path="/workspace/:spaceId/manage"
+              element={(
+                <WorkspaceCapabilityBoundary>
+                  <div>Revoked content</div>
+                </WorkspaceCapabilityBoundary>
+              )}
+            />
+          </Routes>
+        </CapabilityProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Access denied' })).toBeTruthy();
+    });
+    expect(setActiveSpace).not.toHaveBeenCalled();
+    expect(useSpaceStore.getState().activeSpaceId).toBe('space-a');
+    expect(screen.queryByText('Revoked content')).toBeNull();
   });
 });

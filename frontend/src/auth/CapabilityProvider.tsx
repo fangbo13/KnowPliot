@@ -100,8 +100,18 @@ export function CapabilityProvider({
       resolvedUserId: null,
       resolvedSpaceId: null,
     });
-    void capabilitiesApi.me(activeSpaceId, controller.signal).then(
-      (snapshot) => {
+    const isCurrent = () =>
+      !controller.signal.aborted && sequence === requestSequence.current;
+    const resolveCapabilities = async () => {
+      try {
+        let snapshot: CapabilitySnapshot;
+        try {
+          snapshot = await capabilitiesApi.me(activeSpaceId, controller.signal);
+        } catch (error: unknown) {
+          const status = (error as { response?: { status?: number } })?.response?.status;
+          if (status !== 404 || !requestedSpaceId) throw error;
+          snapshot = await capabilitiesApi.me(null, controller.signal);
+        }
         if (controller.signal.aborted || sequence !== requestSequence.current) return;
         setState({
           status: 'ready',
@@ -110,9 +120,8 @@ export function CapabilityProvider({
           resolvedUserId: requestedUserId,
           resolvedSpaceId: requestedSpaceId,
         });
-      },
-      (error: unknown) => {
-        if (controller.signal.aborted || sequence !== requestSequence.current) return;
+      } catch (error: unknown) {
+        if (!isCurrent()) return;
         const status = (error as { response?: { status?: number } })?.response?.status;
         if (status === 403 || status === 404) {
           setState({
@@ -131,8 +140,9 @@ export function CapabilityProvider({
             resolvedSpaceId: requestedSpaceId,
           });
         }
-      },
-    );
+      }
+    };
+    void resolveCapabilities();
 
     return () => controller.abort();
   }, [activeSpaceId, enabled, refreshVersion, user?.id]);

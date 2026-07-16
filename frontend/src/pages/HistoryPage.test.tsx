@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { chatApi } from '../api/chat';
 import HistoryPage from './HistoryPage';
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   loadSessions: vi.fn(),
   setActiveSession: vi.fn(),
   navigate: vi.fn(),
+  canShare: false,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -31,6 +32,10 @@ vi.mock('../api/chat', () => ({
   },
 }));
 
+vi.mock('../auth/CapabilityProvider', () => ({
+  useAuthorization: () => ({ has: (capability: string) => capability === 'chat.share' && mocks.canShare }),
+}));
+
 vi.mock('../store/chatStore', () => ({
   useChatStore: () => ({
     sessions: [{
@@ -46,12 +51,14 @@ vi.mock('../store/chatStore', () => ({
 }));
 
 vi.mock('../components/chat/MessageBubble', () => ({
-  default: ({ message }: { message: { content: string } }) => (
-    <div data-testid="history-message">{message.content}</div>
+  default: ({ message, canShare }: { message: { content: string }; canShare?: boolean }) => (
+    <div data-testid="history-message" data-can-share={String(canShare)}>{message.content}</div>
   ),
 }));
 
 describe('HistoryPage', () => {
+  afterEach(cleanup);
+
   beforeAll(() => {
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -77,6 +84,7 @@ describe('HistoryPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.canShare = false;
     mocks.loadSessions.mockResolvedValue(undefined);
     vi.mocked(chatApi.getMessages).mockResolvedValue({
       results: [
@@ -113,5 +121,19 @@ describe('HistoryPage', () => {
     await screen.findByText('Review session');
     expect(screen.queryByText(/V3\.6 HIGH-001/)).toBeNull();
     expect(screen.queryByText(/Same grouping logic/)).toBeNull();
+  });
+
+  it('passes the exact chat.share decision to history messages', async () => {
+    const view = render(<HistoryPage />);
+    fireEvent.click(await screen.findByText('Review session'));
+    const deniedMessages = await screen.findAllByTestId('history-message');
+    expect(deniedMessages.every((message) => message.getAttribute('data-can-share') === 'false')).toBe(true);
+
+    view.unmount();
+    mocks.canShare = true;
+    render(<HistoryPage />);
+    fireEvent.click(await screen.findByText('Review session'));
+    const allowedMessages = await screen.findAllByTestId('history-message');
+    expect(allowedMessages.every((message) => message.getAttribute('data-can-share') === 'true')).toBe(true);
   });
 });

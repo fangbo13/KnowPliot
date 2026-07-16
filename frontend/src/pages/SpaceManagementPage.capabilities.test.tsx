@@ -104,4 +104,24 @@ describe('SpaceManagementPage capability actions', () => {
     expect(spacesApi.members).not.toHaveBeenCalled();
     expect(spacesApi.listInvites).not.toHaveBeenCalled();
   });
+
+  it('keeps legacy members readable without exposing mutations while disabled', async () => {
+    vi.mocked(useAuthorization).mockReturnValue({
+      enabled: false,
+      status: 'ready',
+      snapshot: null,
+      has: () => false,
+      hasAny: () => false,
+      hasAll: () => false,
+      defaultConsole: '/chat',
+    });
+
+    render(<SpaceManagementPage />);
+
+    await waitFor(() => expect(spacesApi.members).toHaveBeenCalledWith('space-1'));
+    expect(spacesApi.listInvites).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'save' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'add_member' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'generate_code' })).toBeNull();
+  });
 });

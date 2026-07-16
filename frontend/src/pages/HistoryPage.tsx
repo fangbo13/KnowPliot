@@ -15,6 +15,7 @@ import MessageBubble from '../components/chat/MessageBubble';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder, formatDate } from '../utils/dateGroup';
 import i18n from '../i18n';
+import { useAuthorization } from '../auth/CapabilityProvider';
 
 const { Text } = Typography;
 
@@ -22,6 +23,7 @@ type TimeFilter = 'all' | 'today' | 'this_week' | 'this_month' | 'older';
 
 export default function HistoryPage() {
   const { t } = useTranslation('common');
+  const canShare = useAuthorization().has('chat.share');
   // V3.6 HIGH-001: Use i18n language for unified date group labels
   const currentLang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const { sessions, loadSessions, setActiveSession } = useChatStore();
@@ -183,7 +185,7 @@ export default function HistoryPage() {
             padding: '8px 4px 0 0',
           }}>
             {viewMessages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble key={msg.id} message={msg} canShare={canShare} />
             ))}
             {viewMessages.length === 0 && (
               <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>

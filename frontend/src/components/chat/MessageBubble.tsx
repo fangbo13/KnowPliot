@@ -34,6 +34,7 @@ interface Props {
   message: Message;
   isStreaming?: boolean;
   disableActions?: boolean;
+  canShare?: boolean;
   onRegenerate?: () => void;
 }
 
@@ -52,7 +53,7 @@ function isPersistedUuid(id: string): boolean {
  * React.memo (below) keeps non-streaming bubbles from re-parsing Markdown while a
  * different message streams — only the streaming bubble re-renders per frame.
  */
-function MessageBubble({ message, isStreaming = false, disableActions = false, onRegenerate }: Props) {
+function MessageBubble({ message, isStreaming = false, disableActions = false, canShare = false, onRegenerate }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
@@ -235,10 +236,12 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
             {copied ? <CheckOutlined style={{ color: 'var(--color-success)' }} /> : <CopyOutlined />}
             {copied ? (t('copied') || 'Copied') : (t('copy_message') || 'Copy')}
           </button>
-          <button className="msg-action-btn hover-lift btn-press" onClick={handleShare} disabled={disableActions}
-            aria-label={t('share_message')}>
-            <ShareAltOutlined />{t('share_message') || 'Share'}
-          </button>
+          {canShare && (
+            <button className="msg-action-btn hover-lift btn-press" onClick={handleShare} disabled={disableActions}
+              aria-label={t('share_message')}>
+              <ShareAltOutlined />{t('share_message') || 'Share'}
+            </button>
+          )}
           {onRegenerate && (
             <button className="msg-action-btn hover-lift btn-press" onClick={onRegenerate} disabled={disableActions}
               aria-label={t('regenerate')}>
@@ -387,7 +390,8 @@ const MemoizedMessageBubble = memo(MessageBubble, (prev, next) => {
   return prev.message.id === next.message.id
     && prev.message.content === next.message.content
     && prev.isStreaming === next.isStreaming
-    && prev.disableActions === next.disableActions;
+    && prev.disableActions === next.disableActions
+    && prev.canShare === next.canShare;
 });
 
 export default MemoizedMessageBubble;

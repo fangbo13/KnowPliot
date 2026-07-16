@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatPage from './ChatPage';
 
 const mocks = vi.hoisted(() => ({
   chatState: {} as Record<string, unknown>,
   cleanupTokenBatcher: vi.fn(),
+  canShare: false,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -41,6 +42,10 @@ vi.mock('../store/spaceStore', () => ({
     selector({ getActiveSpace: () => null }),
 }));
 
+vi.mock('../auth/CapabilityProvider', () => ({
+  useAuthorization: () => ({ has: (capability: string) => capability === 'chat.share' && mocks.canShare }),
+}));
+
 vi.mock('../stream/TokenBatchRenderer', () => ({
   cleanupTokenBatcher: mocks.cleanupTokenBatcher,
 }));
@@ -50,8 +55,8 @@ vi.mock('../components/chat/WelcomeScreen', () => ({
 }));
 
 vi.mock('../components/chat/VirtualizedMessageList', () => ({
-  default: ({ isStreaming, streamContent }: { isStreaming: boolean; streamContent: string }) => (
-    <div data-testid="message-list" data-streaming={String(isStreaming)}>{streamContent}</div>
+  default: ({ isStreaming, streamContent, canShare }: { isStreaming: boolean; streamContent: string; canShare?: boolean }) => (
+    <div data-testid="message-list" data-streaming={String(isStreaming)} data-can-share={String(canShare)}>{streamContent}</div>
   ),
 }));
 
@@ -62,8 +67,11 @@ vi.mock('../components/chat/ChatComposer', () => ({
 }));
 
 describe('ChatPage stream ownership gating', () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.canShare = false;
     Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
     mocks.chatState = {
       sessions: [{ id: 'session-b', title: 'Session B' }],
@@ -124,5 +132,14 @@ describe('ChatPage stream ownership gating', () => {
     render(<ChatPage />);
 
     expect(screen.queryByText('Generating')).toBeNull();
+  });
+
+  it('passes the exact chat.share decision to message rendering', () => {
+    const view = render(<ChatPage />);
+    expect(screen.getByTestId('message-list').getAttribute('data-can-share')).toBe('false');
+
+    mocks.canShare = true;
+    view.rerender(<ChatPage />);
+    expect(screen.getByTestId('message-list').getAttribute('data-can-share')).toBe('true');
   });
 });

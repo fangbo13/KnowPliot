@@ -16,6 +16,7 @@ import WelcomeScreen from '../components/chat/WelcomeScreen';
 import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 import ChatComposer from '../components/chat/ChatComposer';
 import { chatApi } from '../api/chat';
+import { useAuthorization } from '../auth/CapabilityProvider';
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -42,6 +43,7 @@ function clipForScreenReader(text: string, maxLength = 100): string {
 
 export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
+  const canShare = useAuthorization().has('chat.share');
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
@@ -278,6 +280,7 @@ export default function ChatPageContainer() {
             citations={visibleCitations}
             streamPhase={visibleStreamPhase}
             onRegenerate={handleRetry}
+            canShare={canShare}
             onScrollToBottomChange={setShowScrollFab}
           />
 

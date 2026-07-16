@@ -170,6 +170,20 @@ describe('App history routing', () => {
     expect(adminLayoutSpy).toHaveBeenCalled();
   });
 
+  it('keeps legacy workspace management available to authenticated users while disabled', () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/spaces/manage']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App capabilityNavigationEnabled={false} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Spaces')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Access denied' })).toBeNull();
+  });
+
   it('keeps new console URLs behind the disabled rollout flag', () => {
     accessState.allowed = new Set(['platform.access', 'platform.users.manage']);
     render(

@@ -44,6 +44,7 @@ export default function SpaceManagementPage() {
   const canManageSettings = access.has('workspace.settings.manage');
   const canManageMembers = access.has('workspace.members.manage');
   const canManageInvites = access.has('workspace.invites.manage');
+  const canReadMembers = !access.enabled || canManageMembers;
 
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invites, setInvites] = useState<InviteCode[]>([]);
@@ -72,7 +73,7 @@ export default function SpaceManagementPage() {
     setLoading(true);
     try {
       const [m, inv] = await Promise.all([
-        canManageMembers ? spacesApi.members(activeSpaceId).catch(() => []) : Promise.resolve([]),
+        canReadMembers ? spacesApi.members(activeSpaceId).catch(() => []) : Promise.resolve([]),
         canManageInvites ? spacesApi.listInvites(activeSpaceId).catch(() => []) : Promise.resolve([]),
       ]);
       setMembers(m);
@@ -80,7 +81,7 @@ export default function SpaceManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeSpaceId, canManageInvites, canManageMembers]);
+  }, [activeSpaceId, canManageInvites, canReadMembers]);
 
   useEffect(() => {
     if (active) {

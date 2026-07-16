@@ -103,11 +103,11 @@ function App({
           <Route path="profile" element={<ProfilePage />} />
           <Route
             path="spaces/manage"
-            element={(
+            element={capabilityNavigationEnabled ? (
               <CapabilityGate required="workspace.manage">
                 <SpaceManagementPage />
               </CapabilityGate>
-            )}
+            ) : <SpaceManagementPage />}
           />
         </Route>
 
