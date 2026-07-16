@@ -4,20 +4,35 @@
 
 """Audit views."""
 
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
-from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
 from rest_framework import generics, permissions
 from rest_framework.permissions import BasePermission
 
-from apps.spaces.permissions import admin_scope, is_platform_admin
+from apps.spaces.permissions import (
+    AUDIT_VIEW,
+    admin_scope,
+    is_platform_admin,
+    resolve_space_id,
+)
+
 from .models import AuditLog
 from .serializers import AuditLogSerializer
 
 
 class CanViewScopedAuditLogs(BasePermission):
-    """Platform, organization, and business-line admins may inspect logs."""
+    """Authorize global governance or one exact workspace audit scope."""
 
     def has_permission(self, request, view):
+        space_id = request.query_params.get("space")
+        if space_id:
+            view.audit_space = resolve_space_id(
+                request.user,
+                space_id,
+                require_perm=AUDIT_VIEW,
+            )
+            return True
         if is_platform_admin(request.user):
             return True
         org_ids, business_line_ids = admin_scope(request.user)
@@ -31,15 +46,19 @@ class AuditLogListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, CanViewScopedAuditLogs]
 
     def get_queryset(self):
-        qs = AuditLog.objects.all()
-        if not is_platform_admin(self.request.user):
+        audit_space = getattr(self, "audit_space", None)
+        if audit_space is not None:
+            qs = AuditLog.objects.filter(space_id=audit_space.id)
+        elif not is_platform_admin(self.request.user):
             org_ids, business_line_ids = admin_scope(self.request.user)
             scope_query = Q()
             if org_ids:
                 scope_query |= Q(organization_id__in=org_ids)
             if business_line_ids:
                 scope_query |= Q(business_line_id__in=business_line_ids)
-            qs = qs.filter(scope_query)
+            qs = AuditLog.objects.filter(scope_query)
+        else:
+            qs = AuditLog.objects.all()
 
         action = self.request.query_params.get("action")
         user_id = self.request.query_params.get("user_id")

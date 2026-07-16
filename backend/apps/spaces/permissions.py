@@ -303,6 +303,18 @@ def get_space_or_404(space_id) -> KnowledgeSpace:
         raise NotFound("Space not found.") from exc
 
 
+def resolve_space_id(user, space_id, *, require_perm: str | None = None):
+    """Resolve one exact space id without disclosing inaccessible spaces."""
+
+    space = get_space_or_404(space_id)
+    role = effective_space_role(user, space)
+    if role is None:
+        raise NotFound("Space not found.")
+    if require_perm and not has_space_permission(user, space, require_perm):
+        raise PermissionDenied(f"You do not have '{require_perm}' in this space.")
+    return space
+
+
 def resolve_request_space(request, *, require_perm: str | None = None, required: bool = True):
     """Resolve the active space for a request.
 
@@ -322,14 +334,7 @@ def resolve_request_space(request, *, require_perm: str | None = None, required:
             raise PermissionDenied("No active space selected. Choose a space first.")
         return None
 
-    space = get_space_or_404(space_id)
-    role = effective_space_role(request.user, space)
-    if role is None:
-        # Do not reveal existence of spaces the user cannot access.
-        raise NotFound("Space not found.")
-    if require_perm and not has_space_permission(request.user, space, require_perm):
-        raise PermissionDenied(f"You do not have '{require_perm}' in this space.")
-    return space
+    return resolve_space_id(request.user, space_id, require_perm=require_perm)
 
 
 class SpaceDocumentPermission(BasePermission):
