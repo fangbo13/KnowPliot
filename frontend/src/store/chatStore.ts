@@ -14,6 +14,7 @@ import {
   hasActiveStream,
 } from '../stream/StreamLifecycleManager';
 import { initTokenBatcher, appendToken, flushImmediate, resetTokenBatcher } from '../stream/TokenBatchRenderer';
+import { SSEParser } from '../stream/SSEParser';
 // V4.0 DEFECT-008: BroadcastChannel cross-tab sync
 import { broadcastSessionSwitch } from '../sync/crossTabSync';
 
@@ -108,6 +109,7 @@ function generateSmartTitle(content: string): string {
 
 // V3.5: Unified stream state machine — replaces isStreaming + thinkingPhase + connectionStatus
 export type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completing' | 'error';
+export type StreamRecoveryState = 'idle' | 'available' | 'recovering' | 'recovered' | 'failed';
 
 export interface SessionTurnState {
   phase: StreamPhase;
@@ -119,6 +121,10 @@ export interface SessionTurnState {
   aiStatusText: string | null;
   generationId: string | null;
   clientRequestId?: string | null;
+  turnId?: string | null;
+  lastEventSeq?: number;
+  protocolVersion?: 1 | 2 | null;
+  recoveryState?: StreamRecoveryState;
 }
 
 interface ChatState {
@@ -217,6 +223,10 @@ function idleTurn(): SessionTurnState {
     aiStatusText: null,
     generationId: null,
     clientRequestId: null,
+    turnId: null,
+    lastEventSeq: 0,
+    protocolVersion: null,
+    recoveryState: 'idle',
   };
 }
 
@@ -759,6 +769,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       aiStatusText: null,
       generationId,
       clientRequestId,
+      turnId: null,
+      lastEventSeq: 0,
+      protocolVersion: null,
+      recoveryState: 'idle',
     }));
 
     const userMessage: Message = {
@@ -839,6 +853,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         quality: null,
         error,
         aiStatusText: null,
+        recoveryState: error ? (turn.turnId ? turn.recoveryState : 'failed') : 'idle',
       }));
       if (get()._pendingSessionRefresh) {
         set({ _pendingSessionRefresh: false });
@@ -881,6 +896,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         if (eventIdleWatchdog) clearTimeout(eventIdleWatchdog);
         eventIdleWatchdog = setTimeout(() => abortForTimeout('idle'), 30_000);
       };
+      let recoverInterruptedStream: (() => Promise<boolean | null>) | null = null;
 
       try {
         connectionWatchdog = setTimeout(() => abortForTimeout('connection'), 30_000);
@@ -914,13 +930,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           throw new Error(`HTTP ${response.status}`);
         }
 
+        const responseTurnId = response.headers?.get?.('X-Chat-Turn-Id') || null;
+        const responseClientRequestId = response.headers?.get?.('X-Chat-Client-Request-Id') || null;
+        if (responseClientRequestId && responseClientRequestId !== clientRequestId) {
+          finishRecoverable('error_generic');
+          return false;
+        }
+        if (responseTurnId) {
+          set((current) => withTurnUpdate(current, sessionId, generationId, {
+            turnId: responseTurnId,
+            recoveryState: 'available',
+          }));
+        }
+
         // Headers received — connection established → 'searching' phase
         set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'searching' }));
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
-        let currentEvent = '';
+        const parser = new SSEParser();
         armEventIdleWatchdog();
 
         // Phase 1: After 3s of no tokens → "searching" phase (already set on connection)
@@ -939,30 +967,271 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           }
         }, 8000);
 
+        recoverInterruptedStream = async (): Promise<boolean | null> => {
+          const turn = get().turnsBySession[sessionId];
+          if (!turn?.turnId || turn.generationId !== generationId) return null;
+
+          set((current) => withTurnUpdate(current, sessionId, generationId, {
+            phase: 'connecting',
+            recoveryState: 'recovering',
+          }));
+          const recoveryController = createStreamAbortController(sessionId, generationId);
+          const recoveryFetch = async (
+            url: string,
+            init: RequestInit,
+          ): Promise<[Response, () => void]> => {
+            const attemptController = new AbortController();
+            const abortFromOwner = () => attemptController.abort();
+            recoveryController.signal.addEventListener('abort', abortFromOwner, { once: true });
+            if (recoveryController.signal.aborted) attemptController.abort();
+            const timeout = setTimeout(() => {
+              attemptController.abort();
+            }, 5_000);
+            let released = false;
+            const release = () => {
+              if (released) return;
+              released = true;
+              clearTimeout(timeout);
+              recoveryController.signal.removeEventListener('abort', abortFromOwner);
+            };
+            try {
+              const response = await fetch(url, { ...init, signal: attemptController.signal });
+              return [response, release];
+            } catch (error) {
+              release();
+              throw error;
+            }
+          };
+          const recoveryHeaders: Record<string, string> = {
+            Accept: 'text/event-stream',
+            Authorization: `Bearer ${token}`,
+          };
+          const recoverySpaceId = getActiveSpaceId();
+          if (recoverySpaceId) recoveryHeaders['X-Space-Id'] = recoverySpaceId;
+
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+            if (attempt > 0) {
+              await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** (attempt - 1)));
+            }
+            if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+
+            let releaseRecoveryResponse = () => {};
+            try {
+              const cursor = get().turnsBySession[sessionId]?.lastEventSeq ?? 0;
+              const [replayResponse, releaseReplayResponse] = await recoveryFetch(
+                `/api/v1/chat/turns/${turn.turnId}/events/?after=${cursor}`,
+                {
+                  method: 'GET',
+                  headers: { ...recoveryHeaders, 'Last-Event-ID': String(cursor) },
+                  signal: recoveryController.signal,
+                },
+              );
+              releaseRecoveryResponse = releaseReplayResponse;
+              if (!replayResponse.ok) throw new Error(`HTTP ${replayResponse.status}`);
+              const replayTurnId: string = replayResponse.headers?.get?.('X-Chat-Turn-Id') || turn.turnId;
+              const replayClientId = replayResponse.headers?.get?.('X-Chat-Client-Request-Id') || clientRequestId;
+              if (replayTurnId !== turn.turnId || replayClientId !== clientRequestId) {
+                finishRecoverable('error_generic');
+                set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                return false;
+              }
+
+              const replayReader = replayResponse.body?.getReader();
+              if (!replayReader) throw new Error('missing recovery stream');
+              const replayParser = new SSEParser();
+              const replayDecoder = new TextDecoder();
+              while (true) {
+                const { done, value } = await replayReader.read();
+                const replayMessages = done
+                  ? [...replayParser.feed(replayDecoder.decode()), ...replayParser.end()]
+                  : replayParser.feed(replayDecoder.decode(value, { stream: true }));
+                for (const message of replayMessages) {
+                  if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+                  const sequence = message.id && /^\d+$/.test(message.id) ? Number(message.id) : null;
+                  if (sequence === null || sequence <= (get().turnsBySession[sessionId]?.lastEventSeq ?? 0)) {
+                    continue;
+                  }
+                  const data = JSON.parse(message.data);
+                  switch (message.event) {
+                    case 'meta':
+                      if (data.turn_id !== turn.turnId
+                        || data.session_id !== sessionId
+                        || data.client_request_id !== clientRequestId
+                        || data.protocol_version !== 2) {
+                        finishRecoverable('error_generic');
+                        set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                        return false;
+                      }
+                      break;
+                    case 'phase':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, {
+                        phase: data.phase === 'answering' ? 'streaming' : data.phase === 'saving' ? 'completing' : 'searching',
+                      }));
+                      break;
+                    case 'answer_delta':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'streaming' }));
+                      assistantContent += data.text || '';
+                      appendToken(sessionId, generationId, data.text || '');
+                      break;
+                    case 'citations':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { citations: data }));
+                      break;
+                    case 'quality':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
+                      break;
+                    case 'done':
+                      if (data.session_id !== sessionId
+                        || (data.turn_id && data.turn_id !== turn.turnId)
+                        || (data.client_request_id && data.client_request_id !== clientRequestId)) {
+                        finishRecoverable('error_generic');
+                        set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                        return false;
+                      }
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                      flushImmediate(sessionId, generationId);
+                      get().finishStreamingMessage(data.message_id, data.session_id, generationId);
+                      set((current) => withTurnUpdate(current, sessionId, null, { recoveryState: 'recovered' }));
+                      return true;
+                    case 'error':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                      finishRecoverable('error_generic');
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                      return false;
+                  }
+                  set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                }
+                if (done) break;
+              }
+
+              releaseRecoveryResponse();
+              const [statusResponse, releaseStatusResponse] = await recoveryFetch(`/api/v1/chat/turns/${turn.turnId}/`, {
+                method: 'GET',
+                headers: { ...recoveryHeaders, Accept: 'application/json' },
+                signal: recoveryController.signal,
+              });
+              releaseRecoveryResponse = releaseStatusResponse;
+              if (!statusResponse.ok) throw new Error(`HTTP ${statusResponse.status}`);
+              const statusData = await statusResponse.json();
+              if (statusData.id !== turn.turnId
+                || statusData.client_request_id !== clientRequestId
+                || statusData.session !== sessionId) {
+                finishRecoverable('error_generic');
+                set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                return false;
+              }
+              if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+              const statusSequence = Number(statusData.last_event_seq);
+              if (Number.isSafeInteger(statusSequence) && statusSequence > 0) {
+                set((current) => withTurnUpdate(current, sessionId, generationId, {
+                  lastEventSeq: Math.max(current.turnsBySession[sessionId]?.lastEventSeq ?? 0, statusSequence),
+                }));
+              }
+              if (statusData.status === 'completed' && statusData.answer) {
+                const answer = mapApiMessage(statusData.answer);
+                resetTokenBatcher(sessionId, generationId);
+                set((current) => withTurnUpdate(current, sessionId, generationId, {
+                  content: answer.content,
+                  citations: answer.citations ?? [],
+                  quality: {
+                    confidence: answer.confidenceLabel ?? '',
+                    score: answer.confidenceScore ?? 0,
+                    needs_human_review: answer.needsHumanReview ?? false,
+                    retrieval_mode: answer.retrievalMode ?? '',
+                    retrieval_latency_ms: answer.retrievalLatencyMs ?? 0,
+                  },
+                }));
+                get().finishStreamingMessage(answer.id, sessionId, generationId);
+                set((current) => withTurnUpdate(current, sessionId, null, { recoveryState: 'recovered' }));
+                return true;
+              }
+              if (statusData.status === 'failed' || statusData.status === 'cancelled') {
+                finishRecoverable('error_generic');
+                set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                return false;
+              }
+            } catch (error) {
+              if (error instanceof DOMException
+                && error.name === 'AbortError'
+                && recoveryController.signal.aborted) {
+                if (get().turnsBySession[sessionId]?.generationId === generationId) {
+                  finishRecoverable(null, 'idle');
+                }
+                return false;
+              }
+              if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+            } finally {
+              releaseRecoveryResponse();
+            }
+          }
+
+          finishRecoverable('error_timeout');
+          set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+          return false;
+        };
+
         while (true) {
           const { done, value } = await reader.read();
           if (!done && value.length > 0) armEventIdleWatchdog();
-          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = done ? '' : lines.pop() || '';
+          const messages = done
+            ? [...parser.feed(decoder.decode()), ...parser.end()]
+            : [
+                ...parser.feed(decoder.decode(value, { stream: true })),
+                ...parser.flushLegacyEvent(),
+              ];
 
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              armEventIdleWatchdog();
-              currentEvent = line.slice(7);
-            } else if (line.startsWith('data: ')) {
-              armEventIdleWatchdog();
-              const data = JSON.parse(line.slice(6));
-              switch (currentEvent) {
+          for (const message of messages) {
+            armEventIdleWatchdog();
+            const sequence = message.id && /^\d+$/.test(message.id) ? Number(message.id) : null;
+            const currentTurn = get().turnsBySession[sessionId];
+            if (sequence !== null && sequence <= (currentTurn?.lastEventSeq ?? 0)) continue;
+            const data = JSON.parse(message.data);
+            {
+              switch (message.event) {
+                case 'meta': {
+                  const knownTurnId = get().turnsBySession[sessionId]?.turnId;
+                  if (data.protocol_version !== 2
+                    || data.session_id !== sessionId
+                    || data.client_request_id !== clientRequestId
+                    || (knownTurnId && data.turn_id !== knownTurnId)) {
+                    finishRecoverable('error_generic');
+                    return false;
+                  }
+                  set((current) => withTurnUpdate(current, sessionId, generationId, {
+                    turnId: data.turn_id,
+                    protocolVersion: 2,
+                    recoveryState: 'available',
+                  }));
+                  break;
+                }
+                case 'phase': {
+                  const phase: StreamPhase = data.phase === 'answering'
+                    ? 'streaming'
+                    : data.phase === 'saving'
+                      ? 'completing'
+                      : 'searching';
+                  set((current) => withTurnUpdate(current, sessionId, generationId, { phase }));
+                  break;
+                }
                 case 'token':
+                case 'answer_delta':
+                  if (get().turnsBySession[sessionId]?.protocolVersion === null) {
+                    set((current) => withTurnUpdate(current, sessionId, generationId, {
+                      protocolVersion: message.event === 'answer_delta' ? 2 : 1,
+                    }));
+                  }
                   clearPhaseTimers();
                   // V3.5: Transition to 'streaming' on first token
                   if (get().turnsBySession[sessionId]?.phase !== 'streaming') {
                     set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'streaming' }));
                   }
-                  assistantContent += data.token || '';
+                  assistantContent += (message.event === 'answer_delta' ? data.text : data.token) || '';
                   // V3.5 HIGH-005: Batch token updates via rAF instead of per-token set()
-                  appendToken(sessionId, generationId, data.token);
+                  appendToken(
+                    sessionId,
+                    generationId,
+                    (message.event === 'answer_delta' ? data.text : data.token) || '',
+                  );
                   break;
                 case 'citations':
                   // V4.6 FIX: Reset the no-token stall timer on citations. Citations are
@@ -977,25 +1246,40 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 case 'quality':
                   set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
                   break;
+                case 'usage':
+                  break;
                 case 'done':
                   clearAllTimers();
-                  if (data.session_id !== sessionId) {
+                  if (data.session_id !== sessionId
+                    || (data.turn_id && data.turn_id !== get().turnsBySession[sessionId]?.turnId)
+                    || (data.client_request_id && data.client_request_id !== clientRequestId)) {
                     finishRecoverable('error_generic');
                     return false;
+                  }
+                  if (sequence !== null) {
+                    set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
                   }
                   flushImmediate(sessionId, generationId);
                   get().finishStreamingMessage(data.message_id, data.session_id, generationId);
                   return true;
                 case 'error':
                   clearAllTimers();
+                  if (sequence !== null) {
+                    set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                  }
                   finishRecoverable('error_generic');
                   return false;
+              }
+              if (sequence !== null) {
+                set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
               }
             }
           }
 
           if (done) {
             clearAllTimers();
+            const recovered = await recoverInterruptedStream();
+            if (recovered !== null) return recovered;
             finishRecoverable('error_network');
             return false;
           }
@@ -1006,6 +1290,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // V3.5 CRIT-001: Handle AbortError — stream was intentionally aborted
         if (error instanceof DOMException && error.name === 'AbortError') {
           const isTimeout = abortReason !== null;
+          if (abortReason === 'idle' && recoverInterruptedStream) {
+            const recovered = await recoverInterruptedStream();
+            if (recovered !== null) return recovered;
+          }
           finishRecoverable(isTimeout ? 'error_timeout' : null, isTimeout ? 'error' : 'idle');
           return false;
         }
@@ -1029,6 +1317,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           errorKey = 'error_generic';
         }
 
+        if (recoverInterruptedStream && get().turnsBySession[sessionId]?.turnId) {
+          const recovered = await recoverInterruptedStream();
+          if (recovered !== null) return recovered;
+        }
         finishRecoverable(errorKey);
         return false;
       }
@@ -1099,6 +1391,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           error: null,
           aiStatusText: null,
           generationId: null,
+          recoveryState: 'idle',
         }),
       };
     });

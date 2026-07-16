@@ -1,17 +1,17 @@
 # KnowPilot Delivery Memory
 
 - **Last updated:** 2026-07-16
-- **Current phase:** Task 3B1 — backend Redis lease, SSE v2, and event recovery (complete and verified); Task 3B2 frontend recovery is next.
-- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; Task 3B1 base implementation `20903bd` plus the review amendment in this handoff
+- **Current phase:** Task 3B2 — frontend dual-protocol stream consumption and GET-only recovery (complete and verified); Task 4 capability service is next.
+- **Active branch/commit:** `codex/knowpilot-optimization` / current HEAD is the commit containing this handoff; Task 3B2 is layered on the reviewed Task 3B1 backend
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
 
 ## 1 Current Objective
 
-Continue from the verified ChatTurn identity and backend stream coordination.
-The next bounded objective is Task 3B2: add frontend v1/v2 parsing and GET-only
-status/event recovery after unexpected EOF without ever repeating the POST.
+Continue from the verified end-to-end ChatTurn stream and recovery contract.
+The next bounded objective is Task 4: implement the server capability endpoint
+and capability-derived frontend authorization before creating scoped consoles.
 
 ## 2 Locked Decisions
 
@@ -81,6 +81,12 @@ status/event recovery after unexpected EOF without ever repeating the POST.
   replaying a stale terminal error before the new attempt.
 - EOF, parse failure, cancellation, navigation, and unmount retain partial
   content and expose recovery/terminal state without a replacement POST.
+- The frontend stores Turn id, client request id, protocol version, last applied
+  sequence, and recovery state under the owning session/generation. It consumes
+  chunked v1/v2 SSE (including CRLF, multiline data, comments, and EOF tails),
+  validates header/meta/status identities, ignores replayed sequence IDs, and
+  performs at most three authenticated GET recovery attempts with per-response
+  deadlines. A question POST is issued exactly once.
 
 ### Capability
 
@@ -95,7 +101,7 @@ status/event recovery after unexpected EOF without ever repeating the POST.
 | Flag | Current state | Enable gate |
 |---|---|---|
 | `CHAT_TURN_IDEMPOTENCY` | No flag is implemented. Deploying this backend after applying `0013` activates idempotency immediately. | Pass PostgreSQL-backed concurrency tests; add a compatibility flag before deployment if staged activation is required. |
-| `CHAT_STREAM_V2` | Implemented; environment-parsed and default `false`. v2 requires both this flag and request `protocol_version=2`; all other requests preserve v1. | Keep disabled until Task 3B2 dual-parser/GET recovery and PostgreSQL/Redis integration validation pass. |
+| `CHAT_STREAM_V2` | Implemented; environment-parsed and default `false`. v2 requires both this flag and request `protocol_version=2`; all other requests preserve v1. | Frontend dual-parser/GET recovery is complete; keep disabled until PostgreSQL/Redis integration validation passes. |
 | `CAPABILITY_NAV` | Planned; disabled/not implemented | Role matrix, scoped API, route, and navigation tests pass. |
 | `DEEP_ANSWER_MODE` | Planned; disabled/not implemented | Governed model/privacy/mode tests and fast fallback pass. |
 
@@ -143,21 +149,26 @@ deployment and rollback order is recorded in section 10.
   convergence, strict active-membership recovery, untrusted replay validation,
   stable-code logging without raw exception text, and a conditional database
   checkpoint that cannot regress when stream callbacks finish out of order.
+- Task 3B2 frontend dual-protocol recovery: incremental SSE parsing across
+  chunks/CRLF/multiline data/comments/EOF, v1 compatibility, v2 identity and
+  phase/event handling, monotonic event deduplication, per-session Turn state,
+  GET-only events/status convergence, completed-answer fallback after replay
+  expiry, bounded request/body deadlines, cancellation, and session isolation.
 
 ### In Progress
 
-- None. Task 3B1 is implemented and verified within the available environment.
+- None. Task 3B2 is implemented and verified within the available environment.
 
 ### Next
 
-- **Single next action:** Start Task 3B2 with failing frontend tests for v2
-  `meta`/`phase`/`answer_delta` parsing and GET-only status/event recovery after
-  unexpected EOF, retaining the existing v1 parser and never retrying POST.
+- **Single next action:** Start Task 4 with failing backend capability-matrix
+  tests for `GET /api/v1/rbac/me/capabilities/?space_id={id}` before changing
+  frontend routes or navigation.
 
 ### Deferred
 
-- Task 3B2 and Tasks 4–8: frontend dual-protocol recovery, capability consoles,
-  fast/deep execution, design convergence, product closure, and compatibility cleanup.
+- Tasks 4–8: capability consoles, fast/deep execution, design convergence,
+  product closure, and compatibility cleanup.
 - Deployed 筼筜 validation and deployment-server migration require separate
   authorization and environment details.
 
@@ -166,7 +177,7 @@ deployment and rollback order is recorded in section 10.
 | Group | Open IDs | State |
 |---|---|---|
 | Chat stability/data | `KP-C01`–`KP-C06`, `KP-C08`–`KP-C10` | Implemented with database-free/frontend coverage; deployed validation remains. |
-| Chat lock/replay | `KP-C07`, remaining `KP-C11` recovery | Backend Task 3B1 implemented with database-free coverage; frontend Task 3B2 and deployed Redis/PostgreSQL validation remain. |
+| Chat lock/replay | `KP-C07`, `KP-C11` recovery | Backend Task 3B1 and frontend Task 3B2 are implemented with database-free/frontend coverage; deployed Redis/PostgreSQL validation remains. |
 | Authorization/governance | `KP-A01`–`KP-A04` | Audited; implementation not started. |
 | Product closure | `KP-U01`, `KP-U02` | Audited; implementation not started. |
 | Design system | `KP-D01`, `KP-D02` | Audited; implementation not started. |
@@ -194,9 +205,9 @@ deployment and rollback order is recorded in section 10.
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
-| Frontend full suite | 110 passed in 18 files | Two separate sends receive distinct IDs; IDs survive an error/session switch under their owning session. |
-| Frontend typecheck | PASS | `tsc --noEmit`. |
-| Frontend production build | PASS | `tsc -b && vite build`; 4000 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
+| Frontend full suite | 129 passed in 20 files | Covers v1/v2 happy paths, identity mismatch denial, chunk/CRLF/multiline parsing, replay deduplication, events/status recovery, POST-once proof, bounded header/body stalls, cancellation, deletion, and cross-session isolation. |
+| Frontend typecheck | PASS | `tsc --noEmit` after Task 3B2. |
+| Frontend production build | PASS | `tsc -b && vite build`; 4001 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
 | Ruff changed-file check | PASS | All changed chat implementation/test files passed; `base.py` passed with its pre-existing B028/UP031/E402 findings excluded. |
 | `git diff --check` | PASS | Exit 0 after implementation and handoff updates. |
 
@@ -233,10 +244,10 @@ deployment and rollback order is recorded in section 10.
 - [x] 筼筜 target recorded without inventing host, path, or credentials.
 - [x] Environment-not-started state recorded.
 - [x] Locked decisions, contracts, matrix, feature flags, and issues recorded.
-- [x] Task 2, Task 3A, and Task 3B1 evidence plus DB-test limitation recorded honestly.
+- [x] Task 2, Task 3A, Task 3B1, and Task 3B2 evidence plus DB-test limitation recorded honestly.
 - [x] Additive migration and owner-visible recovery contract recorded.
 - [x] Absence of an idempotency feature flag and its real rollback consequence recorded.
 - [x] Exact v2 flag, Redis fallback, recovery route, and rollback boundaries recorded.
-- [x] Exactly one bounded Task 3B2 action identified.
+- [x] Exactly one bounded Task 4 action identified.
 - [x] Generated build metadata excluded from the implementation commit.
-- [x] Task 3B1 implementation is ready for coordinating-agent review.
+- [x] Task 3B2 implementation is ready for coordinating-agent review.
