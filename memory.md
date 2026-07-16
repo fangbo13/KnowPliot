@@ -159,7 +159,8 @@ deployment and rollback order is recorded in section 10.
   preserves delimiter-less adjacent events; shared live/replay validation now
   rejects missing/unsafe IDs, unknown events, malformed payloads, incomplete
   v2 meta/done identities, and missing recovery identity headers before any
-  content or replay cursor can advance.
+  content or replay cursor can advance. A per-event explicit-ID marker prevents
+  SSE's sticky last-event-id value from disguising a missing v2 `id:` field.
 
 ### In Progress
 
@@ -211,7 +212,7 @@ deployment and rollback order is recorded in section 10.
 | Django system check | PASS | `System check identified no issues (0 silenced)` with test settings. |
 | Migration consistency | PASS with environment warning | `No changes detected`; migration-history lookup warned that `db` is unavailable. |
 | PostgreSQL-backed API test | BLOCKED | Setup failed only because hostname `db` could not be resolved; no assertion ran. |
-| Frontend full suite | 148 passed in 21 files | Covers v1/v2 happy paths, strict live/replay event and identity validation, chunk/CRLF/multiline parsing without chunk-boundary dispatch, legacy adjacent-event adaptation, unsafe/unknown event denial without cursor advance, replay deduplication, events/status recovery, POST-once proof, bounded header/body stalls, cancellation, deletion, and cross-session isolation. |
+| Frontend full suite | 151 passed in 21 files | Covers v1/v2 happy paths, strict live/replay event and identity validation, explicit per-v2-event IDs despite sticky SSE last-event-id semantics, chunk/CRLF/multiline parsing without chunk-boundary dispatch, legacy adjacent-event adaptation, unsafe/unknown event denial without cursor advance, replay deduplication, events/status recovery, POST-once proof, bounded header/body stalls, cancellation, deletion, and cross-session isolation. |
 | Frontend typecheck | PASS | `tsc --noEmit` after Task 3B2. |
 | Frontend production build | PASS | `tsc -b && vite build`; 4002 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
 | Ruff changed-file check | PASS | All changed chat implementation/test files passed; `base.py` passed with its pre-existing B028/UP031/E402 findings excluded. |

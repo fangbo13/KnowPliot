@@ -136,6 +136,7 @@ export function validateChatStreamMessage(
 ): ValidatedChatStreamEvent {
   const protocolVersion = context.protocolVersion
     ?? (message.event === 'meta' ? 2 : message.id === null ? 1 : invalid());
+  if (protocolVersion === 2 && !message.hasExplicitId) invalid();
   const sequence = protocolVersion === 2
     ? sequenceOf(message.id)
     : message.id === null ? null : sequenceOf(message.id);

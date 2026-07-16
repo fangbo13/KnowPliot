@@ -1,5 +1,7 @@
 export interface SSEMessage {
   id: string | null;
+  /** True only when this event block contained its own valid `id:` field. */
+  hasExplicitId: boolean;
   event: string;
   data: string;
 }
@@ -10,6 +12,7 @@ export class SSEParser {
   private eventName = '';
   private dataLines: string[] = [];
   private lastEventId: string | null = null;
+  private hasExplicitId = false;
   private ended = false;
 
   feed(chunk: string): SSEMessage[] {
@@ -63,7 +66,10 @@ export class SSEParser {
         this.dataLines.push(value);
         break;
       case 'id':
-        if (!value.includes('\0')) this.lastEventId = value;
+        if (!value.includes('\0')) {
+          this.lastEventId = value;
+          this.hasExplicitId = true;
+        }
         break;
     }
   }
@@ -71,15 +77,18 @@ export class SSEParser {
   private dispatch(events: SSEMessage[]): void {
     if (this.dataLines.length === 0) {
       this.eventName = '';
+      this.hasExplicitId = false;
       return;
     }
     events.push({
       id: this.lastEventId,
+      hasExplicitId: this.hasExplicitId,
       event: this.eventName || 'message',
       data: this.dataLines.join('\n'),
     });
     this.eventName = '';
     this.dataLines = [];
+    this.hasExplicitId = false;
   }
 }
 

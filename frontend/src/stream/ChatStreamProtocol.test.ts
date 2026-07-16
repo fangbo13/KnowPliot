@@ -22,6 +22,7 @@ describe('chat stream protocol validation', () => {
   it('accepts a complete v2 meta and returns its safe sequence', () => {
     expect(validateChatStreamMessage({
       id: '1',
+      hasExplicitId: true,
       event: 'meta',
       data: JSON.stringify({
         protocol_version: 2,
@@ -35,6 +36,7 @@ describe('chat stream protocol validation', () => {
   it('requires meta before any initial id-bearing v2 event', () => {
     expect(() => validateChatStreamMessage({
       id: '1',
+      hasExplicitId: true,
       event: 'answer_delta',
       data: '{"text":"too early"}',
     }, context)).toThrow(InvalidChatStreamEventError);
@@ -45,6 +47,7 @@ describe('chat stream protocol validation', () => {
     (id) => {
       expect(() => validateChatStreamMessage({
         id,
+        hasExplicitId: id !== null,
         event: 'answer_delta',
         data: '{"text":"unsafe"}',
       }, { ...context, protocolVersion: 2 })).toThrow(InvalidChatStreamEventError);
@@ -54,6 +57,7 @@ describe('chat stream protocol validation', () => {
   it('rejects unknown v2 events before a cursor can be advanced', () => {
     expect(() => validateChatStreamMessage({
       id: '9',
+      hasExplicitId: true,
       event: 'provider_reasoning',
       data: '{"text":"private"}',
     }, { ...context, protocolVersion: 2 })).toThrow(InvalidChatStreamEventError);
@@ -62,6 +66,7 @@ describe('chat stream protocol validation', () => {
   it('requires all v2 done identities and a valid message id', () => {
     expect(() => validateChatStreamMessage({
       id: '4',
+      hasExplicitId: true,
       event: 'done',
       data: JSON.stringify({
         message_id: MESSAGE_ID,
@@ -74,6 +79,7 @@ describe('chat stream protocol validation', () => {
   it('allows a legacy v1 token without an event id', () => {
     expect(validateChatStreamMessage({
       id: null,
+      hasExplicitId: false,
       event: 'token',
       data: '{"token":"legacy"}',
     }, context)).toMatchObject({
@@ -82,6 +88,15 @@ describe('chat stream protocol validation', () => {
       protocolVersion: 1,
       data: { token: 'legacy' },
     });
+  });
+
+  it('rejects a v2 event that only inherited the prior event id', () => {
+    expect(() => validateChatStreamMessage({
+      id: '1',
+      hasExplicitId: false,
+      event: 'answer_delta',
+      data: '{"text":"must recover"}',
+    }, { ...context, protocolVersion: 2 })).toThrow(InvalidChatStreamEventError);
   });
 
   it('requires both recovery identity headers to be present and matching', () => {

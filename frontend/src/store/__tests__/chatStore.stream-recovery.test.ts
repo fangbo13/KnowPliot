@@ -660,6 +660,78 @@ describe('chat stream v2 and recovery', () => {
     });
   });
 
+  it('recovers a live v2 delta that omitted its own event id', async () => {
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
+        'event: answer_delta\ndata: {"text":"must not disappear"}\n\n',
+        `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        'id: 2\nevent: answer_delta\ndata: {"text":"recovered"}\n\n',
+        `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
+
+    await useChatStore.getState().sendMessage('hello');
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(String(mocks.fetch.mock.calls[1][0])).toBe(
+      `/api/v1/chat/turns/${TURN_ID}/events/?after=1`,
+    );
+    expect(useChatStore.getState().messages[useChatStore.getState().messages.length - 1]).toMatchObject({
+      id: ASSISTANT_ID,
+      content: 'recovered',
+    });
+  });
+
+  it('retries replay without advancing when a recovered v2 delta omits its id', async () => {
+    vi.useFakeTimers();
+    mocks.fetch
+      .mockResolvedValueOnce(streamResponse([
+        `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_ID}","client_request_id":"${CLIENT_ID}","protocol_version":2}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        'event: answer_delta\ndata: {"text":"must not be accepted"}\n\n',
+        `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }))
+      .mockResolvedValueOnce(streamResponse([
+        'id: 2\nevent: answer_delta\ndata: {"text":"replayed"}\n\n',
+        `id: 3\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}","turn_id":"${TURN_ID}","client_request_id":"${CLIENT_ID}"}\n\n`,
+      ], {
+        'X-Chat-Turn-Id': TURN_ID,
+        'X-Chat-Client-Request-Id': CLIENT_ID,
+      }));
+
+    const send = useChatStore.getState().sendMessage('hello');
+    await vi.runAllTimersAsync();
+    await send;
+
+    expect(mocks.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(mocks.fetch.mock.calls
+      .filter(([url]) => String(url).includes('/events/'))
+      .map(([url]) => String(url))).toEqual([
+      `/api/v1/chat/turns/${TURN_ID}/events/?after=1`,
+      `/api/v1/chat/turns/${TURN_ID}/events/?after=1`,
+    ]);
+    expect(useChatStore.getState().messages[useChatStore.getState().messages.length - 1]).toMatchObject({
+      id: ASSISTANT_ID,
+      content: 'replayed',
+    });
+    vi.useRealTimers();
+  });
+
   it('recovers when the initial v2 meta omits an identity', async () => {
     mocks.fetch
       .mockResolvedValueOnce(streamResponse([
