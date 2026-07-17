@@ -1,18 +1,18 @@
 # KnowPilot Delivery Memory
 
 - **Last updated:** 2026-07-17
-- **Current phase:** Task 4 — server capabilities, scoped consoles, and compatibility rollout (complete and independently reviewed); Task 5 fast/deep execution and chat performance is in progress.
-- **Active branch/commit:** `codex/knowpilot-optimization` / Task 4 reviewed HEAD `2aa43c7`, with Task 5 work layered afterward
+- **Current phase:** Task 5 — governed fast/deep execution, safe processing telemetry, and chat-path performance (complete); Task 6 design-system convergence is in progress.
+- **Active branch/commit:** `codex/knowpilot-optimization` / Task 5 frontend `5c20504`, Task 5 backend `afe17e9`
 - **Primary spec:** [2026-07-16 KnowPilot Optimization Specification Addendum](docs/specs/2026-07-16-knowpilot-optimization-spec.md)
 - **Deployment target:** 筼筜（远端运行环境；主机、路径与凭据未提供）
 - **Environment status:** Not started. Docker and the deployed 筼筜 environment must remain stopped for this work.
 
 ## 1 Current Objective
 
-Continue from the verified ChatTurn recovery and scoped capability contracts.
-The current bounded objective is Task 5: resolve governed fast/deep generation
-per Turn, keep provider reasoning private, and remove ingestion-only startup work
-from the chat path without changing the default-off/v1/fast compatibility path.
+Continue from the verified ChatTurn recovery, scoped capability, and governed
+generation contracts. The current bounded objective is Task 6: converge the
+frontend on one warm editorial token/component/motion system without changing
+business behavior or starting the deployed environment.
 
 ## 2 Locked Decisions
 
@@ -114,7 +114,7 @@ from the chat path without changing the default-off/v1/fast compatibility path.
 | `CHAT_TURN_IDEMPOTENCY` | No flag is implemented. Deploying this backend after applying `0013` activates idempotency immediately. | Pass PostgreSQL-backed concurrency tests; add a compatibility flag before deployment if staged activation is required. |
 | `CHAT_STREAM_V2` | Implemented; environment-parsed and default `false`. v2 requires both this flag and request `protocol_version=2`; all other requests preserve v1. | Frontend dual-parser/GET recovery is complete; keep disabled until PostgreSQL/Redis integration validation passes. |
 | `CAPABILITY_NAV` | Implemented in backend and frontend; default `false`. The frontend build switch is `VITE_CAPABILITY_NAV=true`. | Keep disabled until deployment-backed role/scope smoke tests pass; legacy authorization remains for one release. |
-| `DEEP_ANSWER_MODE` | In progress; must remain default `false`. | Governed model/privacy/mode tests and fast fallback pass. |
+| `DEEP_ANSWER_MODE` | Implemented in backend and frontend; default `false`. | Enable only after governed model bindings, provider access, capability delivery, and privacy checks pass in the deployed environment. |
 
 The idempotency row documents rollout state, not a callable flag. Actual
 deployment and rollback order is recorded in section 10.
@@ -129,8 +129,8 @@ deployment and rollback order is recorded in section 10.
 | 4 | Space owner | Members, invites, access requests, knowledge, quality, audit, settings, and lifecycle in one space. | Implemented through workspace capabilities and scoped console routes. |
 | 4 | Knowledge admin | Document ingestion/index and quality in one space. | Implemented; knowledge read/manage/index/download UI actions are independently gated. |
 | 4 | Reviewer | Quality and read-only audit in one space. | Implemented; exact workspace audit is allowed without global audit access. |
-| 4 | Member | Chat, history, share, and export; deep only with governed `chat.deep`. | Base capabilities implemented; `chat.deep` delivery is Task 5. |
-| 4 | Guest | Fast chat only. | Base guest capability denial implemented; deep denial is reinforced in Task 5. |
+| 4 | Member | Chat, history, share, and export; deep only with governed `chat.deep`. | Implemented; `chat.deep` is selected-space, feature-flag, and effective-policy gated. |
+| 4 | Guest | Fast chat only. | Implemented; the capability resolver and send endpoint both deny deep mode. |
 
 ## 6 Delivery State
 
@@ -182,20 +182,31 @@ deployment and rollback order is recorded in section 10.
   redirects, revoked-space recovery, direct-route preflight, `chat.share`,
   knowledge action separation, and default-off `/spaces/manage` compatibility.
   Independent review found no Critical/Important.
+- Task 5 frontend delivery `5c20504`: per-Turn fast/deep selection, dual flag +
+  `chat.deep` eligibility, safe processing phases/timings/citation basis,
+  separate connection/idle/total timeout budgets, explicit GET recovery, and
+  manual failed-deep-to-fast retry under the same request identity without a
+  second user message. Raw reasoning keys are rejected recursively.
+- Task 5 backend delivery `afe17e9`: default-off `DEEP_ANSWER_MODE`, inherited
+  fast/deep profile and thinking-budget policy, selected-space `chat.deep`,
+  model/mode snapshots, recoverable deep failure and same-Turn fast downgrade,
+  typed provider parts with reasoning text discarded, safe numeric metrics,
+  shared chat clients/services, and chat/ingestion construction separation.
+  Migration `chat.0014_chatturn_metrics_and_model_lengths` is additive.
 
 ### In Progress
 
-- Task 5 backend and frontend TDD for governed fast/deep generation, reasoning
-  privacy, chat-path client reuse, safe progress, and timeout separation.
+- Task 6 frontend token, primitive, layout, visual-language, and restrained
+  motion convergence. No business behavior changes are authorized in this task.
 
 ### Next
 
-- **Single next action:** Complete Task 5 policy/provider/frontend mode tests and
-  independently review the fast/deep privacy and fallback boundaries.
+- **Single next action:** Implement and verify the Task 6 design-system brief
+  across chat, scoped workbenches, login, history, quality, and templates.
 
 ### Deferred
 
-- Tasks 6–8: design convergence, product closure, compatibility cleanup, and
+- Tasks 7–8: product closure, compatibility cleanup, rollout evidence, and
   whole-branch verification.
 - Deployed 筼筜 validation and deployment-server migration require separate
   authorization and environment details.
@@ -207,9 +218,9 @@ deployment and rollback order is recorded in section 10.
 | Chat stability/data | `KP-C01`–`KP-C06`, `KP-C08`–`KP-C10` | Implemented with database-free/frontend coverage; deployed validation remains. |
 | Chat lock/replay | `KP-C07`, `KP-C11` recovery | Backend Task 3B1 and frontend Task 3B2 are implemented with database-free/frontend coverage; deployed Redis/PostgreSQL validation remains. |
 | Authorization/governance | `KP-A01`–`KP-A03` | Implemented and independently reviewed; deployment-backed scope validation remains. |
-| Model/performance authorization | `KP-A04` | Task 5 in progress. |
+| Model/performance authorization | `KP-A04` | Implemented with default-off rollout; deployed provider/profile validation remains. |
 | Product closure | `KP-U01`, `KP-U02` | Audited; implementation not started. |
-| Design system | `KP-D01`, `KP-D02` | Audited; implementation not started. |
+| Design system | `KP-D01`, `KP-D02` | Task 6 in progress. |
 | Environment | Backend DB tests blocked because hostname `db` is unavailable. | Do not claim PostgreSQL coverage until the host is available. |
 
 ## 8 Database and Migration State
@@ -219,6 +230,8 @@ deployment and rollback order is recorded in section 10.
   `(user, client_request_id)` unique constraint.
 - Additive migration `backend/apps/spaces/migrations/0008_organizationmembership_effectiveness.py`
   adds active/expiry lifecycle fields used by effective organization scope.
+- Additive migration `backend/apps/chat/migrations/0014_chatturn_metrics_and_model_lengths.py`
+  adds safe Turn metrics and aligns model identifier fields to 160 characters.
 - Migration model state is consistent: `makemigrations --check --dry-run`
   reported `No changes detected`; its database-history probe separately warned
   that host `db` could not be resolved.
@@ -241,6 +254,11 @@ deployment and rollback order is recorded in section 10.
 | Task 4 workspace-audit related gate | 58 passed (+ 31 subtests) | Exact query-space authorization, header/query anti-confusion, role denial, lifecycle 404, and governance/platform compatibility. |
 | Task 4 frontend full suite | 210 passed in 38 files | Includes scoped routes, revoked-space global fallback/workspace denial, direct-route preflight, compatibility route, share, and fine-grained knowledge actions. |
 | Task 4 independent frontend re-review | 43 passed in 10 files; Ready | Zero Critical/Important; typecheck and amendment diff checks passed. |
+| Task 5 frontend focused/full suites | 69 focused; 241 passed in 41 files | Mode eligibility/payload/isolation, safe processing panel, recursive reasoning denial, timeouts, recovery, and same-Turn manual fast retry. |
+| Task 5 frontend static/build | PASS | Typecheck, 73-file i18n check, and production build (4019 modules); generated build metadata restored and excluded. |
+| Task 5 backend focused matrix | 101 passed | Generation policy, provider privacy, shared chat construction, metrics, Turn downgrade, SSE coordination, and deep capability enforcement. |
+| Task 5 backend related matrix | 29 passed | Hybrid RAG compatibility, Turn status/replay, and existing governance behavior. |
+| Task 5 backend static/migration gate | PASS | Django check, no migration drift, compileall, Ruff for new and changed files, and backend diff check. PostgreSQL/Redis integration remains unrun by instruction. |
 | Frontend typecheck | PASS | `tsc --noEmit` after Task 3B2. |
 | Frontend production build | PASS | `tsc -b && vite build`; 4002 modules transformed. The generated `tsconfig.tsbuildinfo` diff was reversed with a scoped patch and not committed. |
 | Ruff changed-file check | PASS | All changed chat implementation/test files passed; `base.py` passed with its pre-existing B028/UP031/E402 findings excluded. |
@@ -265,6 +283,10 @@ deployment and rollback order is recorded in section 10.
   routes are deployed together. Roll back navigation with the flag while
   preserving the additive membership fields and capability endpoint; do not
   remove the legacy adapter during this release.
+- Apply additive migration `0014` before enabling `DEEP_ANSWER_MODE`. Keep deep
+  disabled until profile bindings and the selected provider are validated; an
+  immediate deep rollback is `DEEP_ANSWER_MODE=false`, preserving fast mode,
+  Turn data, and the additive metrics column.
 - If the lease itself must be rolled back, redeploy the reviewed Task 3A backend
   rather than changing the v2 flag. Preserve migration `0013` and ChatTurn data.
   Redis lease/event keys are ephemeral and expire/release without a data migration.
@@ -283,10 +305,10 @@ deployment and rollback order is recorded in section 10.
 - [x] 筼筜 target recorded without inventing host, path, or credentials.
 - [x] Environment-not-started state recorded.
 - [x] Locked decisions, contracts, matrix, feature flags, and issues recorded.
-- [x] Task 2, Task 3A, Task 3B1, Task 3B2, and Task 4 evidence plus DB-test limitation recorded honestly.
+- [x] Task 2 through Task 5 evidence plus DB-test limitation recorded honestly.
 - [x] Additive migration and owner-visible recovery contract recorded.
 - [x] Absence of an idempotency feature flag and its real rollback consequence recorded.
 - [x] Exact v2 flag, Redis fallback, recovery route, and rollback boundaries recorded.
-- [x] Exactly one bounded Task 5 action identified.
+- [x] Exactly one bounded Task 6 action identified.
 - [x] Generated build metadata excluded from the implementation commit.
 - [x] Task 4 frontend and backend independent reviews are Ready with zero Critical/Important.
