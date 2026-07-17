@@ -13,11 +13,14 @@ import {
 } from '@ant-design/icons';
 import { useEffect, useRef, useState, memo } from 'react';
 import { motion } from 'framer-motion';
+import { designTokens } from '../../design/tokens';
 import type { Message, Citation } from '../../store/chatStore';
 import { chatApi } from '../../api/chat';
 import ErrorBoundary from '../ErrorBoundary';
 import { MarkdownView } from './markdown';
 import StreamingMarkdown from './StreamingMarkdown';
+
+const MESSAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
 function getRelevanceLabel(score: number, t: (key: string) => string): string {
   if (score > 0.8) return t('high_relevance');
@@ -192,9 +195,9 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
     return (
       <motion.div 
         className="msg-row user"
-        initial={{ opacity: 0, y: 15, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: MESSAGE_TRANSITION_SECONDS, ease: [0.2, 0.8, 0.2, 1] }}
       >
         <div className="msg-bubble user">{message.content}</div>
       </motion.div>
@@ -206,7 +209,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
       className="msg-row assistant"
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
+      transition={{ duration: MESSAGE_TRANSITION_SECONDS, ease: [0.2, 0.8, 0.2, 1] }}
     >
       <div className="msg-assistant-label">
         <span className="msg-assistant-dot">K</span>

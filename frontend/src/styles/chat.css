@@ -356,11 +356,7 @@
   border-radius: var(--radius-lg);
   padding: 24px;
   box-shadow: var(--shadow-sm);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.history-page-card:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--accent-soft-strong);
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 
 .msg-row { display: flex; flex-direction: column; padding: 10px 0; animation: messageIn var(--dur-slow) var(--ease-out); }
@@ -389,7 +385,7 @@
   display: inline-block; width: 8px; height: 16px;
   margin-left: 2px; vertical-align: text-bottom;
   background: var(--accent); border-radius: 2px;
-  animation: pulseCaret 1.2s var(--ease-in-out) infinite;
+  opacity: 0.8;
 }
 /* live-tail caret: appended to the end of the last streamed Markdown block */
 .markdown-content.stream-live > :last-child::after {
@@ -400,13 +396,13 @@
   vertical-align: -2px;
   background: var(--accent);
   border-radius: 2px;
-  animation: pulseCaret 1.2s var(--ease-in-out) infinite;
+  opacity: 0.8;
 }
 
 /* thinking indicator */
 .thinking { display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; animation: fadeIn var(--dur) var(--ease-out); }
 .thinking-dots { display: flex; gap: 4px; }
-.thinking-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: dotBounce 1.4s var(--ease-in-out) infinite; }
+.thinking-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.7; }
 .thinking-label { color: var(--color-text-tertiary); font-size: 13.5px; }
 
 /* message actions */
@@ -506,7 +502,7 @@
   border-radius: var(--radius-3xl);
   padding: 8px 8px 8px 18px;
   box-shadow: var(--shadow-floating-input);
-  transition: border-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), transform var(--dur) var(--ease-soft-spring);
+  transition: transform var(--motion-base) var(--motion-ease), opacity var(--motion-base) var(--motion-ease);
 }
 .composer.is-focused { border-color: var(--accent); box-shadow: var(--shadow-floating-input), 0 0 0 4px var(--accent-soft); }
 .composer.is-disabled { opacity: 0.65; }
@@ -521,7 +517,7 @@
   font-size: 11.5px;
   line-height: 22px;
   padding: 0 9px;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 .composer-mode-btn[aria-pressed='true'] { background: var(--color-fill); color: var(--color-text); }
 .composer-mode-btn:disabled { cursor: default; opacity: 0.55; }
@@ -540,15 +536,15 @@
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; font-size: 16px;
-  transition: transform var(--dur-fast) var(--ease-spring), background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  transition: transform var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
 }
 .composer-send { border: none; background: var(--accent); color: var(--color-text-on-accent); box-shadow: var(--shadow-accent); }
-.composer-send:not(:disabled):hover { transform: scale(1.06); }
-.composer-send:not(:disabled):active { transform: scale(0.92); }
+.composer-send:not(:disabled):hover { opacity: 0.9; }
+.composer-send:not(:disabled):active { transform: translateY(1px); }
 .composer-send:disabled { background: var(--color-fill-strong); color: var(--color-text-tertiary); box-shadow: none; cursor: default; }
 .composer-stop { border: 1.5px solid var(--color-text-secondary); background: var(--color-bg-elevated); color: var(--color-text); }
-.composer-stop:hover { transform: scale(1.06); border-color: var(--color-error); color: var(--color-error); }
-.composer-stop:active { transform: scale(0.92); }
+.composer-stop:hover { opacity: 0.9; border-color: var(--color-error); color: var(--color-error); }
+.composer-stop:active { transform: translateY(1px); }
 .composer-counter { position: absolute; right: 58px; bottom: 13px; font-size: 11px; color: var(--color-text-tertiary); pointer-events: none; font-variant-numeric: tabular-nums; transition: color var(--dur-fast) var(--ease-out); }
 .composer-counter.warn { color: var(--color-warning); }
 .composer-counter.danger { color: var(--color-error); }
@@ -567,9 +563,7 @@
   color: var(--color-text-on-accent); font-family: var(--font-family-display); font-weight: 600; font-size: 24px;
   box-shadow: var(--shadow-accent-lg);
   margin-bottom: 18px;
-  transition: transform var(--dur-slow) var(--ease-spring);
 }
-.welcome-mark:hover { transform: scale(1.08) rotate(2deg); }
 .welcome-greeting { font-family: var(--font-family-display); font-weight: 500; font-size: 30px; line-height: 1.2; color: var(--color-text); letter-spacing: -0.015em; margin: 0 0 8px; }
 .welcome-sub { font-size: 15px; color: var(--color-text-secondary); margin: 0; }
 .welcome-suggest-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 26px; }
@@ -581,9 +575,9 @@
   border: 1px solid var(--color-border-secondary);
   border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: transform var(--dur) var(--ease-soft-spring), border-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
-.welcome-suggest:hover { transform: translateY(-2px) scale(1.015); border-color: var(--accent); box-shadow: var(--shadow-md); }
+.welcome-suggest:hover { opacity: 0.9; border-color: var(--accent); }
 .welcome-suggest-top { display: flex; align-items: center; gap: 9px; }
 .welcome-suggest-icon { color: var(--accent); font-size: 16px; display: inline-flex; }
 .welcome-suggest-label { font-weight: 600; font-size: 14px; color: var(--color-text); }
@@ -654,8 +648,8 @@
   border-color: var(--accent-active);
 }
 .onboarding-card .ant-btn-primary:hover {
-  background: #733116 !important;
-  border-color: #733116 !important;
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
 }
 .onboarding-skip-hint {
   font-size: 12px;
@@ -694,7 +688,7 @@
    Standard scrollable page shell (AntD forms / admin / space management)
    ============================================================================ */
 .page { height: 100%; overflow-y: auto; padding: 28px 24px 64px; animation: softFadeInUp var(--dur) var(--ease-out); }
-.page-inner { max-width: 980px; margin: 0 auto; }
+.page-inner { max-width: var(--management-max); margin: 0 auto; }
 .page-head { margin-bottom: 36px; }
 .page-title { font-family: var(--font-family-display); font-weight: 500; font-size: 25px; margin: 0 0 4px; letter-spacing: -0.01em; color: var(--color-text); }
 .page-sub { color: var(--color-text-secondary); margin: 0; font-size: 14px; }

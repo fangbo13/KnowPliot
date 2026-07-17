@@ -5,7 +5,6 @@
  */
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
 import { Form, Input, Button, Alert, Tabs, Select, Modal } from 'antd';
 import {
   MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined,
@@ -187,7 +186,6 @@ export default function LoginPage() {
   const confirmPasswordField = (
     <Form.Item
       name="confirm"
-      className="stagger-fade-in" style={{ animationDelay: '0.4s' }}
       label={t('confirm_password_label')}
       dependencies={['password']}
       rules={[
@@ -225,21 +223,21 @@ export default function LoginPage() {
             </Button>
           </div>
           <Form form={form} layout="vertical" size="large" onFinish={handleLogin} requiredMark={false} validateTrigger="onChange">
-            <Form.Item name="email" label={t('email_label')} className="stagger-fade-in" style={{ animationDelay: '0.1s' }} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
               <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="password" label={t('password_label')} className="stagger-fade-in" style={{ animationDelay: '0.2s' }} rules={[{ required: true, message: t('validation_password_required') }]}>
+            <Form.Item name="password" label={t('password_label')} rules={[{ required: true, message: t('validation_password_required') }]}>
               <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="current-password" className="input-focus-float" />
             </Form.Item>
-            <Button type="link" onClick={() => setResetOpen(true)} className="stagger-fade-in" style={{ padding: 0, marginBottom: 8, animationDelay: '0.3s' }}>
+            <Button type="link" onClick={() => setResetOpen(true)} style={{ padding: 0, marginBottom: 8 }}>
               {t('forgot_password')}
             </Button>
-            <Form.Item className="stagger-fade-in" style={{ marginTop: 12, marginBottom: 0, animationDelay: '0.4s' }}>
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button type="primary" htmlType="submit" icon={<LoginOutlined />} loading={loading} block className="login-btn-premium hover-lift btn-press" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
+              <div>
+                <Button type="primary" htmlType="submit" icon={<LoginOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
                   {t('sign_in')}
                 </Button>
-              </motion.div>
+              </div>
             </Form.Item>
           </Form>
         </div>
@@ -251,10 +249,10 @@ export default function LoginPage() {
       children: (
         <div className="login-input-wrapper">
           <Form layout="vertical" size="large" onFinish={handleRegister} requiredMark={false} validateTrigger="onBlur">
-            <Form.Item name="email" label={t('email_label')} className="stagger-fade-in" style={{ animationDelay: '0.1s' }} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
               <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="service_line" label={t('service_line_label')} className="stagger-fade-in" style={{ animationDelay: '0.2s' }} rules={[{ required: true, message: t('validation_service_line_required') }]}>
+            <Form.Item name="service_line" label={t('service_line_label')} rules={[{ required: true, message: t('validation_service_line_required') }]}>
               <Select
                 placeholder={t('service_line_placeholder')}
                 suffixIcon={<TeamOutlined />}
@@ -262,16 +260,16 @@ export default function LoginPage() {
                 className="input-focus-float"
               />
             </Form.Item>
-            <Form.Item name="password" label={t('password_label')} className="stagger-fade-in" style={{ animationDelay: '0.3s' }} rules={passwordRules}>
+            <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
               <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
             </Form.Item>
             {confirmPasswordField}
-            <Form.Item className="stagger-fade-in" style={{ marginTop: 12, marginBottom: 0, animationDelay: '0.5s' }}>
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button type="primary" htmlType="submit" icon={<UserAddOutlined />} loading={loading} block className="login-btn-premium hover-lift btn-press" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
+              <div>
+                <Button type="primary" htmlType="submit" icon={<UserAddOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
                   {t('create_account')}
                 </Button>
-              </motion.div>
+              </div>
             </Form.Item>
           </Form>
         </div>
@@ -284,22 +282,22 @@ export default function LoginPage() {
         <div className="login-input-wrapper">
           <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 18px', fontSize: 13 }}>{t('admin_register_subtitle')}</p>
           <Form layout="vertical" size="large" onFinish={handleAdminRegister} requiredMark={false} validateTrigger="onBlur">
-            <Form.Item name="email" label={t('email_label')} className="stagger-fade-in" style={{ animationDelay: '0.1s' }} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
+            <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
               <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="code" label={t('admin_code_label')} className="stagger-fade-in" style={{ animationDelay: '0.2s' }} rules={[{ required: true, message: t('validation_code_required') }]}>
+            <Form.Item name="code" label={t('admin_code_label')} rules={[{ required: true, message: t('validation_code_required') }]}>
               <Input prefix={<SafetyCertificateOutlined />} placeholder={t('admin_code_placeholder')} autoComplete="off" className="input-focus-float" />
             </Form.Item>
-            <Form.Item name="password" label={t('password_label')} className="stagger-fade-in" style={{ animationDelay: '0.3s' }} rules={passwordRules}>
+            <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
               <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
             </Form.Item>
             {confirmPasswordField}
-            <Form.Item className="stagger-fade-in" style={{ marginTop: 12, marginBottom: 0, animationDelay: '0.5s' }}>
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button type="primary" htmlType="submit" icon={<SafetyCertificateOutlined />} loading={loading} block className="login-btn-premium hover-lift btn-press" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
+            <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
+              <div>
+                <Button type="primary" htmlType="submit" icon={<SafetyCertificateOutlined />} loading={loading} block className="login-btn-premium" style={{ height: 48, fontWeight: 600, borderRadius: 14 }}>
                   {t('register_admin_btn')}
                 </Button>
-              </motion.div>
+              </div>
             </Form.Item>
           </Form>
         </div>
@@ -313,87 +311,41 @@ export default function LoginPage() {
     : activeTab === 'register' ? t('register_subtitle') : t('admin_register_subtitle');
 
   return (
-    <div className={isDark ? 'gemini-mesh-bg' : 'gemini-mesh-bg-light'} style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, position: 'relative' }}>
-      <style>{`
-        .input-focus-float { transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out); }
-        .input-focus-float:focus-within, .input-focus-float:hover { transform: translateY(-0.5px); }
-      `}</style>
-      <div style={{ position: 'absolute', top: 24, right: 24, display: 'flex', gap: 12, zIndex: 1000 }}>
+    <div className="kp-login">
+      <div className="kp-login__tools">
         <Button
           shape="circle"
           icon={<GlobalOutlined />}
           onClick={toggleLanguage}
           title={i18n.language.startsWith('zh') ? 'Switch to English' : '切换为中文'}
-          style={{ border: '1px solid var(--color-border-secondary)', background: 'var(--color-bg-container)' }}
         />
         <Button
           shape="circle"
           icon={isDark ? <SunOutlined /> : <MoonOutlined />}
           onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
           title={isDark ? t('switch_to_light') : t('switch_to_dark')}
-          style={{ border: '1px solid var(--color-border-secondary)', background: 'var(--color-bg-container)' }}
         />
       </div>
-      <motion.div
-        className="glass-panel"
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: [0.175, 0.885, 0.32, 1.275] }}
-        style={{
-          display: 'flex', flexDirection: isNarrow ? 'column' : 'row',
-          width: '100%', maxWidth: 940, minHeight: isNarrow ? 'auto' : 540,
-          borderRadius: 24, overflow: 'hidden',
-          boxShadow: 'var(--shadow-xl)',
-        }}
-      >
-        {/* Brand panel — warm espresso editorial */}
+      <main className={`kp-login__card${isNarrow ? ' is-narrow' : ''}`}>
         {!isNarrow && (
-          <div style={{
-            flex: '0 0 400px', position: 'relative', overflow: 'hidden',
-            padding: 48, display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            background: 'linear-gradient(165deg, rgba(44,39,34,0.6) 0%, rgba(27,24,21,0.6) 100%)', color: '#F3EFE6',
-          }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'var(--gradient-accent)' }} />
-            <div style={{
-              position: 'absolute', width: 360, height: 360, borderRadius: '50%', right: -120, top: -80,
-              background: 'radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, transparent 70%)',
-              pointerEvents: 'none',
-              animation: 'ambientGlow 18s infinite ease-in-out',
-            }} />
-            <div style={{
-              width: 64, height: 64, borderRadius: 18, background: 'var(--gradient-accent)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 28,
-              boxShadow: 'var(--shadow-accent-lg)', color: '#fff', fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 30,
-              transition: 'transform var(--dur-slow) var(--ease-spring)',
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.08) rotate(2deg)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1) rotate(0deg)'}
-            >K</div>
-            <h1 style={{ fontFamily: "'Fraunces', serif", fontWeight: 500, fontSize: 34, margin: 0, letterSpacing: '-0.02em', color: '#F8F5EE' }}>KnowPilot</h1>
-            <p style={{ color: 'rgba(243,239,230,0.62)', marginTop: 12, fontSize: 14.5, lineHeight: 1.6, maxWidth: 280 }}>{t('login_brand_desc')}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 40 }}>
-              {[t('login_feature_1'), t('login_feature_2'), t('login_feature_3')].map((item, index) => (
-                <div
-                  key={item}
-                  className="login-feature-item"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    color: 'rgba(243,239,230,0.78)', fontSize: 13.5,
-                    animationDelay: `${index * 150 + 200}ms`,
-                  }}
-                >
-                  <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', flexShrink: 0 }} />
+          <section className="kp-login__brand" aria-labelledby="login-brand-title">
+            <div className="kp-login__mark" aria-hidden="true">K</div>
+            <h1 id="login-brand-title">KnowPilot</h1>
+            <p>{t('login_brand_desc')}</p>
+            <div className="kp-login__features">
+              {[t('login_feature_1'), t('login_feature_2'), t('login_feature_3')].map((item) => (
+                <div key={item} className="kp-login__feature">
+                  <span aria-hidden="true" />
                   {item}
                 </div>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Form column */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: isNarrow ? '32px 24px' : '48px 48px', minWidth: isNarrow ? 'auto' : 340 }}>
-          <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 500, fontSize: 26, margin: '0 0 6px' }}>{headerTitle}</h2>
-          <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 20px', fontSize: 14 }}>{headerSubtitle}</p>
+        <section className="kp-login__form" aria-labelledby="login-form-title">
+          <h2 id="login-form-title">{headerTitle}</h2>
+          <p className="kp-login__subtitle">{headerSubtitle}</p>
 
           {error && (
             <Alert message={t('login_error')} description={error} type="error" showIcon closable style={{ marginBottom: 16, borderRadius: 12 }} onClose={() => setError('')} />
@@ -410,7 +362,6 @@ export default function LoginPage() {
           />
           <Modal open={Boolean(mfaChallenge)} title={t('mfa_challenge_title')}
             onCancel={() => setMfaChallenge('')} onOk={completeMfa} confirmLoading={loading}
-            styles={{ mask: { backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' } }}
             className="section-enter"
           >
             <Input value={mfaCode} onChange={(event) => setMfaCode(event.target.value)}
@@ -421,8 +372,8 @@ export default function LoginPage() {
             <Input value={resetEmail} onChange={(event) => setResetEmail(event.target.value)}
               autoComplete="email" placeholder={t('email_placeholder')} />
           </Modal>
-        </div>
-      </motion.div>
+        </section>
+      </main>
     </div>
   );
 }

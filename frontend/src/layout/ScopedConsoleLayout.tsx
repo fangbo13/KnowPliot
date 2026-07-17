@@ -29,57 +29,39 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
   const navigation = visibleConsoleNavigation(kind, access, basePath);
 
   return (
-    <div style={{ display: 'flex', minHeight: '100dvh', background: 'var(--color-bg-body)' }}>
-      <aside
-        style={{
-          width: 256,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          padding: '20px 14px',
-          borderRight: '1px solid var(--color-border-secondary)',
-          background: 'var(--color-bg-sunken)',
-        }}
-      >
-        <div style={{ padding: '0 10px 18px' }}>
-          <div style={{ fontFamily: 'var(--font-family-display)', fontSize: 19, fontWeight: 600 }}>
+    <div className="kp-console-layout">
+      <aside className="kp-console-sidebar">
+        <div className="kp-console-brand">
+          <div className="kp-console-title">
             {TITLES[kind]}
           </div>
-          <div style={{ marginTop: 5, color: 'var(--color-text-tertiary)', fontSize: 12 }}>
+          <div className="kp-console-scope">
             Capability-scoped console
           </div>
         </div>
 
-        <nav aria-label={`${TITLES[kind]} navigation`} style={{ display: 'grid', gap: 3 }}>
+        <nav aria-label={`${TITLES[kind]} navigation`} className="kp-console-nav">
           {navigation.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              style={({ isActive }) => ({
-                padding: '10px 12px',
-                borderRadius: 9,
-                color: isActive ? 'var(--accent-text)' : 'var(--color-text-secondary)',
-                background: isActive ? 'var(--accent-soft)' : 'transparent',
-                fontWeight: isActive ? 600 : 500,
-                textDecoration: 'none',
-              })}
+              className={({ isActive }) => `kp-console-nav__item${isActive ? ' is-active' : ''}`}
             >
               {item.label}
             </NavLink>
           ))}
         </nav>
 
-        <div style={{ flex: 1 }} />
-        <Link
-          to="/chat"
-          style={{ padding: '10px 12px', color: 'var(--color-text-secondary)', textDecoration: 'none' }}
-        >
+        <div className="kp-console-sidebar__spacer" />
+        <Link to="/chat" className="kp-console-back">
           Back to app
         </Link>
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-        <Outlet />
+      <main className="kp-console-main">
+        <div className="kp-console-content">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

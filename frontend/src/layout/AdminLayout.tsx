@@ -20,6 +20,9 @@ import { useAuth } from '../auth/AuthProvider';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { useTheme } from '../hooks/useTheme';
 import NotificationBell from '../components/NotificationBell';
+import { designTokens } from '../design/tokens';
+
+const PAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
 const NAV = [
   { to: '/admin/dashboard', icon: <DashboardOutlined />, key: 'admin_nav_dashboard' },
@@ -69,7 +72,7 @@ export default function AdminLayout() {
           <span style={{
             width: 34, height: 34, borderRadius: 10, background: 'var(--gradient-accent)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 18,
+            color: 'var(--color-text-on-accent)', fontFamily: 'var(--font-family-display)', fontWeight: 600, fontSize: 18,
           }}>K</span>
           <span style={{ fontFamily: "'Fraunces', serif", fontWeight: 500, fontSize: 16 }}>
             {t('admin_console')}
@@ -123,8 +126,7 @@ export default function AdminLayout() {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <header style={{
           height: 56, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          padding: '0 24px', gap: 4, background: 'rgba(255, 255, 255, 0.4)',
-          backdropFilter: 'var(--header-blur)', WebkitBackdropFilter: 'var(--header-blur)',
+          padding: '0 24px', gap: 4, background: 'var(--color-bg-container)',
           borderBottom: '1px solid var(--color-border-secondary)'
         }}>
           <NotificationBell />
@@ -144,10 +146,10 @@ export default function AdminLayout() {
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
-              initial={{ opacity: 0, y: 15 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.3, ease: [0.25, 0.8, 0.25, 1] }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: PAGE_TRANSITION_SECONDS, ease: [0.25, 0.8, 0.25, 1] }}
               style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}
             >
               <Outlet />

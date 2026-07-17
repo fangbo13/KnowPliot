@@ -37,6 +37,9 @@ import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { initCrossTabSync, broadcastSessionDelete } from '../sync/crossTabSync';
+import { designTokens } from '../design/tokens';
+
+const PAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
 function clampToViewport(x: number, y: number, w = 180, h = 140) {
   return { x: Math.max(8, Math.min(x, window.innerWidth - w - 8)), y: Math.max(8, Math.min(y, window.innerHeight - h - 8)) };
@@ -393,7 +396,6 @@ export default function AppLayout() {
           styles={{ 
             body: { padding: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-sunken)' }, 
             header: { display: 'none' },
-            mask: { backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' } 
           }}>
           <div className="sidebar-header">
             <div className="sidebar-brand"><span className="sidebar-brand-mark">K</span><span className="sidebar-brand-name">KnowPilot</span></div>
@@ -443,10 +445,10 @@ export default function AppLayout() {
             <AnimatePresence mode="wait">
               <motion.div 
                 key={location.pathname}
-                initial={{ opacity: 0, y: 12 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: PAGE_TRANSITION_SECONDS, ease: 'easeOut' }}
                 style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
               >
                 <Outlet />

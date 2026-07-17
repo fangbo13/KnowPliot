@@ -16,6 +16,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder, formatDate } from '../utils/dateGroup';
 import i18n from '../i18n';
 import { useAuthorization } from '../auth/CapabilityProvider';
+import { EmptyState, PageHeader, Surface } from '../design/primitives';
 
 const { Text } = Typography;
 
@@ -188,10 +189,7 @@ export default function HistoryPage() {
               <MessageBubble key={msg.id} message={msg} canShare={canShare} />
             ))}
             {viewMessages.length === 0 && (
-              <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-                <div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_messages') || '暂无消息'}</div>
-              </div>
+              <EmptyState className="kp-history-empty" icon="K" title={t('no_messages') || '暂无消息'} />
             )}
             {viewMessages.length > 0 && (
               <>
@@ -231,22 +229,26 @@ export default function HistoryPage() {
 
   if (sessions.length === 0) {
     return (
-      <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>{t('no_history')}</div>
-        <Button type="primary" className="btn-press hover-lift" icon={<PlusOutlined />} onClick={() => navigate('/chat')} style={{ marginTop: 24, borderRadius: 12 }}>
-          {t('new_conversation')}
-        </Button>
+      <div className="page section-enter kp-history-empty-page">
+        <Surface>
+          <EmptyState
+            icon="K"
+            title={t('no_history')}
+            action={(
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/chat')}>
+                {t('new_conversation')}
+              </Button>
+            )}
+          />
+        </Surface>
       </div>
     );
   }
 
   return (
     <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div className="page-head">
-        <h1 className="page-title">{t('conversation_history')}</h1>
-      </div>
-      <div className="page-inner" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <PageHeader title={t('conversation_history')} />
+      <Surface className="page-inner kp-history-surface" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Search and filter toolbar */}
       <div style={{
         display: 'flex',
@@ -276,10 +278,7 @@ export default function HistoryPage() {
       </div>
 
       {filteredSessions.length === 0 ? (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-          <div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_search_results') || '没有找到匹配的对话'}</div>
-        </div>
+        <EmptyState className="kp-history-empty" icon="K" title={t('no_search_results') || '没有找到匹配的对话'} />
       ) : (
         <div style={{
           flex: 1,
@@ -322,7 +321,7 @@ export default function HistoryPage() {
                       <Button
                         type="text"
                         onClick={() => handleSelectSession(session.id)}
-                        className="stagger-fade-in hover-lift btn-press"
+                        className="hover-lift btn-press"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
@@ -335,7 +334,6 @@ export default function HistoryPage() {
                           textAlign: 'left',
                           padding: '12px 16px',
                           height: 'auto',
-                          animationDelay: '0.1s'
                         }}
                         aria-label={`${session.title || t('new_conversation')}, ${session.updatedAt ? formatDate(session.updatedAt) : t('filter_earlier')}`}
                       >
@@ -365,7 +363,7 @@ export default function HistoryPage() {
           )}
         </div>
       )}
-      </div>
+      </Surface>
     </div>
   );
 }

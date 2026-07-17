@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Drawer, Empty, Input, Select, Space, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
+import { PageHeader } from '../../design/primitives';
 import { adminApi, type FeedbackReview, type KnowledgeGap } from '../../api/admin';
 import type { ComplianceExportJob, KnowledgeQualityReport, QualityExportDataset } from '../../api/admin';
 
@@ -193,7 +194,7 @@ export default function AdminQualityPage() {
       key: 'sla',
       render: (_, row) => (
         isSlaOverdue(row)
-          ? <Tag color="error" style={{ borderRadius: 4, fontWeight: 500, padding: '2px 8px', border: '1px solid #ffccc7' }}>{t('quality_sla_overdue')}</Tag>
+          ? <Tag color="error" style={{ borderRadius: 4, fontWeight: 500, padding: '2px 8px', border: '1px solid var(--color-error)' }}>{t('quality_sla_overdue')}</Tag>
           : <Tag style={{ borderRadius: 4, padding: '2px 8px' }}>{t('quality_sla_ok')}</Tag>
       ),
     },
@@ -223,33 +224,30 @@ export default function AdminQualityPage() {
   return (
     <div className="page" style={{ background: 'transparent' }}>
       <div className="page-inner">
-        <div className="page-head" style={{ marginBottom: 32 }}>
-          <h1 className="page-title">{t('admin_nav_quality')}</h1>
-          <p className="page-subtitle" style={{ marginTop: 8 }}>{t('quality_page_subtitle')}</p>
-        </div>
+        <PageHeader title={t('admin_nav_quality')} description={t('quality_page_subtitle')} />
 
         {report && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0s' }} styles={{ body: { padding: '20px' } }}>
+            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
               <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_feedback_total')}</div>
               <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{report.feedback.total}</div>
             </Card>
-            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.1s' }} styles={{ body: { padding: '20px' } }}>
+            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
               <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_negative_rate')}</div>
               <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{Math.round(report.feedback.negative_rate * 100)}%</div>
             </Card>
-            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.2s' }} styles={{ body: { padding: '20px' } }}>
+            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
               <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_open_reviews')}</div>
               <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{report.reviews.pending + report.reviews.in_review}</div>
             </Card>
-            <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.3s' }} styles={{ body: { padding: '20px' } }}>
+            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
               <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_open_gaps')}</div>
               <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-warning)' }}>{report.knowledge_gaps.open + report.knowledge_gaps.in_progress}</div>
             </Card>
           </div>
         )}
 
-        <Card className="glass-panel section-enter" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.4s' }}>
+        <Card className="kp-surface kp-surface--paper">
           <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
             <Select
               allowClear

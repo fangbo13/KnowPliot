@@ -212,13 +212,13 @@ export default function ChatPageContainer() {
           <div style={{
             opacity: visibleAiStatusText ? 1 : 0,
             transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
-            transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            transition: 'opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease)',
             marginBottom: 10,
             display: 'flex',
             justifyContent: 'center',
             pointerEvents: visibleAiStatusText ? 'auto' : 'none'
           }}>
-            <div className="gemini-status-indicator" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.6))' }}>
+            <div className="gemini-status-indicator" style={{ background: 'var(--color-bg-elevated)' }}>
               <span className="gemini-status-spinner" />
               <span>{visibleAiStatusText}</span>
             </div>
@@ -338,7 +338,7 @@ export default function ChatPageContainer() {
           />
 
           {showScrollFab && (
-            <button className="scroll-fab section-enter" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'} style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.7))' }}>
+            <button className="scroll-fab section-enter" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'} style={{ background: 'var(--color-bg-elevated)' }}>
               <ArrowDownOutlined />{t('new_messages') || 'Latest'}
             </button>
           )}
@@ -349,13 +349,13 @@ export default function ChatPageContainer() {
         <div style={{
           opacity: visibleAiStatusText ? 1 : 0,
           transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
-          transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+          transition: 'opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease)',
           marginBottom: 10,
           display: 'flex',
           justifyContent: 'center',
           pointerEvents: visibleAiStatusText ? 'auto' : 'none'
         }}>
-          <div className="gemini-status-indicator" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'var(--color-bg-elevated-blur, rgba(255, 255, 255, 0.6))' }}>
+          <div className="gemini-status-indicator" style={{ background: 'var(--color-bg-elevated)' }}>
             <span className="gemini-status-spinner" />
             <span>{visibleAiStatusText}</span>
           </div>

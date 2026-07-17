@@ -94,11 +94,10 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
       />
 
       <div className="welcome-suggest-grid">
-        {activeQuickActions.map((action, index) => (
+        {activeQuickActions.map((action) => (
           <button
             key={action.label}
-            className="welcome-suggest stagger-fade-in hover-lift btn-press"
-            style={{ animationDelay: `${0.1 + index * 0.05}s` }}
+            className="welcome-suggest hover-lift btn-press"
             onClick={() => onQuickAction(action.question)}
             aria-label={`${action.label}: ${action.question}`}
           >

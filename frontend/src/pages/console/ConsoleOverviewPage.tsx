@@ -4,6 +4,8 @@
  * See LICENSE file in the project root for full license details.
  */
 
+import { PageHeader, Surface } from '../../design/primitives';
+
 export default function ConsoleOverviewPage({
   title,
   description,
@@ -12,21 +14,12 @@ export default function ConsoleOverviewPage({
   description: string;
 }) {
   return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-head">
-          <h1 className="page-title">{title}</h1>
-          <p style={{ maxWidth: 720, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
-            {description}
-          </p>
-        </header>
-        <section className="glass-panel" style={{ marginTop: 24, padding: 28, borderRadius: 16 }}>
-          <h2 style={{ marginTop: 0, fontFamily: 'var(--font-family-display)' }}>Your scope</h2>
-          <p style={{ marginBottom: 0, color: 'var(--color-text-secondary)' }}>
-            Navigation and actions in this console are resolved from the server capability contract.
-          </p>
-        </section>
-      </div>
+    <div>
+      <PageHeader title={title} description={description} />
+      <Surface as="section" tone="subtle" className="kp-console-overview-surface">
+        <h2>Your scope</h2>
+        <p>Navigation and actions in this console are resolved from the server capability contract.</p>
+      </Surface>
     </div>
   );
 }

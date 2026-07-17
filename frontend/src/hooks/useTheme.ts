@@ -5,7 +5,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { theme as antTheme } from 'antd';
+
+import { applyDesignTokens } from '../design/tokens';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -38,7 +39,7 @@ function computeEffective(mode: ThemeMode): 'light' | 'dark' {
 
 function applyThemeNow() {
   sharedEffective = computeEffective(sharedMode);
-  document.documentElement.setAttribute('data-theme', sharedEffective);
+  applyDesignTokens(sharedEffective);
   listeners.forEach(fn => fn(sharedMode, sharedEffective));
 }
 
@@ -90,93 +91,3 @@ export function useTheme() {
 
   return { mode, effective, setThemeMode };
 }
-
-/* ----------------------------------------------------------------------------
-   Ant Design theme — Claude warm "paper" palette.
-   Only token VALUES changed; consumed by ConfigProvider in main.tsx so the
-   admin/form pages (AntD) reskin in lockstep with the CSS-variable layer.
-   ---------------------------------------------------------------------------- */
-const sharedFont = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif";
-const sharedComponents = {
-  Button: { fontWeight: 500, controlHeight: 40, borderRadius: 12, borderRadiusLG: 14, primaryShadow: 'none' },
-  Card: { borderRadiusLG: 16, headerFontSize: 16 },
-  Input: { borderRadius: 12, controlHeight: 40 },
-  Select: { borderRadius: 12, controlHeight: 40 },
-  Menu: { itemBorderRadius: 10, subMenuItemBg: 'transparent', iconSize: 16, collapsedIconSize: 16 },
-  Typography: { titleMarginBottom: 12 },
-  Table: { borderRadiusLG: 12, headerBorderRadius: 12 },
-  Modal: { borderRadiusLG: 18 },
-  Drawer: {},
-  Alert: { borderRadiusLG: 12 },
-  Tag: { borderRadiusSM: 8 },
-  Segmented: { trackPadding: 3, borderRadius: 12 },
-  Spin: { dotSize: 10, dotSizeSM: 8, dotSizeLG: 16 },
-  Tooltip: { borderRadius: 8 },
-  Popover: { borderRadiusLG: 14 },
-};
-
-export const eyTheme = {
-  light: {
-    token: {
-      colorPrimary: '#C2693F',
-      colorInfo: '#C2693F',
-      colorText: '#29251F',
-      colorTextSecondary: '#6E675C',
-      colorTextTertiary: '#9A9384',
-      colorBgLayout: '#F5F4EE',
-      colorBgContainer: '#FCFBF7',
-      colorBgElevated: '#FFFFFF',
-      colorBorder: '#E4E0D5',
-      colorBorderSecondary: '#ECE9DF',
-      colorError: '#B23B30',
-      colorSuccess: '#4F7A4A',
-      colorWarning: '#B8801F',
-      borderRadius: 12,
-      fontSize: 15,
-      lineHeight: 1.65,
-      controlHeight: 40,
-      wireframe: false,
-      fontFamily: sharedFont,
-      fontFamilyCode: "'JetBrains Mono', monospace",
-    },
-    components: {
-      ...sharedComponents,
-      Menu: { ...sharedComponents.Menu, itemSelectedBg: 'rgba(194,105,63,0.10)', itemSelectedColor: '#29251F', itemActiveBg: 'rgba(194,105,63,0.14)', itemHoverBg: 'rgba(64,52,40,0.05)', itemHoverColor: '#29251F' },
-      Layout: { siderBg: '#FCFBF7', headerBg: '#FCFBF7', bodyBg: '#F5F4EE' },
-      Table: { ...sharedComponents.Table, headerBg: '#F0EEE6', headerColor: '#6E675C' },
-      Segmented: { ...sharedComponents.Segmented, itemSelectedBg: '#C2693F', itemSelectedColor: '#FFFFFF' },
-    },
-  },
-  dark: {
-    token: {
-      colorPrimary: '#D9805C',
-      colorInfo: '#D9805C',
-      colorText: '#ECE7DC',
-      colorTextSecondary: '#B0A998',
-      colorTextTertiary: '#847D6E',
-      colorBgLayout: '#1C1A17',
-      colorBgContainer: '#24221E',
-      colorBgElevated: '#2B2925',
-      colorBorder: '#38352F',
-      colorBorderSecondary: '#302D28',
-      colorError: '#E07B6B',
-      colorSuccess: '#7FB069',
-      colorWarning: '#E0B05C',
-      borderRadius: 12,
-      fontSize: 15,
-      lineHeight: 1.65,
-      controlHeight: 40,
-      wireframe: false,
-      fontFamily: sharedFont,
-      fontFamilyCode: "'JetBrains Mono', monospace",
-    },
-    algorithm: antTheme.darkAlgorithm,
-    components: {
-      ...sharedComponents,
-      Menu: { ...sharedComponents.Menu, itemSelectedBg: 'rgba(217,128,92,0.18)', itemSelectedColor: '#ECE7DC', itemActiveBg: 'rgba(217,128,92,0.24)', itemHoverBg: 'rgba(236,231,220,0.06)', itemHoverColor: '#ECE7DC' },
-      Layout: { siderBg: '#24221E', headerBg: '#24221E', bodyBg: '#1C1A17' },
-      Table: { ...sharedComponents.Table, headerBg: '#2B2925', headerColor: '#B0A998' },
-      Segmented: { ...sharedComponents.Segmented, itemSelectedBg: '#D9805C', itemSelectedColor: '#1C140E' },
-    },
-  },
-};

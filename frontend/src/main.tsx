@@ -8,26 +8,31 @@
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
+import { MotionConfig } from 'framer-motion';
 import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { CapabilityProvider } from './auth/CapabilityProvider';
-import { useTheme, eyTheme } from './hooks/useTheme';
+import { getAntTheme } from './design/theme';
+import { useTheme } from './hooks/useTheme';
 import './i18n';
 import './styles/tokens.css';
 import './styles/globals.css';
 import './styles/animations.css';
 import './styles/chat.css';
+import './styles/design-system.css';
 
 function ThemeRoot({ children }: { children: React.ReactNode }) {
   const { effective } = useTheme();
   const themeConfig = useMemo(
-    () => (effective === 'dark' ? eyTheme.dark : eyTheme.light),
+    () => getAntTheme(effective),
     [effective]
   );
 
   return (
     <ConfigProvider theme={themeConfig}>
-      {children}
+      <MotionConfig reducedMotion="user">
+        {children}
+      </MotionConfig>
     </ConfigProvider>
   );
 }

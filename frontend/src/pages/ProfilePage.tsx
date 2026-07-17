@@ -94,7 +94,7 @@ export default function ProfilePage() {
           }
           styles={{ body: { padding: '32px 32px 36px' } }}
           className="glass-panel hover-lift section-enter"
-          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', animationDelay: '0.05s' }}
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
         >
           {/* Avatar + Username header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32 }}>
@@ -186,7 +186,7 @@ export default function ProfilePage() {
           }
           styles={{ body: { padding: '32px 32px 28px' } }}
           className="glass-panel hover-lift section-enter"
-          style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.15s' }}
+          style={{ borderRadius: 'var(--radius-lg)' }}
         >
           <Form
             layout="vertical"
@@ -231,7 +231,7 @@ export default function ProfilePage() {
         <Card 
           title={<><SafetyCertificateOutlined style={{ marginRight: 8, color: 'var(--accent)' }}/>{t('account_security')}</>} 
           className="glass-panel hover-lift section-enter" 
-          style={{ marginTop: 24, borderRadius: 'var(--radius-lg)', animationDelay: '0.25s' }}
+          style={{ marginTop: 24, borderRadius: 'var(--radius-lg)' }}
         >
           <Button icon={<LockOutlined />} className="btn-press" onClick={() => setPasswordOpen(true)}>{t('change_password')}</Button>
           <Button icon={<SafetyCertificateOutlined />} className="btn-press" style={{ marginLeft: 8 }} onClick={() => setMfaOpen(true)}>

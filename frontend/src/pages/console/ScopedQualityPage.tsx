@@ -9,6 +9,7 @@ import { useParams } from 'react-router-dom';
 
 import { adminApi, type FeedbackReview } from '../../api/admin';
 import { useAuthorization } from '../../auth/CapabilityProvider';
+import { EmptyState, PageHeader, Status, Surface } from '../../design/primitives';
 
 export default function ScopedQualityPage() {
   const { spaceId } = useParams<{ spaceId: string }>();
@@ -39,25 +40,24 @@ export default function ScopedQualityPage() {
 
   const canReview = access.has('quality.review');
   return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-head">
-          <h1 className="page-title">Workspace quality</h1>
-          <p style={{ color: 'var(--color-text-secondary)' }}>
-            Feedback is restricted to the selected workspace. Global reports and exports are not loaded here.
-          </p>
-        </header>
-        {loading && <p role="status">Loading feedback...</p>}
-        {error && <p role="alert">Feedback is temporarily unavailable.</p>}
-        {!loading && !error && reviews.length === 0 && <p>No feedback awaiting review.</p>}
-        <div style={{ display: 'grid', gap: 12, marginTop: 20 }}>
-          {reviews.map((review) => (
-            <article key={review.id} className="glass-panel" style={{ padding: 20, borderRadius: 14 }}>
+    <div>
+      <PageHeader
+        title="Workspace quality"
+        description="Feedback is restricted to the selected workspace. Global reports and exports are not loaded here."
+      />
+      {loading && <Status role="status" tone="info">Loading feedback...</Status>}
+      {error && <Status role="alert" tone="error">Feedback is temporarily unavailable.</Status>}
+      {!loading && !error && reviews.length === 0 && (
+        <Surface><EmptyState title="No feedback awaiting review" /></Surface>
+      )}
+      <div className="kp-quality-list">
+        {reviews.map((review) => (
+          <Surface as="article" key={review.id} className="kp-quality-review">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
                 <div>
                   <strong>{review.feedback_type}</strong>
                   <p style={{ color: 'var(--color-text-secondary)' }}>{review.comment || 'No comment'}</p>
-                  <small>{review.status}</small>
+                  <Status tone="neutral">{review.status}</Status>
                 </div>
                 {canReview && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -73,9 +73,8 @@ export default function ScopedQualityPage() {
                   </div>
                 )}
               </div>
-            </article>
-          ))}
-        </div>
+          </Surface>
+        ))}
       </div>
     </div>
   );

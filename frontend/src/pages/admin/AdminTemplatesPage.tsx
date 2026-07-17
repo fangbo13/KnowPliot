@@ -19,6 +19,7 @@ import {
   type ScenarioTemplateRevision,
 } from '../../api/templates';
 import { adminApi, type Organization, type BusinessLine } from '../../api/admin';
+import { AppShell, PageHeader } from '../../design/primitives';
 
 export default function AdminTemplatesPage() {
   const { t } = useTranslation('common');
@@ -411,9 +412,9 @@ export default function AdminTemplatesPage() {
       render: (name: string, r: ScenarioTemplate) => (
         <Space>
           {r.icon ? (
-            <BuildOutlined style={{ color: '#1890ff', fontSize: 16 }} />
+            <BuildOutlined style={{ color: 'var(--accent)', fontSize: 16 }} />
           ) : (
-            <FileTextOutlined style={{ color: '#8c8c8c', fontSize: 16 }} />
+            <FileTextOutlined style={{ color: 'var(--color-text-tertiary)', fontSize: 16 }} />
           )}
           <span style={{ fontWeight: 600 }}>{name}</span>
         </Space>
@@ -602,10 +603,10 @@ export default function AdminTemplatesPage() {
   const filterScopedLines = orgFilter ? lines.filter((l) => l.organization === orgFilter) : lines;
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_nav_templates') || 'Scenario Templates'}</h1>
-        <Space>
+    <AppShell as="div" width="management" className="kp-embedded-shell">
+      <PageHeader
+        title={t('admin_nav_templates') || 'Scenario Templates'}
+        actions={<Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button
             type="primary"
@@ -615,10 +616,10 @@ export default function AdminTemplatesPage() {
           >
             {t('admin_create_template') || 'Create Template'}
           </Button>
-        </Space>
-      </div>
+        </Space>}
+      />
 
-      <Card className="glass-panel section-enter" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+      <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
         <Space wrap size="middle">
           <Input.Search
             allowClear
@@ -733,7 +734,7 @@ export default function AdminTemplatesPage() {
         </Space>
       </Card>
 
-      <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)', animationDelay: '0.1s' }}>
+      <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: 20 } }}>
         <Table rowKey="id" loading={loading} dataSource={templates} columns={columns} pagination={false} size="middle" />
       </Card>
 
@@ -1102,8 +1103,8 @@ export default function AdminTemplatesPage() {
         <pre style={{
           maxHeight: '400px',
           overflow: 'auto',
-          backgroundColor: 'var(--color-bg-container-secondary, #f5f5f5)',
-          border: '1px solid var(--color-border-secondary, #e8e8e8)',
+          backgroundColor: 'var(--color-bg-sunken)',
+          border: '1px solid var(--color-border-secondary)',
           padding: '12px',
           borderRadius: '6px',
           fontSize: 13,
@@ -1185,6 +1186,6 @@ export default function AdminTemplatesPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </AppShell>
   );
 }

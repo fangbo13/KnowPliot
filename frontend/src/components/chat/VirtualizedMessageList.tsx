@@ -109,7 +109,7 @@ export default function VirtualizedMessageList({
         <div className="thinking">
           <div className="thinking-dots">
             {[0, 1, 2].map((i) => (
-              <span key={i} className="thinking-dot" style={{ animationDelay: `${i * 0.16}s` }} />
+              <span key={i} className="thinking-dot" />
             ))}
           </div>
           <span className="thinking-label">

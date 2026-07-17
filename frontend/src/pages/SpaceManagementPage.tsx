@@ -294,8 +294,8 @@ export default function SpaceManagementPage() {
             grid={{ gutter: 16, xs: 1, sm: 1, md: 2, lg: 2, xl: 3, xxl: 3 }}
             dataSource={members}
             loading={loading}
-            renderItem={(rec, i) => (
-              <List.Item className="stagger-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
+            renderItem={(rec) => (
+              <List.Item>
                 <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -352,8 +352,8 @@ export default function SpaceManagementPage() {
               grid={{ gutter: 16, xs: 1, sm: 1, md: 2, lg: 2, xl: 3, xxl: 3 }}
               dataSource={invites}
               loading={loading}
-              renderItem={(rec, i) => (
-                <List.Item className="stagger-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
+              renderItem={(rec) => (
+                <List.Item>
                   <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

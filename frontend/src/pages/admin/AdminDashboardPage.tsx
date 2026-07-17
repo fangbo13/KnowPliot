@@ -156,8 +156,7 @@ export default function AdminDashboardPage() {
             height: 6,
             borderRadius: '50%',
             backgroundColor: style.text,
-            marginRight: 6,
-            animation: 'pulseDot 1.6s infinite ease-in-out'
+            marginRight: 6
           }} />
         )}
         {status.toUpperCase()}
@@ -296,26 +295,26 @@ export default function AdminDashboardPage() {
       
       {systemMetrics && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0s' }} styles={{ body: { padding: '20px' } }}>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Users</div>
             <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.users.total}</div>
           </Card>
-          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.1s' }} styles={{ body: { padding: '20px' } }}>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Users</div>
             <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{systemMetrics.users.active}</div>
           </Card>
-          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.2s' }} styles={{ body: { padding: '20px' } }}>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Documents</div>
             <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.documents.total}</div>
           </Card>
-          <Card className="glass-panel section-enter hover-lift" style={{ borderRadius: 'var(--radius-lg)', animationDelay: '0.3s' }} styles={{ body: { padding: '20px' } }}>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generated Tokens</div>
             <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.model_api.total_tokens.toLocaleString()}</div>
           </Card>
         </div>
       )}
 
-      <div className="section-enter" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start', animationDelay: '0.4s' }}>
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* Left: User list table */}
         <Card
           className="glass-panel hover-lift"
@@ -405,7 +404,7 @@ export default function AdminDashboardPage() {
         </Card>
       </div>
 
-      <div className="section-enter" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24, animationDelay: '0.5s' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24 }}>
         <Card
           title="Ingestion queue"
           extra={<Button icon={<ReloadOutlined />} onClick={loadSystemStatus}>Refresh</Button>}
