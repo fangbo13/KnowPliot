@@ -6,6 +6,8 @@
 >
 > Primary delivery plan: [KnowPilot Optimization Implementation Plan](../superpowers/plans/2026-07-16-knowpilot-optimization-implementation.md)
 >
+> Approved follow-on design: [Ownership Continuity and Account Offboarding](../superpowers/specs/2026-07-17-ownership-continuity-account-offboarding-design.md) — implementation not started
+>
 > Scope: stability, data correctness, authorization, model policy, product closure, and visual-system convergence
 
 This addendum is the final normative specification for the KnowPilot

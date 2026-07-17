@@ -2,6 +2,13 @@
 
 Use this prompt when handing Version1.74.1 to a reviewer, operator, or the next Codex task.
 
+Follow-on work approved on 2026-07-17 is design-only and is not included in
+the implementation-complete claims below. For space-owner succession and
+account offboarding, read
+[the ownership-continuity design](../superpowers/specs/2026-07-17-ownership-continuity-account-offboarding-design.md)
+and use
+[the ownership implementation handoff](Version1.74.1_ownership_continuity_implementation_handoff.md).
+
 ```text
 You are taking over KnowPilot Version1.74.1 for acceptance review.
 
@@ -58,4 +65,3 @@ Expected reviewer output:
 - Whether live Yundang validation has been completed.
 - Any screenshots, logs, or migration output needed for final release confidence.
 ```
-
