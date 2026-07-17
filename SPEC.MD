@@ -757,18 +757,19 @@ external crawling, and billing remain outside this phase.
 | Spaces created per deployment | increased |
 | Knowledge admin time per space | reduced |
 
-## 12. Open Decisions
+## 12. Resolved Decisions
 
-1. Should access code be available on the login page before authentication, or only after login as "join space by code"?
-   - Recommendation: allow pilot/demo code before login only for non-confidential demo spaces; production join code should require login.
-2. Should business lines share global templates or clone templates into each line?
-   - Recommendation: global templates with business-line overrides and versioning.
-3. Should cross-space search be allowed?
-   - Recommendation: only for roles with explicit multi-space permission; default chat remains single-space to avoid source leakage.
-4. Should each project be a space or a document category under a space?
-   - Recommendation: high-confidentiality or long-running projects become spaces; small topics can be categories.
-5. Should answers quote source text verbatim?
-   - Recommendation: keep excerpts short, show source links, and prefer summarized answers with citations.
+1. Production access-code join requires authentication in the current release.
+   Pre-authentication demo entry is deferred and, if approved later, is limited
+   to explicitly non-confidential demo spaces.
+2. Templates are global or scoped assets with versioned business-line overrides;
+   business lines do not silently clone untracked copies.
+3. Chat retrieval remains single-space. Cross-space retrieval is deferred until
+   an explicit permission and citation-isolation design is approved.
+4. High-confidentiality or long-running projects are spaces; small bounded topics
+   are document categories inside a space.
+5. Answers prefer summaries with citations and short source excerpts. The current
+   citation excerpt maximum is 280 plain-text characters.
 
 ## 13. Final Design Principle
 
@@ -1265,13 +1266,14 @@ Audit evidence:
 V9.2 Docker validation status: actual PASS with no phase-level non-PASS
 environment limitation remaining.
 
-## 15. Versioned Optimization Addendum (2026-07-16)
+## 15. Versioned Optimization Addendum (2026-07-17 v2)
 
-The approved post-V11 optimization baseline is maintained in
+The final normative post-V11 optimization specification is maintained in
 [`docs/specs/2026-07-16-knowpilot-optimization-spec.md`](docs/specs/2026-07-16-knowpilot-optimization-spec.md).
-It is a versioned addendum to this specification and defines the audited issue
-register, ChatTurn/SSE v2 contracts, four-level capability model, model policy,
-design direction, phased acceptance gates, compatibility, and rollback rules.
+It is locally accepted but not production-accepted. It defines the audited issue
+register, exact ChatTurn/SSE v2 state and API contracts, capability matrix, model
+policy, product/design states, migration and observability rules, requirement
+traceability, deployment gates, compatibility, and rollback route.
 
 ## 16. Optimization Implementation Closure (2026-07-17)
 
@@ -1309,6 +1311,13 @@ list/detail requests, rejects stale responses, displays explicit loading/error/
 empty/recovery states, and consumes one server cursor page at a time. Selecting a
 long conversation loads the newest message window and exposes “load earlier” for
 subsequent cursor pages; pages are deduplicated and rendered chronologically.
+
+The public capability service names history access `chat.history`. The existing
+space-permission layer names the same policy `CHAT_VIEW_HISTORY` with stored code
+`chat.view_history`; they are mapped representations of one authorization rule.
+Active owned Turn recovery requires effective `chat.ask`; that grant may come
+from direct membership, public-demo guest access, or platform/governance scope.
+Terminal Turn recovery, regenerate, and branch require history access as well.
 
 Regenerate and branch are distinct operations:
 
@@ -1421,7 +1430,7 @@ without an explicit retention decision.
 
 Fresh local gates passed on 2026-07-17:
 
-- Django complete suite: 359 passed.
+- Django complete suite: 365 passed.
 - Frontend complete suite: 266 passed in 45 files.
 - TypeScript typecheck and 82-file i18n validation: passed.
 - Production build: passed; 4,027 modules transformed.

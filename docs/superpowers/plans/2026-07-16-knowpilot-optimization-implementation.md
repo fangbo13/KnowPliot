@@ -1,6 +1,21 @@
 # KnowPilot Optimization Implementation Plan
 
-> Execute on `codex/knowpilot-optimization`. Follow test-first development for every behavior change. Do not start Docker or the deployed Yundang environment. PostgreSQL-dependent tests may be recorded as blocked by the unavailable `db` host, but frontend tests, pure unit tests, type checks, builds, migration checks, and static checks must run whenever applicable.
+> Status: Tasks 1–8 implemented and locally accepted on `codex/knowpilot-optimization`; production acceptance in 筼筜 remains pending.
+>
+> Execution constraint: follow test-first development for every behavior change. Do not start Docker or the deployed 筼筜 environment. Local acceptance uses the isolated test settings; PostgreSQL, Redis, provider, and authenticated browser evidence belongs to an authorized deployment window.
+
+## Completion ledger
+
+| Task | State | Closure evidence |
+|---|---|---|
+| 1. Specification and handoff | Locally accepted | Normative addendum, root pointer, `memory.md`, current progress report |
+| 2. Frontend stability containment | Locally accepted | Session-keyed state, stale-request guards, POST-once recovery and complete frontend suite |
+| 3. ChatTurn/idempotency/locking/SSE v2 | Locally accepted; live Redis pending | Migrations, Turn/replay/lease/error contracts and complete backend suite |
+| 4. Capability service/consoles | Locally accepted; browser UAT pending | Exact capability matrix, scoped APIs, route/deny tests |
+| 5. Fast/deep/performance | Locally accepted; live provider pending | Governed profiles, safe phases/metrics, privacy and mode tests |
+| 6. Design convergence | Locally accepted; visual UAT pending | Typed tokens/primitives, convergence/reduced-motion tests and production build |
+| 7. Product closure | Locally accepted | History, regenerate/version/branch/share/citation and space/governance workflows |
+| 8. Verification/handoff | Locally accepted | 365 backend and 266 frontend tests, static/build/doc gates, compatibility/removal route, current memory and reports |
 
 ## Global Constraints
 
@@ -16,7 +31,11 @@
 
 Create `docs/specs/2026-07-16-knowpilot-optimization-spec.md` from the approved optimization specification. It must contain the audited issue IDs, ChatTurn and SSE v2 contracts, four-level role/capability matrix, fast/deep model policy, design direction, rollout phases, acceptance criteria, and compatibility/rollback rules.
 
-Create root `memory.md` with the approved current-state template. Record the current branch, primary spec, Yundang deployment target, environment-not-started status, locked invariants, baseline evidence (frontend 53 passing; backend DB tests blocked because hostname `db` is unavailable), current phase, feature flags, known issues, and the single next action. Update `SPEC.MD` with a short versioned pointer to the new addendum without rewriting existing content.
+Create root `memory.md` with the approved current-state template. Record the
+current branch, normative spec, 筼筜 deployment target, environment-not-started
+status, locked invariants, final local evidence, feature flags, known deployment
+risks, and the single next action. Update `SPEC.MD` with a versioned pointer and
+implementation-closure summary without rewriting historical audit content.
 
 Verification: link/path checks and `git diff --check`. Documentation-only task; no product test required.
 
@@ -45,7 +64,10 @@ Implement a Redis session lock with a 180-second lease and 30-second renewal, re
 
 Also fix history exclusion to use the new question primary key, touch session `updated_at` when messages are created, and enforce space/member/chat capabilities on list/history/send/share/export paths. Retain v1 compatibility behind `CHAT_STREAM_V2` for one release.
 
-Verification: targeted pure tests, Django checks, migration generation consistency, and DB tests when available. Explicitly record PostgreSQL-only tests blocked by environment.
+Verification: targeted tests, the complete isolated Django suite, Django checks,
+migration generation consistency, and changed-file static checks. Record live
+PostgreSQL/Redis behavior as deployment evidence rather than inferring it from
+local substitutes.
 
 ## Task 4: Capability service and four-level management consoles
 
@@ -97,7 +119,10 @@ Verification: targeted backend/frontend tests, capability denial cases, full fro
 
 ## Task 8: Compatibility cleanup, verification, and handoff
 
-Run available full frontend tests, typecheck, build, backend pure tests, Django checks, migration checks, and `git diff --check`. Do not start the deployment environment. Record unavailable DB-backed coverage honestly in `memory.md`.
+Run the complete frontend and isolated Django suites, typecheck, i18n validation,
+build, Django/static/migration checks, documentation link checks, and
+`git diff --check`. Do not start the deployment environment. Record PostgreSQL,
+Redis, provider, and browser evidence as deployment-pending in `memory.md`.
 
 Review feature-flag defaults and rollback order: additive migration and backward-compatible backend first; dual-protocol frontend second; then enable `CHAT_TURN_IDEMPOTENCY`, `CHAT_STREAM_V2`, `CAPABILITY_NAV`, and `DEEP_ANSWER_MODE` in that order. Do not delete v1 routes or legacy authorization fallback in this branch; document their one-release removal gate.
 

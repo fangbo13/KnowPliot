@@ -3,17 +3,18 @@
 - Last updated: 2026-07-17 (Asia/Shanghai)
 - Branch: `codex/knowpilot-optimization`
 - Handoff commit: the commit containing this file; resolve it with `git rev-parse HEAD`
-- Primary specification: `SPEC.MD` section 16 and `docs/specs/2026-07-16-knowpilot-optimization-spec.md`
+- Primary specification: `docs/specs/2026-07-16-knowpilot-optimization-spec.md` v2; summarized by `SPEC.MD` sections 15–16
 - Deployment target: 筼筜 (remote runtime; host, path, credentials, and provider configuration were not supplied)
 - Environment state: not started and not contacted
 - Delivery state: implementation and local verification complete; deployment validation pending
 
 ## 1. Next action
 
-In an authorized 筼筜 deployment window, rehearse migrations `chat.0013` through
-`chat.0016` against a PostgreSQL backup/clone, then run authenticated Redis,
-provider, capability, and browser smoke checks with all new rollout flags still
-disabled. Do not infer deployment credentials or start services from this handoff.
+In an authorized 筼筜 deployment window, rehearse the additive sequence
+`chat.0013`, `spaces.0008`, and `chat.0014` through `chat.0016` against a
+PostgreSQL backup/clone, then run authenticated Redis, provider, capability, and
+browser smoke checks with all new rollout flags still disabled. Do not infer
+deployment credentials or start services from this handoff.
 
 ## 2. Locked decisions and invariants
 
@@ -38,6 +39,10 @@ disabled. Do not infer deployment credentials or start services from this handof
   only when the server grants document-download capability.
 - The design direction is one warm editorial token system, consistent spacing
   and surfaces, restrained functional motion, and global reduced-motion support.
+- Current product decisions require authenticated production join codes,
+  versioned template overrides, single-space chat retrieval, spaces for long-
+  running/confidential projects, and summarized answers with cited excerpts
+  bounded to 280 plain-text characters.
 - No secrets, PII, raw prompts/reasoning, connection strings, or invented 筼筜
   details belong in this file.
 
@@ -49,6 +54,12 @@ disabled. Do not infer deployment credentials or start services from this handof
   state, Redis lease renewal/release, SSE v1/v2 compatibility, monotonic replay,
   bounded GET-only recovery, safe error codes, partial-content retention, and
   session `updated_at` touches are implemented.
+- Client stream budgets are 20 seconds for connection, 45 seconds idle, 180
+  seconds total, and 5 seconds per recovery request. Server coordination uses a
+  180-second lease renewed every 30 seconds and a 15-minute replay buffer.
+- The final audit fixed the metrics allowlist so boolean
+  `idempotency_rollout_enabled` is persisted beside the bounded idempotency
+  disposition; integer lookalikes and unsupported metric keys remain rejected.
 - History is server-filtered by query, time, recovery status, and opaque cursor.
   Search covers titles and message content without loading all sessions. Ordering
   is stable on pinned state, update time, and ID.
@@ -56,6 +67,14 @@ disabled. Do not infer deployment credentials or start services from this handof
   Long conversations load older message cursor pages and remain chronological.
 - Explicit history states cover loading, failure/retry, empty results, partial,
   recovering, recovered, failed, and terminal conversations.
+- Session lists, message history, session detail, and export re-check current
+  space capabilities. Guest/revoked access cannot recover protected history or
+  use export merely because the session is still owned by that user.
+- Active Turn status/replay remains available to an owner through effective
+  `chat.ask`, including direct membership, public-demo guest access, and
+  platform/governance scope. Terminal Turn recovery, regenerate, and branch
+  require the same history policy exposed as `chat.history` and implemented as
+  `CHAT_VIEW_HISTORY`/`chat.view_history`.
 
 ### Regenerate, versions, branch, citations, and sharing
 
@@ -156,7 +175,7 @@ Fresh final evidence from 2026-07-17:
 
 | Gate | Result | Limitation |
 |---|---:|---|
-| Django complete suite | 359/359 passed | Local `config.settings.local_test` and SQLite; no PostgreSQL/Redis/provider service |
+| Django complete suite | 365/365 passed | Local `config.settings.local_test` and SQLite; no PostgreSQL/Redis/provider service |
 | Frontend complete suite | 266/266 passed in 45 files | jsdom/unit/integration; no live server |
 | Frontend typecheck | Passed | `tsc --noEmit` |
 | Frontend i18n | Passed | 82 source files, all referenced keys present |
