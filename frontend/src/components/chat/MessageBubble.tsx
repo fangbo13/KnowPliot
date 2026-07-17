@@ -7,7 +7,7 @@
 import { useTranslation } from 'react-i18next';
 import { message as antdMessage } from 'antd';
 import {
-  CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined,
+  CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, BranchesOutlined,
   DownOutlined, RightOutlined, PaperClipOutlined,
   LikeOutlined, DislikeOutlined, FlagOutlined, CloseOutlined,
 } from '@ant-design/icons';
@@ -39,6 +39,8 @@ interface Props {
   disableActions?: boolean;
   canShare?: boolean;
   onRegenerate?: () => void;
+  onBranch?: () => void;
+  onShare?: () => void | Promise<void>;
 }
 
 type FeedbackType = 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
@@ -56,7 +58,7 @@ function isPersistedUuid(id: string): boolean {
  * React.memo (below) keeps non-streaming bubbles from re-parsing Markdown while a
  * different message streams — only the streaming bubble re-renders per frame.
  */
-function MessageBubble({ message, isStreaming = false, disableActions = false, canShare = false, onRegenerate }: Props) {
+function MessageBubble({ message, isStreaming = false, disableActions = false, canShare = false, onRegenerate, onBranch, onShare }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
@@ -129,6 +131,10 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
   };
 
   const handleShare = async () => {
+    if (onShare) {
+      await onShare();
+      return;
+    }
     if (navigator.share) {
       try {
         await navigator.share({ title: 'KnowPilot', text: message.content });
@@ -251,6 +257,12 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
               <ReloadOutlined />{t('regenerate') || 'Retry'}
             </button>
           )}
+          {onBranch && (
+            <button className="msg-action-btn btn-press" onClick={onBranch} disabled={disableActions}
+              aria-label={t('branch_conversation')}>
+              <BranchesOutlined />{t('branch_conversation')}
+            </button>
+          )}
           {canGiveFeedback && (
             <>
               <button
@@ -366,20 +378,40 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
           </button>
           {sourcesExpanded && (
             <div className="citation-list">
-              {message.citations.map((cit: Citation, i: number) => (
-                <div key={i} className="citation-item">
-                  <span className="citation-index">{i + 1}.</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="citation-title" title={cit.document_title}>{cit.document_title}</div>
-                    <div className="citation-meta">
-                      {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
-                      <span className="relevance-badge" style={{ color: getRelevanceColor(cit.score) }}>
-                        {getRelevanceLabel(cit.score, t)}
-                      </span>
+              {message.citations.map((cit: Citation, i: number) => {
+                const sourceUrl = cit.source_url?.startsWith('/api/v1/chat/citations/')
+                  ? cit.source_url
+                  : null;
+                return (
+                  <div key={cit.source_id ?? `${cit.document_id}-${i}`} className="citation-item">
+                    <span className="citation-index">{i + 1}.</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {sourceUrl ? (
+                        <a
+                          className="citation-title"
+                          href={sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={cit.document_title}
+                        >
+                          {cit.document_title}
+                        </a>
+                      ) : (
+                        <div className="citation-title" title={cit.document_title}>
+                          {cit.document_title}
+                        </div>
+                      )}
+                      {cit.snippet && <div className="citation-snippet">{cit.snippet}</div>}
+                      <div className="citation-meta">
+                        {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
+                        <span className="relevance-badge" style={{ color: getRelevanceColor(cit.score) }}>
+                          {getRelevanceLabel(cit.score, t)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

@@ -18,6 +18,15 @@ interface CursorRequest {
   signal?: AbortSignal;
 }
 
+export type HistoryTimeFilter = 'all' | 'today' | 'this_week' | 'this_month' | 'older';
+export type HistoryStatusFilter = 'all' | 'partial' | 'recovering' | 'recovered' | 'failed' | 'terminal';
+
+export interface SessionPageRequest extends CursorRequest {
+  query?: string;
+  time?: HistoryTimeFilter;
+  status?: HistoryStatusFilter;
+}
+
 function cursorToken(cursor: string): string {
   try {
     return new URL(cursor, 'http://localhost').searchParams.get('cursor') ?? cursor;
@@ -40,6 +49,24 @@ export interface ChatMessageRecord {
   createdAt?: string;
 }
 
+export interface ConversationShare {
+  id: string;
+  token: string;
+  session: string;
+  expires_at: string;
+  revoked_at?: string | null;
+  created_at?: string;
+}
+
+export interface SharedConversation {
+  id: string;
+  token: string;
+  title: string;
+  expires_at: string;
+  read_only: true;
+  messages: ChatMessageRecord[];
+}
+
 /**
  * Map a raw backend session object (snake_case keys) to the frontend ChatSession
  * interface (camelCase keys). The backend serializer returns updated_at, created_at,
@@ -54,14 +81,25 @@ function mapSession(raw: any): ChatSession {
     title: raw.title,
     is_active: raw.is_active,
     isPinned: Boolean(raw.is_pinned),
+    ...(raw.recovery_state ? { recoveryState: raw.recovery_state } : {}),
     updatedAt: raw.updated_at ?? raw.updatedAt ?? '',  // snake_case → camelCase
   };
 }
 
 export const chatApi = {
-  async getSessions(options: CursorRequest = {}): Promise<CursorPage<ChatSession>> {
-    const { data } = options.cursor
-      ? await apiClient.get('/chat/sessions/', { params: { cursor: cursorToken(options.cursor) } })
+  async getSessions(options: SessionPageRequest = {}): Promise<CursorPage<ChatSession>> {
+    const params = {
+      ...(options.query?.trim() ? { q: options.query.trim() } : {}),
+      ...(options.time && options.time !== 'all' ? { time: options.time } : {}),
+      ...(options.status && options.status !== 'all' ? { status: options.status } : {}),
+      ...(options.cursor ? { cursor: cursorToken(options.cursor) } : {}),
+    };
+    const hasConfig = Object.keys(params).length > 0 || Boolean(options.signal);
+    const { data } = hasConfig
+      ? await apiClient.get('/chat/sessions/', {
+          ...(Object.keys(params).length > 0 ? { params } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
       : await apiClient.get('/chat/sessions/');
     if (Array.isArray(data)) {
       return { results: data.map(mapSession), next: null, previous: null };
@@ -107,6 +145,38 @@ export const chatApi = {
       params: { format },
       responseType: 'blob',
     });
+    return data;
+  },
+
+  async branchMessage(
+    messageId: string,
+    options: { clientRequestId?: string; title?: string } = {},
+  ): Promise<ChatSession> {
+    const { data } = await apiClient.post(`/chat/messages/${messageId}/branch/`, {
+      client_request_id: options.clientRequestId ?? crypto.randomUUID(),
+      ...(options.title ? { title: options.title } : {}),
+    });
+    return mapSession(data);
+  },
+
+  async createShare(sessionId: string, clientRequestId: string = crypto.randomUUID()): Promise<ConversationShare> {
+    const { data } = await apiClient.post(`/chat/sessions/${sessionId}/shares/`, {
+      client_request_id: clientRequestId,
+    });
+    return data;
+  },
+
+  async listShares(sessionId: string): Promise<ConversationShare[]> {
+    const { data } = await apiClient.get(`/chat/sessions/${sessionId}/shares/`);
+    return data;
+  },
+
+  async revokeShare(shareId: string): Promise<void> {
+    await apiClient.delete(`/chat/shares/${shareId}/`);
+  },
+
+  async getSharedConversation(token: string): Promise<SharedConversation> {
+    const { data } = await apiClient.get(`/chat/shares/${token}/view/`);
     return data;
   },
 

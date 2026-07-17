@@ -28,7 +28,9 @@ interface VirtualizedMessageListProps {
   streamContent: string;
   citations: Citation[];
   streamPhase: string;
-  onRegenerate: () => void;
+  onRegenerate: (message: Message) => void;
+  onBranch: (message: Message) => void;
+  onShare: (message: Message) => void;
   canShare: boolean;
   virtuosoRef?: React.Ref<VirtuosoHandle>;
   onScrollToBottomChange?: (isAtBottom: boolean) => void;
@@ -43,6 +45,8 @@ export default function VirtualizedMessageList({
   citations: _citations,
   streamPhase,
   onRegenerate,
+  onBranch,
+  onShare,
   canShare,
   virtuosoRef,
   onScrollToBottomChange,
@@ -96,11 +100,13 @@ export default function VirtualizedMessageList({
           isStreaming={isStreamingBubble}
           disableActions={isStreaming}
           canShare={canShare}
-          onRegenerate={msg.role === 'assistant' && !isStreamingBubble ? onRegenerate : undefined}
+          onShare={canShare ? () => onShare(msg) : undefined}
+          onRegenerate={msg.role === 'assistant' && !isStreamingBubble ? () => onRegenerate(msg) : undefined}
+          onBranch={msg.role === 'assistant' && !isStreamingBubble ? () => onBranch(msg) : undefined}
         />
       </div>
     );
-  }, [canShare, isStreaming, onRegenerate, onLoadOlder, t]);
+  }, [canShare, isStreaming, onBranch, onRegenerate, onLoadOlder, onShare, t]);
 
   const thinkingIndicator = useMemo(() => {
     if (!isStreaming || streamContent) return null;

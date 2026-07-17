@@ -4,13 +4,18 @@
 
 """Chat serializers."""
 
+import re
 import uuid
 
+from django.utils.html import strip_tags
 from rest_framework import serializers
+
+from apps.spaces.permissions import DOCUMENT_DOWNLOAD, has_space_permission
 
 from .models import (
     ChatSession,
     ChatTurn,
+    ConversationShare,
     Feedback,
     FeedbackReviewEvent,
     KnowledgeGapTicket,
@@ -20,14 +25,42 @@ from .models import (
 
 class ChatSessionSerializer(serializers.ModelSerializer):
     message_count = serializers.IntegerField(read_only=True)
+    recovery_state = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatSession
         fields = [
             "id", "user", "title", "is_active", "is_pinned",
-            "created_at", "updated_at", "message_count",
+            "created_at", "updated_at", "message_count", "recovery_state",
         ]
         read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+    def get_recovery_state(self, obj):
+        status = getattr(obj, "latest_turn_status", None)
+        attempts = getattr(obj, "latest_turn_attempt_count", None)
+        assistant_id = getattr(obj, "latest_turn_assistant_id", None)
+        if not hasattr(obj, "latest_turn_status"):
+            latest_turn = obj.turns.order_by("-started_at").only(
+                "status", "attempt_count", "assistant_message_id"
+            ).first()
+            if latest_turn is not None:
+                status = latest_turn.status
+                attempts = latest_turn.attempt_count
+                assistant_id = latest_turn.assistant_message_id
+
+        if status in {
+            ChatTurn.STATUS_ACCEPTED,
+            ChatTurn.STATUS_RETRIEVING,
+            ChatTurn.STATUS_REASONING,
+            ChatTurn.STATUS_ANSWERING,
+            ChatTurn.STATUS_SAVING,
+        }:
+            return "recovering"
+        if status == ChatTurn.STATUS_COMPLETED and (attempts or 0) > 1:
+            return "recovered"
+        if status in {ChatTurn.STATUS_FAILED, ChatTurn.STATUS_CANCELLED}:
+            return "partial" if assistant_id else "failed"
+        return "terminal"
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -40,20 +73,32 @@ class MessageSerializer(serializers.ModelSerializer):
             "model_used", "response_time_ms", "retrieval_count",
             "confidence_score", "confidence_label", "needs_human_review",
             "retrieval_mode", "retrieval_latency_ms",
-            "created_at", "citations",
+            "version_group_id", "version_number", "is_current_version",
+            "supersedes_message", "created_at", "citations",
         ]
         read_only_fields = ["id", "created_at"]
 
     def get_citations(self, obj):
         citations = obj.citations.all()
+        request = self.context.get("request")
         return [
             {
                 "id": str(c.id),
+                "source_id": str(c.id),
                 "document_id": str(c.document.id),
                 "document_title": c.document.title,
                 "page_number": c.page_number,
                 "relevance_score": c.relevance_score,
-                "quoted_text": c.quoted_text,
+                "score": c.relevance_score,
+                "snippet": re.sub(r"\s+", " ", strip_tags(c.quoted_text)).strip()[:280],
+                "quoted_text": re.sub(r"\s+", " ", strip_tags(c.quoted_text)).strip()[:280],
+                "source_url": (
+                    f"/api/v1/chat/citations/{c.id}/source/"
+                    if request is not None
+                    and c.space is not None
+                    and has_space_permission(request.user, c.space, DOCUMENT_DOWNLOAD)
+                    else None
+                ),
             }
             for c in citations
         ]
@@ -80,6 +125,25 @@ class ChatMessageRequestSerializer(serializers.Serializer):
         if not stripped:
             raise serializers.ValidationError("Message cannot be empty or whitespace-only.")
         return stripped
+
+
+class BranchMessageRequestSerializer(serializers.Serializer):
+    client_request_id = serializers.UUIDField(default=uuid.uuid4, required=False)
+    title = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+
+class ConversationShareRequestSerializer(serializers.Serializer):
+    client_request_id = serializers.UUIDField(default=uuid.uuid4, required=False)
+
+
+class ConversationShareSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConversationShare
+        fields = [
+            "id", "token", "session", "owner", "organization",
+            "expires_at", "revoked_at", "created_at", "updated_at",
+        ]
+        read_only_fields = fields
 
 
 class ChatTurnStatusSerializer(serializers.ModelSerializer):

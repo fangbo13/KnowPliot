@@ -53,6 +53,29 @@ export interface Announcement {
   created_at: string;
 }
 
+export interface ModelProfile {
+  id: string;
+  name: string;
+  provider: string;
+  model_id: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface GovernancePolicy {
+  id: string;
+  organization: string;
+  space: string | null;
+  revision: number;
+  values: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface GovernancePolicyEnvelope {
+  effective: Record<string, unknown>;
+  revisions: GovernancePolicy[];
+}
+
 export interface AuditLog {
   id: string;
   user_email?: string;
@@ -293,6 +316,28 @@ export interface ComplianceExportJob {
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
 
 export const adminApi = {
+  async modelProfiles(): Promise<ModelProfile[]> {
+    const { data } = await apiClient.get('/admin/model-profiles/');
+    return unwrap(data);
+  },
+  async createModelProfile(body: Pick<ModelProfile, 'name' | 'provider' | 'model_id' | 'enabled'>): Promise<ModelProfile> {
+    const { data } = await apiClient.post('/admin/model-profiles/', body);
+    return data;
+  },
+  async governancePolicies(spaceId: string): Promise<GovernancePolicyEnvelope> {
+    const { data } = await apiClient.get('/admin/governance/policies/', {
+      params: { space: spaceId },
+    });
+    return data;
+  },
+  async createGovernancePolicy(body: {
+    organization?: string;
+    space?: string;
+    values: Record<string, unknown>;
+  }): Promise<GovernancePolicy> {
+    const { data } = await apiClient.post('/admin/governance/policies/', body);
+    return data;
+  },
   // ── Users & roles (existing rbac endpoints) ──
   async users(): Promise<AdminUser[]> {
     const { data } = await apiClient.get('/rbac/users/');

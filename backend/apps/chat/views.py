@@ -8,15 +8,19 @@ import json
 import logging
 import time
 from contextlib import suppress
+from datetime import datetime, timedelta
 from html import escape
 
 from django.conf import settings
 from django.db import transaction
-from django.http import HttpResponse, StreamingHttpResponse
+from django.db.models import Exists, Max, OuterRef, Q, Subquery
+from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.html import strip_tags
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
@@ -31,6 +35,8 @@ from apps.spaces.generation_policy import (
 # V6.0: space isolation helpers.
 from apps.spaces.permissions import (
     CHAT_ASK,
+    CHAT_SHARE,
+    DOCUMENT_DOWNLOAD,
     effective_space_role,
     has_space_permission,
     resolve_request_space,
@@ -44,11 +50,14 @@ from .coordination import (
     lease_exists,
 )
 from .metrics import ChatStreamMetrics, merge_turn_metrics
-from .models import ChatSession, ChatTurn, Citation, Feedback, Message
+from .models import ChatSession, ChatTurn, Citation, ConversationShare, Feedback, Message
 from .serializers import (
+    BranchMessageRequestSerializer,
     ChatMessageRequestSerializer,
     ChatSessionSerializer,
     ChatTurnStatusSerializer,
+    ConversationShareRequestSerializer,
+    ConversationShareSerializer,
     FeedbackSerializer,
     MessageSerializer,
 )
@@ -92,7 +101,7 @@ def _default_space_for(user):
 
 # V3.5 HIGH-004: Cursor pagination for sessions
 class SessionCursorPagination(CursorPagination):
-    ordering = ('-is_pinned', '-updated_at')
+    ordering = ('-is_pinned', '-updated_at', '-id')
     page_size = 20
 
 
@@ -127,7 +136,12 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     # V3.5 HIGH-004: Enable cursor pagination for sessions (was None)
     pagination_class = SessionCursorPagination
-    ordering = ('-is_pinned', '-updated_at')
+    ordering = ('-is_pinned', '-updated_at', '-id')
+
+    TIME_FILTERS = {"all", "today", "this_week", "this_month", "older"}
+    STATUS_FILTERS = {
+        "all", "partial", "recovering", "recovered", "failed", "terminal"
+    }
 
     def get_queryset(self):
         qs = ChatSession.objects.filter(user=self.request.user, is_active=True)
@@ -136,7 +150,74 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
         space = resolve_request_space(self.request, required=False)
         if space is not None:
             qs = qs.filter(space=space)
-        return qs.order_by('-is_pinned', '-updated_at')
+
+        query = self.request.query_params.get("q", "").strip()
+        time_filter = self.request.query_params.get("time", "all").strip().lower()
+        status_filter = self.request.query_params.get("status", "all").strip().lower()
+        if time_filter not in self.TIME_FILTERS:
+            raise ValidationError({"time": "Unsupported history time filter."})
+        if status_filter not in self.STATUS_FILTERS:
+            raise ValidationError({"status": "Unsupported recovery status filter."})
+        if query:
+            matching_message = Message.objects.filter(
+                session_id=OuterRef("pk"),
+                content__icontains=query,
+            )
+            qs = qs.annotate(matches_message=Exists(matching_message)).filter(
+                Q(title__icontains=query) | Q(matches_message=True)
+            )
+
+        now = timezone.localtime()
+        day_start = timezone.make_aware(datetime.combine(now.date(), datetime.min.time()))
+        if time_filter == "today":
+            qs = qs.filter(updated_at__gte=day_start)
+        elif time_filter == "this_week":
+            qs = qs.filter(updated_at__gte=day_start - timedelta(days=now.weekday()))
+        elif time_filter == "this_month":
+            month_start = day_start.replace(day=1)
+            qs = qs.filter(updated_at__gte=month_start)
+        elif time_filter == "older":
+            qs = qs.filter(updated_at__lt=day_start - timedelta(days=30))
+
+        latest_turn = ChatTurn.objects.filter(session=OuterRef("pk")).order_by("-started_at")
+        qs = qs.annotate(
+            latest_turn_status=Subquery(latest_turn.values("status")[:1]),
+            latest_turn_attempt_count=Subquery(latest_turn.values("attempt_count")[:1]),
+            latest_turn_assistant_id=Subquery(latest_turn.values("assistant_message_id")[:1]),
+        )
+        active_statuses = [
+            ChatTurn.STATUS_ACCEPTED,
+            ChatTurn.STATUS_RETRIEVING,
+            ChatTurn.STATUS_REASONING,
+            ChatTurn.STATUS_ANSWERING,
+            ChatTurn.STATUS_SAVING,
+        ]
+        if status_filter == "recovering":
+            qs = qs.filter(latest_turn_status__in=active_statuses)
+        elif status_filter == "recovered":
+            qs = qs.filter(
+                latest_turn_status=ChatTurn.STATUS_COMPLETED,
+                latest_turn_attempt_count__gt=1,
+            )
+        elif status_filter == "partial":
+            qs = qs.filter(
+                latest_turn_status__in=[ChatTurn.STATUS_FAILED, ChatTurn.STATUS_CANCELLED],
+                latest_turn_assistant_id__isnull=False,
+            )
+        elif status_filter == "failed":
+            qs = qs.filter(
+                latest_turn_status__in=[ChatTurn.STATUS_FAILED, ChatTurn.STATUS_CANCELLED],
+                latest_turn_assistant_id__isnull=True,
+            )
+        elif status_filter == "terminal":
+            qs = qs.filter(
+                Q(latest_turn_status__isnull=True)
+                | Q(
+                    latest_turn_status=ChatTurn.STATUS_COMPLETED,
+                    latest_turn_attempt_count__lte=1,
+                )
+            )
+        return qs.order_by('-is_pinned', '-updated_at', '-id')
 
     def perform_create(self, serializer):
         space = resolve_request_space(self.request, require_perm=CHAT_ASK, required=False) \
@@ -207,6 +288,122 @@ def export_session(request, session_id):
     return HttpResponse(document, content_type="text/html; charset=utf-8")
 
 
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def branch_from_message(request, message_id):
+    """Create an idempotent conversation branch through one owned message."""
+    source_message = get_object_or_404(
+        Message.objects.select_related("session", "space"),
+        pk=message_id,
+        session__user=request.user,
+        session__is_active=True,
+    )
+    source_session = source_message.session
+    space = source_session.space
+    if (
+        space is None
+        or effective_space_role(request.user, space) is None
+        or not has_space_permission(request.user, space, CHAT_ASK)
+    ):
+        return Response({"code": "space_access_denied"}, status=status.HTTP_403_FORBIDDEN)
+
+    payload = BranchMessageRequestSerializer(data=request.data)
+    payload.is_valid(raise_exception=True)
+    request_id = payload.validated_data["client_request_id"]
+    existing = ChatSession.objects.filter(
+        user=request.user,
+        branch_request_id=request_id,
+    ).first()
+    if existing is not None:
+        return Response(ChatSessionSerializer(existing).data, status=status.HTTP_200_OK)
+
+    with transaction.atomic():
+        title = payload.validated_data.get("title", "").strip()
+        branch, created = ChatSession.objects.get_or_create(
+            user=request.user,
+            branch_request_id=request_id,
+            defaults={
+                "space": space,
+                "title": title or f"Branch · {source_session.title or 'Conversation'}",
+                "branched_from_message": source_message,
+            },
+        )
+        if not created:
+            return Response(ChatSessionSerializer(branch).data, status=status.HTTP_200_OK)
+        copied = []
+        source_messages = list(
+            source_session.messages.filter(created_at__lte=source_message.created_at)
+            .filter(
+                Q(role__in=["user", "system"])
+                | Q(is_current_version=True)
+                | Q(pk=source_message.pk)
+            )
+            .prefetch_related("citations")
+        )
+        source_messages.sort(
+            key=lambda item: (
+                item.created_at,
+                {"user": 0, "assistant": 1, "system": 2}.get(item.role, 3),
+                str(item.id),
+            )
+        )
+        for message in source_messages:
+            copied.append(Message(
+                session=branch,
+                space=space,
+                role=message.role,
+                content=message.content,
+                token_count=message.token_count,
+                model_used=message.model_used,
+                response_time_ms=message.response_time_ms,
+                retrieval_count=message.retrieval_count,
+                confidence_score=message.confidence_score,
+                confidence_label=message.confidence_label,
+                needs_human_review=message.needs_human_review,
+                retrieval_mode=message.retrieval_mode,
+                retrieval_latency_ms=message.retrieval_latency_ms,
+                version_number=1,
+                is_current_version=True,
+            ))
+            if message.pk == source_message.pk:
+                break
+        Message.objects.bulk_create(copied)
+        citation_copies = []
+        for source, destination in zip(source_messages, copied, strict=False):
+            for citation in source.citations.all():
+                citation_copies.append(Citation(
+                    space=space,
+                    message=destination,
+                    document_id=citation.document_id,
+                    chunk_id=citation.chunk_id,
+                    relevance_score=citation.relevance_score,
+                    page_number=citation.page_number,
+                    quoted_text=citation.quoted_text,
+                ))
+            if source.pk == source_message.pk:
+                break
+        Citation.objects.bulk_create(citation_copies)
+
+    try:
+        from apps.audit.views import create_audit_log
+        create_audit_log(
+            request.user,
+            "chat_session_branch",
+            "ChatSession",
+            branch.id,
+            details={
+                "source_session_id": str(source_session.id),
+                "source_message_id": str(source_message.id),
+            },
+            request=request,
+            space_id=space.id,
+            result="success",
+        )
+    except Exception:
+        logger.warning("Could not write conversation branch audit", exc_info=True)
+    return Response(ChatSessionSerializer(branch).data, status=status.HTTP_201_CREATED)
+
+
 class ChatSessionMessagesView(generics.ListAPIView):
     """List messages in a session."""
 
@@ -217,11 +414,176 @@ class ChatSessionMessagesView(generics.ListAPIView):
 
     def get_queryset(self):
         # V3.5 HIGH-004: prefetch_related eliminates N+1 citation queries
-        return Message.objects.filter(
+        queryset = Message.objects.filter(
             session_id=self.kwargs["session_id"],
             session__user=self.request.user,
             session__is_active=True,
-        ).order_by("created_at").prefetch_related("citations__document")
+        )
+        if self.request.query_params.get("include_versions") != "true":
+            queryset = queryset.exclude(role="assistant", is_current_version=False)
+        return queryset.order_by("created_at").prefetch_related(
+            "citations__document",
+            "citations__space__organization",
+            "citations__space__business_line",
+        )
+
+
+def _safe_shared_text(value, limit=12000):
+    return " ".join(strip_tags(value or "").split())[:limit]
+
+
+def _audit_chat_action(request, action, target_type, target_id, *, space, details=None):
+    try:
+        from apps.audit.views import create_audit_log
+        create_audit_log(
+            request.user,
+            action,
+            target_type,
+            target_id,
+            details=details or {},
+            request=request,
+            space_id=space.id if space else None,
+            result="success",
+        )
+    except Exception:
+        logger.warning("Could not write %s audit", action, exc_info=True)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def conversation_share_collection(request, session_id):
+    session = get_object_or_404(
+        ChatSession.objects.select_related("space__organization"),
+        pk=session_id,
+        user=request.user,
+        is_active=True,
+    )
+    space = session.space
+    if (
+        space is None
+        or effective_space_role(request.user, space) is None
+        or not has_space_permission(request.user, space, CHAT_SHARE)
+    ):
+        return Response({"code": "share_not_allowed"}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == "GET":
+        shares = session.shares.filter(owner=request.user)
+        return Response(ConversationShareSerializer(shares, many=True).data)
+
+    payload = ConversationShareRequestSerializer(data=request.data)
+    payload.is_valid(raise_exception=True)
+    request_id = payload.validated_data["client_request_id"]
+    share, created = ConversationShare.objects.get_or_create(
+        owner=request.user,
+        client_request_id=request_id,
+        defaults={
+            "session": session,
+            "organization": space.organization,
+        },
+    )
+    if share.session_id != session.id:
+        return Response(
+            {"code": "client_request_conflict"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    if created:
+        _audit_chat_action(
+            request,
+            "chat_share_create",
+            "ConversationShare",
+            share.id,
+            space=space,
+            details={"session_id": str(session.id)},
+        )
+    return Response(
+        ConversationShareSerializer(share).data,
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@api_view(["DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def revoke_conversation_share(request, share_id):
+    share = get_object_or_404(
+        ConversationShare.objects.select_related("session__space"),
+        pk=share_id,
+        owner=request.user,
+    )
+    space = share.session.space
+    if share.revoked_at is None:
+        share.revoked_at = timezone.now()
+        share.save(update_fields=["revoked_at", "updated_at"])
+        _audit_chat_action(
+            request,
+            "chat_share_revoke",
+            "ConversationShare",
+            share.id,
+            space=space,
+        )
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def view_conversation_share(request, token):
+    share = get_object_or_404(
+        ConversationShare.objects.select_related("session__space__organization"),
+        token=token,
+        revoked_at__isnull=True,
+        expires_at__gt=timezone.now(),
+        session__is_active=True,
+    )
+    session = share.session
+    space = session.space
+    if (
+        space is None
+        or share.organization_id != space.organization_id
+        or effective_space_role(request.user, space) is None
+        or not has_space_permission(request.user, space, CHAT_ASK)
+    ):
+        raise Http404
+
+    messages = (
+        session.messages.exclude(role="assistant", is_current_version=False)
+        .order_by("created_at")
+        .prefetch_related("citations__document", "citations__space")
+    )
+    serialized = MessageSerializer(messages, many=True, context={"request": request}).data
+    safe_messages = []
+    for message in serialized:
+        safe_message = dict(message)
+        safe_message["content"] = _safe_shared_text(message.get("content"))
+        safe_messages.append(safe_message)
+    return Response({
+        "id": str(share.id),
+        "token": str(share.token),
+        "title": _safe_shared_text(session.title, 255),
+        "expires_at": share.expires_at,
+        "read_only": True,
+        "messages": safe_messages,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def citation_source(request, citation_id):
+    citation = get_object_or_404(
+        Citation.objects.select_related("space__organization", "document"),
+        pk=citation_id,
+        message__session__is_active=True,
+    )
+    space = citation.space
+    if space is None or effective_space_role(request.user, space) is None:
+        raise Http404
+    if not has_space_permission(request.user, space, DOCUMENT_DOWNLOAD):
+        return Response({"code": "source_access_denied"}, status=status.HTTP_403_FORBIDDEN)
+    return Response({
+        "source_id": str(citation.id),
+        "document_id": str(citation.document_id),
+        "title": citation.document.title,
+        "page_number": citation.page_number,
+        "snippet": _safe_shared_text(citation.quoted_text, 280),
+    })
 
 
 def _save_citations(assistant_message, citations_data, space=None):
@@ -570,14 +932,42 @@ def chat_turn_events(request, turn_id):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 @throttle_classes([SendMessageRateThrottle])
-def send_message(request, session_id):
+def send_message(request, session_id=None, message_id=None):
     """Send a message and get streaming response (SSE).
 
     ChatTurn identity/idempotency is durable here. The Redis session lock and
     replayable SSE v2 envelope are intentionally deferred to Task 3B.
     """
     request_started_at = time.monotonic()
-    serializer = ChatMessageRequestSerializer(data=request.data)
+    regenerate_source = None
+    question_message_override = None
+    serializer_data = request.data
+    if message_id is not None:
+        regenerate_source = get_object_or_404(
+            Message.objects.select_related("session", "space"),
+            pk=message_id,
+            role="assistant",
+            session__user=request.user,
+            session__is_active=True,
+        )
+        source_turn = getattr(regenerate_source, "assistant_turn", None)
+        question_message_override = source_turn.question_message if source_turn else (
+            Message.objects.filter(
+                session=regenerate_source.session,
+                role="user",
+                created_at__lte=regenerate_source.created_at,
+            ).order_by("-created_at").first()
+        )
+        if question_message_override is None:
+            return Response(
+                {"code": "question_unavailable"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        session_id = regenerate_source.session_id
+        serializer_data = request.data.copy()
+        serializer_data["content"] = question_message_override.content
+
+    serializer = ChatMessageRequestSerializer(data=serializer_data)
     serializer.is_valid(raise_exception=True)
 
     content = serializer.validated_data["content"]
@@ -659,6 +1049,7 @@ def send_message(request, session_id):
             content=content,
             answer_mode=answer_mode,
             model_id=generation_policy.model_id,
+            question_message=question_message_override,
         )
     except ChatTurnScopeError:
         return Response(
@@ -669,6 +1060,7 @@ def send_message(request, session_id):
     _record_turn_metrics(
         turn,
         idempotency_disposition=begin_result.disposition.value,
+        idempotency_rollout_enabled=bool(settings.CHAT_TURN_IDEMPOTENCY),
     )
 
     if begin_result.disposition == BeginTurnDisposition.CONFLICT:
@@ -1079,6 +1471,22 @@ def send_message(request, session_id):
                 # H-03: Use tiktoken for accurate token count
                 token_count = _estimate_token_count(assistant_content)
 
+                version_values = {}
+                if regenerate_source is not None:
+                    max_version = Message.objects.filter(
+                        version_group_id=regenerate_source.version_group_id,
+                    ).aggregate(value=Max("version_number"))["value"] or 1
+                    Message.objects.filter(
+                        version_group_id=regenerate_source.version_group_id,
+                        is_current_version=True,
+                    ).update(is_current_version=False)
+                    version_values = {
+                        "version_group_id": regenerate_source.version_group_id,
+                        "version_number": max_version + 1,
+                        "is_current_version": True,
+                        "supersedes_message": regenerate_source,
+                    }
+
                 assistant_message = Message.objects.create(
                     session=session,
                     role="assistant",
@@ -1093,6 +1501,7 @@ def send_message(request, session_id):
                     retrieval_mode=quality_data.get("retrieval_mode", ""),
                     retrieval_latency_ms=quality_data.get("retrieval_latency_ms"),
                     space=space,  # V6.0 space isolation
+                    **version_values,
                 )
 
                 # Save citations

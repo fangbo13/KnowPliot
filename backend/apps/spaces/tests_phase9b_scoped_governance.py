@@ -2,16 +2,17 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.notifications.models import Notification
 from apps.spaces.models import (
     BusinessLine,
+    GovernancePolicy,
     KnowledgeSpace,
+    ModelProfile,
     Organization,
     OrganizationMembership,
     SpaceMembership,
 )
 from apps.spaces.permissions import DOCUMENT_UPLOAD, has_space_permission
-from apps.notifications.models import Notification
-
 
 User = get_user_model()
 
@@ -91,6 +92,44 @@ class Phase9BScopedGovernanceTests(APITestCase):
         )
         self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_org_admin_can_bind_models_only_inside_own_organization(self):
+        profile = ModelProfile.objects.create(
+            name="Governed deep",
+            provider="openai-compatible",
+            model_id="deep-1",
+        )
+        other_space = KnowledgeSpace.objects.create(
+            organization=self.other_org,
+            name="Other private space",
+            code="other-private-space",
+            visibility="organization",
+        )
+        self.client.force_authenticate(self.org_admin)
+
+        profiles = self.client.get("/api/v1/admin/model-profiles/")
+        self.assertEqual(profiles.status_code, status.HTTP_200_OK, profiles.data)
+        self.assertEqual(profiles.data["results"][0]["id"], str(profile.id))
+
+        created = self.client.post(
+            "/api/v1/admin/governance/policies/",
+            {
+                "space": str(self.space.id),
+                "values": {"deep_model_profile_id": str(profile.id)},
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        self.assertTrue(
+            GovernancePolicy.objects.filter(space=self.space, revision=1).exists()
+        )
+
+        forbidden = self.client.post(
+            "/api/v1/admin/governance/policies/",
+            {"space": str(other_space.id), "values": {"retrieval_top_k": 4}},
+            format="json",
+        )
+        self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_archived_space_can_be_restored_by_owner(self):
         self.space.status = "archived"
         self.space.save(update_fields=["status"])
@@ -125,6 +164,28 @@ class Phase9BScopedGovernanceTests(APITestCase):
             SpaceMembership.objects.filter(
                 user=self.member, space=self.space, status="active", role="member"
             ).exists()
+        )
+
+    def test_access_request_rejection_persists_a_review_reason(self):
+        self.client.force_authenticate(self.member)
+        requested = self.client.post(
+            f"/api/v1/spaces/{self.space.id}/access-requests/",
+            {"role": "member", "reason": "Temporary need"},
+            format="json",
+        )
+        self.client.force_authenticate(self.org_admin)
+
+        rejected = self.client.post(
+            f"/api/v1/admin/spaces/{self.space.id}/access-requests/{requested.data['id']}/reject/",
+            {"reason": "Use the approved project workspace instead."},
+            format="json",
+        )
+
+        self.assertEqual(rejected.status_code, status.HTTP_200_OK, rejected.data)
+        self.assertEqual(rejected.data["status"], "rejected")
+        self.assertEqual(
+            rejected.data["rejection_reason"],
+            "Use the approved project workspace instead.",
         )
 
     def test_owner_can_transfer_ownership_and_clone_configuration(self):

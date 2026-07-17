@@ -45,6 +45,46 @@ describe('session product closure client', () => {
     });
   });
 
+  it('sends history search, time, recovery status, cursor, and abort signal to the server', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] });
+    const controller = new AbortController();
+
+    await chatApi.getSessions({
+      query: 'alpha',
+      time: 'today',
+      status: 'recovering',
+      cursor: 'history-next',
+      signal: controller.signal,
+    });
+
+    expect(get).toHaveBeenCalledWith('/chat/sessions/', {
+      params: {
+        q: 'alpha',
+        time: 'today',
+        status: 'recovering',
+        cursor: 'history-next',
+      },
+      signal: controller.signal,
+    });
+  });
+
+  it('maps the durable recovery state returned for a session', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      data: [{
+        id: 'recovering-session',
+        title: 'Recovering',
+        is_active: true,
+        is_pinned: false,
+        recovery_state: 'recovering',
+        updated_at: '2026-07-17T00:00:00Z',
+      }],
+    });
+
+    const page = await chatApi.getSessions();
+
+    expect(page.results[0].recoveryState).toBe('recovering');
+  });
+
   it('extracts an opaque cursor token from a next-page URL', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] });
 
@@ -156,5 +196,44 @@ describe('session product closure client', () => {
       '/chat/sessions/session-id/export/',
       { params: { format: 'markdown' }, responseType: 'blob' },
     );
+  });
+
+  it('creates an idempotent conversation branch through a selected message', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({
+      data: {
+        id: 'branch-session',
+        title: 'Decision branch',
+        is_active: true,
+        is_pinned: false,
+        updated_at: '2026-07-17T00:00:00Z',
+      },
+    });
+
+    const branch = await chatApi.branchMessage('assistant-id', {
+      clientRequestId: 'branch-request',
+      title: 'Decision branch',
+    });
+
+    expect(post).toHaveBeenCalledWith('/chat/messages/assistant-id/branch/', {
+      client_request_id: 'branch-request',
+      title: 'Decision branch',
+    });
+    expect(branch.id).toBe('branch-session');
+  });
+
+  it('creates and revokes a durable conversation share', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({
+      data: { id: 'share-id', token: 'opaque-token', expires_at: '2026-07-24T00:00:00Z' },
+    });
+    const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: null });
+
+    const share = await chatApi.createShare('session-id', 'share-request');
+    await chatApi.revokeShare(share.id);
+
+    expect(post).toHaveBeenCalledWith('/chat/sessions/session-id/shares/', {
+      client_request_id: 'share-request',
+    });
+    expect(remove).toHaveBeenCalledWith('/chat/shares/share-id/');
+    expect(share.token).toBe('opaque-token');
   });
 });

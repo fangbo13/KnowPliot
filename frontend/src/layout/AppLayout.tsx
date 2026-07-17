@@ -15,6 +15,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
   PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
+  CompassOutlined,
 } from '@ant-design/icons';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../auth/AuthProvider';
@@ -152,6 +153,7 @@ export default function AppLayout() {
     if (canUseHistory) {
       items.push({ key: 'history', icon: <HistoryOutlined />, label: t('nav_history'), onClick: () => navigate('/history') });
     }
+    items.push({ key: 'discover-spaces', icon: <CompassOutlined />, label: t('space_discovery'), onClick: () => navigate('/spaces/discover') });
     items.push({ key: 'profile', icon: <SettingOutlined />, label: t('user_settings'), onClick: () => navigate('/profile') });
     items.push({ type: 'divider' as const });
     items.push({

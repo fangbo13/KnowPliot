@@ -44,10 +44,13 @@ export interface QualityData {
 }
 
 export interface Citation {
+  source_id?: string;
+  source_url?: string | null;
   document_id: string;
   document_title: string;
   page_number?: number;
   score: number;
+  snippet?: string;
   quoted_text: string;
 }
 
@@ -57,6 +60,7 @@ export interface ChatSession {
   is_active: boolean;
   isPinned: boolean;
   updatedAt: string;
+  recoveryState?: 'partial' | 'recovering' | 'recovered' | 'failed' | 'terminal';
 }
 
 // Words/phrases that don't make good titles
@@ -129,6 +133,8 @@ export interface SendMessageOptions {
   canUseDeep?: boolean;
   /** Explicit user retry of the current failed deep Turn; never inferred. */
   retryClientRequestId?: string;
+  /** Persisted assistant message whose answer version should be regenerated. */
+  regenerateMessageId?: string;
 }
 
 export const CHAT_STREAM_TIMEOUTS = Object.freeze({
@@ -785,8 +791,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   sendMessage: async (content: string, options: SendMessageOptions = {}) => {
     const state = get();
     let sessionId = state.activeSessionId;
+    const regenerateMessageId = options.regenerateMessageId;
+    const isRegeneration = Boolean(regenerateMessageId);
     if (sessionId && state.turnsBySession[sessionId]?.isLocked) return;
     if (!sessionId && state.isSendLocked) return;
+    if (isRegeneration && (!sessionId || !/^[0-9a-f-]{36}$/i.test(regenerateMessageId!))) {
+      set({ streamPhase: 'error', sendError: 'error_session', isSendLocked: false });
+      return;
+    }
 
     const requestedMode: AnswerMode = options.answerMode === 'deep' ? 'deep' : 'fast';
     if (requestedMode === 'deep' && options.canUseDeep !== true) {
@@ -880,7 +892,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       startedAtMs,
     }));
 
-    if (!isExplicitFastRetry) {
+    if (!isExplicitFastRetry && !isRegeneration) {
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -941,6 +953,27 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             ).slice(-MAX_ALL_MESSAGES),
           },
           ...activeUpdates,
+        };
+      });
+    };
+
+    const commitRegeneratedVersion = () => {
+      if (!regenerateMessageId) return;
+      set((current) => {
+        const withoutOldVersion = (messages: Message[]) => messages.filter(
+          (message) => message.id !== regenerateMessageId,
+        );
+        return {
+          messages: current.activeSessionId === sessionId
+            ? withoutOldVersion(current.messages)
+            : current.messages,
+          allMessages: current.activeSessionId === sessionId
+            ? withoutOldVersion(current.allMessages)
+            : current.allMessages,
+          messageCacheBySession: {
+            ...current.messageCacheBySession,
+            [sessionId]: withoutOldVersion(current.messageCacheBySession[sessionId] ?? []),
+          },
         };
       });
     };
@@ -1054,7 +1087,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           Authorization: `Bearer ${token}`,
         };
         if (spaceId) sendHeaders['X-Space-Id'] = spaceId;
-        const response = await fetch(`/api/v1/chat/sessions/${sessionId}/send/`, {
+        const sendUrl = regenerateMessageId
+          ? `/api/v1/chat/messages/${regenerateMessageId}/regenerate/`
+          : `/api/v1/chat/sessions/${sessionId}/send/`;
+        const response = await fetch(sendUrl, {
           method: 'POST',
           headers: sendHeaders,
           body: JSON.stringify({
@@ -1244,6 +1280,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                     case 'done':
                       set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
                       flushImmediate(sessionId, generationId);
+                      commitRegeneratedVersion();
                       get().finishStreamingMessage(data.message_id, data.session_id, generationId);
                       set((current) => withTurnUpdate(current, sessionId, null, { recoveryState: 'recovered' }));
                       return true;
@@ -1296,6 +1333,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                     retrieval_latency_ms: answer.retrievalLatencyMs ?? 0,
                   },
                 }));
+                commitRegeneratedVersion();
                 get().finishStreamingMessage(answer.id, sessionId, generationId);
                 set((current) => withTurnUpdate(current, sessionId, null, { recoveryState: 'recovered' }));
                 return true;
@@ -1402,6 +1440,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                     set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
                   }
                   flushImmediate(sessionId, generationId);
+                  commitRegeneratedVersion();
                   get().finishStreamingMessage(data.message_id, data.session_id, generationId);
                   return true;
                 case 'error':

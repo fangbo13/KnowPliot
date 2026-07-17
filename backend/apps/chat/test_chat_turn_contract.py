@@ -27,7 +27,7 @@ class ChatTurnModelContractTest(SimpleTestCase):
         self.assertTrue(fields["id"].primary_key)
         self.assertEqual(fields["id"].get_internal_type(), "UUIDField")
         self.assertEqual(fields["client_request_id"].get_internal_type(), "UUIDField")
-        self.assertEqual(fields["question_message"].one_to_one, True)
+        self.assertEqual(fields["question_message"].many_to_one, True)
         self.assertEqual(fields["assistant_message"].one_to_one, True)
         self.assertTrue(fields["assistant_message"].null)
         self.assertFalse(fields["space"].null)
@@ -212,6 +212,31 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
         self.assertIs(result.turn.user, self.user)
         self.assertIs(result.turn.space, self.space)
         self.assertEqual(self.atomic_entries, 1)
+
+    def test_regeneration_reuses_the_original_question_without_creating_a_duplicate(self):
+        repository = FakeTurnRepository()
+        repository.locked_session = self.session
+        original_question = SimpleNamespace(
+            id=uuid.uuid4(),
+            session_id=self.session.id,
+            space_id=self.space.id,
+            content="same question",
+            role="user",
+        )
+
+        result = begin_chat_turn(
+            session=self.session,
+            client_request_id=self.request_id,
+            content="same question",
+            answer_mode="fast",
+            question_message=original_question,
+            repository=repository,
+            atomic_factory=self.atomic,
+        )
+
+        self.assertEqual(result.disposition, BeginTurnDisposition.CREATED)
+        self.assertEqual(repository.questions, [])
+        self.assertIs(result.turn.question_message, original_question)
 
     def test_completed_and_active_duplicates_create_no_question(self):
         completed = self.existing(

@@ -1,52 +1,88 @@
-/*
- * Copyright (c) 2026 Haibo Fang.
- * Licensed under the CC BY-NC-SA 4.0 License.
- * See LICENSE file in the project root for full license details.
- */
-
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Alert, Button, Input, List, Modal, Tag } from 'antd';
 import { useParams } from 'react-router-dom';
 
-import {
-  scopedConsoleApi,
-  type SpaceAccessRequest,
-} from '../../api/scopedConsole';
+import { scopedConsoleApi, type SpaceAccessRequest } from '../../api/scopedConsole';
+import { EmptyState, PageHeader, Surface } from '../../design/primitives';
 
 export default function AccessRequestsPage() {
+  const { t } = useTranslation('common');
   const { spaceId } = useParams<{ spaceId: string }>();
   const [requests, setRequests] = useState<SpaceAccessRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [rejecting, setRejecting] = useState<SpaceAccessRequest | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!spaceId) {
-      setLoading(false);
-      return;
-    }
-    void scopedConsoleApi.accessRequests(spaceId).then(
-      (rows) => {
-        if (!cancelled) {
-          setRequests(rows);
-          setLoading(false);
-        }
-      },
-      () => { if (!cancelled) setLoading(false); },
-    );
-    return () => { cancelled = true; };
+  const load = useCallback(async () => {
+    if (!spaceId) { setLoading(false); return; }
+    setLoading(true); setError(false);
+    try { setRequests(await scopedConsoleApi.accessRequests(spaceId)); }
+    catch { setError(true); }
+    finally { setLoading(false); }
   }, [spaceId]);
+  useEffect(() => { void load(); }, [load]);
+
+  const approve = async (requestId: string) => {
+    if (!spaceId) return;
+    setBusy(requestId);
+    try { await scopedConsoleApi.approveAccessRequest(spaceId, requestId); await load(); }
+    catch { setError(true); }
+    finally { setBusy(''); }
+  };
+
+  const reject = async () => {
+    if (!spaceId || !rejecting || !rejectionReason.trim()) return;
+    setBusy(rejecting.id);
+    try {
+      await scopedConsoleApi.rejectAccessRequest(spaceId, rejecting.id, rejectionReason.trim());
+      setRejecting(null); setRejectionReason(''); await load();
+    } catch { setError(true); }
+    finally { setBusy(''); }
+  };
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-head"><h1 className="page-title">Access requests</h1></header>
-        {loading && <p role="status">Loading requests…</p>}
-        {!loading && requests.length === 0 && <p>No pending requests in this workspace.</p>}
-        <ul>
-          {requests.map((request) => (
-            <li key={request.id}>{request.user_email ?? request.user} — {request.status}</li>
-          ))}
-        </ul>
-      </div>
+    <div className="page section-enter">
+      <PageHeader title={t('access_requests')} description={t('access_requests_description')} />
+      <Surface>
+        {loading ? <p role="status">{t('loading')}</p> : error ? (
+          <Alert type="error" showIcon message={t('load_error')} action={<Button onClick={load}>{t('error_retry')}</Button>} />
+        ) : requests.length === 0 ? <EmptyState icon="K" title={t('access_requests_empty')} /> : (
+          <List dataSource={requests} renderItem={(request) => (
+            <List.Item
+              actions={request.status === 'pending' ? [
+                <Button key="approve" type="primary" loading={busy === request.id} onClick={() => approve(request.id)}>{t('approve')}</Button>,
+                <Button key="reject" danger onClick={() => setRejecting(request)}>{t('reject')}</Button>,
+              ] : undefined}
+            >
+              <List.Item.Meta
+                title={<>{request.user_email ?? request.user} <Tag bordered={false}>{request.status}</Tag></>}
+                description={request.status === 'rejected' && request.rejection_reason
+                  ? `${request.reason || t('access_request_no_reason')} · ${request.rejection_reason}`
+                  : request.reason || t('access_request_no_reason')}
+              />
+            </List.Item>
+          )} />
+        )}
+      </Surface>
+      <Modal
+        open={Boolean(rejecting)}
+        title={t('reject_access_request')}
+        okText={t('reject')}
+        okButtonProps={{ danger: true, disabled: !rejectionReason.trim(), loading: busy === rejecting?.id }}
+        onOk={reject}
+        onCancel={() => { setRejecting(null); setRejectionReason(''); }}
+      >
+        <Input.TextArea
+          value={rejectionReason}
+          onChange={(event) => setRejectionReason(event.target.value)}
+          placeholder={t('rejection_reason')}
+          rows={4}
+          maxLength={2000}
+        />
+      </Modal>
     </div>
   );
 }

@@ -23,6 +23,8 @@ import ChatPage from './pages/ChatPage';
 import HistoryPage from './pages/HistoryPage';
 import ProfilePage from './pages/ProfilePage';
 import SpaceManagementPage from './pages/SpaceManagementPage';
+import SharedConversationPage from './pages/SharedConversationPage';
+import SpaceDiscoveryPage from './pages/SpaceDiscoveryPage';
 import AdminAnnouncementsPage from './pages/admin/AdminAnnouncementsPage';
 import AdminAuditPage from './pages/admin/AdminAuditPage';
 import AdminBusinessLinesPage from './pages/admin/AdminBusinessLinesPage';
@@ -34,11 +36,13 @@ import AdminUsersPage from './pages/admin/AdminUsersPage';
 import KnowledgeBasePage from './pages/admin/KnowledgeBasePage';
 import AccessRequestsPage from './pages/console/AccessRequestsPage';
 import ConsoleOverviewPage from './pages/console/ConsoleOverviewPage';
-import ConsolePlaceholderPage from './pages/console/ConsolePlaceholderPage';
 import ScopedAuditPage from './pages/console/ScopedAuditPage';
 import ScopedMetricsPage from './pages/console/ScopedMetricsPage';
 import ScopedQualityPage from './pages/console/ScopedQualityPage';
 import ScopedUsersPage from './pages/console/ScopedUsersPage';
+import GovernancePoliciesPage from './pages/console/GovernancePoliciesPage';
+import ModelProfilesPage from './pages/console/ModelProfilesPage';
+import WorkspaceLifecyclePage from './pages/console/WorkspaceLifecyclePage';
 
 function WorkspaceAuditRoute() {
   const { spaceId } = useParams<{ spaceId: string }>();
@@ -100,6 +104,8 @@ function App({
           <Route index element={<Navigate to="/chat" replace />} />
           <Route path="chat" element={<CapabilityGate required="chat.ask"><ChatPage /></CapabilityGate>} />
           <Route path="history" element={<CapabilityGate required="chat.history"><HistoryPage /></CapabilityGate>} />
+          <Route path="shared/:token" element={<SharedConversationPage />} />
+          <Route path="spaces/discover" element={<SpaceDiscoveryPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route
             path="spaces/manage"
@@ -159,7 +165,7 @@ function App({
           <Route path="templates" element={<CapabilityGate required="platform.organizations.manage"><AdminTemplatesPage /></CapabilityGate>} />
           <Route path="metrics" element={<CapabilityGate required="platform.metrics.read"><ScopedMetricsPage /></CapabilityGate>} />
           <Route path="audit" element={<CapabilityGate required="platform.audit.read"><ScopedAuditPage /></CapabilityGate>} />
-          <Route path="model" element={<CapabilityGate required="platform.models.manage"><ConsolePlaceholderPage title="Model profiles" /></CapabilityGate>} />
+          <Route path="model" element={<CapabilityGate required="platform.models.manage"><ModelProfilesPage /></CapabilityGate>} />
         </Route>
 
         <Route
@@ -179,7 +185,7 @@ function App({
           <Route path="templates" element={<CapabilityGate required="governance.templates.manage"><AdminTemplatesPage /></CapabilityGate>} />
           <Route path="metrics" element={<CapabilityGate required="governance.metrics.read"><ScopedMetricsPage /></CapabilityGate>} />
           <Route path="audit" element={<CapabilityGate required="governance.audit.read"><ScopedAuditPage /></CapabilityGate>} />
-          <Route path="model" element={<CapabilityGate required="governance.models.bind"><ConsolePlaceholderPage title="Model binding" /></CapabilityGate>} />
+          <Route path="model" element={<CapabilityGate required="governance.models.bind"><GovernancePoliciesPage /></CapabilityGate>} />
         </Route>
 
         <Route
@@ -201,7 +207,7 @@ function App({
           <Route path="quality" element={<CapabilityGate required="quality.read"><ScopedQualityPage /></CapabilityGate>} />
           <Route path="audit" element={<CapabilityGate required="audit.read"><WorkspaceAuditRoute /></CapabilityGate>} />
           <Route path="settings" element={<CapabilityGate required="workspace.settings.manage"><SpaceManagementPage /></CapabilityGate>} />
-          <Route path="lifecycle" element={<CapabilityGate required="workspace.lifecycle.manage"><ConsolePlaceholderPage title="Workspace lifecycle" /></CapabilityGate>} />
+          <Route path="lifecycle" element={<CapabilityGate required="workspace.lifecycle.manage"><WorkspaceLifecyclePage /></CapabilityGate>} />
         </Route>
       </Routes>
     </ErrorBoundary>

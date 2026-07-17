@@ -19,6 +19,7 @@ export interface SpaceAccessRequest {
   user_email?: string;
   reason: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  rejection_reason?: string;
   created_at: string;
 }
 
@@ -48,5 +49,21 @@ export const scopedConsoleApi = {
       `/admin/spaces/${spaceId}/access-requests/`,
     );
     return unwrap<SpaceAccessRequest>(data);
+  },
+
+  async approveAccessRequest(spaceId: string, requestId: string): Promise<SpaceAccessRequest> {
+    const { data } = await apiClient.post(
+      `/admin/spaces/${spaceId}/access-requests/${requestId}/approve/`,
+      {},
+    );
+    return data;
+  },
+
+  async rejectAccessRequest(spaceId: string, requestId: string, reason: string): Promise<SpaceAccessRequest> {
+    const { data } = await apiClient.post(
+      `/admin/spaces/${spaceId}/access-requests/${requestId}/reject/`,
+      { reason },
+    );
+    return data;
   },
 };

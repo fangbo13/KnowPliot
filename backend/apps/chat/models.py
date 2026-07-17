@@ -7,6 +7,7 @@
 import hashlib
 import re
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -34,12 +35,27 @@ class ChatSession(models.Model):
     title = models.CharField(max_length=255, blank=True, default="")
     is_active = models.BooleanField(default=True)
     is_pinned = models.BooleanField(default=False, db_index=True)
+    branch_request_id = models.UUIDField(null=True, blank=True)
+    branched_from_message = models.ForeignKey(
+        "chat.Message",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="branched_sessions",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "chat_chatsession"
         ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "branch_request_id"],
+                condition=models.Q(branch_request_id__isnull=False),
+                name="chat_session_user_branch_request_uniq",
+            ),
+        ]
 
     def __str__(self):
         return f"Session {self.id} - {self.user.email}"
@@ -88,6 +104,16 @@ class Message(models.Model):
         default="",
     )
     needs_human_review = models.BooleanField(default=False)
+    version_group_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    version_number = models.PositiveIntegerField(default=1)
+    is_current_version = models.BooleanField(default=True, db_index=True)
+    supersedes_message = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="newer_versions",
+    )
     retrieval_mode = models.CharField(max_length=20, blank=True, default="")
     retrieval_latency_ms = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -95,6 +121,17 @@ class Message(models.Model):
     class Meta:
         db_table = "chat_message"
         ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["version_group_id", "version_number"],
+                name="chat_message_version_number_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["version_group_id"],
+                condition=models.Q(is_current_version=True),
+                name="chat_message_one_current_version_uniq",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.role}: {self.content[:50]}..."
@@ -146,10 +183,10 @@ class ChatTurn(models.Model):
         on_delete=models.CASCADE,
         related_name="chat_turns",
     )
-    question_message = models.OneToOneField(
+    question_message = models.ForeignKey(
         Message,
         on_delete=models.CASCADE,
-        related_name="question_turn",
+        related_name="question_turns",
     )
     assistant_message = models.OneToOneField(
         Message,
@@ -239,6 +276,52 @@ class Citation(models.Model):
 
     def __str__(self):
         return f"Citation: {self.document.title} (p.{self.page_number})"
+
+
+def default_share_expiry():
+    return timezone.now() + timedelta(days=7)
+
+
+class ConversationShare(models.Model):
+    """Revocable, tenant-scoped, read-only share of one conversation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    client_request_id = models.UUIDField(null=True, blank=True)
+    session = models.ForeignKey(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="shares",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="conversation_shares",
+    )
+    organization = models.ForeignKey(
+        "spaces.Organization",
+        on_delete=models.CASCADE,
+        related_name="conversation_shares",
+    )
+    expires_at = models.DateTimeField(default=default_share_expiry, db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_conversationshare"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "client_request_id"],
+                condition=models.Q(client_request_id__isnull=False),
+                name="chat_share_owner_request_uniq",
+            ),
+        ]
+
+    @property
+    def is_available(self):
+        return self.revoked_at is None and self.expires_at > timezone.now()
 
 
 class Feedback(models.Model):

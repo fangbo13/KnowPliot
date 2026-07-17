@@ -236,4 +236,29 @@ describe('per-Turn answer mode', () => {
       turnId: TURN_ID,
     });
   });
+
+  it('regenerates a persisted assistant version without duplicating the question', async () => {
+    const assistantId = '66666666-6666-4666-8666-666666666666';
+    const existingMessages = [
+      { id: '77777777-7777-4777-8777-777777777777', role: 'user' as const, content: 'one question', createdAt: '2026-07-17T01:00:00Z' },
+      { id: assistantId, role: 'assistant' as const, content: 'old answer', createdAt: '2026-07-17T01:00:01Z' },
+    ];
+    useChatStore.setState({
+      messages: existingMessages,
+      allMessages: existingMessages,
+      messageCacheBySession: { [SESSION_A]: existingMessages },
+      totalRoundCount: 1,
+    });
+    mocks.fetch.mockResolvedValue(completedResponse(SESSION_A));
+
+    await useChatStore.getState().sendMessage('one question', {
+      answerMode: 'fast',
+      regenerateMessageId: assistantId,
+    });
+
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe(`/api/v1/chat/messages/${assistantId}/regenerate/`);
+    expect(useChatStore.getState().messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(useChatStore.getState().messages.some((message) => message.id === assistantId)).toBe(false);
+    expect(useChatStore.getState().messages.some((message) => message.content === 'answer')).toBe(true);
+  });
 });

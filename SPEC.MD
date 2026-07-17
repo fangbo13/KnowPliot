@@ -1272,3 +1272,168 @@ The approved post-V11 optimization baseline is maintained in
 It is a versioned addendum to this specification and defines the audited issue
 register, ChatTurn/SSE v2 contracts, four-level capability model, model policy,
 design direction, phased acceptance gates, compatibility, and rollback rules.
+
+## 16. Optimization Implementation Closure (2026-07-17)
+
+This section records the implemented state of the approved addendum. “Locally
+accepted” means source, migrations, automated tests, static checks, and production
+build passed without starting the application or contacting 筼筜. It does not mean
+the change has been deployed or validated against live PostgreSQL, Redis, model
+providers, or browser sessions.
+
+### 16.1 Issue traceability
+
+| Issue | Implemented resolution | Local acceptance evidence | State |
+|---|---|---|---|
+| `KP-C01`–`KP-C04` | Active reselection no-op; stream/message state keyed by session; stale requests aborted/rejected; cross-tab selection cannot cancel this tab’s Turn. | Store, session-switch, cross-tab, rapid-selection, and integration tests. | Locally accepted |
+| `KP-C05`–`KP-C07`, `KP-C11` | Durable Turn status, partial retention, explicit recovery, POST-once behavior, renewable session lease, monotonic SSE replay, and bounded GET recovery. | Complete backend/frontend suites plus stream lifecycle/recovery contracts. | Locally accepted; live Redis pending |
+| `KP-C08`–`KP-C10` | Persisted question identity, stable cursor consumption, chronological deduplication, older-message loading, and session update touches. | History search/filter/pagination and message-pagination tests. | Locally accepted |
+| `KP-A01` | Server space/membership/capability checks cover chat list/history/send/regenerate/branch/share/export/source. | Cross-user, guest, revoked, expired, and cross-organization denial tests. | Locally accepted |
+| `KP-A02`, `KP-A03` | Capability-derived platform/governance/workspace consoles; scoped APIs; default-off compatibility navigation; no upward grants. | Capability matrix, route gate, scoped endpoint, and legacy-denial tests. | Locally accepted |
+| `KP-A04` | Platform model registry, organization-scoped immutable bindings, governed fast/deep execution, safe phases/metrics, and raw-reasoning rejection. | Generation policy, provider privacy, model binding, and mode tests. | Locally accepted; live provider pending |
+| `KP-U01` | Server history query/URL state; non-duplicating regenerate; durable versions; branch; safe citations; seven-day revocable read-only shares. | API, store, page, model-constraint, scope, expiry, and revoke tests. | Locally accepted |
+| `KP-U02` | Discovery/request reasons, approve/reject, archive/restore/clone/transfer/owner transfer, model profile, and governance policy workflows. | Space/governance backend and frontend API/page tests. | Locally accepted |
+| `KP-D01`, `KP-D02` | One warm editorial token/primitive system, consistent layout/spacing, restrained motion, responsive actions, and global reduced motion. | Design token/primitive/convergence tests and production build. | Locally accepted; live visual pass pending |
+
+### 16.2 Final chat and history behavior
+
+The session list endpoint accepts validated `q`, `time`, `status`, and cursor
+parameters. Search is executed in the database against session title and message
+content before pagination. Time filters are `all`, `today`, `this_week`,
+`this_month`, and `older`; recovery filters are `all`, `partial`, `recovering`,
+`recovered`, `failed`, and `terminal`. Ordering is deterministic on pinned state,
+update time, and ID. Unknown filter values return 400.
+
+The History page stores filters and the active cursor in the URL, aborts obsolete
+list/detail requests, rejects stale responses, displays explicit loading/error/
+empty/recovery states, and consumes one server cursor page at a time. Selecting a
+long conversation loads the newest message window and exposes “load earlier” for
+subsequent cursor pages; pages are deduplicated and rendered chronologically.
+
+Regenerate and branch are distinct operations:
+
+- `POST /api/v1/chat/messages/{message_id}/regenerate/` derives the original
+  persisted question, accepts a new `client_request_id`, and runs the same guarded
+  streaming pipeline without inserting another user message.
+- A completed regeneration creates an assistant version in the original version
+  group, increments the version number, marks prior current versions non-current,
+  and links `supersedes_message`. The database enforces one `(group, number)` and
+  one current message per group.
+- `POST /api/v1/chat/messages/{message_id}/branch/` creates one idempotent new
+  session for `(user, branch_request_id)` and copies the visible path through the
+  selected message. Superseded answers are not copied unless that exact version
+  was selected. Copied messages receive independent version groups.
+
+### 16.3 Citation and conversation-share contract
+
+Citation payloads contain a bounded plain-text snippet, document title, page,
+score, and stable source identity. `source_url` is present only when the current
+caller has server-side document-download capability. The frontend converts only
+the expected internal citation path prefix into a link; untrusted absolute URLs
+remain plain text.
+
+`GET /api/v1/chat/citations/{citation_id}/source/` returns safe metadata only. It
+never returns raw file bytes, storage paths, provider payloads, or unrestricted
+document content. Inaccessible scope is non-disclosing; an accessible member
+without download capability receives 403.
+
+Conversation shares use these endpoints:
+
+- `GET|POST /api/v1/chat/sessions/{session_id}/shares/`
+- `DELETE /api/v1/chat/shares/{share_id}/`
+- `GET /api/v1/chat/shares/{token}/view/`
+
+A share is persisted with owner, organization, session, idempotent client request,
+token, seven-day expiry, and optional revocation timestamp. Creation requires
+`chat.share`. Viewing requires authentication plus current access to the same
+workspace and returns sanitized, read-only messages with superseded assistant
+versions excluded. Revoked, expired, cross-organization, or inaccessible tokens
+return a non-disclosing 404. The owner may always revoke their own share, including
+after losing workspace membership.
+
+### 16.4 Administration and governance behavior
+
+The implemented console split is:
+
+| Console | Authority | Implemented workflows |
+|---|---|---|
+| `/platform-admin/*` | Platform capabilities | Global users/organizations/metrics/audit and model profile registry |
+| `/governance/*` | Organization/business-line scope | Scoped users, business lines, templates, metrics/audit, and organization-owned workspace model-policy binding |
+| `/workspace/:spaceId/manage/*` | Selected workspace capabilities | Members, invites, access review, knowledge, quality, audit, settings, and lifecycle |
+| User surfaces | Chat/workspace capabilities | Chat/history/share/export, discovery, and access request |
+
+Organization administrators may list enabled model profiles and create immutable
+policy revisions only for their own organization or its workspaces. They cannot
+create/edit platform model profiles or bind another organization. Business-line
+administrators do not receive `governance.models.bind`. Platform administrators
+retain global model profile and policy authority.
+
+Workspace access rejection requires a non-empty bounded reason, records reviewer
+and timestamp, writes an audit event, and sends a safe notification. Lifecycle
+mutations use existing server authorization and explicit frontend confirmation.
+
+### 16.5 Schema and migration acceptance
+
+The optimization sequence is additive:
+
+1. `chat.0013_chatturn`
+2. `spaces.0008_organizationmembership_effectiveness`
+3. `chat.0014_chatturn_metrics_and_model_lengths`
+4. `chat.0015_message_versions_and_session_branches`
+5. `chat.0016_conversation_share`
+
+`0015` first adds a nullable version group, assigns a distinct UUID to each
+existing message in batches of 1,000, then makes the field non-null and adds the
+lineage/current constraints. This ordering is required: using one schema default
+for all historical rows would merge unrelated messages and fail the current-
+version uniqueness constraint. A production rehearsal must measure migration
+duration and locking on a PostgreSQL copy before rollout.
+
+`makemigrations --check --dry-run` reports no model drift. Reverse migration is
+not the normal rollback after production data is written; rollback deploys prior
+code/flags while preserving additive Turn, version, and share records.
+
+### 16.6 Rollout route and rollback
+
+All staged flags default off: `CHAT_TURN_IDEMPOTENCY`, `CHAT_STREAM_V2`,
+`CAPABILITY_NAV`/`VITE_CAPABILITY_NAV`, and
+`DEEP_ANSWER_MODE`/`VITE_DEEP_ANSWER_MODE`.
+
+Durable Turn duplicate suppression is a non-optional correctness invariant.
+`CHAT_TURN_IDEMPOTENCY` is retained as a safe operational rollout marker and
+metric dimension; setting it false does not permit duplicate questions.
+
+Deployment proceeds in this order:
+
+1. Backup and PostgreSQL migration rehearsal; apply additive migrations.
+2. Deploy backend/frontend with all flags false and validate v1 stability/scope.
+3. Enable the idempotency marker and observe duplicate/conflict metrics.
+4. Enable SSE v2 and validate live Redis lease/replay/disconnect recovery.
+5. Enable backend/frontend capability navigation together and validate each role.
+6. Bind tested model profiles, then enable backend/frontend deep answer mode.
+
+Rollback occurs in reverse flag order. v2 rollback retains v1; capability rollback
+retains scoped endpoints and uses compatibility navigation; deep rollback retains
+fast mode. Do not reverse additive migrations or delete Turn/version/share data
+without an explicit retention decision.
+
+### 16.7 Final verification and unresolved evidence
+
+Fresh local gates passed on 2026-07-17:
+
+- Django complete suite: 359 passed.
+- Frontend complete suite: 266 passed in 45 files.
+- TypeScript typecheck and 82-file i18n validation: passed.
+- Production build: passed; 4,027 modules transformed.
+- Django system check, migration drift check, Ruff changed-backend gate, and
+  `git diff --check`: passed.
+
+ESLint is not claimed because the installed dependency set does not contain the
+ESLint executable. The build’s existing large Ant Design/main chunks remain a
+post-rollout performance opportunity.
+
+The release is not production-accepted until an authorized 筼筜 run verifies
+PostgreSQL migration timing, live Redis multi-worker behavior, real provider
+streaming/policy binding, authenticated browser role journeys, clipboard/native
+share, source download, visual layout, and reduced motion. No service or deployed
+environment was started during this implementation.

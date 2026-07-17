@@ -244,6 +244,7 @@ CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:
 CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
 CHAT_COORDINATION_REDIS_URL = os.environ.get("CHAT_COORDINATION_REDIS_URL", CELERY_BROKER_URL)
+CHAT_TURN_IDEMPOTENCY = env_bool("CHAT_TURN_IDEMPOTENCY", default=False)
 CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "1",
     "true",

@@ -330,6 +330,7 @@ def begin_chat_turn(
     content: str,
     answer_mode: str,
     model_id: str = "",
+    question_message=None,
     repository: Any | None = None,
     atomic_factory=None,
 ) -> BeginTurnResult:
@@ -361,11 +362,19 @@ def begin_chat_turn(
         space = locked_session.space
         turn = repository.find_turn(user, client_request_id)
         if turn is None:
-            question_message = repository.create_question(
-                session=session,
-                space=space,
-                content=content,
-            )
+            if question_message is None:
+                question_message = repository.create_question(
+                    session=session,
+                    space=space,
+                    content=content,
+                )
+            elif (
+                question_message.session_id != session.id
+                or getattr(question_message, "space_id", space.id) != space.id
+                or question_message.role != "user"
+                or question_message.content != content
+            ):
+                raise ChatTurnScopeError("question_scope_mismatch")
             turn = repository.create_turn(
                 user=user,
                 session=session,

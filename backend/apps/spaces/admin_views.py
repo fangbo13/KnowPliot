@@ -15,35 +15,48 @@ Authorization model (docs/KnowPilot_V7_Identity_RBAC_Spec.md §4.1):
 
 import logging
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Avg, Count, Max
 from django.utils import timezone
-from django.contrib.auth import get_user_model
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.views import APIView
 
-from .models import AdminRegistrationCode, BusinessLine, Organization, OrganizationMembership, KnowledgeSpace, SpaceAccessRequest, SpaceMembership, GovernancePolicy, ModelProfile, create_policy_revision, resolve_effective_policy
-from .permissions import admin_scope, is_platform_admin
-from .serializers import (
-    AdminRegistrationCodeCreateSerializer,
-    AdminRegistrationCodeSerializer,
-    BusinessLineSerializer,
-    OrganizationSerializer,
-    SpaceAccessRequestSerializer,
-    GovernancePolicySerializer,
-    ModelProfileSerializer,
-)
-from .services import generate_admin_code, hash_code
+from apps.knowledge.models import Document, IngestionJob
+
 from .admin_operations import (
     collect_scoped_metrics,
     collect_system_health,
     scoped_space_ids,
 )
-from apps.knowledge.models import Document, IngestionJob
+from .models import (
+    AdminRegistrationCode,
+    BusinessLine,
+    GovernancePolicy,
+    KnowledgeSpace,
+    ModelProfile,
+    Organization,
+    OrganizationMembership,
+    SpaceAccessRequest,
+    SpaceMembership,
+    create_policy_revision,
+    resolve_effective_policy,
+)
+from .permissions import admin_scope, is_platform_admin
+from .serializers import (
+    AdminRegistrationCodeCreateSerializer,
+    AdminRegistrationCodeSerializer,
+    BusinessLineSerializer,
+    GovernancePolicySerializer,
+    ModelProfileSerializer,
+    OrganizationSerializer,
+    SpaceAccessRequestSerializer,
+)
+from .services import generate_admin_code, hash_code
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +66,22 @@ class ModelProfileListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     queryset = ModelProfile.objects.all().order_by("name")
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if not is_platform_admin(self.request.user):
+            queryset = queryset.filter(enabled=True)
+        return queryset
+
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if not is_platform_admin(request.user):
+        if is_platform_admin(request.user):
+            return
+        organization_ids, _ = admin_scope(request.user)
+        if request.method == "GET" and organization_ids:
+            return
+        if request.method == "GET":
+            raise PermissionDenied("You cannot view model profiles.")
+        else:
             raise PermissionDenied("Only platform administrators can manage model profiles.")
 
 
@@ -70,15 +96,37 @@ def governance_policies(request):
             space = KnowledgeSpace.objects.get(pk=space_id)
         except KnowledgeSpace.DoesNotExist as exc:
             raise NotFound("Space not found.") from exc
-        if not is_platform_admin(request.user) and space.organization_id not in admin_scope(request.user)[0]:
+        if (
+            not is_platform_admin(request.user)
+            and space.organization_id not in admin_scope(request.user)[0]
+        ):
             raise PermissionDenied("You cannot view this policy.")
-        return Response({"effective": resolve_effective_policy(space), "revisions": GovernancePolicySerializer(GovernancePolicy.objects.filter(space=space), many=True).data})
-    if not is_platform_admin(request.user):
-        raise PermissionDenied("Only platform administrators can create governance policies.")
+        revisions = GovernancePolicy.objects.filter(space=space)
+        return Response(
+            {
+                "effective": resolve_effective_policy(space),
+                "revisions": GovernancePolicySerializer(revisions, many=True).data,
+            }
+        )
     serializer = GovernancePolicySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     validated = serializer.validated_data
-    policy = create_policy_revision(organization=validated.get("organization"), space=validated.get("space"), values=validated.get("values"))
+    organization = validated.get("organization")
+    space = validated.get("space")
+    if bool(organization) == bool(space):
+        raise ValidationError(
+            {"scope": "Provide exactly one organization or workspace scope."}
+        )
+    target_organization = organization or space.organization
+    if not is_platform_admin(request.user):
+        organization_ids, _ = admin_scope(request.user)
+        if target_organization.id not in organization_ids:
+            raise PermissionDenied("You cannot create a policy in this organization.")
+    policy = create_policy_revision(
+        organization=organization,
+        space=space,
+        values=validated.get("values"),
+    )
     return Response(GovernancePolicySerializer(policy).data, status=status.HTTP_201_CREATED)
 
 
@@ -341,9 +389,10 @@ def _can_issue(user, grants_role, organization) -> bool:
         return True
     org_ids, _ = admin_scope(user)
     # Org admins may only mint business_admin codes within their own org.
-    if grants_role == OrganizationMembership.ROLE_BUSINESS_ADMIN and organization.id in org_ids:
-        return True
-    return False
+    return (
+        grants_role == OrganizationMembership.ROLE_BUSINESS_ADMIN
+        and organization.id in org_ids
+    )
 
 
 class AdminRegistrationCodeListCreateView(generics.ListCreateAPIView):
@@ -461,7 +510,13 @@ class OrganizationDetailView(generics.RetrieveUpdateAPIView):
     def perform_update(self, serializer):
         organization = serializer.save()
         from apps.audit.views import create_audit_log
-        create_audit_log(self.request.user, "organization_update", "Organization", organization.id, request=self.request)
+        create_audit_log(
+            self.request.user,
+            "organization_update",
+            "Organization",
+            organization.id,
+            request=self.request,
+        )
 
 
 def _organization_lifecycle(request, pk, status_value, action):
@@ -546,7 +601,11 @@ class BusinessLineDetailView(generics.RetrieveUpdateAPIView):
 
 def _business_line_lifecycle(request, pk, status_value, action):
     org_ids = _scoped_org_ids(request.user)
-    qs = BusinessLine.objects.all() if org_ids is None else BusinessLine.objects.filter(organization_id__in=list(org_ids))
+    qs = (
+        BusinessLine.objects.all()
+        if org_ids is None
+        else BusinessLine.objects.filter(organization_id__in=list(org_ids))
+    )
     try:
         line = qs.get(pk=pk)
     except BusinessLine.DoesNotExist as exc:
@@ -633,6 +692,50 @@ def space_access_request_approve(request, pk, request_id):
     return Response(SpaceAccessRequestSerializer(access_request).data)
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_access_request_reject(request, pk, request_id):
+    try:
+        space = KnowledgeSpace.objects.get(pk=pk)
+        access_request = SpaceAccessRequest.objects.get(pk=request_id, space=space)
+    except (KnowledgeSpace.DoesNotExist, SpaceAccessRequest.DoesNotExist) as exc:
+        raise NotFound("Access request not found.") from exc
+    if not _can_manage_space(request.user, space):
+        raise PermissionDenied("You cannot reject this access request.")
+    if access_request.status != SpaceAccessRequest.STATUS_PENDING:
+        return Response({"detail": "Request is already resolved."}, status=status.HTTP_409_CONFLICT)
+    reason = str(request.data.get("reason", "")).strip()
+    if not reason:
+        raise ValidationError({"reason": "A rejection reason is required."})
+    if len(reason) > 2000:
+        raise ValidationError({"reason": "Rejection reason is too long."})
+    access_request.status = SpaceAccessRequest.STATUS_REJECTED
+    access_request.rejection_reason = reason
+    access_request.reviewed_by = request.user
+    access_request.reviewed_at = timezone.now()
+    access_request.save(update_fields=[
+        "status", "rejection_reason", "reviewed_by", "reviewed_at", "updated_at"
+    ])
+    from apps.audit.views import create_audit_log
+    create_audit_log(
+        request.user,
+        "space_access_request_reject",
+        "KnowledgeSpace",
+        space.id,
+        details={"access_request_id": str(access_request.id)},
+        request=request,
+    )
+    from apps.notifications.services import notify
+    notify(
+        access_request.user,
+        "space_access_rejected",
+        "Space access request reviewed",
+        body=f"Your request to join {space.name} was not approved.",
+        metadata={"space_id": str(space.id), "access_request_id": str(access_request.id)},
+    )
+    return Response(SpaceAccessRequestSerializer(access_request).data)
+
+
 User = get_user_model()
 
 
@@ -693,7 +796,12 @@ def scoped_user_assignment(request, user_id):
                 user=target, organization=organization, business_line=None, role=role
             )
         else:
-            OrganizationMembership.objects.filter(user=target, organization=organization, business_line=None, role=role).delete()
+            OrganizationMembership.objects.filter(
+                user=target,
+                organization=organization,
+                business_line=None,
+                role=role,
+            ).delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
     elif scope == "space":
         try:
@@ -706,15 +814,45 @@ def scoped_user_assignment(request, user_id):
             raise ValidationError({"role": "Invalid space role."})
         if request.method == "POST":
             assignment, _ = SpaceMembership.objects.update_or_create(
-                user=target, space=space, defaults={"role": role, "status": "active", "invited_by": request.user}
+                user=target,
+                space=space,
+                defaults={
+                    "role": role,
+                    "status": "active",
+                    "invited_by": request.user,
+                },
             )
         else:
-            if role == SpaceMembership.ROLE_OWNER and SpaceMembership.objects.filter(space=space, role=role, status="active").count() <= 1:
+            is_last_owner = (
+                role == SpaceMembership.ROLE_OWNER
+                and SpaceMembership.objects.filter(
+                    space=space,
+                    role=role,
+                    status="active",
+                ).count()
+                <= 1
+            )
+            if is_last_owner:
                 raise ValidationError({"detail": "Cannot remove the last owner."})
             SpaceMembership.objects.filter(user=target, space=space, role=role).delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
     else:
         raise ValidationError({"scope": "Use organization or space."})
     from apps.audit.views import create_audit_log
-    create_audit_log(request.user, "scoped_role_assign", "User", target.id, details={"scope": scope, "scope_id": str(scope_id), "role": role}, request=request)
-    return Response({"id": str(assignment.id), "user_id": str(target.id), "scope": scope, "role": role}, status=status.HTTP_201_CREATED)
+    create_audit_log(
+        request.user,
+        "scoped_role_assign",
+        "User",
+        target.id,
+        details={"scope": scope, "scope_id": str(scope_id), "role": role},
+        request=request,
+    )
+    return Response(
+        {
+            "id": str(assignment.id),
+            "user_id": str(target.id),
+            "scope": scope,
+            "role": role,
+        },
+        status=status.HTTP_201_CREATED,
+    )

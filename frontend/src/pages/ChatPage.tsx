@@ -10,7 +10,7 @@ import { useLocation } from 'react-router-dom';
 import { message as antMessage } from 'antd';
 import { CheckOutlined, CloseOutlined, ArrowDownOutlined, EditOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useChatStore, type AnswerMode } from '../store/chatStore';
+import { useChatStore, type AnswerMode, type Message } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
@@ -54,7 +54,7 @@ export default function ChatPageContainer() {
   const isOnline = useOnlineStatus();
   const {
     sessions, messages, activeSessionId, isLoadingMessages, hasOlderMessages,
-    setSendError, sendMessage, loadSessions, loadMessages, loadOlderRounds,
+    setSendError, sendMessage, loadSessions, loadMessages, loadOlderRounds, setActiveSession,
     abortSessionStream,
   } = useChatStore();
 
@@ -141,15 +141,28 @@ export default function ChatPageContainer() {
     inputRef.current?.focus();
   };
 
-  const handleRetry = () => {
+  const handleRetry = (targetAssistant?: Message) => {
     if (isStreaming || isSendLocked || isSendingRef.current) return;
     if (!navigator.onLine) {
       antMessage.warning(t('offline_send_warning') || 'You are offline. Please check your network.');
       return;
     }
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+    const targetIndex = targetAssistant
+      ? messages.findIndex((message) => message.id === targetAssistant.id)
+      : messages.length;
+    const lastUserMsg = messages.slice(0, targetIndex).reverse().find((message) => message.role === 'user');
     if (lastUserMsg) {
       isSendingRef.current = true;
+      if (targetAssistant) {
+        setSendError(null);
+        sendMessage(lastUserMsg.content, {
+          answerMode: answerMode === 'deep' && canUseDeep ? 'deep' : 'fast',
+          canUseDeep,
+          regenerateMessageId: targetAssistant.id,
+        });
+        requestAnimationFrame(() => { isSendingRef.current = false; });
+        return;
+      }
       const reusesFailedDeepTurn = activeTurn?.answerMode === 'deep'
         && activeTurn.phase === 'error'
         && !activeTurn.isLocked
@@ -169,6 +182,31 @@ export default function ChatPageContainer() {
         });
       }
       requestAnimationFrame(() => { isSendingRef.current = false; });
+    }
+  };
+
+  const handleBranch = async (targetAssistant: Message) => {
+    if (isStreaming || isSendLocked) return;
+    try {
+      const branch = await chatApi.branchMessage(targetAssistant.id);
+      await loadSessions();
+      setActiveSession(branch.id);
+      antMessage.success(t('branch_created'));
+    } catch {
+      antMessage.error(t('branch_failed'));
+    }
+  };
+
+  const handleShare = async () => {
+    if (!activeSessionId || !canShare) return;
+    try {
+      const share = await chatApi.createShare(activeSessionId);
+      const url = `${window.location.origin}/shared/${share.token}`;
+      if (navigator.share) await navigator.share({ title: activeSessionTitle, url });
+      else await navigator.clipboard.writeText(url);
+      antMessage.success(t('share_created'));
+    } catch {
+      antMessage.error(t('share_failed'));
     }
   };
 
@@ -307,7 +345,7 @@ export default function ChatPageContainer() {
               <div className="chat-error-title">{t('error_title') || 'Error'}</div>
               <div className="chat-error-desc">{getErrorDescription(sendError)}</div>
               <div className="chat-error-actions">
-                <button className="msg-action-btn" onClick={handleRetry}><ReloadOutlined />{t('error_retry')}</button>
+                <button className="msg-action-btn" onClick={() => handleRetry()}><ReloadOutlined />{t('error_retry')}</button>
                 <button className="msg-action-btn" onClick={() => setSendError(null)}>{t('cancel') || 'Dismiss'}</button>
               </div>
             </div>
@@ -333,6 +371,8 @@ export default function ChatPageContainer() {
             citations={visibleCitations}
             streamPhase={visibleStreamPhase}
             onRegenerate={handleRetry}
+            onBranch={handleBranch}
+            onShare={handleShare}
             canShare={canShare}
             onScrollToBottomChange={setShowScrollFab}
           />

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Message } from '../../store/chatStore';
@@ -38,5 +38,37 @@ describe('MessageBubble share capability', () => {
   it('shows share when chat.share is allowed', () => {
     render(<MessageBubbleRaw message={message} canShare />);
     expect(screen.getByRole('button', { name: 'share_message' })).toBeTruthy();
+  });
+
+  it('links only server-issued citation source paths', () => {
+    render(<MessageBubbleRaw message={{
+      ...message,
+      citations: [
+        {
+          source_id: 'source-1',
+          source_url: '/api/v1/chat/citations/source-1/source/',
+          document_id: 'document-1',
+          document_title: 'Safe source',
+          score: 0.9,
+          snippet: 'Governed excerpt',
+          quoted_text: 'Governed excerpt',
+        },
+        {
+          source_id: 'source-2',
+          source_url: 'https://untrusted.example/source',
+          document_id: 'document-2',
+          document_title: 'Untrusted source',
+          score: 0.8,
+          quoted_text: '',
+        },
+      ],
+    }} />);
+
+    fireEvent.click(screen.getByText('sources_count').closest('button')!);
+
+    expect(screen.getByRole('link', { name: 'Safe source' }).getAttribute('href'))
+      .toBe('/api/v1/chat/citations/source-1/source/');
+    expect(screen.queryByRole('link', { name: 'Untrusted source' })).toBeNull();
+    expect(screen.getByText('Governed excerpt')).toBeTruthy();
   });
 });
