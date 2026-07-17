@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
@@ -35,11 +35,14 @@ from apps.spaces.generation_policy import (
 # V6.0: space isolation helpers.
 from apps.spaces.permissions import (
     CHAT_ASK,
+    CHAT_EXPORT,
     CHAT_SHARE,
+    CHAT_VIEW_HISTORY,
     DOCUMENT_DOWNLOAD,
     effective_space_role,
     has_space_permission,
     resolve_request_space,
+    spaces_with_permission,
 )
 
 from .coordination import (
@@ -62,6 +65,7 @@ from .serializers import (
     MessageSerializer,
 )
 from .services import (
+    ACTIVE_TURN_STATUSES,
     BeginTurnDisposition,
     ChatTurnScopeError,
     InvalidTurnTransitionError,
@@ -145,11 +149,21 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         qs = ChatSession.objects.filter(user=self.request.user, is_active=True)
-        # V6.0: when a space is active, the sidebar only shows that space's
-        # sessions. Without a header (legacy client) all sessions are returned.
-        space = resolve_request_space(self.request, required=False)
+        # When a space is active, show only that space's permitted history.
+        # Legacy clients without a header still see only currently permitted
+        # spaces plus their pre-space sessions.
+        space = resolve_request_space(
+            self.request,
+            require_perm=CHAT_VIEW_HISTORY,
+            required=False,
+        )
         if space is not None:
             qs = qs.filter(space=space)
+        else:
+            qs = qs.filter(
+                Q(space__isnull=True)
+                | Q(space__in=spaces_with_permission(self.request.user, CHAT_VIEW_HISTORY))
+            )
 
         query = self.request.query_params.get("q", "").strip()
         time_filter = self.request.query_params.get("time", "all").strip().lower()
@@ -232,7 +246,10 @@ class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return ChatSession.objects.filter(user=self.request.user)
+        return ChatSession.objects.filter(user=self.request.user).filter(
+            Q(space__isnull=True)
+            | Q(space__in=spaces_with_permission(self.request.user, CHAT_VIEW_HISTORY))
+        )
 
     def perform_update(self, serializer):
         """Only update title field — preserve updated_at so session stays in
@@ -245,7 +262,7 @@ class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
 def export_session(request, session_id):
     """Export one owned, currently accessible session as Markdown or safe HTML."""
     try:
-        session = ChatSession.objects.prefetch_related("messages").get(
+        session = ChatSession.objects.select_related("space").get(
             id=session_id,
             user=request.user,
             is_active=True,
@@ -253,8 +270,11 @@ def export_session(request, session_id):
     except ChatSession.DoesNotExist:
         from rest_framework.exceptions import NotFound
         raise NotFound("Session not found.") from None
-    if session.space_id and effective_space_role(request.user, session.space) is None:
-        from rest_framework.exceptions import PermissionDenied
+    if session.space_id and not has_space_permission(
+        request.user,
+        session.space,
+        CHAT_EXPORT,
+    ):
         raise PermissionDenied("You no longer have access to this space.")
     export_format = request.query_params.get("format", "markdown")
     if export_format not in {"markdown", "html"}:
@@ -304,6 +324,7 @@ def branch_from_message(request, message_id):
         space is None
         or effective_space_role(request.user, space) is None
         or not has_space_permission(request.user, space, CHAT_ASK)
+        or not has_space_permission(request.user, space, CHAT_VIEW_HISTORY)
     ):
         return Response({"code": "space_access_denied"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -413,11 +434,21 @@ class ChatSessionMessagesView(generics.ListAPIView):
     pagination_class = MessageCursorPagination
 
     def get_queryset(self):
+        session = get_object_or_404(
+            ChatSession.objects.select_related("space"),
+            id=self.kwargs["session_id"],
+            user=self.request.user,
+            is_active=True,
+        )
+        if session.space_id and not has_space_permission(
+            self.request.user,
+            session.space,
+            CHAT_VIEW_HISTORY,
+        ):
+            raise PermissionDenied("You no longer have access to this space.")
         # V3.5 HIGH-004: prefetch_related eliminates N+1 citation queries
         queryset = Message.objects.filter(
-            session_id=self.kwargs["session_id"],
-            session__user=self.request.user,
-            session__is_active=True,
+            session=session,
         )
         if self.request.query_params.get("include_versions") != "true":
             queryset = queryset.exclude(role="assistant", is_current_version=False)
@@ -701,23 +732,6 @@ def _record_turn_metrics(turn, *, increments=(), **values):
         )
 
 
-def _has_active_space_membership(user, space) -> bool:
-    """Recovery requires an active, unexpired membership in the Turn space."""
-
-    from apps.spaces.models import SpaceMembership
-
-    membership = (
-        SpaceMembership.objects.filter(
-            user=user,
-            space=space,
-            status="active",
-        )
-        .only("status", "expires_at")
-        .first()
-    )
-    return bool(membership and membership.is_effective)
-
-
 def _owned_recovery_turn(request, turn_id):
     turn = get_object_or_404(
         ChatTurn.objects.select_related(
@@ -729,9 +743,13 @@ def _owned_recovery_turn(request, turn_id):
         id=turn_id,
         user=request.user,
     )
-    if turn.space_id and not _has_active_space_membership(
+    required_permission = (
+        CHAT_ASK if turn.status in ACTIVE_TURN_STATUSES else CHAT_VIEW_HISTORY
+    )
+    if turn.space_id and not has_space_permission(
         request.user,
         turn.space,
+        required_permission,
     ):
         from rest_framework.exceptions import NotFound
 
@@ -935,8 +953,8 @@ def chat_turn_events(request, turn_id):
 def send_message(request, session_id=None, message_id=None):
     """Send a message and get streaming response (SSE).
 
-    ChatTurn identity/idempotency is durable here. The Redis session lock and
-    replayable SSE v2 envelope are intentionally deferred to Task 3B.
+    ChatTurn identity/idempotency, the renewable Redis session lease, and the
+    replayable SSE v2 envelope are coordinated by this endpoint.
     """
     request_started_at = time.monotonic()
     regenerate_source = None
@@ -950,6 +968,20 @@ def send_message(request, session_id=None, message_id=None):
             session__user=request.user,
             session__is_active=True,
         )
+        regenerate_space = regenerate_source.space or regenerate_source.session.space
+        if (
+            regenerate_space is None
+            or not has_space_permission(request.user, regenerate_space, CHAT_ASK)
+            or not has_space_permission(
+                request.user,
+                regenerate_space,
+                CHAT_VIEW_HISTORY,
+            )
+        ):
+            return Response(
+                {"code": "space_access_denied"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         source_turn = getattr(regenerate_source, "assistant_turn", None)
         question_message_override = source_turn.question_message if source_turn else (
             Message.objects.filter(

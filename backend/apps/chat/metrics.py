@@ -18,6 +18,7 @@ _NUMERIC_KEYS = frozenset(
 _IDEMPOTENCY_VALUES = frozenset(
     {"created", "retry", "completed", "in_progress", "terminal", "conflict"}
 )
+_BOOLEAN_KEYS = frozenset({"idempotency_rollout_enabled"})
 
 
 def sanitize_turn_metrics(values: dict) -> dict:
@@ -31,6 +32,9 @@ def sanitize_turn_metrics(values: dict) -> dict:
             sanitized[key] = max(0, int(value))
             continue
         if key == "idempotency_disposition" and value in _IDEMPOTENCY_VALUES:
+            sanitized[key] = value
+            continue
+        if key in _BOOLEAN_KEYS and isinstance(value, bool):
             sanitized[key] = value
             continue
         raise ValueError("unsupported chat metric")

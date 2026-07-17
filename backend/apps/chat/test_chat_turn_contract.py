@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from apps.chat.metrics import sanitize_turn_metrics
 from apps.chat.models import ChatTurn
 from apps.chat.serializers import ChatMessageRequestSerializer
 from apps.chat.services import (
@@ -59,6 +60,20 @@ class ChatTurnModelContractTest(SimpleTestCase):
         index_fields = {tuple(index.fields) for index in ChatTurn._meta.indexes}
         self.assertIn(("session", "status"), index_fields)
         self.assertIn(("user", "-started_at"), index_fields)
+
+    def test_metrics_accept_the_boolean_idempotency_rollout_marker(self):
+        metrics = sanitize_turn_metrics(
+            {
+                "idempotency_disposition": "created",
+                "idempotency_rollout_enabled": True,
+            }
+        )
+
+        self.assertEqual(metrics["idempotency_disposition"], "created")
+        self.assertIs(metrics["idempotency_rollout_enabled"], True)
+
+        with self.assertRaises(ValueError):
+            sanitize_turn_metrics({"idempotency_rollout_enabled": 1})
 
 
 class ChatMessageRequestSerializerTest(SimpleTestCase):

@@ -277,6 +277,35 @@ def has_space_permission(user, space: KnowledgeSpace, perm: str) -> bool:
     return perm in ROLE_PERMISSIONS.get(role, set())
 
 
+def spaces_with_permission(user, perm: str):
+    """Active spaces where ``user`` currently holds one exact permission."""
+
+    spaces = active_spaces()
+    if not user or not user.is_authenticated:
+        return spaces.none()
+    if is_platform_admin(user):
+        return spaces
+
+    eligible_roles = [
+        role for role, permissions in ROLE_PERMISSIONS.items() if perm in permissions
+    ]
+    member_space_ids = effective_space_memberships(user).filter(
+        role__in=eligible_roles
+    ).values_list("space_id", flat=True)
+    org_ids, bl_ids = admin_scope(user)
+    access = (
+        Q(id__in=member_space_ids)
+        | Q(organization_id__in=list(org_ids))
+        | Q(business_line_id__in=list(bl_ids))
+    )
+    if (
+        getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False)
+        and perm in ROLE_PERMISSIONS[SpaceMembership.ROLE_GUEST]
+    ):
+        access |= Q(visibility="public_demo")
+    return spaces.filter(access).distinct()
+
+
 def accessible_spaces(user):
     """Queryset of spaces the user may see."""
     spaces = active_spaces()

@@ -10,12 +10,18 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from apps.spaces.models import KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.models import (
+    KnowledgeSpace,
+    Organization,
+    OrganizationMembership,
+    SpaceMembership,
+)
 
+from .coordination import CoordinationUnavailableError
 from .models import ChatSession, ChatTurn, Message
 
 User = get_user_model()
@@ -142,6 +148,142 @@ class SessionProductClosureTest(APITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_history_and_export_require_the_current_space_capability(self):
+        membership = SpaceMembership.objects.get(user=self.user, space=self.space)
+        membership.role = SpaceMembership.ROLE_GUEST
+        membership.save(update_fields=["role"])
+
+        listing = self.client.get(
+            "/api/v1/chat/sessions/",
+            HTTP_X_SPACE_ID=str(self.space.id),
+        )
+        unscoped_listing = self.client.get("/api/v1/chat/sessions/")
+        messages = self.client.get(
+            f"/api/v1/chat/sessions/{self.session.id}/messages/",
+        )
+        detail = self.client.get(f"/api/v1/chat/sessions/{self.session.id}/")
+        exported = self.client.get(
+            f"/api/v1/chat/sessions/{self.session.id}/export/",
+            {"format": "markdown"},
+        )
+
+        self.assertEqual(listing.status_code, 403)
+        self.assertEqual(unscoped_listing.status_code, 200)
+        self.assertNotIn(
+            str(self.session.id),
+            [row["id"] for row in unscoped_listing.data["results"]],
+        )
+        self.assertEqual(messages.status_code, 403)
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(exported.status_code, 403)
+
+    def test_guest_cannot_recover_or_derive_from_completed_history(self):
+        membership = SpaceMembership.objects.get(user=self.user, space=self.space)
+        membership.role = SpaceMembership.ROLE_GUEST
+        membership.save(update_fields=["role"])
+        question = self.session.messages.get(role="user")
+        assistant = self.session.messages.get(role="assistant")
+        turn = ChatTurn.objects.create(
+            client_request_id=uuid.uuid4(),
+            session=self.session,
+            space=self.space,
+            user=self.user,
+            question_message=question,
+            assistant_message=assistant,
+            status=ChatTurn.STATUS_COMPLETED,
+            completed_at=timezone.now(),
+        )
+
+        status_response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
+        self.assertEqual(status_response.status_code, 404)
+
+        events = self.client.get(f"/api/v1/chat/turns/{turn.id}/events/")
+        branch = self.client.post(
+            f"/api/v1/chat/messages/{assistant.id}/branch/",
+            {"client_request_id": str(uuid.uuid4())},
+            format="json",
+        )
+        regenerate = self.client.post(
+            f"/api/v1/chat/messages/{assistant.id}/regenerate/",
+            {"client_request_id": str(uuid.uuid4())},
+            format="json",
+        )
+
+        self.assertEqual(events.status_code, 404)
+        self.assertEqual(branch.status_code, 403)
+        self.assertEqual(regenerate.status_code, 403)
+
+    def test_guest_can_recover_own_active_turn(self):
+        membership = SpaceMembership.objects.get(user=self.user, space=self.space)
+        membership.role = SpaceMembership.ROLE_GUEST
+        membership.save(update_fields=["role"])
+        question = self.session.messages.get(role="user")
+        turn = ChatTurn.objects.create(
+            client_request_id=uuid.uuid4(),
+            session=self.session,
+            space=self.space,
+            user=self.user,
+            question_message=question,
+            status=ChatTurn.STATUS_ACCEPTED,
+        )
+
+        with patch(
+            "apps.chat.views.create_redis_client",
+            side_effect=CoordinationUnavailableError(),
+        ):
+            response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], ChatTurn.STATUS_ACCEPTED)
+
+    @override_settings(ENABLE_PUBLIC_DEMO_SPACES=True)
+    def test_public_demo_guest_without_membership_can_recover_active_turn(self):
+        SpaceMembership.objects.filter(user=self.user, space=self.space).delete()
+        self.space.visibility = "public_demo"
+        self.space.save(update_fields=["visibility"])
+        question = self.session.messages.get(role="user")
+        turn = ChatTurn.objects.create(
+            client_request_id=uuid.uuid4(),
+            session=self.session,
+            space=self.space,
+            user=self.user,
+            question_message=question,
+            status=ChatTurn.STATUS_ACCEPTED,
+        )
+
+        with patch(
+            "apps.chat.views.create_redis_client",
+            side_effect=CoordinationUnavailableError(),
+        ):
+            response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_org_admin_without_membership_can_recover_active_turn(self):
+        SpaceMembership.objects.filter(user=self.user, space=self.space).delete()
+        OrganizationMembership.objects.create(
+            organization=self.org,
+            user=self.user,
+            role=OrganizationMembership.ROLE_ORG_ADMIN,
+        )
+        question = self.session.messages.get(role="user")
+        turn = ChatTurn.objects.create(
+            client_request_id=uuid.uuid4(),
+            session=self.session,
+            space=self.space,
+            user=self.user,
+            question_message=question,
+            status=ChatTurn.STATUS_ACCEPTED,
+        )
+
+        with patch(
+            "apps.chat.views.create_redis_client",
+            side_effect=CoordinationUnavailableError(),
+        ):
+            response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
+
+        self.assertEqual(response.status_code, 200)
 
     def test_export_rejects_unknown_format(self):
         response = self.client.get(

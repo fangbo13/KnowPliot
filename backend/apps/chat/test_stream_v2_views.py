@@ -618,7 +618,7 @@ class TurnEventsViewTest(SimpleTestCase):
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
             patch(
-                "apps.chat.views._has_active_space_membership",
+                "apps.chat.views.has_space_permission",
                 return_value=True,
             ),
             patch("apps.chat.views.create_redis_client", return_value=redis),
@@ -644,7 +644,7 @@ class TurnEventsViewTest(SimpleTestCase):
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
             patch(
-                "apps.chat.views._has_active_space_membership",
+                "apps.chat.views.has_space_permission",
                 return_value=True,
             ),
             patch("apps.chat.views.create_redis_client", return_value=redis),
@@ -660,7 +660,7 @@ class TurnEventsViewTest(SimpleTestCase):
         request = SimpleNamespace(user=self.user)
         with (
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
-            patch("apps.chat.views._has_active_space_membership", return_value=True),
+            patch("apps.chat.views.has_space_permission", return_value=True),
             patch("apps.chat.views.create_redis_client", return_value=FakeRedis()),
             patch(
                 "apps.chat.views.converge_stale_turn",
@@ -683,7 +683,7 @@ class TurnEventsViewTest(SimpleTestCase):
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
             patch(
-                "apps.chat.views._has_active_space_membership",
+                "apps.chat.views.has_space_permission",
                 return_value=False,
             ),
             patch("apps.chat.views.create_redis_client", create_client),
@@ -699,7 +699,7 @@ class TurnEventsViewTest(SimpleTestCase):
             patch("apps.chat.views.get_object_or_404", return_value=self.turn),
             patch("apps.chat.views.effective_space_role", return_value="member"),
             patch(
-                "apps.chat.views._has_active_space_membership",
+                "apps.chat.views.has_space_permission",
                 return_value=True,
             ),
             patch(
