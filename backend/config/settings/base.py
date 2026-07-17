@@ -6,6 +6,8 @@ import os
 import warnings
 from pathlib import Path
 
+from .parsing import env_bool
+
 # Load .env file
 try:
     from dotenv import load_dotenv
@@ -175,6 +177,9 @@ SITE_ID = 1
 
 # Django REST Framework
 REST_FRAMEWORK = {
+    # ``format`` is a business query parameter for compliance and chat exports.
+    # Do not reserve it for renderer selection.
+    "URL_FORMAT_OVERRIDE": None,
     # V4.2 SYS-V4.2-020: Use custom auth class that checks blacklist table.
     # Default JWTAuthentication only validates signature + expiry, ignoring
     # blacklisted_tokens — meaning blacklisted access tokens remain valid
@@ -225,10 +230,12 @@ AUTHENTICATION_BACKENDS = [
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "optional"
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+MFA_ENCRYPTION_KEY = os.environ.get("MFA_ENCRYPTION_KEY", "")
+PASSWORD_RESET_TIMEOUT = 30 * 60
 
 # CORS
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
@@ -236,6 +243,16 @@ CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:
 # Celery — V4.1 SYS-V4.1-010: Redis now requires password
 CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
+CHAT_COORDINATION_REDIS_URL = os.environ.get("CHAT_COORDINATION_REDIS_URL", CELERY_BROKER_URL)
+CHAT_TURN_IDEMPOTENCY = env_bool("CHAT_TURN_IDEMPOTENCY", default=False)
+CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+CAPABILITY_NAV = env_bool("CAPABILITY_NAV", default=False)
+DEEP_ANSWER_MODE = env_bool("DEEP_ANSWER_MODE", default=False)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

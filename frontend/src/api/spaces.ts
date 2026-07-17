@@ -75,6 +75,18 @@ export interface AddMemberResult {
   member?: SpaceMember;
 }
 
+export interface SpaceAccessRequestRecord {
+  id: string;
+  space: string;
+  user: string;
+  reason: string;
+  role: 'member' | 'guest';
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const spacesApi = {
   async list(): Promise<KnowledgeSpace[]> {
     const { data } = await apiClient.get('/spaces/');
@@ -98,6 +110,44 @@ export const spacesApi = {
 
   async archive(id: string): Promise<KnowledgeSpace> {
     const { data } = await apiClient.post(`/spaces/${id}/archive/`, {});
+    return data;
+  },
+
+  async restore(id: string): Promise<KnowledgeSpace> {
+    const { data } = await apiClient.post(`/spaces/${id}/restore/`, {});
+    return data;
+  },
+
+  async clone(
+    id: string,
+    body: { name: string; code: string; copy_documents: boolean },
+  ): Promise<KnowledgeSpace> {
+    const { data } = await apiClient.post(`/spaces/${id}/clone/`, body);
+    return data;
+  },
+
+  async transfer(id: string, businessLine: string): Promise<KnowledgeSpace> {
+    const { data } = await apiClient.post(`/spaces/${id}/transfer/`, {
+      business_line: businessLine,
+    });
+    return data;
+  },
+
+  async transferOwner(id: string, user: string): Promise<SpaceMember> {
+    const { data } = await apiClient.post(`/spaces/${id}/transfer-owner/`, { user });
+    return data;
+  },
+
+  async discoverable(): Promise<KnowledgeSpace[]> {
+    const { data } = await apiClient.get('/spaces/discoverable/');
+    return Array.isArray(data) ? data : data.results ?? [];
+  },
+
+  async requestAccess(
+    id: string,
+    body: { reason: string; role: 'member' | 'guest' },
+  ): Promise<SpaceAccessRequestRecord> {
+    const { data } = await apiClient.post(`/spaces/${id}/access-requests/`, body);
     return data;
   },
 

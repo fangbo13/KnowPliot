@@ -94,20 +94,21 @@ export default function AdminCodesPage() {
   const scopedLines = lines.filter((l) => l.organization === orgId);
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_codes_title')}</h1>
-        <Space>
+    <div className="page" style={{ background: 'transparent' }}>
+      <div className="page-inner">
+        <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 className="page-title">{t('admin_codes_title')}</h1>
+          <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)} style={{ borderRadius: 8 }}>{t('admin_issue_code')}</Button>
         </Space>
       </div>
 
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
-        <Table rowKey="id" loading={loading} dataSource={codes} columns={columns} pagination={false} size="middle" />
+      <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+        <Table rowKey="id" loading={loading} dataSource={codes} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 
-      <Modal title={t('admin_issue_code')} open={open} onOk={issue} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>
+      <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_issue_code')} open={open} onOk={issue} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>
         <Space direction="vertical" style={{ width: '100%', padding: '12px 0' }} size="middle">
           <Select value={grantsRole} onChange={(v) => setGrantsRole(v)} style={{ width: '100%' }}
             options={[{ value: 'business_admin', label: 'business_admin' }, { value: 'org_admin', label: 'org_admin' }]} />
@@ -123,11 +124,12 @@ export default function AdminCodesPage() {
         </Space>
       </Modal>
 
-      <Modal title={t('code_generated') || 'Code generated'} open={!!generated} onCancel={() => setGenerated(null)}
+      <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('code_generated') || 'Code generated'} open={!!generated} onCancel={() => setGenerated(null)}
         footer={[<Button key="ok" type="primary" onClick={() => setGenerated(null)}>{t('done') || 'Done'}</Button>]}>
         <Paragraph type="warning" style={{ fontSize: 13, fontWeight: 500 }}>{t('admin_code_copy_hint')}</Paragraph>
         <Input.TextArea readOnly value={generated ?? ''} autoSize style={{ fontFamily: 'var(--font-family-mono)', borderRadius: 8 }} />
       </Modal>
+      </div>
     </div>
   );
 }

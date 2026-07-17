@@ -13,7 +13,10 @@ from .models import (
     KnowledgeSpace,
     Organization,
     SpaceEmailInvite,
+    SpaceAccessRequest,
     SpaceMembership,
+    GovernancePolicy,
+    ModelProfile,
 )
 
 
@@ -21,7 +24,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Organization
         fields = ["id", "name", "slug", "status", "created_at"]
-        read_only_fields = fields
+        read_only_fields = ["id", "created_at"]
 
 
 class BusinessLineSerializer(serializers.ModelSerializer):
@@ -186,3 +189,57 @@ class AddMemberByEmailSerializer(serializers.Serializer):
 
 class UpdateMemberRoleSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=[c[0] for c in SpaceMembership.ROLE_CHOICES])
+
+
+class SpaceAccessRequestSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = SpaceAccessRequest
+        fields = [
+            "id", "space", "user", "user_email", "role", "reason", "status",
+            "reviewed_by", "reviewed_at", "rejection_reason", "created_at",
+        ]
+        read_only_fields = [
+            "id", "space", "user", "status", "reviewed_by", "reviewed_at",
+            "rejection_reason", "created_at",
+        ]
+
+
+class SpaceAccessRequestCreateSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=[SpaceMembership.ROLE_MEMBER, SpaceMembership.ROLE_GUEST])
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+
+
+class SpaceTransferSerializer(serializers.Serializer):
+    business_line = serializers.PrimaryKeyRelatedField(queryset=BusinessLine.objects.all(), required=False)
+    organization = serializers.PrimaryKeyRelatedField(queryset=Organization.objects.all(), required=False)
+
+
+class SpaceCloneSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200)
+    code = serializers.SlugField(max_length=120)
+    copy_documents = serializers.BooleanField(default=False)
+
+    def validate_code(self, value):
+        if KnowledgeSpace.objects.filter(code=value).exists():
+            raise serializers.ValidationError("A space with this code already exists.")
+        return value
+
+
+class SpaceOwnerTransferSerializer(serializers.Serializer):
+    user = serializers.UUIDField()
+
+
+class GovernancePolicySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GovernancePolicy
+        fields = ["id", "organization", "space", "revision", "values", "created_at"]
+        read_only_fields = ["id", "revision", "created_at"]
+
+
+class ModelProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModelProfile
+        fields = ["id", "name", "provider", "model_id", "enabled", "created_at"]
+        read_only_fields = ["id", "created_at"]

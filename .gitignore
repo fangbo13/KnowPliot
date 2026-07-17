@@ -53,3 +53,9 @@ htmlcov/
 *.tmp
 *.bak
 skills/open-design/
+
+# Local Git worktrees
+.worktrees/
+
+# Superpowers execution scratch files
+.superpowers/sdd/

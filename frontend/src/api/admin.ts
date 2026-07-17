@@ -53,6 +53,29 @@ export interface Announcement {
   created_at: string;
 }
 
+export interface ModelProfile {
+  id: string;
+  name: string;
+  provider: string;
+  model_id: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface GovernancePolicy {
+  id: string;
+  organization: string;
+  space: string | null;
+  revision: number;
+  values: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface GovernancePolicyEnvelope {
+  effective: Record<string, unknown>;
+  revisions: GovernancePolicy[];
+}
+
 export interface AuditLog {
   id: string;
   user_email?: string;
@@ -61,12 +84,260 @@ export interface AuditLog {
   target_id: string | null;
   details: Record<string, unknown>;
   role_used: string;
+  organization_id: string | null;
+  business_line_id: string | null;
+  space_id: string | null;
+  result: 'success' | 'denied' | 'failure';
   created_at: string;
+}
+
+export interface AuditLogQuery {
+  action?: string;
+  result?: 'success' | 'denied' | 'failure';
+  organization?: string;
+  business_line?: string;
+  space?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export type ServiceHealthStatus =
+  | 'up'
+  | 'down'
+  | 'degraded'
+  | 'configured'
+  | 'not_configured';
+
+export interface SystemHealth {
+  overall: 'up' | 'degraded' | 'down';
+  readiness?: 'up' | 'degraded' | 'down';
+  liveness?: 'up' | 'down';
+  dependency_health?: Record<string, ServiceHealthStatus>;
+  background_worker_health?: {
+    status: ServiceHealthStatus;
+    latency_ms?: number;
+    detail?: string;
+    error?: string;
+  };
+  services: Record<string, {
+    status: ServiceHealthStatus;
+    code?: string;
+    latency_ms?: number;
+    latency_bucket?: 'fast' | 'normal' | 'slow';
+    last_checked_at?: string;
+    detail?: string;
+    error?: string;
+    missing?: string[];
+    max_sync_rows?: number;
+    retention?: {
+      export_job_days?: number | null;
+      audit_log_days?: number | null;
+      notification_days?: number | null;
+      stale_job_days?: number | null;
+    };
+    cleanup?: {
+      expired_export_jobs?: number;
+      failed_export_jobs?: number;
+      failed_ingestion_jobs?: number;
+    };
+    backlog?: {
+      sla_overdue_items?: number;
+      stale_documents?: number;
+    };
+  }>;
+}
+
+export interface SystemMetrics {
+  users: { total: number; active: number };
+  usage: { sessions: number; questions: number; citations: number };
+  documents: {
+    total: number;
+    processing: number;
+    failed: number;
+    stale: number;
+    expiring: number;
+  };
+  quality: {
+    average_response_time_ms: number | null;
+    no_evidence_rate: number;
+    citation_coverage_rate: number;
+  };
+  model_api: {
+    calls: number;
+    failures: number;
+    error_rate: number;
+    total_tokens: number;
+    average_tokens: number;
+    by_model: Array<{ model: string; calls: number }>;
+  };
+  knowledge_quality: {
+    unused_documents: number;
+    high_usage_documents: number;
+    stale_cited_documents: number;
+  };
+  security: { permission_denied: number };
+}
+
+export type IngestionJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'retrying'
+  | 'succeeded'
+  | 'failed';
+
+export interface IngestionJob {
+  id: string;
+  document: string;
+  document_title: string;
+  space: string;
+  space_name: string;
+  requested_by_email: string | null;
+  trigger: 'upload' | 'batch' | 'crawler' | 'reindex' | 'admin_retry';
+  status: IngestionJobStatus;
+  celery_task_id: string;
+  attempt: number;
+  max_attempts: number;
+  last_error: string;
+  retry_of: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface DocumentQuality {
+  id: string;
+  title: string;
+  space: string;
+  status: 'active' | 'stale';
+  effective_to: string | null;
+  chunk_count: number;
+  citation_count: number;
+  average_relevance: number | null;
+  last_cited_at: string | null;
+  flags: {
+    unused: boolean;
+    high_usage: boolean;
+    stale_source: boolean;
+  };
+}
+
+export interface FeedbackReview {
+  id: string;
+  space: string;
+  message: string;
+  user: string;
+  user_email?: string;
+  type?: string;
+  feedback_type: 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
+  comment: string;
+  suggested_source: string;
+  flag_for_review: boolean;
+  status: 'submitted' | 'pending_review' | 'in_review' | 'resolved' | 'dismissed' | 'withdrawn';
+  reviewer: string | null;
+  reviewer_email?: string | null;
+  resolution_code: string;
+  resolution_notes: string;
+  review_context: {
+    question?: string;
+    answer?: string;
+    citations?: Array<{ document_title?: string; quoted_text?: string }>;
+    retrieval_count?: number;
+    model?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeGap {
+  id: string;
+  space: string;
+  feedback: string | null;
+  question: string;
+  question_snapshot: string;
+  status: 'open' | 'in_progress' | 'resolved' | 'wont_fix';
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  assignee: string | null;
+  assignee_email?: string | null;
+  suggested_source: string;
+  resolution_notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeQualityReport {
+  feedback: {
+    total: number;
+    negative_rate: number;
+    flagged_rate: number;
+    by_type: Record<string, number>;
+  };
+  reviews: {
+    pending: number;
+    in_review: number;
+    resolved: number;
+    dismissed: number;
+    average_resolution_seconds: number | null;
+  };
+  unanswered_questions: Array<{ question: string; count: number }>;
+  knowledge_gaps: {
+    open: number;
+    in_progress: number;
+    resolved: number;
+    wont_fix: number;
+  };
+  documents: {
+    high_citation: Array<{ id: string; title: string; citation_count: number }>;
+    uncited: Array<{ id: string; title: string }>;
+    stale_cited: Array<{ id: string; title: string }>;
+  };
+  trends: Array<{ date: string; feedback: number; negative: number }>;
+}
+
+export type QualityExportDataset = 'feedback' | 'reviews' | 'gaps' | 'unanswered' | 'documents';
+
+export interface ComplianceExportJob {
+  id: string;
+  dataset: QualityExportDataset;
+  status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'expired';
+  space: string | null;
+  requested_by: string;
+  retry_of?: string | null;
+  row_count: number;
+  error_code: string;
+  safe_error_summary: string;
+  date_from: string | null;
+  date_to: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  download_url: string;
 }
 
 const unwrap = (data: any) => (Array.isArray(data) ? data : data.results ?? []);
 
 export const adminApi = {
+  async modelProfiles(): Promise<ModelProfile[]> {
+    const { data } = await apiClient.get('/admin/model-profiles/');
+    return unwrap(data);
+  },
+  async createModelProfile(body: Pick<ModelProfile, 'name' | 'provider' | 'model_id' | 'enabled'>): Promise<ModelProfile> {
+    const { data } = await apiClient.post('/admin/model-profiles/', body);
+    return data;
+  },
+  async governancePolicies(spaceId: string): Promise<GovernancePolicyEnvelope> {
+    const { data } = await apiClient.get('/admin/governance/policies/', {
+      params: { space: spaceId },
+    });
+    return data;
+  },
+  async createGovernancePolicy(body: {
+    organization?: string;
+    space?: string;
+    values: Record<string, unknown>;
+  }): Promise<GovernancePolicy> {
+    const { data } = await apiClient.post('/admin/governance/policies/', body);
+    return data;
+  },
   // ── Users & roles (existing rbac endpoints) ──
   async users(): Promise<AdminUser[]> {
     const { data } = await apiClient.get('/rbac/users/');
@@ -117,6 +388,14 @@ export const adminApi = {
     const { data } = await apiClient.get('/admin/organizations/');
     return unwrap(data);
   },
+  async archiveOrganization(id: string): Promise<Organization> {
+    const { data } = await apiClient.post(`/admin/organizations/${id}/archive/`, {});
+    return data;
+  },
+  async restoreOrganization(id: string): Promise<Organization> {
+    const { data } = await apiClient.post(`/admin/organizations/${id}/restore/`, {});
+    return data;
+  },
   async businessLines(orgId?: string): Promise<BusinessLine[]> {
     const { data } = await apiClient.get('/admin/business-lines/', {
       params: orgId ? { organization: orgId } : {},
@@ -125,6 +404,14 @@ export const adminApi = {
   },
   async createBusinessLine(body: { organization: string; name: string; code: string; description?: string }): Promise<BusinessLine> {
     const { data } = await apiClient.post('/admin/business-lines/', body);
+    return data;
+  },
+  async archiveBusinessLine(id: string): Promise<BusinessLine> {
+    const { data } = await apiClient.post(`/admin/business-lines/${id}/archive/`, {});
+    return data;
+  },
+  async restoreBusinessLine(id: string): Promise<BusinessLine> {
+    const { data } = await apiClient.post(`/admin/business-lines/${id}/restore/`, {});
     return data;
   },
 
@@ -142,8 +429,113 @@ export const adminApi = {
   },
 
   // ── Audit logs (existing endpoint) ──
-  async auditLogs(params?: { action?: string }): Promise<AuditLog[]> {
+  async auditLogs(params?: AuditLogQuery): Promise<AuditLog[]> {
     const { data } = await apiClient.get('/audit/logs/', { params });
     return unwrap(data);
+  },
+  async health(): Promise<SystemHealth> {
+    const { data } = await apiClient.get('/admin/health/');
+    return data;
+  },
+  async metrics(): Promise<SystemMetrics> {
+    const { data } = await apiClient.get('/admin/metrics/');
+    return data;
+  },
+  async ingestionJobs(params?: {
+    status?: IngestionJobStatus;
+  }): Promise<IngestionJob[]> {
+    const { data } = await apiClient.get('/admin/ingestion-jobs/', { params });
+    return unwrap(data);
+  },
+  async retryIngestionJob(jobId: string): Promise<IngestionJob> {
+    const { data } = await apiClient.post(
+      `/admin/ingestion-jobs/${jobId}/retry/`,
+      {},
+    );
+    return data;
+  },
+  async documentQuality(params?: {
+    status?: 'active' | 'stale';
+    flag?: 'unused' | 'high_usage' | 'stale_source';
+  }): Promise<DocumentQuality[]> {
+    const { data } = await apiClient.get('/admin/quality/documents/', { params });
+    return unwrap(data);
+  },
+  async feedbackReviews(params?: {
+    status?: string;
+    type?: string;
+    space?: string;
+    reviewer?: string;
+  }): Promise<FeedbackReview[]> {
+    const { data } = await apiClient.get('/admin/quality/feedback/', { params });
+    return unwrap(data);
+  },
+  async claimFeedback(id: string): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/claim/`, {});
+    return data;
+  },
+  async assignFeedback(id: string, reviewer: string): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/assign/`, { reviewer });
+    return data;
+  },
+  async resolveFeedback(id: string, body: { resolution_code?: string; resolution_notes?: string }): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/resolve/`, body);
+    return data;
+  },
+  async dismissFeedback(id: string, body: { resolution_code?: string; resolution_notes?: string }): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/dismiss/`, body);
+    return data;
+  },
+  async reopenFeedback(id: string): Promise<FeedbackReview> {
+    const { data } = await apiClient.post(`/admin/quality/feedback/${id}/reopen/`, {});
+    return data;
+  },
+  async knowledgeGaps(params?: { status?: string; priority?: string; space?: string }): Promise<KnowledgeGap[]> {
+    const { data } = await apiClient.get('/admin/quality/gaps/', { params });
+    return unwrap(data);
+  },
+  async createKnowledgeGap(body: {
+    space: string;
+    feedback?: string;
+    question: string;
+    priority?: string;
+    suggested_source?: string;
+  }): Promise<KnowledgeGap> {
+    const { data } = await apiClient.post('/admin/quality/gaps/', body);
+    return data;
+  },
+  async knowledgeQualityReport(): Promise<KnowledgeQualityReport> {
+    const { data } = await apiClient.get('/admin/reports/knowledge-quality/');
+    return data;
+  },
+  async exportQualityDataset(dataset: QualityExportDataset): Promise<Blob> {
+    const { data } = await apiClient.get('/admin/reports/export/', {
+      params: { dataset, format: 'csv' },
+      responseType: 'blob',
+    });
+    return data;
+  },
+  async exportJobs(): Promise<ComplianceExportJob[]> {
+    const { data } = await apiClient.get('/admin/reports/export-jobs/');
+    return unwrap(data);
+  },
+  async createExportJob(body: {
+    dataset: QualityExportDataset;
+    space?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<ComplianceExportJob> {
+    const { data } = await apiClient.post('/admin/reports/export-jobs/', body);
+    return data;
+  },
+  async downloadExportJob(id: string): Promise<Blob> {
+    const { data } = await apiClient.get(`/admin/reports/export-jobs/${id}/download/`, {
+      responseType: 'blob',
+    });
+    return data;
+  },
+  async retryExportJob(id: string): Promise<ComplianceExportJob> {
+    const { data } = await apiClient.post(`/admin/reports/export-jobs/${id}/retry/`, {});
+    return data;
   },
 };

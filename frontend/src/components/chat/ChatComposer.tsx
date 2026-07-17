@@ -6,6 +6,8 @@
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { SendOutlined, ArrowUpOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
+import type { AnswerMode } from '../../store/chatStore';
 
 type Props = {
   value: string;
@@ -23,6 +25,9 @@ type Props = {
   showCharacterCount?: boolean;
   showHint?: boolean;
   hintText?: string;
+  answerMode?: AnswerMode;
+  canUseDeep?: boolean;
+  onAnswerModeChange?: (mode: AnswerMode) => void;
 };
 
 const MAX_LEN = 4000;
@@ -44,7 +49,11 @@ export default function ChatComposer({
   showCharacterCount = true,
   showHint = false,
   hintText,
+  answerMode = 'fast',
+  canUseDeep = false,
+  onAnswerModeChange,
 }: Props) {
+  const { t } = useTranslation('chat');
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const [focused, setFocused] = useState(false);
@@ -79,6 +88,30 @@ export default function ChatComposer({
 
   return (
     <>
+      <div className="composer-mode" role="group" aria-label={t('answer_mode_label')}>
+        <button
+          type="button"
+          className="composer-mode-btn"
+          aria-label={t('answer_mode_fast')}
+          aria-pressed={answerMode === 'fast'}
+          disabled={disabled || isStreaming}
+          onClick={() => onAnswerModeChange?.('fast')}
+        >
+          {t('answer_mode_fast')}
+        </button>
+        {canUseDeep ? (
+          <button
+            type="button"
+            className="composer-mode-btn"
+            aria-label={t('answer_mode_deep')}
+            aria-pressed={answerMode === 'deep'}
+            disabled={disabled || isStreaming}
+            onClick={() => onAnswerModeChange?.('deep')}
+          >
+            {t('answer_mode_deep')}
+          </button>
+        ) : null}
+      </div>
       <div className={`composer${focused ? ' is-focused' : ''}${disabled ? ' is-disabled' : ''}`}>
         <div className="composer-inner">
           <textarea
@@ -106,7 +139,7 @@ export default function ChatComposer({
           )}
 
           {isStreaming ? (
-            <button type="button" className="composer-stop" onClick={onStop} aria-label="Stop generation">
+            <button type="button" className="composer-stop" onClick={onStop} aria-label={t('stop_generation')}>
               <span style={{ width: 11, height: 11, borderRadius: 3, background: 'currentColor', display: 'block' }} />
             </button>
           ) : (

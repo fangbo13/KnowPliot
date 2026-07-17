@@ -234,6 +234,8 @@ class OrganizationMembership(models.Model):
         related_name="org_memberships",
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -244,6 +246,14 @@ class OrganizationMembership(models.Model):
     def __str__(self):
         scope = self.business_line.code if self.business_line else self.organization.slug
         return f"{self.user} = {self.role} @ {scope}"
+
+    @property
+    def is_effective(self) -> bool:
+        """An explicit governance grant must be active and unexpired."""
+
+        if not self.is_active:
+            return False
+        return not self.expires_at or self.expires_at >= timezone.now()
 
 
 class InviteCode(models.Model):
@@ -414,3 +424,159 @@ class SpaceEmailInvite(models.Model):
         if self.expires_at and self.expires_at < timezone.now():
             return False
         return True
+
+
+class SpaceAccessRequest(models.Model):
+    """A user's idempotent request to join a discoverable knowledge space."""
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        KnowledgeSpace, on_delete=models.CASCADE, related_name="access_requests"
+    )
+    user = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="space_access_requests",
+    )
+    role = models.CharField(max_length=20, choices=[
+        (SpaceMembership.ROLE_MEMBER, "Member"),
+        (SpaceMembership.ROLE_GUEST, "Guest"),
+    ], default=SpaceMembership.ROLE_MEMBER)
+    reason = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    reviewed_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_space_access_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "spaces_spaceaccessrequest"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["space", "user", "status"],
+                name="spaces_access_request_unique_status",
+            )
+        ]
+        ordering = ["-created_at"]
+
+
+class GovernancePolicy(models.Model):
+    """Versioned, scoped operational policy. Security invariants are not configurable."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.CASCADE, related_name="governance_policies")
+    space = models.ForeignKey(KnowledgeSpace, null=True, blank=True, on_delete=models.CASCADE, related_name="governance_policies")
+    revision = models.PositiveIntegerField(default=1)
+    values = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spaces_governancepolicy"
+        ordering = ["-revision", "-created_at"]
+
+    def clean(self):
+        allowed = {
+            "model_profile",
+            "fast_model_profile_id",
+            "deep_model_profile_id",
+            "deep_thinking_budget",
+            "retrieval_top_k",
+            "similarity_threshold",
+            "needs_human_review",
+            "max_answer_chars",
+            "retention_days",
+        }
+        invalid = set(self.values) - allowed
+        if invalid:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({"values": f"Unsupported policy fields: {', '.join(sorted(invalid))}"})
+        for field_name in ("fast_model_profile_id", "deep_model_profile_id"):
+            profile_id = self.values.get(field_name)
+            if profile_id is None:
+                continue
+            try:
+                if not isinstance(profile_id, str):
+                    raise ValueError
+                uuid.UUID(profile_id)
+            except (TypeError, ValueError, AttributeError):
+                from django.core.exceptions import ValidationError
+
+                raise ValidationError(
+                    {"values": f"{field_name} must be a UUID string."}
+                ) from None
+        thinking_budget = self.values.get("deep_thinking_budget")
+        if thinking_budget is not None and (
+            isinstance(thinking_budget, bool)
+            or not isinstance(thinking_budget, int)
+            or not 1 <= thinking_budget <= 32768
+        ):
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError(
+                {"values": "deep_thinking_budget must be an integer from 1 to 32768."}
+            )
+        top_k = self.values.get("retrieval_top_k")
+        if top_k is not None and (not isinstance(top_k, int) or not 1 <= top_k <= 20):
+            from django.core.exceptions import ValidationError
+            raise ValidationError({"values": "retrieval_top_k must be an integer from 1 to 20."})
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Governance policy revisions are immutable; create a new revision instead.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class ModelProfile(models.Model):
+    """Platform-managed model registry; secrets remain in deployment configuration."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    provider = models.CharField(max_length=40)
+    model_id = models.CharField(max_length=160)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spaces_modelprofile"
+
+
+def resolve_effective_policy(space):
+    """Resolve defaults < organization < space; retrieval safety is never configurable."""
+    defaults = {"retrieval_top_k": 5, "similarity_threshold": 0.3, "needs_human_review": False, "max_answer_chars": 12000, "retention_days": 365}
+    org = GovernancePolicy.objects.filter(organization=space.organization, space__isnull=True).order_by("-revision", "-created_at").first()
+    scoped = GovernancePolicy.objects.filter(space=space).order_by("-revision", "-created_at").first()
+    if org:
+        defaults.update(org.values)
+    if scoped:
+        defaults.update(scoped.values)
+    return defaults
+
+
+def create_policy_revision(*, organization=None, space=None, values=None):
+    """Create (never mutate) the next revision for one policy scope."""
+    if bool(organization) == bool(space):
+        raise ValueError("A policy revision needs exactly one organization or space scope.")
+    query = GovernancePolicy.objects.filter(space=space) if space else GovernancePolicy.objects.filter(organization=organization, space__isnull=True)
+    latest = query.order_by("-revision").first()
+    return GovernancePolicy.objects.create(
+        organization=organization or space.organization,
+        space=space,
+        revision=(latest.revision + 1) if latest else 1,
+        values=values or {},
+    )

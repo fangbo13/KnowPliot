@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Table, Button, Tag, Modal, Select, Input, Space, Form, Switch, Tooltip,
   message as antdMessage,
@@ -19,20 +19,29 @@ import {
   type ScenarioTemplateRevision,
 } from '../../api/templates';
 import { adminApi, type Organization, type BusinessLine } from '../../api/admin';
+import { AppShell, PageHeader } from '../../design/primitives';
 
 export default function AdminTemplatesPage() {
   const { t } = useTranslation('common');
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [lines, setLines] = useState<BusinessLine[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [scenarioFilter, setScenarioFilter] = useState<ScenarioTemplate['scenario_type'] | undefined>();
+  const [searchText, setSearchText] = useState(searchParams.get('q') || '');
+  const [scenarioFilter, setScenarioFilter] = useState<ScenarioTemplate['scenario_type'] | undefined>(
+    (searchParams.get('scenario_type') as ScenarioTemplate['scenario_type']) || undefined,
+  );
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | undefined>();
   const [scopeFilter, setScopeFilter] = useState<'global' | 'organization' | 'business_line' | undefined>();
   const [orgFilter, setOrgFilter] = useState<string | undefined>();
   const [lineFilter, setLineFilter] = useState<string | undefined>();
+  const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') || '');
+  const [tagsFilter, setTagsFilter] = useState(searchParams.get('tags') || '');
+  const [sort, setSort] = useState<'recommended' | 'popular' | 'recent' | 'name'>(
+    (searchParams.get('sort') as 'recommended' | 'popular' | 'recent' | 'name') || 'recommended',
+  );
 
   // Modal / Form state for space instantiation
   const [open, setOpen] = useState(false);
@@ -82,6 +91,9 @@ export default function AdminTemplatesPage() {
           scope: scopeFilter,
           organization: orgFilter,
           business_line: lineFilter,
+          category: categoryFilter || undefined,
+          tags: tagsFilter || undefined,
+          sort,
         }).catch(() => []),
         adminApi.organizations().catch(() => []),
         adminApi.businessLines().catch(() => []),
@@ -95,7 +107,17 @@ export default function AdminTemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [lineFilter, orgFilter, scenarioFilter, scopeFilter, searchText, statusFilter]);
+  }, [categoryFilter, lineFilter, orgFilter, scenarioFilter, scopeFilter, searchText, sort, statusFilter, tagsFilter]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (searchText.trim()) next.set('q', searchText.trim());
+    if (scenarioFilter) next.set('scenario_type', scenarioFilter);
+    if (categoryFilter) next.set('category', categoryFilter);
+    if (tagsFilter) next.set('tags', tagsFilter);
+    if (sort !== 'recommended') next.set('sort', sort);
+    setSearchParams(next, { replace: true });
+  }, [categoryFilter, scenarioFilter, searchText, setSearchParams, sort, tagsFilter]);
 
   useEffect(() => {
     refresh();
@@ -390,9 +412,9 @@ export default function AdminTemplatesPage() {
       render: (name: string, r: ScenarioTemplate) => (
         <Space>
           {r.icon ? (
-            <BuildOutlined style={{ color: '#1890ff', fontSize: 16 }} />
+            <BuildOutlined style={{ color: 'var(--accent)', fontSize: 16 }} />
           ) : (
-            <FileTextOutlined style={{ color: '#8c8c8c', fontSize: 16 }} />
+            <FileTextOutlined style={{ color: 'var(--color-text-tertiary)', fontSize: 16 }} />
           )}
           <span style={{ fontWeight: 600 }}>{name}</span>
         </Space>
@@ -581,10 +603,10 @@ export default function AdminTemplatesPage() {
   const filterScopedLines = orgFilter ? lines.filter((l) => l.organization === orgFilter) : lines;
 
   return (
-    <div>
-      <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">{t('admin_nav_templates') || 'Scenario Templates'}</h1>
-        <Space>
+    <AppShell as="div" width="management" className="kp-embedded-shell">
+      <PageHeader
+        title={t('admin_nav_templates') || 'Scenario Templates'}
+        actions={<Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button
             type="primary"
@@ -594,10 +616,10 @@ export default function AdminTemplatesPage() {
           >
             {t('admin_create_template') || 'Create Template'}
           </Button>
-        </Space>
-      </div>
+        </Space>}
+      />
 
-      <Card styles={{ body: { padding: 16 } }} style={{ marginBottom: 16, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+      <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
         <Space wrap size="middle">
           <Input.Search
             allowClear
@@ -659,6 +681,31 @@ export default function AdminTemplatesPage() {
             options={orgs.map((o) => ({ value: o.id, label: o.name }))}
             style={{ width: 200 }}
           />
+          <Input
+            allowClear
+            value={categoryFilter}
+            placeholder={t('admin_template_filter_category') || 'Category slug'}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            style={{ width: 160 }}
+          />
+          <Input
+            allowClear
+            value={tagsFilter}
+            placeholder={t('admin_template_filter_tags') || 'Tags (comma separated)'}
+            onChange={(event) => setTagsFilter(event.target.value)}
+            style={{ width: 200 }}
+          />
+          <Select
+            value={sort}
+            onChange={setSort}
+            options={[
+              { value: 'recommended', label: t('admin_template_sort_recommended') || 'Recommended' },
+              { value: 'popular', label: t('admin_template_sort_popular') || 'Popular' },
+              { value: 'recent', label: t('admin_template_sort_recent') || 'Recent' },
+              { value: 'name', label: t('admin_template_sort_name') || 'Name' },
+            ]}
+            style={{ width: 160 }}
+          />
           <Select
             allowClear
             showSearch
@@ -677,6 +724,9 @@ export default function AdminTemplatesPage() {
               setScopeFilter(undefined);
               setOrgFilter(undefined);
               setLineFilter(undefined);
+              setCategoryFilter('');
+              setTagsFilter('');
+              setSort('recommended');
             }}
           >
             {t('clear_filters') || 'Clear filters'}
@@ -684,12 +734,14 @@ export default function AdminTemplatesPage() {
         </Space>
       </Card>
 
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+      <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: 20 } }}>
         <Table rowKey="id" loading={loading} dataSource={templates} columns={columns} pagination={false} size="middle" />
       </Card>
 
       {/* 1. Modal for space instantiation */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={t('create_space_from_template') || 'Create Space from Template'}
         open={open}
         onOk={handleCreateSpace}
@@ -765,6 +817,8 @@ export default function AdminTemplatesPage() {
 
       {/* 2. Modal for creating/editing templates */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={editingTemplate ? (t('admin_edit_template') || 'Edit Template') : (t('admin_create_template') || 'Create Template')}
         open={templateModalOpen}
         onOk={handleSaveTemplate}
@@ -912,6 +966,8 @@ export default function AdminTemplatesPage() {
 
       {/* 3. Modal for application history */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={`${t('admin_template_applications') || 'Template Applications'} - ${selectedAppTemplate?.name || ''}`}
         open={appsModalOpen}
         onCancel={() => setAppsModalOpen(false)}
@@ -966,6 +1022,8 @@ export default function AdminTemplatesPage() {
 
       {/* 4. Modal for revision history */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={`${t('admin_template_revisions') || 'Template Revisions'} - ${selectedRevTemplate?.name || ''}`}
         open={revisionsModalOpen}
         onCancel={() => setRevisionsModalOpen(false)}
@@ -1033,6 +1091,8 @@ export default function AdminTemplatesPage() {
 
       {/* 5. Sub-modal for Revision Snapshot JSON */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={`${t('admin_template_revision_snapshot') || 'Revision Snapshot'} - v${selectedRevision?.version ?? ''}`}
         open={snapshotModalOpen}
         onCancel={() => setSnapshotModalOpen(false)}
@@ -1043,8 +1103,8 @@ export default function AdminTemplatesPage() {
         <pre style={{
           maxHeight: '400px',
           overflow: 'auto',
-          backgroundColor: 'var(--color-bg-container-secondary, #f5f5f5)',
-          border: '1px solid var(--color-border-secondary, #e8e8e8)',
+          backgroundColor: 'var(--color-bg-sunken)',
+          border: '1px solid var(--color-border-secondary)',
           padding: '12px',
           borderRadius: '6px',
           fontSize: 13,
@@ -1056,6 +1116,8 @@ export default function AdminTemplatesPage() {
 
       {/* 6. Modal for cloning templates */}
       <Modal
+        styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+        transitionName="fade"
         title={t('admin_clone_template') || 'Clone Template'}
         open={cloneModalOpen}
         onOk={handleCloneTemplate}
@@ -1124,6 +1186,6 @@ export default function AdminTemplatesPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </AppShell>
   );
 }

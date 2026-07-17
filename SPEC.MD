@@ -1,7 +1,10 @@
-# KnowPilot SPEC
+﻿# KnowPilot SPEC
 
-> Version: V6.1
-> Source: `KnowPilot.md`, `README.md`, existing V4.x audit/planning reports
+> Encoding recovery: restored from the 2026-07-01 UTF-8 backup and reconciled
+> with versioned implementation audits on 2026-07-02.
+
+> Version: V11.2 actual-pass baseline; Phase 9 complete
+> Source: `KnowPilot.md`, `README.md`, and versioned implementation audits
 > Purpose: define the modular product architecture for KnowPilot as a multi-business-line knowledge Agent platform.
 
 ## 1. Architecture Decision
@@ -640,7 +643,7 @@ Delivered slices:
 - object-level document permissions;
 - allowlisted retrieval filters.
 
-Delivered and planned slices:
+Delivered slices:
 
 - Phase 3A: Authenticated Document Access.
 - Phase 3B: File Validation Consistency.
@@ -654,12 +657,60 @@ Delivered and planned slices:
 - system health and usage metrics;
 - stale knowledge and quality dashboards.
 
+Delivered slices:
+
+- Phase 4A: Scoped Audit Governance.
+- Phase 4B: Operations, Metrics, and Document Lifecycle MVP.
+- Phase 4C: Ingestion Operations and Knowledge Quality.
+
 ### Phase 5: Knowledge Improvement Loop
 
 - answer feedback workflow;
 - flagged-answer review queue;
 - knowledge gap analytics;
 - exportable compliance and usage reports.
+
+Delivered slices:
+
+- Phase 5A: Answer Feedback Foundation.
+- Phase 5B: Scoped Answer Review and Knowledge Gaps.
+- Phase 5C: Analytics and Compliance Reporting.
+
+### Phase 6: Production Hardening
+
+Delivered slices:
+
+- Phase 6A: Production Hardening Baseline.
+- Phase 6B: Async Operations and Quality SLA Alerts.
+- Phase 6C: Release Readiness and Regression Closure.
+
+### Phase 7: Long-Run Operations and Scale
+
+Delivered slices:
+
+- Phase 7A: Long-Run Operations Baseline.
+- Phase 7B: Scale Hardening and Background Reliability.
+- Phase 7C: Operational Runbook and Regression Closure.
+
+### Phase 8: Product Completeness
+
+Delivery slices:
+
+- Phase 8A / V10.0: Answer Quality and Evaluation — actual PASS.
+- Phase 8B / V10.1: Template Catalog and Isolated Knowledge Packs — actual PASS.
+- Phase 8C / V10.2: Accessibility and Product Closure — actual PASS.
+
+### Phase 9: Enterprise Account and Administration Governance
+
+Delivery slices:
+
+- Phase 9A / V11.0: Account Security and User Preferences — actual PASS.
+- Phase 9B / V11.1: Scoped Administration and Lifecycle — actual PASS.
+- Phase 9C / V11.2: Model and Retention Policy Governance — actual PASS.
+
+Phase 9 preserves single-space retrieval, citation enforcement, backend
+authorization, and immutable audit evidence. Real SSO, cross-space retrieval,
+external crawling, and billing remain outside this phase.
 
 ## 10. Non-Functional Requirements
 
@@ -706,18 +757,19 @@ Delivered and planned slices:
 | Spaces created per deployment | increased |
 | Knowledge admin time per space | reduced |
 
-## 12. Open Decisions
+## 12. Resolved Decisions
 
-1. Should access code be available on the login page before authentication, or only after login as "join space by code"?
-   - Recommendation: allow pilot/demo code before login only for non-confidential demo spaces; production join code should require login.
-2. Should business lines share global templates or clone templates into each line?
-   - Recommendation: global templates with business-line overrides and versioning.
-3. Should cross-space search be allowed?
-   - Recommendation: only for roles with explicit multi-space permission; default chat remains single-space to avoid source leakage.
-4. Should each project be a space or a document category under a space?
-   - Recommendation: high-confidentiality or long-running projects become spaces; small topics can be categories.
-5. Should answers quote source text verbatim?
-   - Recommendation: keep excerpts short, show source links, and prefer summarized answers with citations.
+1. Production access-code join requires authentication in the current release.
+   Pre-authentication demo entry is deferred and, if approved later, is limited
+   to explicitly non-confidential demo spaces.
+2. Templates are global or scoped assets with versioned business-line overrides;
+   business lines do not silently clone untracked copies.
+3. Chat retrieval remains single-space. Cross-space retrieval is deferred until
+   an explicit permission and citation-isolation design is approved.
+4. High-confidentiality or long-running projects are spaces; small bounded topics
+   are document categories inside a space.
+5. Answers prefer summaries with citations and short source excerpts. The current
+   citation excerpt maximum is 280 plain-text characters.
 
 ## 13. Final Design Principle
 
@@ -727,9 +779,9 @@ The platform should not multiply deployments for every business line. It should 
 
 ## 14. Implementation Appendix: Delivered Extensions and Phase Details
 
-This appendix preserves implementation details that were added after the core
-SPEC was written. It should be read as evidence and clarification for the
-roadmap in `## 9. Implementation Phases`, not as separate product phases.
+This appendix records delivered behavior and versioned audit evidence. It
+clarifies the canonical roadmap in `## 9. Implementation Phases`; it does not
+create additional top-level product phases.
 
 ### 14.1 V7 Identity & Governance (extension)
 
@@ -747,7 +799,8 @@ Key invariants:
 - Permission = "who you are in the org" (Super/Org/Business Admin / Employee) ×
   "what you can do in this space" (Owner / Knowledge Admin / Reviewer / Member / Guest).
 - A "project group" is a `KnowledgeSpace`; its lead is the Space **Owner**.
-- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` �?  **Super Admin is never obtainable through any registration entry point** (CLI /
+- `AdminRegistrationCode.grants_role` can only be `org_admin` or `business_admin` —
+  **Super Admin is never obtainable through any registration entry point** (CLI /
   console promotion only).
 - The access/admin code is an *entry* mechanism; it never bypasses RBAC.
 
@@ -845,3 +898,551 @@ Audit evidence:
 
 Next Phase 3 slice: allowlisted retrieval filters, mandatory space scoping, and
 active-document status enforcement across every retrieval path.
+
+### 14.6 Phase 3C: Retrieval Safety
+
+Implementation status as of 2026-07-02:
+
+- Every retrieval request requires a valid `space_id`; unscoped or malformed
+  requests fail before embedding or database access.
+- Caller-controlled metadata filters use the typed `RetrievalFilters`
+  allowlist and accept only document IDs and category IDs.
+- SQLite and PostgreSQL retrieval both enforce the requested space and an
+  `active` source-document status.
+- PostgreSQL filter names map to qualified chunk/document columns and all
+  values remain parameterized.
+- Verified by 100 backend regression tests, migration checks, and Django
+  system checks.
+
+Audit evidence:
+`audit_reports/v7.4/Phase3C_Retrieval_Safety_Test_Audit_Report_V7.4.md`.
+
+### 14.7 Phase 4A: Scoped Audit Governance
+
+Implementation status as of 2026-07-02:
+
+- Audit records carry immutable organization, business-line, and space UUID
+  scope plus `success`, `denied`, or `failure` result.
+- Platform administrators see all records; organization and business
+  administrators see only their authorized scope.
+- Legacy unscoped records remain visible only to platform administrators.
+- The read-only audit API supports server-side pagination and action, actor,
+  result, scope, and date filters.
+- The admin audit page exposes scope/result/date filters and visible load
+  errors.
+- Verified by 107 backend and 43 frontend regression tests, migration and
+  system checks, i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v7.5/Phase4A_Audit_Governance_Test_Audit_Report_V7.5.md`.
+
+### 14.8 Phase 4B: Operations, Metrics, and Document Lifecycle MVP
+
+Implementation status as of 2026-07-02:
+
+- Added authenticated `/api/v1/admin/health/` with honest backend, database,
+  Redis, Celery, vector database, and LLM configuration states.
+- Added administrator-scoped `/api/v1/admin/metrics/` for users, sessions,
+  questions, citations, documents, latency, evidence, citation coverage,
+  ingestion state, expiry, and permission denials.
+- The admin dashboard consumes these dedicated APIs rather than inferring
+  service health from audit-log reachability.
+- Document lifecycle now includes `stale` and `archived`. Default deletion
+  archives and preserves chunks/citations; physical deletion is restricted to
+  platform superusers and rejected for cited sources.
+- Archived documents are hidden from normal lists, excluded from retrieval,
+  and cannot be re-indexed.
+- The idempotent `mark_stale_documents` command retires active documents whose
+  effective date has passed.
+- Verified by 117 backend and 47 frontend tests, migration and Django checks,
+  Python compilation, i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v7.5/Phase4B_Operations_Metrics_Test_Audit_Report_V7.5.md`.
+
+### 14.9 Phase 4C: Ingestion Operations and Knowledge Quality
+
+Implementation status as of 2026-07-02:
+
+- Added durable, space-scoped ingestion jobs for upload, batch, re-index, and
+  administrator retry operations.
+- Added administrator-scoped queue visibility and safe retry. Only failed
+  jobs may be retried; archived documents, cross-scope jobs, and duplicate
+  active work are rejected while the original job history remains immutable.
+- Model invocations record safe operational metadata for success, failure,
+  timeout, and cancellation without storing prompts, answers, credentials, or
+  raw exception messages.
+- Scoped metrics now expose model/API calls, failures, error rate, total and
+  average token use, per-model calls, and knowledge-quality aggregates.
+- Added document-quality drill-down for unused, high-use, and stale cited
+  documents, including citation count, average relevance, and last-use time.
+- The admin dashboard exposes queue state, governed retry, model/token/error
+  metrics, and document-quality rows from dedicated APIs.
+- Verified by 126 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v7.5/Phase4C_Knowledge_Quality_Test_Audit_Report_V7.5.md`.
+
+### 14.10 Phase 5A: Answer Feedback Foundation
+
+Implementation status as of 2026-07-03:
+
+- Answer feedback is now keyed by `(user, message)` so each user can maintain
+  one idempotently updated feedback record per assistant answer.
+- Feedback supports `helpful`, `unhelpful`, `incorrect`, `outdated`, and
+  `missing_source`, with optional comment, suggested source, explicit review
+  flag, lifecycle status, reviewer/resolution metadata, safe review snapshot,
+  and `updated_at`.
+- Legacy thumbs feedback is migrated to the new type model and associated with
+  the owning chat-session user.
+- `ModelInvocation` stores `question_message` so successful, failed, timed-out,
+  and cancelled model calls can be tied back to the originating user question
+  without storing prompts or raw exceptions.
+- Feedback APIs support current-user GET, legacy-compatible POST upsert, PUT
+  upsert, and soft-withdraw DELETE. Only assistant messages owned by the
+  caller's session are accepted.
+- Feedback submit, update, and withdraw operations write scoped audit logs with
+  safe metadata and without complete answers or sensitive comments.
+- The chat message UI exposes bilingual helpful/not-helpful controls, optional
+  issue type/comment/source/review fields, withdrawal, keyboard operation, and
+  ARIA labels. Feedback is disabled for streaming or non-persisted messages.
+- Verified by 131 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/V7.6/Phase5A_Feedback_Test_Audit_Report_V7.6.md`.
+
+### 14.11 Phase 5B: Scoped Answer Review and Knowledge Gaps
+
+Implementation status as of 2026-07-03:
+
+- Added scoped review queue APIs at `/api/v1/admin/quality/feedback/` with
+  detail, claim, assign, resolve, dismiss, and reopen actions.
+- Review access is limited to platform, organization, and business-line
+  administrators plus space owners, knowledge admins, and reviewers.
+- Claim/assign/resolve/dismiss/reopen transitions run transactionally and
+  return 409 for invalid state changes.
+- `FeedbackReviewEvent` records immutable event history with actor, reviewer,
+  event type, from/to status, notes, and timestamp.
+- Feedback can no longer be withdrawn by the submitter once review has started
+  or after it has been closed.
+- Added `KnowledgeGapTicket` with space, linked feedback, safe question
+  snapshot, normalized question hash, status, priority, assignee, suggested
+  source, resolution notes, and timestamps.
+- Duplicate open/in-progress gap creation in the same space for the same
+  normalized question returns the existing ticket instead of creating a second
+  open ticket.
+- Added gap list/create and assign/resolve/reopen APIs under
+  `/api/v1/admin/quality/gaps/`.
+- All review and gap state changes write scoped audit records.
+- The admin console exposes an Answer Quality page with filters, a detail
+  drawer, question/answer/feedback snapshots, review actions, and knowledge-gap
+  summary.
+- Verified by 138 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/V7.7/Phase5B_Review_Workflow_Test_Audit_Report_V7.7.md`.
+
+### 14.12 Phase 5C: Analytics and Compliance Reporting
+
+Implementation status as of 2026-07-03:
+
+- Added administrator/reviewer-scoped knowledge-quality report API at
+  `/api/v1/admin/reports/knowledge-quality/`.
+- Reports include feedback totals by type, negative feedback rate, flagged
+  rate, review status counts, average resolution time, unanswered-question
+  groups, knowledge-gap status counts, high-citation documents, uncited
+  documents, stale cited documents, and daily improvement trends.
+- “Unanswered” includes assistant messages with `retrieval_count=0` and
+  model invocations with `failure` or `timeout` status.
+- Unanswered questions are grouped internally by normalized text hash while the
+  response exposes only safe question text and counts.
+- Added synchronous CSV export at `/api/v1/admin/reports/export/` for feedback,
+  reviews, gaps, unanswered questions, and documents.
+- CSV exports use UTF-8 BOM, stable columns, UTC ISO timestamps, a 10,000-row
+  cap with 413 overflow response, and scoped `audit_export` records that store
+  dataset/range/result metadata without export content.
+- The admin Answer Quality page displays report summary cards and download
+  buttons for quality datasets.
+- Verified by 142 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/V7.8/Phase5C_Compliance_Reporting_Test_Audit_Report_V7.8.md`.
+
+### 14.13 Phase 6A: Production Hardening Baseline
+
+Implementation status as of 2026-07-03:
+
+- Admin health now includes production readiness services for migrations,
+  static files, media storage, security configuration, and export limits.
+- Health status distinguishes `configured`, `degraded`, `down`,
+  `not_configured`, and `up`, with safe details that do not expose secret
+  values or environment variable contents.
+- Security readiness reports missing setting names such as `DEBUG`,
+  `ALLOWED_HOSTS`, `CORS_ALLOW_ALL_ORIGINS`, cookie security, and SSL redirect
+  requirements.
+- API exception responses now include stable `detail` and `code` fields while
+  preserving the legacy `error` key for compatibility.
+- The admin dashboard displays the new readiness health checks with operational
+  details and bilingual labels.
+- Verified by 145 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
+
+Audit evidence:
+`audit_reports/v8.0/Phase6A_Production_Baseline_Test_Audit_Report_V8.0.md`.
+
+Phase 6A status: actual PASS. Next stage: Phase 6B async operations,
+notifications, and SLA alerts.
+
+### 14.14 Phase 6B: Async Operations and Quality SLA Alerts
+
+Implementation status as of 2026-07-03:
+
+- Added `ComplianceExportJob` for asynchronous compliance exports across
+  feedback, reviews, gaps, unanswered questions, and documents.
+- Export jobs track requester, optional space scope, date range, status,
+  result file, row count, safe error fields, expiry, and timestamps.
+- Added scoped admin export-job APIs for create, list, detail, and audited CSV
+  download under `/api/v1/admin/reports/export-jobs/`.
+- Synchronous CSV exports keep the 10,000-row cap and now return an async
+  export-job hint when the request is too large.
+- Export-job creation, completion, and download write scoped audit records
+  without storing export contents.
+- Export download access is limited to the creator and same-scope
+  administrators/reviewers.
+- Added `scan_quality_sla` to identify pending feedback older than 3 days,
+  in-review feedback older than 5 days, and open/in-progress knowledge gaps;
+  notifications are deduplicated by stable metadata keys.
+- SLA alerts notify space owners, reviewers, knowledge admins, and assigned
+  reviewers/assignees where present, and write `sla_alert_created` audit logs.
+- Export completion creates a system notification for the requester; existing
+  notification center surfaces both export-complete and SLA notifications.
+- The admin Answer Quality page now shows SLA overdue labels/filtering plus
+  async export creation, job status list, and job download actions.
+- Verified by 148 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+
+Audit evidence:
+`audit_reports/v8.1/Phase6B_Async_Operations_Test_Audit_Report_V8.1.md`.
+
+Phase 6B status: actual PASS. Next stage: Phase 6C release readiness,
+performance indexes, smoke validation, and documentation.
+
+### 14.15 Phase 6C: Release Readiness and Regression Closure
+
+Implementation status as of 2026-07-03:
+
+- Added release-readiness indexes for the highest-risk quality operations:
+  feedback by space/status/created time, knowledge gaps by space/status/created
+  time, and export jobs by status/requester/created time.
+- Added a dependency-light V8 smoke script at
+  `backend/scripts/smoke_v8_release.py` that can validate frontend build
+  artifacts independently or run authenticated API smoke checks for health,
+  quality report, feedback CSV export, and review queue list.
+- Added Phase 6C release guard tests that verify the query indexes, smoke
+  script build-artifact mode, and V8.2 documentation/roadmap consistency.
+- Reconciled the long-term roadmap so Phase 5 remains V7.6–V7.8 and Phase 6
+  maps to V8.0–V8.2.
+- V8 release readiness production deploy check was later re-run during V9.2
+  Docker closure after installing `psycopg[binary]`; it now reports no issues.
+
+Audit evidence:
+`audit_reports/v8.2/Phase6C_Release_Readiness_Test_Audit_Report_V8.2.md`.
+
+Phase 6C status: actual PASS. Next stage: V9.0 Long-Run Operations / Scale Hardening.
+
+### 14.16 Phase 7A: Long-Run Operations Baseline
+
+Implementation status as of 2026-07-03:
+
+- Admin health now exposes long-run operations fields for readiness, liveness,
+  dependency health, and background worker health while preserving the existing
+  services payload.
+- Added a `long_run_operations` health service with safe status/code/detail,
+  last check time, latency bucket, retention configuration, cleanup counts, and
+  SLA/stale-document backlog counts.
+- Long-run health reports missing cleanup/retention settings by setting the
+  service to degraded and listing setting names only; it does not expose
+  secrets, connection strings, filesystem paths, prompts, or export contents.
+- Added `cleanup_export_jobs` with `--dry-run`; the mutating mode marks only
+  expired export jobs and clears generated result-file references.
+- The admin dashboard type definitions and readiness labels now include
+  long-run operations status.
+- Verified by 155 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
+
+Audit evidence:
+`audit_reports/v9.0/Phase7A_Long_Run_Operations_Baseline_Audit_Report_V9.0.md`.
+
+Phase 7A status: actual PASS. Next stage: Phase 7B scale hardening and
+background reliability.
+
+### 14.17 Phase 7B: Scale Hardening and Background Reliability
+
+Implementation status as of 2026-07-03:
+
+- Failed compliance export jobs can now be retried through
+  `/api/v1/admin/reports/export-jobs/{id}/retry/`.
+- Export retry is scoped by existing export-job access rules, creates a new job,
+  links it to the failed job with `retry_of`, and preserves the original failed
+  job's status and safe error evidence.
+- Export retry writes `export_job_retry` audit records with safe metadata.
+- `scan_quality_sla` now supports `--dry-run` and reports
+  candidates/created/skipped/errors, allowing operators to inspect SLA impact
+  without creating notifications or audit records.
+- Added scale-path indexes for notification feed queries, scoped audit queries,
+  and ingestion job status/space lookups; the export job status/requester index
+  remains guarded by Phase 7B tests.
+- The Answer Quality export job table now shows safe failure summaries and
+  provides a retry action for failed jobs.
+- Verified by 159 backend and 49 frontend tests, migration and Django checks,
+  i18n validation, TypeScript, and production build.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
+
+Audit evidence:
+`audit_reports/v9.1/Phase7B_Scale_Hardening_Background_Reliability_Audit_Report_V9.1.md`.
+
+Phase 7B status: actual PASS. Next stage: Phase 7C operational runbook and
+regression closure.
+
+### 14.18 Phase 7C: Operational Runbook and Regression Closure
+
+Implementation status as of 2026-07-03:
+
+- Added `docs/operations/KnowPilot_V9_Operations_Runbook.md` covering health degraded triage,
+  export job failed recovery, SLA backlog handling, migration checks, deploy check,
+  smoke script usage, and rollback.
+- Added `backend/scripts/smoke_v9_operations.py` for frontend build artifact checks and
+  authenticated API smoke checks covering health, admin metrics, quality report,
+  export job list, notification feed, and review queue.
+- V9 smoke returns structured JSON and fails safely without tracebacks.
+- Added Phase 7C guard tests for the runbook, smoke script, safe smoke failure,
+  and V9.0–V9.2 documentation closure.
+- Phase 7 is now closed as V9.0–V9.2. The next roadmap candidate is V10.0 and
+  is not considered started.
+- Verified by 163 backend tests, the 4-test Phase 7C focused suite, V9 smoke
+  build-artifact validation, Django check, migration dry-run, 49 frontend
+  tests, i18n validation, TypeScript, and production build.
+- Production deploy check was later re-run during V9.2 Docker closure after
+  installing `psycopg[binary]`; it now reports no issues.
+
+Audit evidence:
+`audit_reports/v9.2/Phase7C_Operational_Runbook_Regression_Closure_Audit_Report_V9.2.md`.
+
+Phase 7C status: actual PASS. Next stage: V10.0 candidate planning only.
+
+### 14.19 V9.2 Docker Validation and Non-PASS Closure
+
+Implementation status as of 2026-07-03:
+
+- Installed the missing local PostgreSQL driver dependency in
+  `backend\venv`, then re-ran production deploy checks with
+  `config.settings.prod`; the check now reports no issues.
+- Replaced deprecated django-allauth settings with the current
+  `ACCOUNT_LOGIN_METHODS` / `ACCOUNT_SIGNUP_FIELDS` configuration.
+- Added production HSTS settings and kept Docker's local HTTP validation profile
+  separate from production SSL enforcement.
+- Fixed Docker health's Celery probe to use the project Celery app rather than
+  the global default app, so the probe pings the configured Redis broker.
+- Removed frontend production-build warnings by using static i18n imports and
+  setting an explicit known-bundle chunk threshold.
+- Repaired the existing local Docker PostgreSQL volume ownership mismatch from
+  the old `ey_onboarding` role to the current `knowpilot` role.
+- Verified Docker browser flows with screenshots for Admin Dashboard,
+  Answer Quality async exports, notifications, and Knowledge Base operations.
+
+Audit evidence:
+`audit_reports/v9.2/Docker_SPEC_Functional_Test_Report_V9.2.md` and
+`audit_reports/v9.2/Docker_Bugfix_Report_V9.2.md`.
+
+V9.2 Docker validation status: actual PASS with no phase-level non-PASS
+environment limitation remaining.
+
+## 15. Versioned Optimization Addendum (2026-07-17 v2)
+
+The final normative post-V11 optimization specification is maintained in
+[`docs/specs/2026-07-16-knowpilot-optimization-spec.md`](docs/specs/2026-07-16-knowpilot-optimization-spec.md).
+It is locally accepted but not production-accepted. It defines the audited issue
+register, exact ChatTurn/SSE v2 state and API contracts, capability matrix, model
+policy, product/design states, migration and observability rules, requirement
+traceability, deployment gates, compatibility, and rollback route.
+
+## 16. Optimization Implementation Closure (2026-07-17)
+
+This section records the implemented state of the approved addendum. “Locally
+accepted” means source, migrations, automated tests, static checks, and production
+build passed without starting the application or contacting 筼筜. It does not mean
+the change has been deployed or validated against live PostgreSQL, Redis, model
+providers, or browser sessions.
+
+### 16.1 Issue traceability
+
+| Issue | Implemented resolution | Local acceptance evidence | State |
+|---|---|---|---|
+| `KP-C01`–`KP-C04` | Active reselection no-op; stream/message state keyed by session; stale requests aborted/rejected; cross-tab selection cannot cancel this tab’s Turn. | Store, session-switch, cross-tab, rapid-selection, and integration tests. | Locally accepted |
+| `KP-C05`–`KP-C07`, `KP-C11` | Durable Turn status, partial retention, explicit recovery, POST-once behavior, renewable session lease, monotonic SSE replay, and bounded GET recovery. | Complete backend/frontend suites plus stream lifecycle/recovery contracts. | Locally accepted; live Redis pending |
+| `KP-C08`–`KP-C10` | Persisted question identity, stable cursor consumption, chronological deduplication, older-message loading, and session update touches. | History search/filter/pagination and message-pagination tests. | Locally accepted |
+| `KP-A01` | Server space/membership/capability checks cover chat list/history/send/regenerate/branch/share/export/source. | Cross-user, guest, revoked, expired, and cross-organization denial tests. | Locally accepted |
+| `KP-A02`, `KP-A03` | Capability-derived platform/governance/workspace consoles; scoped APIs; default-off compatibility navigation; no upward grants. | Capability matrix, route gate, scoped endpoint, and legacy-denial tests. | Locally accepted |
+| `KP-A04` | Platform model registry, organization-scoped immutable bindings, governed fast/deep execution, safe phases/metrics, and raw-reasoning rejection. | Generation policy, provider privacy, model binding, and mode tests. | Locally accepted; live provider pending |
+| `KP-U01` | Server history query/URL state; non-duplicating regenerate; durable versions; branch; safe citations; seven-day revocable read-only shares. | API, store, page, model-constraint, scope, expiry, and revoke tests. | Locally accepted |
+| `KP-U02` | Discovery/request reasons, approve/reject, archive/restore/clone/transfer/owner transfer, model profile, and governance policy workflows. | Space/governance backend and frontend API/page tests. | Locally accepted |
+| `KP-D01`, `KP-D02` | One warm editorial token/primitive system, consistent layout/spacing, restrained motion, responsive actions, and global reduced motion. | Design token/primitive/convergence tests and production build. | Locally accepted; live visual pass pending |
+
+### 16.2 Final chat and history behavior
+
+The session list endpoint accepts validated `q`, `time`, `status`, and cursor
+parameters. Search is executed in the database against session title and message
+content before pagination. Time filters are `all`, `today`, `this_week`,
+`this_month`, and `older`; recovery filters are `all`, `partial`, `recovering`,
+`recovered`, `failed`, and `terminal`. Ordering is deterministic on pinned state,
+update time, and ID. Unknown filter values return 400.
+
+The History page stores filters and the active cursor in the URL, aborts obsolete
+list/detail requests, rejects stale responses, displays explicit loading/error/
+empty/recovery states, and consumes one server cursor page at a time. Selecting a
+long conversation loads the newest message window and exposes “load earlier” for
+subsequent cursor pages; pages are deduplicated and rendered chronologically.
+
+The public capability service names history access `chat.history`. The existing
+space-permission layer names the same policy `CHAT_VIEW_HISTORY` with stored code
+`chat.view_history`; they are mapped representations of one authorization rule.
+Active owned Turn recovery requires effective `chat.ask`; that grant may come
+from direct membership, public-demo guest access, or platform/governance scope.
+Terminal Turn recovery, regenerate, and branch require history access as well.
+
+Regenerate and branch are distinct operations:
+
+- `POST /api/v1/chat/messages/{message_id}/regenerate/` derives the original
+  persisted question, accepts a new `client_request_id`, and runs the same guarded
+  streaming pipeline without inserting another user message.
+- A completed regeneration creates an assistant version in the original version
+  group, increments the version number, marks prior current versions non-current,
+  and links `supersedes_message`. The database enforces one `(group, number)` and
+  one current message per group.
+- `POST /api/v1/chat/messages/{message_id}/branch/` creates one idempotent new
+  session for `(user, branch_request_id)` and copies the visible path through the
+  selected message. Superseded answers are not copied unless that exact version
+  was selected. Copied messages receive independent version groups.
+
+### 16.3 Citation and conversation-share contract
+
+Citation payloads contain a bounded plain-text snippet, document title, page,
+score, and stable source identity. `source_url` is present only when the current
+caller has server-side document-download capability. The frontend converts only
+the expected internal citation path prefix into a link; untrusted absolute URLs
+remain plain text.
+
+`GET /api/v1/chat/citations/{citation_id}/source/` returns safe metadata only. It
+never returns raw file bytes, storage paths, provider payloads, or unrestricted
+document content. Inaccessible scope is non-disclosing; an accessible member
+without download capability receives 403.
+
+Conversation shares use these endpoints:
+
+- `GET|POST /api/v1/chat/sessions/{session_id}/shares/`
+- `DELETE /api/v1/chat/shares/{share_id}/`
+- `GET /api/v1/chat/shares/{token}/view/`
+
+A share is persisted with owner, organization, session, idempotent client request,
+token, seven-day expiry, and optional revocation timestamp. Creation requires
+`chat.share`. Viewing requires authentication plus current access to the same
+workspace and returns sanitized, read-only messages with superseded assistant
+versions excluded. Revoked, expired, cross-organization, or inaccessible tokens
+return a non-disclosing 404. The owner may always revoke their own share, including
+after losing workspace membership.
+
+### 16.4 Administration and governance behavior
+
+The implemented console split is:
+
+| Console | Authority | Implemented workflows |
+|---|---|---|
+| `/platform-admin/*` | Platform capabilities | Global users/organizations/metrics/audit and model profile registry |
+| `/governance/*` | Organization/business-line scope | Scoped users, business lines, templates, metrics/audit, and organization-owned workspace model-policy binding |
+| `/workspace/:spaceId/manage/*` | Selected workspace capabilities | Members, invites, access review, knowledge, quality, audit, settings, and lifecycle |
+| User surfaces | Chat/workspace capabilities | Chat/history/share/export, discovery, and access request |
+
+Organization administrators may list enabled model profiles and create immutable
+policy revisions only for their own organization or its workspaces. They cannot
+create/edit platform model profiles or bind another organization. Business-line
+administrators do not receive `governance.models.bind`. Platform administrators
+retain global model profile and policy authority.
+
+Workspace access rejection requires a non-empty bounded reason, records reviewer
+and timestamp, writes an audit event, and sends a safe notification. Lifecycle
+mutations use existing server authorization and explicit frontend confirmation.
+
+### 16.5 Schema and migration acceptance
+
+The optimization sequence is additive:
+
+1. `chat.0013_chatturn`
+2. `spaces.0008_organizationmembership_effectiveness`
+3. `chat.0014_chatturn_metrics_and_model_lengths`
+4. `chat.0015_message_versions_and_session_branches`
+5. `chat.0016_conversation_share`
+
+`0015` first adds a nullable version group, assigns a distinct UUID to each
+existing message in batches of 1,000, then makes the field non-null and adds the
+lineage/current constraints. This ordering is required: using one schema default
+for all historical rows would merge unrelated messages and fail the current-
+version uniqueness constraint. A production rehearsal must measure migration
+duration and locking on a PostgreSQL copy before rollout.
+
+`makemigrations --check --dry-run` reports no model drift. Reverse migration is
+not the normal rollback after production data is written; rollback deploys prior
+code/flags while preserving additive Turn, version, and share records.
+
+### 16.6 Rollout route and rollback
+
+All staged flags default off: `CHAT_TURN_IDEMPOTENCY`, `CHAT_STREAM_V2`,
+`CAPABILITY_NAV`/`VITE_CAPABILITY_NAV`, and
+`DEEP_ANSWER_MODE`/`VITE_DEEP_ANSWER_MODE`.
+
+Durable Turn duplicate suppression is a non-optional correctness invariant.
+`CHAT_TURN_IDEMPOTENCY` is retained as a safe operational rollout marker and
+metric dimension; setting it false does not permit duplicate questions.
+
+Deployment proceeds in this order:
+
+1. Backup and PostgreSQL migration rehearsal; apply additive migrations.
+2. Deploy backend/frontend with all flags false and validate v1 stability/scope.
+3. Enable the idempotency marker and observe duplicate/conflict metrics.
+4. Enable SSE v2 and validate live Redis lease/replay/disconnect recovery.
+5. Enable backend/frontend capability navigation together and validate each role.
+6. Bind tested model profiles, then enable backend/frontend deep answer mode.
+
+Rollback occurs in reverse flag order. v2 rollback retains v1; capability rollback
+retains scoped endpoints and uses compatibility navigation; deep rollback retains
+fast mode. Do not reverse additive migrations or delete Turn/version/share data
+without an explicit retention decision.
+
+### 16.7 Final verification and unresolved evidence
+
+Fresh local gates passed on 2026-07-17:
+
+- Django complete suite: 365 passed.
+- Frontend complete suite: 266 passed in 45 files.
+- TypeScript typecheck and 82-file i18n validation: passed.
+- Production build: passed; 4,027 modules transformed.
+- Django system check, migration drift check, Ruff changed-backend gate, and
+  `git diff --check`: passed.
+
+ESLint is not claimed because the installed dependency set does not contain the
+ESLint executable. The build’s existing large Ant Design/main chunks remain a
+post-rollout performance opportunity.
+
+The release is not production-accepted until an authorized 筼筜 run verifies
+PostgreSQL migration timing, live Redis multi-worker behavior, real provider
+streaming/policy binding, authenticated browser role journeys, clipboard/native
+share, source download, visual layout, and reduced motion. No service or deployed
+environment was started during this implementation.

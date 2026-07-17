@@ -5,17 +5,22 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Dropdown, Drawer, Modal, Button, Tooltip, message as antMessage } from 'antd';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageOutlined, BookOutlined, UserOutlined, LogoutOutlined,
   SunOutlined, MoonOutlined, GlobalOutlined, SettingOutlined, PlusOutlined,
   DeleteOutlined, SearchOutlined, MoreOutlined, MenuOutlined, AppstoreOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
+  PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
+  CompassOutlined,
 } from '@ant-design/icons';
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
+import { useAuth } from '../auth/AuthProvider';
+import { useAuthorization } from '../auth/CapabilityProvider';
+import { buildManagementEntries } from '../auth/managementEntries';
 import { useTheme } from '../hooks/useTheme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { useDebounce } from '../hooks/useDebounce';
@@ -28,11 +33,14 @@ import SessionRenameModal from '../components/chat/SessionRenameModal';
 import CommandPalette from '../components/CommandPalette';
 import { chatApi } from '../api/chat';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
-import { abortActiveStream } from '../stream/StreamLifecycleManager';
+import { hasActiveStream } from '../stream/StreamLifecycleManager';
 import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { initCrossTabSync, broadcastSessionDelete } from '../sync/crossTabSync';
+import { designTokens } from '../design/tokens';
+
+const PAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
 function clampToViewport(x: number, y: number, w = 180, h = 140) {
   return { x: Math.max(8, Math.min(x, window.innerWidth - w - 8)), y: Math.max(8, Math.min(y, window.innerHeight - h - 8)) };
@@ -44,18 +52,22 @@ function initials(email?: string) {
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
+  const access = useAuthorization();
   const navigate = useNavigate();
-  const { sessions, activeSessionId, streamPhase, loadSessions, setActiveSession, resetSession } = useChatStore();
-  const isStreaming = streamPhase !== 'idle';
-  const activeSpaceRole = useSpaceStore((s) => s.spaces.find((x) => x.id === s.activeSpaceId)?.my_role ?? null);
-  const canManageSpace = ['owner', 'super_admin', 'org_admin', 'business_admin'].includes(activeSpaceRole || '');
+  const location = useLocation();
+  const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
+  const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
+  const managementEntries = buildManagementEntries(access, activeSpaceId);
+  const canAsk = access.has('chat.ask');
+  const canUseHistory = access.has('chat.history');
+  const canExport = access.has('chat.export');
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
 
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(['7days', '30days', 'earlier']));
-  const [sessionMenu, setSessionMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
+  const [sessionMenu, setSessionMenu] = useState<{ id: string; title: string; isPinned: boolean; x: number; y: number } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; title: string } | null>(null);
@@ -88,7 +100,7 @@ export default function AppLayout() {
   useHotkeys([
     { key: 'k', meta: true, allowInInput: true, handler: () => setCmdkOpen((o) => !o) },
     { key: 'b', meta: true, allowInInput: true, handler: () => setSidebarCollapsed((p) => !p) },
-    { key: 'o', meta: true, shift: true, allowInInput: true, handler: () => handleNewChat() },
+    { key: 'o', meta: true, shift: true, allowInInput: true, handler: () => { if (canAsk) handleNewChat(); } },
   ]);
 
   useEffect(() => {
@@ -102,10 +114,10 @@ export default function AppLayout() {
   useEffect(() => {
     (async () => {
       try { await useSpaceStore.getState().loadSpaces(); } catch { /* default-space fallback */ }
-      loadSessions();
+      if (canUseHistory) await loadSessions();
     })();
     initCrossTabSync();
-  }, [loadSessions]);
+  }, [canUseHistory, loadSessions]);
 
   useEffect(() => {
     if (isMobile && !localStorage.getItem('ey-mobile-drawer-seen')) {
@@ -124,11 +136,24 @@ export default function AppLayout() {
 
   const userMenu = useMemo(() => {
     const items: any[] = [];
-    // V7.0: a single entry into the dedicated admin console for any admin.
-    const showAdminConsole = isAnyAdmin(user);
-    if (showAdminConsole) items.push({ key: 'admin-console', icon: <AppstoreOutlined />, label: t('admin_console'), onClick: () => navigate('/admin') });
-    if (canManageSpace) items.push({ key: 'space-manage', icon: <TeamOutlined />, label: t('space_management') || 'Space Management', onClick: () => navigate('/spaces/manage') });
-    if (showAdminConsole || canManageSpace) items.push({ type: 'divider' as const });
+    for (const entry of managementEntries) {
+      const icon = entry.id === 'console'
+        ? <AppstoreOutlined />
+        : entry.id === 'workspace'
+          ? <TeamOutlined />
+          : <BookOutlined />;
+      items.push({
+        key: `management-${entry.id}`,
+        icon,
+        label: entry.label,
+        onClick: () => navigate(entry.to),
+      });
+    }
+    if (managementEntries.length) items.push({ type: 'divider' as const });
+    if (canUseHistory) {
+      items.push({ key: 'history', icon: <HistoryOutlined />, label: t('nav_history'), onClick: () => navigate('/history') });
+    }
+    items.push({ key: 'discover-spaces', icon: <CompassOutlined />, label: t('space_discovery'), onClick: () => navigate('/spaces/discover') });
     items.push({ key: 'profile', icon: <SettingOutlined />, label: t('user_settings'), onClick: () => navigate('/profile') });
     items.push({ type: 'divider' as const });
     items.push({
@@ -140,7 +165,7 @@ export default function AppLayout() {
       },
     });
     return { items };
-  }, [logout, navigate, t, user, canManageSpace]);
+  }, [canUseHistory, logout, managementEntries, navigate, t]);
 
   const currentLang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const handleLangChange = useCallback((lang: 'zh' | 'en') => { i18n.changeLanguage(lang); localStorage.setItem('ey-language', lang); }, []);
@@ -193,19 +218,18 @@ export default function AppLayout() {
   }, [setActiveSession, navigate, closeMenu]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
-    if (activeSessionId === id && isStreaming) abortActiveStream();
     const chatState = useChatStore.getState();
-    if (chatState.isSendLocked) { chatState.unlockSend(); chatState.setStreamPhase('idle'); }
+    if (hasActiveStream(id)) chatState.abortSessionStream(id);
     try {
       await chatApi.deleteSession(id);
+      chatState.removeSessionState(id);
       broadcastSessionDelete(id);
       loadSessions();
-      if (activeSessionId === id) resetSession();
     } catch (err) {
       console.error('Failed to delete session:', err);
     }
     closeMenu();
-  }, [activeSessionId, isStreaming, loadSessions, resetSession, closeMenu]);
+  }, [loadSessions, closeMenu]);
 
   const openRenameSession = useCallback((session: { id: string; title: string }) => { setRenameSessionTarget(session); closeMenu(); }, [closeMenu]);
 
@@ -224,12 +248,29 @@ export default function AppLayout() {
     }
   }, [loadSessions, renameSessionTarget]);
 
-  const openMenuFromButton = (e: React.MouseEvent, session: { id: string; title: string }) => {
+  const handlePinSession = useCallback(async (id: string, isPinned: boolean) => {
+    await chatApi.pinSession(id, !isPinned);
+    await loadSessions();
+    closeMenu();
+  }, [closeMenu, loadSessions]);
+
+  const handleExportSession = useCallback(async (id: string, format: 'markdown' | 'html') => {
+    const blob = await chatApi.exportSession(id, format);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `conversation-${id}.${format === 'markdown' ? 'md' : 'html'}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    closeMenu();
+  }, [closeMenu]);
+
+  const openMenuFromButton = (e: React.MouseEvent, session: { id: string; title: string; isPinned: boolean }) => {
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const { x, y } = clampToViewport(rect.right - 180, rect.bottom + 4);
     setConfirmingDelete(false);
-    setSessionMenu({ id: session.id, title: session.title, x, y });
+    setSessionMenu({ id: session.id, title: session.title, isPinned: session.isPinned, x, y });
   };
 
   /* ---- sidebar sub-renderers (shared by desktop + mobile drawer) ---- */
@@ -266,14 +307,13 @@ export default function AppLayout() {
                   <div
                     key={session.id}
                     className={`sidebar-item${isActive ? ' is-active' : ''}`}
-                    onClick={() => handleSidebarSessionClick(session.id)}
-                    onContextMenu={(e) => { e.preventDefault(); const { x, y } = clampToViewport(e.clientX, e.clientY); setConfirmingDelete(false); setSessionMenu({ id: session.id, title, x, y }); }}
-                    role="button" tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSidebarSessionClick(session.id); }}
+                    onContextMenu={(e) => { e.preventDefault(); const { x, y } = clampToViewport(e.clientX, e.clientY); setConfirmingDelete(false); setSessionMenu({ id: session.id, title, isPinned: session.isPinned, x, y }); }}
                     title={title}
                   >
-                    <span className="sidebar-item-title">{title}</span>
-                    <button className="sidebar-item-more" aria-label={t('sidebar_rename')} onClick={(e) => openMenuFromButton(e, { id: session.id, title })}><MoreOutlined /></button>
+                    <button className="sidebar-item-main" onClick={() => handleSidebarSessionClick(session.id)}>
+                      <span className="sidebar-item-title">{session.isPinned && <PushpinOutlined aria-label={t('sidebar_pinned')} />} {title}</span>
+                    </button>
+                    <button className="sidebar-item-more" aria-label={t('sidebar_rename')} onClick={(e) => openMenuFromButton(e, { id: session.id, title, isPinned: session.isPinned })}><MoreOutlined /></button>
                   </div>
                 );
               })}
@@ -296,11 +336,11 @@ export default function AppLayout() {
     </div>
   );
 
-  const newChatBtn = (
+  const newChatBtn = canAsk ? (
     <div className="sidebar-section">
       <button className="new-chat-btn" onClick={handleNewChat}><PlusOutlined />{t('sidebar_new_chat')}</button>
     </div>
-  );
+  ) : null;
 
   return (
     <div className="app-shell">
@@ -325,7 +365,7 @@ export default function AppLayout() {
           <div style={{ marginTop: 12, minHeight: 22 }}>
             {showSkipHint
               ? <button className="msg-action-btn" style={{ margin: '0 auto' }} onClick={handleOnboardingClose}>{t('skip_for_now')}</button>
-              : <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>{t('skip_hint_loading') || ''}</span>}
+              : <span className="onboarding-skip-hint">{t('skip_hint_loading') || ''}</span>}
           </div>
         </div>
       </Modal>
@@ -346,8 +386,8 @@ export default function AppLayout() {
           </div>
           <div className="sidebar-section"><SpaceSwitcher collapsed={false} /></div>
           {newChatBtn}
-          {renderSearch()}
-          {renderList()}
+          {canUseHistory && renderSearch()}
+          {canUseHistory && renderList()}
           {renderFooter()}
         </aside>
       )}
@@ -355,15 +395,18 @@ export default function AppLayout() {
       {/* Mobile drawer */}
       {isMobile && (
         <Drawer placement="left" onClose={() => setMobileDrawerOpen(false)} open={mobileDrawerOpen} width={300}
-          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-sunken)' }, header: { display: 'none' } }}>
+          styles={{ 
+            body: { padding: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-sunken)' }, 
+            header: { display: 'none' },
+          }}>
           <div className="sidebar-header">
             <div className="sidebar-brand"><span className="sidebar-brand-mark">K</span><span className="sidebar-brand-name">KnowPilot</span></div>
             <button className="icon-btn" onClick={() => setMobileDrawerOpen(false)} aria-label={t('cancel') || 'Close'}><CloseOutlined /></button>
           </div>
           <div className="sidebar-section"><SpaceSwitcher collapsed={false} /></div>
           {newChatBtn}
-          {renderSearch()}
-          {renderList()}
+          {canUseHistory && renderSearch()}
+          {canUseHistory && renderList()}
           {renderFooter()}
         </Drawer>
       )}
@@ -401,9 +444,18 @@ export default function AppLayout() {
         <NetworkStatusBanner />
         <main id="main-content" role="main" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <ErrorBoundary title={t('error_boundary_title')} description={t('error_boundary_desc')} retryText={t('error_boundary_retry')}>
-            <div className="page-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <Outlet />
-            </div>
+            <AnimatePresence mode="wait">
+              <motion.div 
+                key={location.pathname}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: PAGE_TRANSITION_SECONDS, ease: 'easeOut' }}
+                style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              >
+                <Outlet />
+              </motion.div>
+            </AnimatePresence>
           </ErrorBoundary>
         </main>
       </div>
@@ -420,6 +472,9 @@ export default function AppLayout() {
           ) : (
             <>
               <div className="menu-pop-label">{sessionMenu.title}</div>
+              <div className="menu-pop-item" onClick={() => handlePinSession(sessionMenu.id, sessionMenu.isPinned)}><PushpinOutlined />{sessionMenu.isPinned ? t('sidebar_unpin') : t('sidebar_pin')}</div>
+              {canExport && <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'markdown')}><FileTextOutlined />{t('sidebar_export_markdown')}</div>}
+              {canExport && <div className="menu-pop-item" onClick={() => handleExportSession(sessionMenu.id, 'html')}><DownloadOutlined />{t('sidebar_export_html')}</div>}
               <div className="menu-pop-item" onClick={() => openRenameSession({ id: sessionMenu.id, title: sessionMenu.title })}><EditOutlined />{t('sidebar_rename')}</div>
               <div className="menu-pop-item danger" onClick={() => setConfirmingDelete(true)}><DeleteOutlined />{t('sidebar_delete')}</div>
             </>

@@ -11,7 +11,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Card,
-  Table,
+  List,
   Button,
   Input,
   Select,
@@ -20,7 +20,6 @@ import {
   Space,
   Modal,
   Popconfirm,
-  Empty,
   message as antdMessage,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -32,17 +31,20 @@ import {
   type InviteCode,
   type SpaceRole,
 } from '../api/spaces';
+import { useAuthorization } from '../auth/CapabilityProvider';
 
 const { Text, Paragraph } = Typography;
 
-const MANAGE_ROLES: (SpaceRole | null)[] = ['owner', 'super_admin', 'org_admin', 'business_admin'];
-
 export default function SpaceManagementPage() {
   const { t } = useTranslation('common');
+  const access = useAuthorization();
   const { activeSpaceId, getActiveSpace, loadSpaces } = useSpaceStore();
   const active = getActiveSpace();
 
-  const canManage = MANAGE_ROLES.includes(active?.my_role ?? null);
+  const canManageSettings = access.has('workspace.settings.manage');
+  const canManageMembers = access.has('workspace.members.manage');
+  const canManageInvites = access.has('workspace.invites.manage');
+  const canReadMembers = !access.enabled || canManageMembers;
 
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invites, setInvites] = useState<InviteCode[]>([]);
@@ -71,15 +73,15 @@ export default function SpaceManagementPage() {
     setLoading(true);
     try {
       const [m, inv] = await Promise.all([
-        spacesApi.members(activeSpaceId).catch(() => []),
-        canManage ? spacesApi.listInvites(activeSpaceId).catch(() => []) : Promise.resolve([]),
+        canReadMembers ? spacesApi.members(activeSpaceId).catch(() => []) : Promise.resolve([]),
+        canManageInvites ? spacesApi.listInvites(activeSpaceId).catch(() => []) : Promise.resolve([]),
       ]);
       setMembers(m);
       setInvites(inv);
     } finally {
       setLoading(false);
     }
-  }, [activeSpaceId, canManage]);
+  }, [activeSpaceId, canManageInvites, canReadMembers]);
 
   useEffect(() => {
     if (active) {
@@ -181,85 +183,14 @@ export default function SpaceManagementPage() {
 
   if (!active) {
     return (
-      <div style={{ padding: 24 }}>
-        <Empty description={t('no_active_space') || 'No active space selected'} />
+      <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>{t('no_active_space') || 'No active space selected'}</div>
       </div>
     );
   }
 
-  const memberColumns = [
-    { title: t('member_email') || 'Email', dataIndex: 'user_email', key: 'email' },
-    {
-      title: t('member_role') || 'Role',
-      dataIndex: 'role',
-      key: 'role',
-      render: (r: SpaceRole, rec: SpaceMember) =>
-        canManage && rec.status === 'active' ? (
-          <Select
-            size="small"
-            value={r}
-            style={{ width: 160 }}
-            popupClassName="menu-pop-dropdown"
-            onChange={(v) => changeMemberRole(rec.user, v as SpaceRole)}
-            options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
-          />
-        ) : (
-          <Tag>{r}</Tag>
-        ),
-    },
-    {
-      title: t('member_status') || 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag>,
-    },
-    ...(canManage
-      ? [{
-          title: '',
-          key: 'member_actions',
-          render: (_: any, rec: SpaceMember) =>
-            rec.status === 'active' ? (
-              <Popconfirm
-                title={t('member_remove_confirm') || 'Remove this member?'}
-                onConfirm={() => removeMember(rec.user)}
-              >
-                <Button type="link" danger size="small">{t('remove') || 'Remove'}</Button>
-              </Popconfirm>
-            ) : null,
-        }]
-      : []),
-  ];
 
-  const inviteColumns = [
-    { title: t('access_code') || 'Code', dataIndex: 'code_prefix', key: 'code', render: (p: string) => `${p}…` },
-    { title: t('member_role') || 'Role', dataIndex: 'role', key: 'role', render: (r: string) => <Tag>{r}</Tag> },
-    {
-      title: t('invite_uses') || 'Uses',
-      key: 'uses',
-      render: (_: any, rec: InviteCode) => `${rec.used_count}${rec.max_uses ? ` / ${rec.max_uses}` : ''}`,
-    },
-    {
-      title: t('member_status') || 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (s: string) => <Tag color={s === 'active' ? 'green' : 'red'}>{s}</Tag>,
-    },
-    {
-      title: '',
-      key: 'actions',
-      render: (_: any, rec: InviteCode) =>
-        rec.status === 'active' ? (
-          <Popconfirm
-            title={t('invite_revoke_confirm') || 'Revoke this code?'}
-            onConfirm={() => revokeInvite(rec.id)}
-          >
-            <Button type="link" danger size="small">
-              {t('revoke') || 'Revoke'}
-            </Button>
-          </Popconfirm>
-        ) : null,
-    },
-  ];
   return (
     <div className="page" style={{ background: 'transparent' }}>
       <div className="page-inner">
@@ -276,19 +207,20 @@ export default function SpaceManagementPage() {
             </span>
           }
           styles={{ body: { padding: '28px' } }}
-          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
         >
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <div>
               <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('space_name') || 'Space name'}</Text>
-              <Input size="large" value={name} onChange={(e) => setName(e.target.value)} disabled={!canManage} style={{ marginTop: 6, borderRadius: 10 }} />
+              <Input size="large" value={name} onChange={(e) => setName(e.target.value)} disabled={!canManageSettings} style={{ marginTop: 6, borderRadius: 10 }} />
             </div>
             <div>
               <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('space_description') || 'Description'}</Text>
               <Input.TextArea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                disabled={!canManage}
+                disabled={!canManageSettings}
                 rows={3}
                 style={{ marginTop: 6, borderRadius: 10 }}
               />
@@ -299,9 +231,9 @@ export default function SpaceManagementPage() {
                 size="large"
                 value={visibility}
                 onChange={setVisibility}
-                disabled={!canManage}
+                disabled={!canManageSettings}
                 style={{ width: 260, display: 'block', marginTop: 6 }}
-                popupClassName="menu-pop-dropdown"
+                classNames={{ popup: { root: 'menu-pop-dropdown' } }}
                 options={[
                   { value: 'private', label: t('visibility_private') || 'Private' },
                   { value: 'business_line', label: t('visibility_business_line') || 'Business line' },
@@ -310,7 +242,7 @@ export default function SpaceManagementPage() {
                 ]}
               />
             </div>
-            {canManage && (
+            {canManageSettings && (
               <Button type="primary" loading={savingSettings} onClick={saveSettings} size="large" style={{ height: 44, borderRadius: 12, fontWeight: 600, padding: '0 24px', marginTop: 8 }}>
                 {t('save') || 'Save'}
               </Button>
@@ -325,10 +257,11 @@ export default function SpaceManagementPage() {
             </span>
           }
           styles={{ body: { padding: '24px' } }}
-          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
           extra={<Button icon={<ReloadOutlined />} size="middle" onClick={refresh} style={{ borderRadius: 8 }} />}
         >
-          {canManage && (
+          {canManageMembers && (
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               <Input
                 placeholder={t('member_email_placeholder') || 'Add member by email…'}
@@ -342,7 +275,7 @@ export default function SpaceManagementPage() {
                 value={memberRole}
                 onChange={(v) => setMemberRole(v as SpaceRole)}
                 style={{ width: 170 }}
-                popupClassName="menu-pop-dropdown"
+                classNames={{ popup: { root: 'menu-pop-dropdown' } }}
                 options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
               />
               <Button
@@ -357,17 +290,49 @@ export default function SpaceManagementPage() {
               </Button>
             </div>
           )}
-          <Table
-            rowKey="id"
-            loading={loading}
+          <List
+            grid={{ gutter: 16, xs: 1, sm: 1, md: 2, lg: 2, xl: 3, xxl: 3 }}
             dataSource={members}
-            columns={memberColumns}
-            pagination={false}
-            size="middle"
+            loading={loading}
+            renderItem={(rec) => (
+              <List.Item>
+                <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <Text strong style={{ fontSize: 14 }}>{rec.user_email}</Text>
+                      <Tag color={rec.status === 'active' ? 'green' : 'default'}>{rec.status}</Tag>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      {canManageMembers && rec.status === 'active' ? (
+                        <Select
+                          size="small"
+                          value={rec.role}
+                          style={{ width: 140 }}
+                          classNames={{ popup: { root: 'menu-pop-dropdown' } }}
+                          onChange={(v) => changeMemberRole(rec.user, v as SpaceRole)}
+                          options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+                        />
+                      ) : (
+                        <Tag>{rec.role}</Tag>
+                      )}
+                      {canManageMembers && rec.status === 'active' && (
+                        <Popconfirm
+                          title={t('member_remove_confirm') || 'Remove this member?'}
+                          onConfirm={() => removeMember(rec.user)}
+                        >
+                          <Button type="text" danger size="small">{t('remove') || 'Remove'}</Button>
+                        </Popconfirm>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              </List.Item>
+            )}
+            locale={{ emptyText: <div style={{ padding: 40 }}><div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div><div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_members') || '暂无成员'}</div></div> }}
           />
         </Card>
 
-        {canManage && (
+        {canManageInvites && (
           <Card
             title={
               <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -375,20 +340,47 @@ export default function SpaceManagementPage() {
               </span>
             }
             styles={{ body: { padding: '24px' } }}
-            style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+            className="glass-panel hover-lift"
+            style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
             extra={
               <Button type="primary" icon={<PlusOutlined />} size="middle" onClick={() => setInviteOpen(true)} style={{ borderRadius: 8 }}>
                 {t('generate_code') || 'Generate code'}
               </Button>
             }
           >
-            <Table
-              rowKey="id"
-              loading={loading}
+            <List
+              grid={{ gutter: 16, xs: 1, sm: 1, md: 2, lg: 2, xl: 3, xxl: 3 }}
               dataSource={invites}
-              columns={inviteColumns}
-              pagination={false}
-              size="middle"
+              loading={loading}
+              renderItem={(rec) => (
+                <List.Item>
+                  <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text strong code style={{ fontSize: 15 }}>{rec.code_prefix}…</Text>
+                        <Tag color={rec.status === 'active' ? 'green' : 'red'}>{rec.status}</Tag>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Space>
+                          <Tag>{rec.role}</Tag>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{t('invite_uses') || 'Uses'}: {rec.used_count}{rec.max_uses ? ` / ${rec.max_uses}` : ''}</Text>
+                        </Space>
+                        {rec.status === 'active' && (
+                          <Popconfirm
+                            title={t('invite_revoke_confirm') || 'Revoke this code?'}
+                            onConfirm={() => revokeInvite(rec.id)}
+                          >
+                            <Button type="text" danger size="small">
+                              {t('revoke') || 'Revoke'}
+                            </Button>
+                          </Popconfirm>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                </List.Item>
+              )}
+              locale={{ emptyText: <div style={{ padding: 40 }}><div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div><div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_invites') || '暂无邀请码'}</div></div> }}
             />
           </Card>
         )}
@@ -412,7 +404,7 @@ export default function SpaceManagementPage() {
                 value={inviteRole}
                 onChange={(v) => setInviteRole(v as SpaceRole)}
                 style={{ width: '100%', marginTop: 6 }}
-                popupClassName="menu-pop-dropdown"
+                classNames={{ popup: { root: 'menu-pop-dropdown' } }}
                 options={[
                   { value: 'member', label: 'member' },
                   { value: 'guest', label: 'guest' },

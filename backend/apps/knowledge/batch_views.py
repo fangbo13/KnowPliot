@@ -206,8 +206,12 @@ class BatchDocumentUploadView(generics.CreateAPIView):
                 doc.save()
 
                 # Trigger async ingestion via Celery
-                from apps.rag.services import ingest_document
-                ingest_document.delay(str(doc.id))
+                from apps.knowledge.ingestion import enqueue_document_ingestion
+                enqueue_document_ingestion(
+                    doc,
+                    requested_by=request.user,
+                    trigger="batch",
+                )
 
                 batch_result.add_success(str(doc.id), doc.title)
                 logger.info(f"[BatchImport] Document created: '{filename}' → {doc.id}")

@@ -28,7 +28,10 @@ interface VirtualizedMessageListProps {
   streamContent: string;
   citations: Citation[];
   streamPhase: string;
-  onRegenerate: () => void;
+  onRegenerate: (message: Message) => void;
+  onBranch: (message: Message) => void;
+  onShare: (message: Message) => void;
+  canShare: boolean;
   virtuosoRef?: React.Ref<VirtuosoHandle>;
   onScrollToBottomChange?: (isAtBottom: boolean) => void;
 }
@@ -42,6 +45,9 @@ export default function VirtualizedMessageList({
   citations: _citations,
   streamPhase,
   onRegenerate,
+  onBranch,
+  onShare,
+  canShare,
   virtuosoRef,
   onScrollToBottomChange,
 }: VirtualizedMessageListProps) {
@@ -93,11 +99,14 @@ export default function VirtualizedMessageList({
           message={streamingMessage}
           isStreaming={isStreamingBubble}
           disableActions={isStreaming}
-          onRegenerate={msg.role === 'assistant' && !isStreamingBubble ? onRegenerate : undefined}
+          canShare={canShare}
+          onShare={canShare ? () => onShare(msg) : undefined}
+          onRegenerate={msg.role === 'assistant' && !isStreamingBubble ? () => onRegenerate(msg) : undefined}
+          onBranch={msg.role === 'assistant' && !isStreamingBubble ? () => onBranch(msg) : undefined}
         />
       </div>
     );
-  }, [isStreaming, onRegenerate, onLoadOlder, t]);
+  }, [canShare, isStreaming, onBranch, onRegenerate, onLoadOlder, onShare, t]);
 
   const thinkingIndicator = useMemo(() => {
     if (!isStreaming || streamContent) return null;
@@ -106,7 +115,7 @@ export default function VirtualizedMessageList({
         <div className="thinking">
           <div className="thinking-dots">
             {[0, 1, 2].map((i) => (
-              <span key={i} className="thinking-dot" style={{ animationDelay: `${i * 0.16}s` }} />
+              <span key={i} className="thinking-dot" />
             ))}
           </div>
           <span className="thinking-label">

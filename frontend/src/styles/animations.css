@@ -1,0 +1,67 @@
+/* Restrained feedback motion: 120/180/240ms and opacity/transform only. */
+
+.hover-lift {
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.hover-lift:is(button, a, [role="button"]):hover { opacity: 0.92; }
+.hover-lift:is(button, a, [role="button"]):active { opacity: 0.82; }
+
+.gemini-mesh-bg,
+.gemini-mesh-bg-light {
+  background: var(--color-bg-body);
+}
+
+.ai-thinking { display: flex; align-items: center; gap: 4px; }
+.ai-thinking span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--accent);
+  opacity: 0.45;
+}
+.ai-thinking span:nth-child(2) { opacity: 0.7; }
+.ai-thinking span:nth-child(3) { opacity: 0.9; }
+
+.fade-in-up,
+.stagger-fade-in,
+.stagger-fade-in > *,
+.section-enter {
+  animation: kp-fade-in-up var(--motion-base) var(--motion-ease) both;
+}
+
+@keyframes kp-fade-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.skeleton-card,
+.skeleton-table {
+  background: var(--color-fill);
+  border-radius: var(--radius-sm);
+}
+
+.pulse-subtle { opacity: 0.85; }
+.success-check {
+  display: inline-block;
+  animation: kp-fade-in var(--motion-base) var(--motion-ease) both;
+}
+@keyframes kp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.btn-press {
+  transition: transform var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+.btn-press:active { transform: translateY(1px); opacity: 0.86; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-lift,
+  .btn-press,
+  .fade-in-up,
+  .stagger-fade-in,
+  .stagger-fade-in > *,
+  .section-enter,
+  .success-check {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transform: none !important;
+  }
+}

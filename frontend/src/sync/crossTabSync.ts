@@ -28,8 +28,7 @@
  */
 
 // V4.2 SYS-V4.2-017: Static imports — eliminates 4-layer dynamic import delay
-import { abortActiveStream, getActiveStreamSessionId } from '../stream/StreamLifecycleManager';
-import { resetTokenBatcher } from '../stream/TokenBatchRenderer';
+import { hasActiveStream } from '../stream/StreamLifecycleManager';
 import { useChatStore } from '../store/chatStore';
 
 const channel = new BroadcastChannel('ey-onboarding-sync');
@@ -54,29 +53,19 @@ export function initCrossTabSync() {
     switch (type) {
       case 'session-switch':
         import('antd').then(({ message: antMessage }) => {
-          const ourStreamId = getActiveStreamSessionId();
-          if (ourStreamId && ourStreamId !== sessionId) {
-            // Another tab switched sessions — abort our stream if different
-            abortActiveStream();
-            resetTokenBatcher();
-            const store = useChatStore.getState();
-            store.setStreamPhase('idle');
-            store.unlockSend();
-            useChatStore.setState({ streamContent: '', sendError: null });
-            // V4.1 BUG-010: Toast feedback
-            antMessage.info('另一个标签页正在查看不同会话，当前流已暂停');
+          const hasDifferentStream = Object.entries(useChatStore.getState().turnsBySession)
+            .some(([id, turn]) => turn.isLocked && id !== sessionId);
+          if (hasDifferentStream) {
+            antMessage.info('另一个标签页切换了会话');
           }
         });
         break;
 
       case 'session-delete':
         import('antd').then(({ message: antMessage }) => {
-          const ourStreamId = getActiveStreamSessionId();
-          if (ourStreamId === sessionId) {
-            // Another tab deleted our active session — abort + reset
-            abortActiveStream();
-            resetTokenBatcher();
-            useChatStore.getState().resetSession();
+          const ownedStreamWasDeleted = hasActiveStream(sessionId);
+          useChatStore.getState().removeSessionState(sessionId);
+          if (ownedStreamWasDeleted) {
             // V4.1 BUG-010: Toast feedback
             antMessage.info('另一个标签页删除了当前会话');
           }

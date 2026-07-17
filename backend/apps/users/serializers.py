@@ -51,6 +51,10 @@ class UserSerializer(serializers.ModelSerializer):
             "role_level",
             "start_date",
             "language_preference",
+            "theme_preference",
+            "default_space",
+            "notification_preferences",
+            "mfa_enabled",
             "is_hr_admin",
             "is_superuser",
             "roles",
@@ -63,6 +67,7 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "email", "username", "employee_id", "is_superuser", "roles",
             "permissions", "is_super_admin", "is_org_admin", "is_business_admin", "admin_scope",
+            "mfa_enabled",
         ]
 
     def _flags(self, obj):
@@ -119,7 +124,32 @@ class UserPreferenceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["language_preference"]
+        fields = [
+            "language_preference",
+            "theme_preference",
+            "default_space",
+            "notification_preferences",
+        ]
+
+    def validate_default_space(self, value):
+        if value is None:
+            return value
+        from apps.spaces.permissions import accessible_spaces
+
+        if not accessible_spaces(self.instance).filter(pk=value.pk).exists():
+            raise serializers.ValidationError("Default space is not accessible.")
+        return value
+
+    def validate_notification_preferences(self, value):
+        allowed = {"announcements", "quality", "exports", "security"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise serializers.ValidationError(
+                f"Unknown notification preference: {sorted(unknown)[0]}"
+            )
+        if any(not isinstance(flag, bool) for flag in value.values()):
+            raise serializers.ValidationError("Notification preferences must be boolean.")
+        return value
 
 
 class UserManageSerializer(serializers.ModelSerializer):

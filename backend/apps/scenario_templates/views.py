@@ -3,7 +3,10 @@
 # See LICENSE file in the project root for full license details.
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
+from django.core.files.base import ContentFile
+from pathlib import Path
+import uuid
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -15,6 +18,10 @@ from .models import (
     ScenarioTemplate,
     ScenarioTemplateApplication,
     ScenarioTemplateRevision,
+    ScenarioTemplateAsset,
+    TemplateAssetApplication,
+    TemplateCategory,
+    TemplateTag,
 )
 from .serializers import (
     CloneScenarioTemplateSerializer,
@@ -22,7 +29,10 @@ from .serializers import (
     ScenarioTemplateApplicationSerializer,
     ScenarioTemplateRevisionSerializer,
     ScenarioTemplateSerializer,
+    ScenarioTemplateAssetSerializer,
 )
+from apps.knowledge.ingestion import enqueue_document_ingestion
+from apps.knowledge.models import Document
 from apps.spaces.models import KnowledgeSpace, SpaceMembership, Organization, BusinessLine
 from apps.spaces.serializers import KnowledgeSpaceSerializer
 from apps.spaces.permissions import is_platform_admin, admin_scope
@@ -233,7 +243,27 @@ def _apply_template_query_filters(qs, params, *, allow_inactive=False):
             | Q(description__icontains=q)
         )
 
-    return qs
+    category = params.get("category")
+    if category:
+        qs = qs.filter(category__slug=category)
+
+    tags = [value.strip() for value in params.get("tags", "").split(",") if value.strip()]
+    if tags:
+        qs = qs.filter(tags__slug__in=tags).annotate(
+            matched_tag_count=Count("tags", filter=Q(tags__slug__in=tags), distinct=True)
+        ).filter(matched_tag_count=len(tags))
+
+    qs = qs.annotate(application_count=Count("applications", distinct=True))
+    sort = params.get("sort", "recommended")
+    if sort == "popular":
+        qs = qs.order_by("-application_count", "-updated_at", "name")
+    elif sort == "recent":
+        qs = qs.order_by("-updated_at", "name")
+    elif sort == "name":
+        qs = qs.order_by("name")
+    else:
+        qs = qs.order_by("-featured", "-application_count", "-updated_at", "name")
+    return qs.distinct()
 
 
 def _template_snapshot(template):
@@ -246,6 +276,9 @@ def _template_snapshot(template):
         "scenario_type": template.scenario_type,
         "default_language": template.default_language,
         "icon": template.icon,
+        "category": str(template.category_id) if template.category_id else None,
+        "tags": list(template.tags.order_by("slug").values_list("slug", flat=True)),
+        "featured": template.featured,
         "quick_questions": template.quick_questions,
         "prompt_policy": template.prompt_policy,
         "retrieval_policy": template.retrieval_policy,
@@ -274,6 +307,62 @@ def _record_template_revision(template, user, change_note=""):
     )
 
 
+def _provision_template_asset(application, asset, user):
+    """Copy one asset and enqueue independent ingestion without orphaning files."""
+    record, _ = TemplateAssetApplication.objects.get_or_create(
+        application=application,
+        asset=asset,
+        defaults={"source_document": asset.document, "status": "pending"},
+    )
+    if record.target_document_id and record.status == "processing":
+        return record, None
+    target = None
+    try:
+        source = asset.document
+        with source.file.open("rb") as source_file:
+            file_content = source_file.read()
+        target = Document(
+            space=application.space,
+            title=source.title,
+            file_type=source.file_type,
+            file_size=len(file_content),
+            category=source.category,
+            tags=source.tags,
+            status="draft",
+            version=1,
+            effective_from=source.effective_from,
+            effective_to=source.effective_to,
+            uploaded_by=user,
+            content_hash="",
+            chunk_count=0,
+        )
+        safe_name = f"{uuid.uuid4()}-{Path(source.file.name).name}"
+        target.file.save(safe_name, ContentFile(file_content), save=False)
+        target.save()
+        job = enqueue_document_ingestion(
+            target,
+            requested_by=user,
+            trigger="upload",
+            prevent_duplicate=True,
+        )
+        record.target_document = target
+        record.ingestion_job = job
+        record.status = "processing"
+        record.error_code = ""
+        record.save()
+        return record, job.celery_task_id or None
+    except Exception as exc:
+        if target and target.pk:
+            target.file.delete(save=False)
+            target.delete()
+        record.target_document = None
+        record.ingestion_job = None
+        record.status = "failed"
+        record.error_code = exc.__class__.__name__
+        record.save()
+        return record, None
+
+
 class ScenarioTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet for managing scenario templates and instantiating spaces from them."""
 
@@ -283,7 +372,9 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = ScenarioTemplate.objects.select_related("organization", "business_line")
+        qs = ScenarioTemplate.objects.select_related(
+            "organization", "business_line", "category"
+        ).prefetch_related("tags")
         if is_any_admin(user):
             qs = qs.filter(_template_scope_filter(user))
             return _apply_template_query_filters(
@@ -441,6 +532,27 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                 },
             )
 
+        assets = list(template.assets.select_related("document"))
+        task_ids = []
+        failures = 0
+        for asset in assets:
+            asset_application, task_id = _provision_template_asset(
+                application, asset, request.user
+            )
+            if asset_application.status == "failed":
+                failures += 1
+            elif task_id:
+                task_ids.append(task_id)
+
+        application.asset_total = len(assets)
+        application.task_ids = task_ids
+        application.provisioning_status = (
+            "partial_failure" if failures else ("processing" if assets else "completed")
+        )
+        application.save(
+            update_fields=["asset_total", "task_ids", "provisioning_status"]
+        )
+
         _audit(
             request.user,
             "space_create",
@@ -451,12 +563,73 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                 "template_code": template.code,
                 "scenario_type": template.scenario_type,
                 "template_application_id": str(application.id),
+                "asset_total": application.asset_total,
+                "provisioning_status": application.provisioning_status,
             },
             request=request,
         )
 
-        out = KnowledgeSpaceSerializer(space, context={"request": request})
-        return Response(out.data, status=status.HTTP_201_CREATED)
+        out = dict(KnowledgeSpaceSerializer(space, context={"request": request}).data)
+        out.update(
+            {
+                "application_id": str(application.id),
+                "asset_total": application.asset_total,
+                "task_ids": application.task_ids,
+                "provisioning_status": application.provisioning_status,
+            }
+        )
+        return Response(out, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"applications/(?P<application_id>[^/.]+)/retry-assets",
+    )
+    def retry_assets(self, request, pk=None, application_id=None):
+        template = self.get_object()
+        if not _can_manage_template(request.user, template):
+            raise PermissionDenied("You cannot retry assets for this template.")
+        try:
+            application = template.applications.get(
+                id=application_id,
+                created_by=request.user,
+            )
+        except ScenarioTemplateApplication.DoesNotExist:
+            raise NotFound("Application not found.")
+        task_ids = list(application.task_ids)
+        for failed in application.asset_applications.filter(status="failed").select_related(
+            "asset", "asset__document"
+        ):
+            record, task_id = _provision_template_asset(
+                application, failed.asset, request.user
+            )
+            if task_id:
+                task_ids.append(task_id)
+        remaining = application.asset_applications.filter(status="failed").exists()
+        application.task_ids = list(dict.fromkeys(task_ids))
+        application.provisioning_status = (
+            "partial_failure" if remaining else "processing"
+        )
+        application.save(update_fields=["task_ids", "provisioning_status"])
+        _audit(
+            request.user,
+            "template_update",
+            target_id=template.id,
+            details={
+                "operation": "asset_retry",
+                "application_id": str(application.id),
+                "provisioning_status": application.provisioning_status,
+            },
+            request=request,
+        )
+        return Response(
+            {
+                "application_id": str(application.id),
+                "asset_total": application.asset_total,
+                "task_ids": application.task_ids,
+                "provisioning_status": application.provisioning_status,
+            }
+        )
 
     @action(detail=True, methods=["get"], url_path="applications")
     def applications(self, request, pk=None):
@@ -499,6 +672,140 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         )
         serializer = ScenarioTemplateRevisionSerializer(qs, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="diff")
+    def revision_diff(self, request, pk=None):
+        template = self.get_object()
+        if not is_any_admin(request.user) or not _can_use_template(request.user, template):
+            raise NotFound("Template not found.")
+        try:
+            from_version = int(request.query_params["from"])
+            to_version = int(request.query_params["to"])
+            revisions = {
+                row.version: row
+                for row in template.revisions.filter(version__in=[from_version, to_version])
+            }
+            before, after = revisions[from_version], revisions[to_version]
+        except (KeyError, TypeError, ValueError):
+            raise ValidationError({"detail": "Valid from and to revisions are required."})
+        keys = sorted(set(before.snapshot) | set(after.snapshot))
+        changes = {
+            key: {"from": before.snapshot.get(key), "to": after.snapshot.get(key)}
+            for key in keys
+            if before.snapshot.get(key) != after.snapshot.get(key)
+        }
+        return Response({"from": from_version, "to": to_version, "changes": changes})
+
+    @action(detail=True, methods=["post"], url_path="rollback")
+    def rollback(self, request, pk=None):
+        template = self.get_object()
+        if not _can_manage_template(request.user, template):
+            raise PermissionDenied("You cannot roll back this template.")
+        try:
+            revision = template.revisions.get(version=int(request.data["revision"]))
+        except (KeyError, TypeError, ValueError, ScenarioTemplateRevision.DoesNotExist):
+            raise ValidationError({"revision": "A valid revision is required."})
+        snapshot = revision.snapshot
+        fields = {
+            "name": "template_name",
+            "description": "description",
+            "scenario_type": "scenario_type",
+            "default_language": "default_language",
+            "icon": "icon",
+            "quick_questions": "quick_questions",
+            "prompt_policy": "prompt_policy",
+            "retrieval_policy": "retrieval_policy",
+            "default_visibility": "default_visibility",
+            "is_active": "is_active",
+            "featured": "featured",
+        }
+        for model_field, snapshot_field in fields.items():
+            if snapshot_field in snapshot:
+                setattr(template, model_field, snapshot[snapshot_field])
+        if "category" in snapshot:
+            template.category = TemplateCategory.objects.filter(
+                id=snapshot["category"]
+            ).first() if snapshot["category"] else None
+        template.save()
+        if "tags" in snapshot:
+            template.tags.set(TemplateTag.objects.filter(slug__in=snapshot["tags"]))
+        _record_template_revision(
+            template, request.user, f"rollback from revision {revision.version}"
+        )
+        _audit(
+            request.user,
+            "template_update",
+            target_id=template.id,
+            details={"operation": "rollback", "revision": revision.version},
+            request=request,
+        )
+        return Response(self.get_serializer(template).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="assets")
+    def assets(self, request, pk=None):
+        template = self.get_object()
+        if not _can_manage_template(request.user, template):
+            raise PermissionDenied("You cannot manage assets for this template.")
+        if request.method == "GET":
+            return Response(
+                ScenarioTemplateAssetSerializer(
+                    template.assets.select_related("document", "document__space"),
+                    many=True,
+                ).data
+            )
+        document_id = request.data.get("document")
+        qs = Document.objects.select_related("space", "space__organization")
+        if not is_platform_admin(request.user):
+            org_ids, bl_ids = admin_scope(request.user)
+            qs = qs.filter(
+                Q(space__organization_id__in=org_ids)
+                | Q(space__business_line_id__in=bl_ids)
+            )
+        try:
+            document = qs.get(id=document_id, status="active")
+        except (Document.DoesNotExist, ValueError):
+            raise NotFound("Document not found.")
+        asset, created = ScenarioTemplateAsset.objects.get_or_create(
+            template=template,
+            document=document,
+            defaults={"created_by": request.user},
+        )
+        _audit(
+            request.user,
+            "template_update",
+            target_id=template.id,
+            details={
+                "operation": "asset_attach",
+                "asset_id": str(asset.id),
+                "document_id": str(document.id),
+            },
+            request=request,
+        )
+        return Response(
+            ScenarioTemplateAssetSerializer(asset).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path=r"assets/(?P<asset_id>[^/.]+)",
+    )
+    def delete_asset(self, request, pk=None, asset_id=None):
+        template = self.get_object()
+        if not _can_manage_template(request.user, template):
+            raise PermissionDenied("You cannot manage assets for this template.")
+        deleted, _ = template.assets.filter(id=asset_id).delete()
+        if not deleted:
+            raise NotFound("Asset not found.")
+        _audit(
+            request.user,
+            "template_update",
+            target_id=template.id,
+            details={"operation": "asset_delete", "asset_id": str(asset_id)},
+            request=request,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="clone")
     def clone(self, request, pk=None):

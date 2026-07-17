@@ -55,4 +55,13 @@ class BlacklistCheckingJWTAuthentication(JWTAuthentication):
         if jti and BlacklistedToken.objects.filter(token__jti=jti).exists():
             raise AuthenticationFailed("Token has been blacklisted.")
 
+        session_id = validated_token.get("session_id")
+        if session_id:
+            from .models import AuthSession
+
+            if not AuthSession.objects.filter(
+                id=session_id, user=user, revoked_at__isnull=True
+            ).exists():
+                raise AuthenticationFailed("Session has been revoked.")
+
         return result

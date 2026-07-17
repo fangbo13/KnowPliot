@@ -7,14 +7,20 @@
 import { useTranslation } from 'react-i18next';
 import { message as antdMessage } from 'antd';
 import {
-  CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined,
+  CopyOutlined, CheckOutlined, ShareAltOutlined, ReloadOutlined, BranchesOutlined,
   DownOutlined, RightOutlined, PaperClipOutlined,
+  LikeOutlined, DislikeOutlined, FlagOutlined, CloseOutlined,
 } from '@ant-design/icons';
-import { useState, memo } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
+import { motion } from 'framer-motion';
+import { designTokens } from '../../design/tokens';
 import type { Message, Citation } from '../../store/chatStore';
+import { chatApi } from '../../api/chat';
 import ErrorBoundary from '../ErrorBoundary';
 import { MarkdownView } from './markdown';
 import StreamingMarkdown from './StreamingMarkdown';
+
+const MESSAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
 function getRelevanceLabel(score: number, t: (key: string) => string): string {
   if (score > 0.8) return t('high_relevance');
@@ -31,7 +37,16 @@ interface Props {
   message: Message;
   isStreaming?: boolean;
   disableActions?: boolean;
+  canShare?: boolean;
   onRegenerate?: () => void;
+  onBranch?: () => void;
+  onShare?: () => void | Promise<void>;
+}
+
+type FeedbackType = 'helpful' | 'unhelpful' | 'incorrect' | 'outdated' | 'missing_source';
+
+function isPersistedUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
 /**
@@ -43,11 +58,59 @@ interface Props {
  * React.memo (below) keeps non-streaming bubbles from re-parsing Markdown while a
  * different message streams — only the streaming bubble re-renders per frame.
  */
-function MessageBubble({ message, isStreaming = false, disableActions = false, onRegenerate }: Props) {
+function MessageBubble({ message, isStreaming = false, disableActions = false, canShare = false, onRegenerate, onBranch, onShare }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [issueType, setIssueType] = useState<FeedbackType>('incorrect');
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [suggestedSource, setSuggestedSource] = useState('');
+  const [flagForReview, setFlagForReview] = useState(false);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const feedbackTriggerRef = useRef<HTMLButtonElement>(null);
+  const feedbackWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (feedbackWasOpenRef.current && !feedbackOpen) {
+      feedbackTriggerRef.current?.focus();
+    }
+    feedbackWasOpenRef.current = feedbackOpen;
+  }, [feedbackOpen]);
+
+  useEffect(() => {
+    if (!feedbackOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setFeedbackOpen(false);
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [feedbackOpen]);
+  const canGiveFeedback = !isStreaming && !disableActions && isPersistedUuid(message.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canGiveFeedback) return undefined;
+    chatApi.getFeedback(message.id)
+      .then((feedback) => {
+        if (cancelled || !feedback || feedback.status === 'withdrawn') return;
+        const currentType = feedback.type || feedback.feedback_type;
+        setFeedbackType(currentType);
+        if (currentType && currentType !== 'helpful') {
+          setIssueType(currentType);
+          setFeedbackComment(feedback.comment || '');
+          setSuggestedSource(feedback.suggested_source || '');
+          setFlagForReview(Boolean(feedback.flag_for_review));
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [canGiveFeedback, message.id]);
 
   const handleCopy = async () => {
     try {
@@ -68,6 +131,10 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
   };
 
   const handleShare = async () => {
+    if (onShare) {
+      await onShare();
+      return;
+    }
     if (navigator.share) {
       try {
         await navigator.share({ title: 'KnowPilot', text: message.content });
@@ -77,16 +144,79 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
     handleCopy();
   };
 
+  const submitSimpleFeedback = async (type: FeedbackType) => {
+    if (!canGiveFeedback) return;
+    setFeedbackBusy(true);
+    try {
+      await chatApi.updateFeedback(message.id, { type, flag_for_review: false });
+      setFeedbackType(type);
+      setFeedbackOpen(false);
+      antdMessage.success(t('feedback_saved') || 'Feedback saved');
+    } catch {
+      antdMessage.error(t('feedback_failed') || 'Feedback failed');
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
+  const submitDetailedFeedback = async () => {
+    if (!canGiveFeedback) return;
+    setFeedbackBusy(true);
+    try {
+      await chatApi.updateFeedback(message.id, {
+        type: issueType,
+        comment: feedbackComment,
+        suggested_source: suggestedSource,
+        flag_for_review: flagForReview,
+      });
+      setFeedbackType(issueType);
+      setFeedbackOpen(false);
+      antdMessage.success(t('feedback_saved') || 'Feedback saved');
+    } catch {
+      antdMessage.error(t('feedback_failed') || 'Feedback failed');
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
+  const withdrawFeedback = async () => {
+    if (!canGiveFeedback) return;
+    setFeedbackBusy(true);
+    try {
+      await chatApi.withdrawFeedback(message.id);
+      setFeedbackType(null);
+      setFeedbackOpen(false);
+      setFeedbackComment('');
+      setSuggestedSource('');
+      setFlagForReview(false);
+      antdMessage.success(t('feedback_withdrawn') || 'Feedback withdrawn');
+    } catch {
+      antdMessage.error(t('feedback_failed') || 'Feedback failed');
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
   if (isUser) {
     return (
-      <div className="msg-row user">
+      <motion.div 
+        className="msg-row user"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: MESSAGE_TRANSITION_SECONDS, ease: [0.2, 0.8, 0.2, 1] }}
+      >
         <div className="msg-bubble user">{message.content}</div>
-      </div>
+      </motion.div>
     );
   }
 
   return (
-    <div className="msg-row assistant">
+    <motion.div 
+      className="msg-row assistant"
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: MESSAGE_TRANSITION_SECONDS, ease: [0.2, 0.8, 0.2, 1] }}
+    >
       <div className="msg-assistant-label">
         <span className="msg-assistant-dot">K</span>
         <span className="msg-assistant-name">KnowPilot</span>
@@ -110,21 +240,132 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
 
       {!isStreaming && (
         <div className="msg-actions">
-          <button className="msg-action-btn" onClick={handleCopy} disabled={disableActions}
+          <button className="msg-action-btn hover-lift btn-press" onClick={handleCopy} disabled={disableActions}
             aria-label={copied ? t('copied') : t('copy_message')}>
             {copied ? <CheckOutlined style={{ color: 'var(--color-success)' }} /> : <CopyOutlined />}
             {copied ? (t('copied') || 'Copied') : (t('copy_message') || 'Copy')}
           </button>
-          <button className="msg-action-btn" onClick={handleShare} disabled={disableActions}
-            aria-label={t('share_message')}>
-            <ShareAltOutlined />{t('share_message') || 'Share'}
-          </button>
+          {canShare && (
+            <button className="msg-action-btn hover-lift btn-press" onClick={handleShare} disabled={disableActions}
+              aria-label={t('share_message')}>
+              <ShareAltOutlined />{t('share_message') || 'Share'}
+            </button>
+          )}
           {onRegenerate && (
-            <button className="msg-action-btn" onClick={onRegenerate} disabled={disableActions}
+            <button className="msg-action-btn hover-lift btn-press" onClick={onRegenerate} disabled={disableActions}
               aria-label={t('regenerate')}>
               <ReloadOutlined />{t('regenerate') || 'Retry'}
             </button>
           )}
+          {onBranch && (
+            <button className="msg-action-btn btn-press" onClick={onBranch} disabled={disableActions}
+              aria-label={t('branch_conversation')}>
+              <BranchesOutlined />{t('branch_conversation')}
+            </button>
+          )}
+          {canGiveFeedback && (
+            <>
+              <button
+                className={`msg-action-btn hover-lift btn-press ${feedbackType === 'helpful' ? 'active' : ''}`}
+                onClick={() => submitSimpleFeedback('helpful')}
+                disabled={feedbackBusy}
+                aria-pressed={feedbackType === 'helpful'}
+                aria-label={t('feedback_helpful')}
+              >
+                <LikeOutlined />{t('feedback_helpful') || 'Helpful'}
+              </button>
+              <button
+                ref={feedbackTriggerRef}
+                className={`msg-action-btn hover-lift btn-press ${feedbackType && feedbackType !== 'helpful' ? 'active' : ''}`}
+                onClick={() => setFeedbackOpen((v) => !v)}
+                disabled={feedbackBusy}
+                aria-expanded={feedbackOpen}
+                aria-label={t('feedback_unhelpful')}
+              >
+                <DislikeOutlined />{t('feedback_unhelpful') || 'Not helpful'}
+              </button>
+              {feedbackType && (
+                <button
+                  className="msg-action-btn hover-lift btn-press"
+                  onClick={withdrawFeedback}
+                  disabled={feedbackBusy}
+                  aria-label={t('feedback_withdraw')}
+                >
+                  <CloseOutlined />{t('feedback_withdraw') || 'Withdraw'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {feedbackOpen && canGiveFeedback && (
+        <div
+          className="msg-feedback-panel"
+          role="form"
+          aria-label={t('feedback_panel_label')}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setFeedbackOpen(false);
+            }
+          }}
+        >
+          <label>
+            <span>{t('feedback_issue_type')}</span>
+            <select
+              value={issueType}
+              onChange={(event) => setIssueType(event.target.value as FeedbackType)}
+              disabled={feedbackBusy}
+            >
+              <option value="unhelpful">{t('feedback_type_unhelpful')}</option>
+              <option value="incorrect">{t('feedback_type_incorrect')}</option>
+              <option value="outdated">{t('feedback_type_outdated')}</option>
+              <option value="missing_source">{t('feedback_type_missing_source')}</option>
+            </select>
+          </label>
+          <label>
+            <span>{t('feedback_comment')}</span>
+            <textarea
+              value={feedbackComment}
+              onChange={(event) => setFeedbackComment(event.target.value)}
+              placeholder={t('feedback_comment_placeholder') || ''}
+              disabled={feedbackBusy}
+            />
+          </label>
+          <label>
+            <span>{t('feedback_source')}</span>
+            <input
+              value={suggestedSource}
+              onChange={(event) => setSuggestedSource(event.target.value)}
+              placeholder={t('feedback_source_placeholder') || ''}
+              disabled={feedbackBusy}
+            />
+          </label>
+          <label className="msg-feedback-check">
+            <input
+              type="checkbox"
+              checked={flagForReview}
+              onChange={(event) => setFlagForReview(event.target.checked)}
+              disabled={feedbackBusy}
+            />
+            <span><FlagOutlined /> {t('feedback_flag_for_review')}</span>
+          </label>
+          <div className="msg-feedback-actions">
+            <button className="msg-action-btn hover-lift btn-press" onClick={submitDetailedFeedback} disabled={feedbackBusy}>
+              {t('feedback_submit') || 'Submit'}
+            </button>
+            <button className="msg-action-btn hover-lift btn-press" onClick={() => setFeedbackOpen(false)} disabled={feedbackBusy}>
+              {t('feedback_cancel') || 'Cancel'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {message.role === 'assistant' && message.confidenceLabel && (
+        <div className={`msg-quality msg-quality-${message.confidenceLabel}`}>
+          <span>{t(`confidence_${message.confidenceLabel}`)}</span>
+          {message.needsHumanReview && <span>{t('needs_human_review')}</span>}
         </div>
       )}
 
@@ -137,25 +378,45 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, o
           </button>
           {sourcesExpanded && (
             <div className="citation-list">
-              {message.citations.map((cit: Citation, i: number) => (
-                <div key={i} className="citation-item">
-                  <span className="citation-index">{i + 1}.</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="citation-title" title={cit.document_title}>{cit.document_title}</div>
-                    <div className="citation-meta">
-                      {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
-                      <span className="relevance-badge" style={{ color: getRelevanceColor(cit.score) }}>
-                        {getRelevanceLabel(cit.score, t)}
-                      </span>
+              {message.citations.map((cit: Citation, i: number) => {
+                const sourceUrl = cit.source_url?.startsWith('/api/v1/chat/citations/')
+                  ? cit.source_url
+                  : null;
+                return (
+                  <div key={cit.source_id ?? `${cit.document_id}-${i}`} className="citation-item">
+                    <span className="citation-index">{i + 1}.</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {sourceUrl ? (
+                        <a
+                          className="citation-title"
+                          href={sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={cit.document_title}
+                        >
+                          {cit.document_title}
+                        </a>
+                      ) : (
+                        <div className="citation-title" title={cit.document_title}>
+                          {cit.document_title}
+                        </div>
+                      )}
+                      {cit.snippet && <div className="citation-snippet">{cit.snippet}</div>}
+                      <div className="citation-meta">
+                        {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
+                        <span className="relevance-badge" style={{ color: getRelevanceColor(cit.score) }}>
+                          {getRelevanceLabel(cit.score, t)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -164,7 +425,8 @@ const MemoizedMessageBubble = memo(MessageBubble, (prev, next) => {
   return prev.message.id === next.message.id
     && prev.message.content === next.message.content
     && prev.isStreaming === next.isStreaming
-    && prev.disableActions === next.disableActions;
+    && prev.disableActions === next.disableActions
+    && prev.canShare === next.canShare;
 });
 
 export default MemoizedMessageBubble;

@@ -80,6 +80,8 @@ class DocumentListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(category__slug=category)
         if status_filter:
             qs = qs.filter(status=status_filter)
+        else:
+            qs = qs.exclude(status="archived")
         return qs
 
     def get_serializer_class(self):
@@ -101,8 +103,12 @@ class DocumentListCreateView(generics.ListCreateAPIView):
             request=self.request,
         )
         # Trigger async ingestion
-        from apps.rag.services import ingest_document
-        ingest_document.delay(str(doc.id))
+        from apps.knowledge.ingestion import enqueue_document_ingestion
+        enqueue_document_ingestion(
+            doc,
+            requested_by=self.request.user,
+            trigger="upload",
+        )
 
 
 class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -121,6 +127,31 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        hard_delete = request.query_params.get("hard", "").lower() == "true"
+        if hard_delete:
+            if not is_platform_admin(request.user):
+                return Response(
+                    {"detail": "Only a platform super administrator may hard-delete documents."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            from apps.chat.models import Citation
+
+            if Citation.objects.filter(document=instance).exists():
+                return Response(
+                    {"detail": "Cited documents cannot be hard-deleted."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            create_audit_log(
+                user=request.user,
+                action="document_delete",
+                target_type="Document",
+                target_id=str(instance.id),
+                details={"title": instance.title, "hard_delete": True},
+                request=request,
+            )
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
         # V6.0: a document may be deleted by a platform admin, the uploader, or a
         # user with the space's document.delete permission (owner / knowledge
         # admin / org / business admin). Prevents cross-user/space deletion.
@@ -134,23 +165,18 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
             )
         create_audit_log(
             user=request.user,
-            action="document_delete",
+            action="document_status_change",
             target_type="Document",
             target_id=str(instance.id),
-            details={"title": instance.title},
+            details={
+                "title": instance.title,
+                "from": instance.status,
+                "to": "archived",
+            },
             request=request,
         )
-
-        # Citations protect their source document/chunk so historical answers do
-        # not silently lose provenance. For an explicit document delete, remove
-        # those citation rows first, then let Document.delete cascade chunks.
-        # Without this, documents that have ever been cited fail with
-        # ProtectedError and the UI appears unable to delete them.
-        from apps.chat.models import Citation
-
-        with transaction.atomic():
-            Citation.objects.filter(document=instance).delete()
-            self.perform_destroy(instance)
+        instance.status = "archived"
+        instance.save(update_fields=["status", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -270,6 +296,11 @@ class DocumentReindexView(generics.GenericAPIView):
                         {"error": "Document is already being processed"},
                         status=status.HTTP_409_CONFLICT,
                     )
+                if document.status == "archived":
+                    return Response(
+                        {"error": "Archived documents cannot be re-indexed"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
                 document.status = "processing"
                 document.save(update_fields=["status"])
         except Document.DoesNotExist:
@@ -285,8 +316,12 @@ class DocumentReindexView(generics.GenericAPIView):
         )
 
         # Trigger Celery task OUTSIDE the transaction (avoid long DB lock)
-        from apps.rag.services import ingest_document
-        ingest_document.delay(str(document.id))
+        from apps.knowledge.ingestion import enqueue_document_ingestion
+        enqueue_document_ingestion(
+            document,
+            requested_by=request.user,
+            trigger="reindex",
+        )
 
         return Response({"status": "reindexing started"})
 

@@ -14,37 +14,79 @@ V4.2 KB-V4.2-BATCH-009: Added metadata sanitization via bleach.
 """
 
 import logging
+import threading
 import time
+from dataclasses import dataclass
 
 from django.conf import settings
 
-from .chunker import LangChainChunker
-from .embedding import EmbeddingService
-from .retriever import PgVectorRetriever
-from .prompt_builder import PromptBuilder
-from .guardrails import GuardrailsService, LiteLLMChatService
-from .config import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K, SIMILARITY_THRESHOLD
 from apps.core.circuit_breaker import dashscope_breaker  # V4.2 SYS-V4.2-014
-from apps.knowledge.batch import sanitize_metadata, is_zero_vector  # V4.2 BATCH-009/012
+from apps.knowledge.batch import is_zero_vector, sanitize_metadata  # V4.2 BATCH-009/012
+
+from .config import CHUNK_OVERLAP, CHUNK_SIZE, SIMILARITY_THRESHOLD, TOP_K
+from .embedding import EmbeddingService
+from .errors import ProviderGenerationError
+from .guardrails import GuardrailsService, get_llm_service
+from .hybrid import HybridRetriever, classify_confidence
+from .prompt_builder import PromptBuilder
+from .retriever import PgVectorRetriever
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _SharedChatServices:
+    embedder: EmbeddingService
+    retriever: HybridRetriever
+    prompt_builder: PromptBuilder
+    guardrails: GuardrailsService
+
+
+_shared_chat_services = None
+_shared_chat_services_lock = threading.Lock()
+
+
+def get_shared_chat_services() -> _SharedChatServices:
+    """Reuse immutable/stateless chat services across concurrent requests."""
+
+    global _shared_chat_services
+    if _shared_chat_services is None:
+        with _shared_chat_services_lock:
+            if _shared_chat_services is None:
+                embedder = EmbeddingService()
+                _shared_chat_services = _SharedChatServices(
+                    embedder=embedder,
+                    retriever=HybridRetriever(
+                        vector_retriever=PgVectorRetriever(embedder=embedder)
+                    ),
+                    prompt_builder=PromptBuilder(),
+                    guardrails=GuardrailsService(),
+                )
+    return _shared_chat_services
 
 
 class RAGPipeline:
     """Orchestrates the full RAG lifecycle: ingest, retrieve, generate."""
 
-    def __init__(self):
-        self.parser = DocumentParser()
-        self.chunker = LangChainChunker(
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP,
-        )
-        self.embedder = EmbeddingService()
-        self.retriever = PgVectorRetriever()
-        self.prompt_builder = PromptBuilder()
-        self.guardrails = GuardrailsService()
-        self.llm = LiteLLMChatService()
+    def __init__(self, *, ingestion=False):
+        shared = get_shared_chat_services()
+        self.retriever = shared.retriever
+        self.prompt_builder = shared.prompt_builder
+        self.guardrails = shared.guardrails
+        self.llm = get_llm_service()
         self.model_name = settings.RAG_LLM_MODEL
+        self.answer_mode = "fast"
+        self.thinking_enabled = False
+        self.thinking_budget = None
+        if ingestion:
+            from .chunker import LangChainChunker
+
+            self.parser = DocumentParser()
+            self.chunker = LangChainChunker(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+            )
+            self.embedder = EmbeddingService()
 
     def ingest(self, document) -> list:
         """Parse, chunk, embed, and store a document.
@@ -60,6 +102,9 @@ class RAGPipeline:
             List of created DocumentChunk instances.
         """
         from apps.knowledge.models import DocumentChunk
+
+        if not hasattr(self, "parser") or not hasattr(self, "chunker"):
+            raise RuntimeError("ingestion_pipeline_required")
 
         # Parse document
         raw_text, page_metadata = self.parser.parse(document.file.path, document.file_type)
@@ -167,15 +212,16 @@ class RAGPipeline:
         query: str,
         user_profile,
         conversation_history: list,
+        *,
+        space_id: str,
         language: str = "en",
-        space_id: str | None = None,
     ):
         """Full RAG: retrieve context, build prompt, call LLM, stream response.
 
         Args:
             space_id: V6.0 — restrict retrieval (and therefore citations) to the
-                active knowledge space. When ``None`` no space filter is applied
-                (used only by non-scoped callers / tests).
+                active knowledge space. The pipeline no longer supports
+                unscoped callers.
 
         Yields:
             Dicts with 'event' and 'data' keys for SSE streaming.
@@ -186,8 +232,8 @@ class RAGPipeline:
                 yield {"event": "token", "data": {"token": self.guardrails.generate_fallback(language)}}
                 yield {"event": "done", "data": {}}
                 return
-        except Exception as e:
-            logger.error("Guardrails check error: %s", e, exc_info=True)
+        except Exception:
+            logger.error("chat_guardrails_failed code=guardrails_error")
             # V4.3 UAT: If guardrails service fails, proceed anyway —
             # guardrails is a safety enhancement, not a hard gate.
             pass
@@ -197,6 +243,7 @@ class RAGPipeline:
         # (e.g., PgVector not configured, DashScope embedding API unavailable),
         # return graceful degraded response instead of uncaught exception that
         # causes SSE "error" event → frontend shows "当前无法获取响应".
+        retrieval_started = time.monotonic()
         try:
             chunks = self.retriever.search(
                 query=query,
@@ -204,13 +251,24 @@ class RAGPipeline:
                 similarity_threshold=SIMILARITY_THRESHOLD,
                 space_id=space_id,  # V6.0 space isolation
             )
-        except Exception as e:
-            logger.error("Retrieval error: %s", e, exc_info=True)
+        except Exception:
+            logger.error("chat_retrieval_failed code=retrieval_error")
             dashscope_breaker.record_failure()  # Count as failure for circuit breaker
             degraded_msg = (
                 "抱歉，知识检索服务暂时不可用，请稍后重试。" if language == "zh"
                 else "Sorry, the knowledge retrieval service is temporarily unavailable. Please try again later."
             )
+            retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
+            yield {
+                "event": "quality",
+                "data": {
+                    "confidence": "insufficient",
+                    "score": 0.0,
+                    "needs_human_review": True,
+                    "retrieval_mode": "hybrid",
+                    "retrieval_latency_ms": retrieval_latency_ms,
+                },
+            }
             yield {"event": "token", "data": {"token": degraded_msg}}
             yield {"event": "citations", "data": []}
             yield {"event": "done", "data": {}}
@@ -218,6 +276,11 @@ class RAGPipeline:
 
         # V4.2 SYS-V4.2-014: Circuit breaker check — fail fast if DashScope is down
         if not dashscope_breaker.allow_request():
+            if getattr(self, "answer_mode", "fast") == "deep":
+                logger.warning(
+                    "provider_circuit_open code=provider_unavailable"
+                )
+                raise ProviderGenerationError("provider_unavailable")
             degraded_msg = (
                 "服务暂时不可用，请稍后重试。" if language == "zh"
                 else "Service temporarily unavailable, please try again later."
@@ -236,16 +299,32 @@ class RAGPipeline:
                 content = self._sanitize_content(content)
             sanitized_chunks.append({**chunk, "content": content})
         chunks = sanitized_chunks
+        retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
+        quality = classify_confidence(chunks)
+        yield {
+            "event": "quality",
+            "data": {
+                "confidence": quality.label,
+                "score": quality.score,
+                "needs_human_review": quality.needs_human_review,
+                "retrieval_mode": "hybrid",
+                "retrieval_latency_ms": retrieval_latency_ms,
+            },
+        }
 
-        # Step 2b: If no good results, return fallback
-        if not chunks:
+        # Step 2b: Refuse when evidence is absent or too weak. Low-confidence
+        # retrieval must never be promoted into an uncited deterministic claim.
+        if not chunks or quality.label in {"low", "insufficient"}:
             fallback = (
                 "我没有足够的信息来回答此问题，请联系您的人力资源伙伴或HR团队。"
                 if language == "zh"
                 else "I don't have enough information to answer this question. Please contact your HR buddy or HR team."
             )
             yield {"event": "token", "data": {"token": fallback}}
-            yield {"event": "citations", "data": []}
+            yield {
+                "event": "citations",
+                "data": self._build_citations(chunks) if chunks else [],
+            }
             yield {"event": "done", "data": {}}
             return
 
@@ -263,8 +342,8 @@ class RAGPipeline:
                 user_profile=user_profile,
                 language=language,
             )
-        except Exception as e:
-            logger.error("Prompt builder error: %s", e, exc_info=True)
+        except Exception:
+            logger.error("chat_prompt_build_failed code=prompt_build_error")
             dashscope_breaker.record_failure()
             degraded_msg = (
                 "抱歉，系统暂时无法处理您的请求，请稍后重试。" if language == "zh"
@@ -280,16 +359,37 @@ class RAGPipeline:
         # On failure: record_failure() counts toward opening the circuit.
         llm_success = False
         try:
-            for token in self.llm.stream_chat(system_prompt, query):
-                llm_success = True  # At least one token received = API is working
-                yield {"event": "token", "data": {"token": token}}
+            stream_parts = getattr(self.llm, "stream_chat_parts", None)
+            if callable(stream_parts):
+                for part in stream_parts(
+                    system_prompt,
+                    query,
+                    model_id=self.model_name,
+                    thinking_enabled=getattr(self, "thinking_enabled", False),
+                    thinking_budget=getattr(self, "thinking_budget", None),
+                ):
+                    if part.kind == "reasoning_duration":
+                        yield {
+                            "event": "metrics",
+                            "data": {"reasoning_ms": part.duration_ms or 0},
+                        }
+                    elif part.kind == "answer_delta":
+                        llm_success = True
+                        yield {"event": "token", "data": {"token": part.text}}
+            else:
+                for token in self.llm.stream_chat(system_prompt, query):
+                    llm_success = True
+                    yield {"event": "token", "data": {"token": token}}
             # Full success — record it to close/reset the circuit breaker
-            if llm_success:
-                dashscope_breaker.record_success()
-        except Exception as e:
+            if not llm_success:
+                raise ProviderGenerationError("provider_empty_answer")
+            dashscope_breaker.record_success()
+        except Exception as exc:
             # V4.2 SYS-V4.2-014: Record failure to count toward circuit opening
             dashscope_breaker.record_failure()
-            logger.error("DashScope stream error: %s", e, exc_info=True)
+            logger.error("provider_stream_failed code=provider_unavailable")
+            if getattr(self, "answer_mode", "fast") == "deep":
+                raise ProviderGenerationError("provider_unavailable") from exc
             degraded_msg = (
                 "服务暂时不可用，请稍后重试。" if language == "zh"
                 else "Service temporarily unavailable, please try again later."

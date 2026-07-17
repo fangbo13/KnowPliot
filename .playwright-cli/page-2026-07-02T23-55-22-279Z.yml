@@ -1,0 +1,132 @@
+- generic [ref=e1]:
+  - generic [ref=e108]:
+    - link "Skip to main content" [ref=e109] [cursor=pointer]:
+      - /url: "#main-content"
+    - complementary [ref=e110]:
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - generic [ref=e113]: K
+          - generic [ref=e114]: KnowPilot
+        - button "Collapse sidebar" [ref=e115] [cursor=pointer]:
+          - img "menu-fold" [ref=e116]:
+            - img [ref=e117]
+      - button "Switch space" [ref=e120] [cursor=pointer]:
+        - img "appstore" [ref=e121]:
+          - img [ref=e122]
+        - generic [ref=e124]: General Knowledge Space
+        - img "down" [ref=e125]:
+          - img [ref=e126]
+      - button "plus Start New Chat" [ref=e129] [cursor=pointer]:
+        - img "plus" [ref=e130]:
+          - img [ref=e131]
+        - text: Start New Chat
+      - generic [ref=e135]:
+        - img "search" [ref=e136]:
+          - img [ref=e137]
+        - textbox "Search conversations" [ref=e139]
+      - generic [ref=e141]: No conversations yet. Start your first chat!
+      - generic [ref=e142]:
+        - generic [ref=e143]: C
+        - generic [ref=e144]: codex.qa.admin@example.test
+        - button "Logout" [ref=e145] [cursor=pointer]:
+          - img "logout" [ref=e146]:
+            - img [ref=e147]
+    - generic [ref=e149]:
+      - banner [ref=e150]:
+        - button "Search conversations or run a command…" [ref=e151] [cursor=pointer]:
+          - img "search" [ref=e152]:
+            - img [ref=e153]
+        - button "Switch language" [ref=e155] [cursor=pointer]:
+          - img "global" [ref=e156]:
+            - img [ref=e157]
+        - button "Switch to Dark Mode" [ref=e159] [cursor=pointer]:
+          - img "moon" [ref=e160]:
+            - img [ref=e161]
+        - button "Notifications" [ref=e163] [cursor=pointer]:
+          - img "bell" [ref=e165]:
+            - img [ref=e166]
+        - button "User menu" [ref=e168] [cursor=pointer]:
+          - generic [ref=e169]: C
+          - generic [ref=e170]: codex.qa.admin@example.test
+      - main [ref=e171]:
+        - generic [ref=e174]:
+          - generic [ref=e175]:
+            - generic [ref=e176]: K
+            - heading "How can I help with your onboarding?" [level=1] [ref=e177]
+            - paragraph [ref=e178]: Welcome to KnowPilot! Type your question below or choose a quick question from Common Questions.
+          - generic [ref=e180]:
+            - textbox "Type your message" [ref=e181]:
+              - /placeholder: Type your question here...
+            - button "Send message" [disabled] [ref=e182]:
+              - img "arrow-up" [ref=e183]:
+                - img [ref=e184]
+          - generic [ref=e186]: Ask anything, or pick a topic below
+          - generic [ref=e187]:
+            - 'button "IT setup: How do I set up my company email and laptop?" [ref=e188] [cursor=pointer]':
+              - generic [ref=e189]:
+                - img "laptop" [ref=e191]:
+                  - img [ref=e192]
+                - generic [ref=e194]: IT setup
+              - generic [ref=e195]: How do I set up my company email and laptop?
+            - 'button "Expenses: What is the expense reimbursement process?" [ref=e196] [cursor=pointer]':
+              - generic [ref=e197]:
+                - img "dollar" [ref=e199]:
+                  - img [ref=e200]
+                - generic [ref=e202]: Expenses
+              - generic [ref=e203]: What is the expense reimbursement process?
+            - 'button "Annual leave: How many annual leave days do I have?" [ref=e204] [cursor=pointer]':
+              - generic [ref=e205]:
+                - img "calendar" [ref=e207]:
+                  - img [ref=e208]
+                - generic [ref=e210]: Annual leave
+              - generic [ref=e211]: How many annual leave days do I have?
+            - 'button "Training: What courses are included in onboarding training?" [ref=e212] [cursor=pointer]':
+              - generic [ref=e213]:
+                - img "book" [ref=e215]:
+                  - img [ref=e216]
+                - generic [ref=e218]: Training
+              - generic [ref=e219]: What courses are included in onboarding training?
+            - 'button "Office location: Where is the office and how do I get there?" [ref=e220] [cursor=pointer]':
+              - generic [ref=e221]:
+                - img "environment" [ref=e223]:
+                  - img [ref=e224]
+                - generic [ref=e226]: Office location
+              - generic [ref=e227]: Where is the office and how do I get there?
+            - 'button "Mentor: Who is my mentor or buddy?" [ref=e228] [cursor=pointer]':
+              - generic [ref=e229]:
+                - img "team" [ref=e231]:
+                  - img [ref=e232]
+                - generic [ref=e234]: Mentor
+              - generic [ref=e235]: Who is my mentor or buddy?
+  - generic [ref=e238]:
+    - dialog:
+      - generic [ref=e239]:
+        - button "Close" [ref=e240] [cursor=pointer]:
+          - generic "Close" [ref=e241]:
+            - img "close" [ref=e242]:
+              - img [ref=e243]
+        - generic [ref=e246]:
+          - generic [ref=e247]: K
+          - heading "Welcome to KnowPilot" [level=2] [ref=e248]
+          - paragraph [ref=e249]: Quick overview of navigation features to get started
+          - generic [ref=e250]:
+            - generic [ref=e251]:
+              - img "message" [ref=e253]:
+                - img [ref=e254]
+              - generic [ref=e256]: Smart Chat
+              - generic [ref=e257]: Ask the AI assistant any policy, or benefits questions
+            - generic [ref=e258]:
+              - img "book" [ref=e260]:
+                - img [ref=e261]
+              - generic [ref=e263]: Knowledge Base
+              - generic [ref=e264]: Browse company policy and guide documents
+            - generic [ref=e265]:
+              - img "user" [ref=e267]:
+                - img [ref=e268]
+              - generic [ref=e270]: Profile Settings
+              - generic [ref=e271]: Manage your language and theme preferences
+          - button "rocket Get Started" [ref=e272] [cursor=pointer]:
+            - img "rocket" [ref=e274]:
+              - img [ref=e275]
+            - generic [ref=e277]: Get Started
+          - generic [ref=e278]: Skip option will appear in a moment…

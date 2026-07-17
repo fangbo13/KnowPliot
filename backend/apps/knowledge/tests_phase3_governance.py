@@ -24,7 +24,7 @@ from rest_framework.test import APITestCase
 from apps.audit.models import AuditLog
 from apps.core.validators import validate_file_content_type
 from apps.knowledge.batch import validate_inner_file_type, validate_zip_content
-from apps.knowledge.models import Document
+from apps.knowledge.models import Document, IngestionJob
 from apps.knowledge.serializers import DocumentSerializer
 from apps.spaces.models import KnowledgeSpace, Organization, SpaceMembership
 
@@ -337,7 +337,8 @@ class DocumentUploadPolicyIntegrationTest(APITestCase):
         self.assertEqual(document.file_type, "txt")
         self.assertEqual(document.file_size, len(content))
         self.assertEqual(document.space, self.space)
-        delay.assert_called_once_with(str(document.id))
+        job = IngestionJob.objects.get(document=document)
+        delay.assert_called_once_with(str(document.id), str(job.id))
 
 
 class DocumentDownloadSecurityTest(APITestCase):

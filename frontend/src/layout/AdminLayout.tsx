@@ -8,16 +8,21 @@
 // employee app. Only admins (super / org / business) may enter; everyone else
 // is redirected back to the chat app. Server-side checks still gate every API.
 
-import { NavLink, Outlet, useNavigate, Navigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   DashboardOutlined, TeamOutlined, SafetyCertificateOutlined, SoundOutlined,
   ApartmentOutlined, AuditOutlined, DatabaseOutlined, ArrowLeftOutlined,
-  GlobalOutlined, SunOutlined, MoonOutlined, LayoutOutlined,
+  GlobalOutlined, SunOutlined, MoonOutlined, LayoutOutlined, MessageOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useAuth, isAnyAdmin } from '../auth/AuthProvider';
+import { useAuth } from '../auth/AuthProvider';
+import { useAuthorization } from '../auth/CapabilityProvider';
 import { useTheme } from '../hooks/useTheme';
 import NotificationBell from '../components/NotificationBell';
+import { designTokens } from '../design/tokens';
+
+const PAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
 const NAV = [
   { to: '/admin/dashboard', icon: <DashboardOutlined />, key: 'admin_nav_dashboard' },
@@ -26,6 +31,7 @@ const NAV = [
   { to: '/admin/announcements', icon: <SoundOutlined />, key: 'admin_nav_announcements' },
   { to: '/admin/business-lines', icon: <ApartmentOutlined />, key: 'admin_nav_business_lines' },
   { to: '/admin/templates', icon: <LayoutOutlined />, key: 'admin_nav_templates' },
+  { to: '/admin/quality', icon: <MessageOutlined />, key: 'admin_nav_quality' },
   { to: '/admin/audit', icon: <AuditOutlined />, key: 'admin_nav_audit' },
   { to: '/admin/knowledge', icon: <DatabaseOutlined />, key: 'admin_nav_knowledge' },
 ];
@@ -38,12 +44,14 @@ function initials(email?: string) {
 export default function AdminLayout() {
   const { t, i18n } = useTranslation('common');
   const { user } = useAuth();
+  const access = useAuthorization();
   const navigate = useNavigate();
+  const location = useLocation();
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
 
   // Gate: only admins enter the console.
-  if (!isAnyAdmin(user)) {
+  if (!access.hasAny(['platform.access', 'governance.access'])) {
     return <Navigate to="/chat" replace />;
   }
 
@@ -64,7 +72,7 @@ export default function AdminLayout() {
           <span style={{
             width: 34, height: 34, borderRadius: 10, background: 'var(--gradient-accent)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 18,
+            color: 'var(--color-text-on-accent)', fontFamily: 'var(--font-family-display)', fontWeight: 600, fontSize: 18,
           }}>K</span>
           <span style={{ fontFamily: "'Fraunces', serif", fontWeight: 500, fontSize: 16 }}>
             {t('admin_console')}
@@ -77,6 +85,7 @@ export default function AdminLayout() {
               key={item.to}
               to={item.to}
               style={({ isActive }) => ({
+                position: 'relative',
                 display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px',
                 borderRadius: 10, fontSize: 14, textDecoration: 'none',
                 fontWeight: isActive ? 600 : 500,
@@ -85,8 +94,18 @@ export default function AdminLayout() {
                 transition: 'background var(--dur) var(--ease-out), color var(--dur) var(--ease-out)',
               })}
             >
-              <span style={{ fontSize: 16, display: 'inline-flex' }}>{item.icon}</span>
-              {t(item.key)}
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <div style={{
+                      position: 'absolute', left: -12, top: '50%', transform: 'translateY(-50%)',
+                      width: 3, height: 18, borderRadius: '0 3px 3px 0', background: 'var(--accent)'
+                    }} />
+                  )}
+                  <span style={{ fontSize: 16, display: 'inline-flex' }}>{item.icon}</span>
+                  {t(item.key)}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -103,25 +122,39 @@ export default function AdminLayout() {
         </button>
       </aside>
 
-      {/* Main */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <header className="app-header" style={{ justifyContent: 'flex-end' }}>
-          <span className="spacer" />
-          <button className="icon-btn" onClick={toggleLanguage} aria-label={t('language_switch') || 'Switch language'}
-            style={{ color: i18n.language.startsWith('zh') ? 'var(--accent)' : undefined }}><GlobalOutlined /></button>
-          <button className="icon-btn" onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
-            aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')}>
+      {/* Main Content */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <header style={{
+          height: 56, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+          padding: '0 24px', gap: 4, background: 'var(--color-bg-container)',
+          borderBottom: '1px solid var(--color-border-secondary)'
+        }}>
+          <NotificationBell />
+          <button className="icon-btn" onClick={() => setThemeMode(isDark ? 'light' : 'dark')} aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')} title={isDark ? t('switch_to_light') : t('switch_to_dark')}>
             {isDark ? <SunOutlined /> : <MoonOutlined />}
           </button>
-          <NotificationBell />
+          <button className="icon-btn" onClick={toggleLanguage} aria-label={t('language_switch') || 'Switch language'}>
+            <GlobalOutlined />
+          </button>
           <button className="icon-btn" style={{ width: 'auto', gap: 8, padding: '0 8px' }} aria-label={t('user_menu') || 'User'}>
             <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>
             <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>
           </button>
         </header>
 
-        <main style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '28px 32px' }}>
-          <Outlet />
+        <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '28px 32px', display: 'flex', flexDirection: 'column' }}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: PAGE_TRANSITION_SECONDS, ease: [0.25, 0.8, 0.25, 1] }}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
     </div>

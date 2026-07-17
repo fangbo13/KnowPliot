@@ -24,11 +24,11 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isChinese = i18n.language?.startsWith('zh');
-  const isSendLocked = useChatStore((s) => s.isSendLocked);
-  const streamPhase = useChatStore((s) => s.streamPhase);
-  const streamingSessionId = useChatStore((s) => s.streamingSessionId);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const isStreaming = streamPhase !== 'idle' && streamingSessionId === activeSessionId;
+  const activeTurn = useChatStore((s) => activeSessionId ? s.turnsBySession[activeSessionId] : undefined);
+  const pendingSessionCreation = useChatStore((s) => activeSessionId ? false : s.isSendLocked);
+  const isSendLocked = activeTurn?.isLocked ?? pendingSessionCreation;
+  const isStreaming = Boolean(activeTurn?.isLocked && activeTurn.phase !== 'error');
 
   const defaultQuickActions = useMemo(() => (
     isChinese
@@ -71,8 +71,8 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
 
   return (
     <div className="welcome">
-      <div className="welcome-head">
-        <div className="welcome-mark">K</div>
+      <div className="welcome-head section-enter">
+        <div className="welcome-mark ambient-glow">K</div>
         <h1 className="welcome-greeting">{t('welcome_greeting', { defaultValue: 'How can I help with your onboarding?' })}</h1>
         <p className="welcome-sub">{t('welcome_tip')}</p>
       </div>
@@ -97,7 +97,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
         {activeQuickActions.map((action) => (
           <button
             key={action.label}
-            className="welcome-suggest"
+            className="welcome-suggest hover-lift btn-press"
             onClick={() => onQuickAction(action.question)}
             aria-label={`${action.label}: ${action.question}`}
           >

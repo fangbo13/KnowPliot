@@ -10,14 +10,15 @@ import { useLocation } from 'react-router-dom';
 import { message as antMessage } from 'antd';
 import { CheckOutlined, CloseOutlined, ArrowDownOutlined, EditOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useChatStore } from '../store/chatStore';
+import { useChatStore, type AnswerMode, type Message } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
-import { abortActiveStream } from '../stream/StreamLifecycleManager';
-import { cleanupTokenBatcher } from '../stream/TokenBatchRenderer';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 import ChatComposer from '../components/chat/ChatComposer';
+import ProcessingPanel from '../components/chat/ProcessingPanel';
 import { chatApi } from '../api/chat';
+import { useAuthorization } from '../auth/CapabilityProvider';
+import { DEEP_ANSWER_MODE_ENABLED } from '../auth/authorization';
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -44,22 +45,35 @@ function clipForScreenReader(text: string, maxLength = 100): string {
 
 export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
+  const authorization = useAuthorization();
+  const canShare = authorization.has('chat.share');
+  const canUseDeep = DEEP_ANSWER_MODE_ENABLED
+    && authorization.enabled
+    && authorization.has('chat.deep');
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
-    sessions, messages, streamContent, citations, activeSessionId, streamingSessionId,
-    isLoadingMessages, sendError, hasOlderMessages, setSendError, sendMessage,
-    loadSessions, loadMessages, loadOlderRounds, aiStatusText,
+    sessions, messages, activeSessionId, isLoadingMessages, hasOlderMessages,
+    setSendError, sendMessage, loadSessions, loadMessages, loadOlderRounds, setActiveSession,
+    abortSessionStream,
   } = useChatStore();
 
-  const streamPhase = useChatStore((s) => s.streamPhase);
-  const isSendLocked = useChatStore((s) => s.isSendLocked);
-  const isStreaming = streamPhase !== 'idle';
+  const activeTurn = useChatStore((s) => activeSessionId ? s.turnsBySession[activeSessionId] : undefined);
+  const streamPhase = activeTurn?.phase ?? 'idle';
+  const isSendLocked = activeTurn?.isLocked ?? false;
+  const sendError = activeTurn?.error ?? null;
+  const isStreaming = isSendLocked && streamPhase !== 'error';
+  const visibleStreamContent = isStreaming ? activeTurn?.content ?? '' : '';
+  const visibleCitations = isStreaming ? activeTurn?.citations ?? [] : [];
+  const visibleStreamPhase = isStreaming ? streamPhase : 'idle';
+  const visibleAiStatusText = isStreaming ? activeTurn?.aiStatusText ?? null : null;
 
   const activeSpace = useSpaceStore((s) => s.getActiveSpace());
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
 
   const [inputValue, setInputValue] = useState('');
+  const [answerMode, setAnswerMode] = useState<AnswerMode>('fast');
+  const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
@@ -82,11 +96,16 @@ export default function ChatPageContainer() {
   }, [activeSessionTitle, isRenamingTitle]);
 
   useEffect(() => { loadedSessionRef.current = null; }, [location.pathname]);
-  useEffect(() => () => cleanupTokenBatcher(), []);
+
+  useEffect(() => {
+    if (answerMode !== 'deep' || canUseDeep) return;
+    setAnswerMode('fast');
+    setModeNotice('error_deep_unavailable');
+  }, [answerMode, canUseDeep]);
 
   useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
-      if (streamPhase !== 'idle' && streamingSessionId === activeSessionId) {
+      if (activeTurn?.isLocked) {
         loadedSessionRef.current = activeSessionId;
         return;
       }
@@ -94,40 +113,100 @@ export default function ChatPageContainer() {
       loadedSessionRef.current = activeSessionId;
       loadMessages(activeSessionId).finally(() => setIsTransitioning(false));
     }
-  }, [activeSessionId, loadMessages, streamPhase, streamingSessionId]);
+  }, [activeSessionId, activeTurn?.isLocked, loadMessages]);
 
   const scrollToBottom = () => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth', align: 'end' });
 
   const handleSend = () => {
     if (!inputValue.trim() || isStreaming || isSendLocked || isSendingRef.current) return;
+    if (answerMode === 'deep' && !canUseDeep) {
+      setAnswerMode('fast');
+      setModeNotice('error_deep_unavailable');
+      return;
+    }
     if (!navigator.onLine) {
       antMessage.warning(t('offline_send_warning') || 'You are offline. Please check your network.');
       return;
     }
     isSendingRef.current = true;
-    sendMessage(inputValue.trim());
+    sendMessage(inputValue.trim(), { answerMode, canUseDeep });
+    setModeNotice(null);
     setInputValue('');
     inputRef.current?.focus();
     requestAnimationFrame(() => { isSendingRef.current = false; });
   };
 
   const handleQuickAction = (question: string) => {
-    sendMessage(question);
+    sendMessage(question, { answerMode: 'fast' });
     inputRef.current?.focus();
   };
 
-  const handleRetry = () => {
+  const handleRetry = (targetAssistant?: Message) => {
     if (isStreaming || isSendLocked || isSendingRef.current) return;
     if (!navigator.onLine) {
       antMessage.warning(t('offline_send_warning') || 'You are offline. Please check your network.');
       return;
     }
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+    const targetIndex = targetAssistant
+      ? messages.findIndex((message) => message.id === targetAssistant.id)
+      : messages.length;
+    const lastUserMsg = messages.slice(0, targetIndex).reverse().find((message) => message.role === 'user');
     if (lastUserMsg) {
-      setSendError(null);
       isSendingRef.current = true;
-      sendMessage(lastUserMsg.content);
+      if (targetAssistant) {
+        setSendError(null);
+        sendMessage(lastUserMsg.content, {
+          answerMode: answerMode === 'deep' && canUseDeep ? 'deep' : 'fast',
+          canUseDeep,
+          regenerateMessageId: targetAssistant.id,
+        });
+        requestAnimationFrame(() => { isSendingRef.current = false; });
+        return;
+      }
+      const reusesFailedDeepTurn = activeTurn?.answerMode === 'deep'
+        && activeTurn.phase === 'error'
+        && !activeTurn.isLocked
+        && Boolean(activeTurn.clientRequestId);
+      if (reusesFailedDeepTurn) {
+        setAnswerMode('fast');
+        setModeNotice(null);
+        sendMessage(lastUserMsg.content, {
+          answerMode: 'fast',
+          retryClientRequestId: activeTurn.clientRequestId!,
+        });
+      } else {
+        setSendError(null);
+        sendMessage(lastUserMsg.content, {
+          answerMode: answerMode === 'deep' && canUseDeep ? 'deep' : 'fast',
+          canUseDeep,
+        });
+      }
       requestAnimationFrame(() => { isSendingRef.current = false; });
+    }
+  };
+
+  const handleBranch = async (targetAssistant: Message) => {
+    if (isStreaming || isSendLocked) return;
+    try {
+      const branch = await chatApi.branchMessage(targetAssistant.id);
+      await loadSessions();
+      setActiveSession(branch.id);
+      antMessage.success(t('branch_created'));
+    } catch {
+      antMessage.error(t('branch_failed'));
+    }
+  };
+
+  const handleShare = async () => {
+    if (!activeSessionId || !canShare) return;
+    try {
+      const share = await chatApi.createShare(activeSessionId);
+      const url = `${window.location.origin}/shared/${share.token}`;
+      if (navigator.share) await navigator.share({ title: activeSessionTitle, url });
+      else await navigator.clipboard.writeText(url);
+      antMessage.success(t('share_created'));
+    } catch {
+      antMessage.error(t('share_failed'));
     }
   };
 
@@ -156,7 +235,7 @@ export default function ChatPageContainer() {
     }
   };
 
-  const handleStop = () => abortActiveStream();
+  const handleStop = () => { if (activeSessionId) abortSessionStream(activeSessionId); };
   const handleLoadOlder = () => loadOlderRounds(5);
 
   if (!activeSessionId && messages.length === 0) {
@@ -169,17 +248,17 @@ export default function ChatPageContainer() {
         />
         <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
           <div style={{
-            opacity: aiStatusText ? 1 : 0,
-            transform: aiStatusText ? 'translateY(0)' : 'translateY(8px)',
-            transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            opacity: visibleAiStatusText ? 1 : 0,
+            transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
+            transition: 'opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease)',
             marginBottom: 10,
             display: 'flex',
             justifyContent: 'center',
-            pointerEvents: aiStatusText ? 'auto' : 'none'
+            pointerEvents: visibleAiStatusText ? 'auto' : 'none'
           }}>
-            <div className="gemini-status-indicator">
+            <div className="gemini-status-indicator" style={{ background: 'var(--color-bg-elevated)' }}>
               <span className="gemini-status-spinner" />
-              <span>{aiStatusText}</span>
+              <span>{visibleAiStatusText}</span>
             </div>
           </div>
         </div>
@@ -229,34 +308,57 @@ export default function ChatPageContainer() {
 
       <div className="chat-stream-wrap">
         <div aria-live="polite" aria-atomic="false" className="sr-only">
-          {isStreaming && streamContent && `AI is typing: ${clipForScreenReader(streamContent)}`}
-          {isStreaming && !streamContent &&
+          {isStreaming && visibleStreamContent && `AI is typing: ${clipForScreenReader(visibleStreamContent)}`}
+          {isStreaming && !visibleStreamContent &&
             (streamPhase === 'connecting' ? t('thinking_connecting')
               : streamPhase === 'searching' ? t('thinking_searching')
               : t('thinking_generating'))}
         </div>
 
+        {isStreaming && activeTurn?.safePhase ? (
+          <ProcessingPanel
+            answerMode={activeTurn.answerMode ?? 'fast'}
+            phase={activeTurn.safePhase}
+            timings={activeTurn.timings}
+            citations={activeTurn.citations}
+          />
+        ) : null}
+
         {isLoadingMessages && messages.length === 0 && (
-          <div className="skeleton-msg">
-            {[80, 55, 70].map((w, i) => (
-              <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: i === 0 ? 20 : 14 }} />
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px 0' }}>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-end', width: '60%', padding: '14px 18px', borderRadius: 20 }}>
+              {[100, 85].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-start', width: '85%', padding: '14px 18px', borderRadius: 20 }}>
+              {[100, 100, 65].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
+            <div className="skeleton-msg" style={{ alignSelf: 'flex-end', width: '40%', padding: '14px 18px', borderRadius: 20 }}>
+              {[90].map((w, i) => <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 14 }} />)}
+            </div>
           </div>
         )}
 
         {sendError && (
-          <div className="chat-error" role="alert">
+          <div className="chat-error section-enter" role="alert">
             <WarningOutlined className="chat-error-icon" />
             <div className="chat-error-body">
               <div className="chat-error-title">{t('error_title') || 'Error'}</div>
               <div className="chat-error-desc">{getErrorDescription(sendError)}</div>
               <div className="chat-error-actions">
-                <button className="msg-action-btn" onClick={handleRetry}><ReloadOutlined />{t('error_retry')}</button>
+                <button className="msg-action-btn" onClick={() => handleRetry()}><ReloadOutlined />{t('error_retry')}</button>
                 <button className="msg-action-btn" onClick={() => setSendError(null)}>{t('cancel') || 'Dismiss'}</button>
               </div>
             </div>
           </div>
         )}
+
+        {modeNotice ? (
+          <div className="chat-mode-notice" role="alert">
+            {t(modeNotice, {
+              defaultValue: 'Deep answer is no longer available. Fast answer remains available.',
+            })}
+          </div>
+        ) : null}
 
         <div style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity var(--dur) var(--ease-out)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <VirtualizedMessageList
@@ -265,15 +367,18 @@ export default function ChatPageContainer() {
             hasOlderMessages={hasOlderMessages}
             onLoadOlder={handleLoadOlder}
             isStreaming={isStreaming}
-            streamContent={streamContent}
-            citations={citations}
-            streamPhase={streamPhase}
+            streamContent={visibleStreamContent}
+            citations={visibleCitations}
+            streamPhase={visibleStreamPhase}
             onRegenerate={handleRetry}
+            onBranch={handleBranch}
+            onShare={handleShare}
+            canShare={canShare}
             onScrollToBottomChange={setShowScrollFab}
           />
 
           {showScrollFab && (
-            <button className="scroll-fab" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'}>
+            <button className="scroll-fab section-enter" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'} style={{ background: 'var(--color-bg-elevated)' }}>
               <ArrowDownOutlined />{t('new_messages') || 'Latest'}
             </button>
           )}
@@ -282,17 +387,17 @@ export default function ChatPageContainer() {
 
       <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
         <div style={{
-          opacity: aiStatusText ? 1 : 0,
-          transform: aiStatusText ? 'translateY(0)' : 'translateY(8px)',
-          transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+          opacity: visibleAiStatusText ? 1 : 0,
+          transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease)',
           marginBottom: 10,
           display: 'flex',
           justifyContent: 'center',
-          pointerEvents: aiStatusText ? 'auto' : 'none'
+          pointerEvents: visibleAiStatusText ? 'auto' : 'none'
         }}>
-          <div className="gemini-status-indicator">
+          <div className="gemini-status-indicator" style={{ background: 'var(--color-bg-elevated)' }}>
             <span className="gemini-status-spinner" />
-            <span>{aiStatusText}</span>
+            <span>{visibleAiStatusText}</span>
           </div>
         </div>
 
@@ -310,6 +415,17 @@ export default function ChatPageContainer() {
             multiline
             maxRows={6}
             showHint
+            answerMode={answerMode}
+            canUseDeep={canUseDeep}
+            onAnswerModeChange={(mode) => {
+              if (mode === 'deep' && !canUseDeep) {
+                setAnswerMode('fast');
+                setModeNotice('error_deep_unavailable');
+                return;
+              }
+              setAnswerMode(mode);
+              setModeNotice(null);
+            }}
           />
         </div>
       </div>

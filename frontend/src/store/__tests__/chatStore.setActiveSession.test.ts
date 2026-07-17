@@ -38,25 +38,31 @@ import {
   flushImmediate,
   resetTokenBatcher,
 } from '../../stream/TokenBatchRenderer';
+import { broadcastSessionSwitch } from '../../sync/crossTabSync';
 
 // Register a batch callback (as sendMessage does) and capture everything it emits.
-function collectBatcher(): string[] {
+function collectBatcher(sessionId = 'sess-A', generationId = 'gen-A'): string[] {
   const received: string[] = [];
-  initTokenBatcher((update) => {
+  initTokenBatcher(sessionId, generationId, (update) => {
     received.push('appendTokens' in update ? update.appendTokens : update.fullContent);
   });
   return received;
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   // Node test env has no rAF; stub so appendToken() can schedule without throwing.
   (globalThis as any).requestAnimationFrame = (_cb: unknown) => 1;
   (globalThis as any).cancelAnimationFrame = () => {};
-  resetTokenBatcher();
+  resetTokenBatcher('sess-A');
+  resetTokenBatcher('sess-B');
   useChatStore.setState({
     activeSessionId: null,
     messages: [],
     allMessages: [],
+    turnsBySession: {},
+    localPartialsBySession: {},
+    messageCacheBySession: {},
     streamPhase: 'idle',
     streamContent: '',
     streamingSessionId: null,
@@ -65,26 +71,92 @@ beforeEach(() => {
 });
 
 describe('setActiveSession — keeps background stream rendering alive (V4.6)', () => {
+  it('restores a bounded session message cache immediately on switch back', () => {
+    useChatStore.setState({ activeSessionId: 'sess-A' });
+    for (let index = 0; index < 105; index += 1) {
+      useChatStore.getState().addMessage({
+        id: `message-${index}`,
+        role: 'user',
+        content: `question ${index}`,
+        createdAt: new Date(2026, 6, 16, 0, index).toISOString(),
+      });
+    }
+
+    useChatStore.getState().setActiveSession('sess-B');
+    useChatStore.getState().setActiveSession('sess-A');
+
+    const state = useChatStore.getState();
+    expect(state.allMessages).toHaveLength(100);
+    expect(state.allMessages[0]?.id).toBe('message-5');
+    expect(state.messages[state.messages.length - 1]?.content).toBe('question 104');
+  });
+
+  it('is a true no-op when selecting the active session again', () => {
+    const message = {
+      id: 'message-1',
+      role: 'user' as const,
+      content: 'keep me',
+      createdAt: '2026-07-16T00:00:00Z',
+    };
+    useChatStore.setState({
+      activeSessionId: 'sess-A',
+      messages: [message],
+      allMessages: [message],
+      sessionNextCursor: 'session-next',
+      messageNextCursor: 'message-next',
+      visibleRoundCount: 7,
+      hasOlderMessages: true,
+      totalRoundCount: 9,
+      isLoadingMessages: true,
+      streamPhase: 'streaming',
+      streamingSessionId: 'sess-A',
+      streamContent: 'partial answer',
+      sendError: 'error_network',
+      isSendLocked: true,
+    });
+
+    const before = useChatStore.getState();
+    before.setActiveSession('sess-A');
+
+    expect(useChatStore.getState()).toBe(before);
+    expect(broadcastSessionSwitch).not.toHaveBeenCalled();
+  });
+
   it('does NOT sever the token-batch callback when switching sessions mid-stream', () => {
     const received = collectBatcher();
 
     // A stream is in progress for session A.
-    useChatStore.setState({ streamingSessionId: 'sess-A', streamPhase: 'streaming' });
-    appendToken('Hello');
+    useChatStore.setState({
+      activeSessionId: 'sess-A',
+      turnsBySession: {
+        'sess-A': {
+          phase: 'streaming', isLocked: true, content: '', citations: [], quality: null,
+          error: null, aiStatusText: null, generationId: 'gen-A',
+        },
+      },
+    });
+    appendToken('sess-A', 'gen-A', 'Hello');
 
     // User switches to a different conversation while A is still streaming.
     useChatStore.getState().setActiveSession('sess-B');
 
     // The still-running background stream keeps delivering tokens.
-    appendToken(' world');
-    flushImmediate();
+    appendToken('sess-A', 'gen-A', ' world');
+    flushImmediate('sess-A', 'gen-A');
 
     // Before the fix this was '' — resetTokenBatcher() nulled the callback + wiped the buffer.
     expect(received.join('')).toContain('Hello world');
   });
 
-  it('preserves streamPhase / streamContent / streamingSessionId across a switch', () => {
+  it('preserves session A turn while mirroring idle state for session B', () => {
     useChatStore.setState({
+      activeSessionId: 'sess-A',
+      turnsBySession: {
+        'sess-A': {
+          phase: 'streaming', isLocked: true, content: 'partial answer', citations: [], quality: null,
+          error: null, aiStatusText: null, generationId: 'gen-A',
+        },
+      },
       streamingSessionId: 'sess-A',
       streamPhase: 'streaming',
       streamContent: 'partial answer',
@@ -94,24 +166,48 @@ describe('setActiveSession — keeps background stream rendering alive (V4.6)', 
 
     const s = useChatStore.getState();
     expect(s.activeSessionId).toBe('sess-B');        // the view switched
-    expect(s.streamPhase).toBe('streaming');         // the stream keeps running
-    expect(s.streamContent).toBe('partial answer');  // partial output not discarded
-    expect(s.streamingSessionId).toBe('sess-A');     // stream still owned by A
+    expect(s.streamPhase).toBe('idle');
+    expect(s.streamContent).toBe('');
+    expect(s.streamingSessionId).toBeNull();
+    expect(s.turnsBySession['sess-A']).toMatchObject({
+      phase: 'streaming', content: 'partial answer', generationId: 'gen-A',
+    });
   });
 });
 
 describe('resetSession — still tears the batcher down (new chat)', () => {
+  it('does not dismiss an existing recoverable error for the prior session', () => {
+    useChatStore.setState({
+      activeSessionId: 'sess-A',
+      turnsBySession: {
+        'sess-A': {
+          phase: 'error', isLocked: false, content: '', citations: [], quality: null,
+          error: 'error_network', aiStatusText: null, generationId: 'gen-A',
+        },
+      },
+    });
+
+    useChatStore.getState().resetSession();
+    useChatStore.getState().setActiveSession('sess-A');
+
+    expect(useChatStore.getState().turnsBySession['sess-A']).toMatchObject({
+      phase: 'error', error: 'error_network', generationId: 'gen-A',
+    });
+  });
+
   it('drops buffered tokens and detaches the callback', () => {
     const received = collectBatcher();
-    appendToken('partial');
+    useChatStore.setState({ activeSessionId: 'sess-A' });
+    appendToken('sess-A', 'gen-A', 'partial');
 
     useChatStore.getState().resetSession();
 
-    appendToken(' more');
-    flushImmediate();
+    appendToken('sess-A', 'gen-A', ' more');
+    flushImmediate('sess-A', 'gen-A');
 
     expect(received.join('')).toBe('');
     expect(useChatStore.getState().streamPhase).toBe('idle');
     expect(useChatStore.getState().streamingSessionId).toBeNull();
+    expect(useChatStore.getState().isSendLocked).toBe(false);
   });
 });

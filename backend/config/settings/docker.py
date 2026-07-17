@@ -55,6 +55,12 @@ CORS_ALLOWED_ORIGINS = [
 # Email backend for local dev
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
+# Docker Compose is a local HTTP validation profile behind the bundled nginx
+# proxy. Keep production SSL/HSTS enforcement in config.settings.prod, but do
+# not mark the local Docker health endpoint degraded only because HTTPS
+# termination is not enabled on localhost.
+HEALTH_REQUIRE_HTTPS_SECURITY = False
+
 # Database: Use PostgreSQL from Docker Compose (with pgvector support)
 # This is inherited from base.py — no override needed!
 # The base.py DATABASES config uses env vars that docker-compose provides:

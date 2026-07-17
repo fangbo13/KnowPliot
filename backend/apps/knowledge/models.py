@@ -41,6 +41,8 @@ class Document(models.Model):
         ("uploading", "Uploading"),
         ("processing", "Processing"),
         ("active", "Active"),
+        ("stale", "Stale"),
+        ("archived", "Archived"),
         ("expired", "Expired"),
         ("failed", "Failed"),
     ]
@@ -198,3 +200,87 @@ class BatchImportResultRecord(models.Model):
 
     def __str__(self):
         return f"Batch {self.id}: {self.success_count}/{self.total_files} imported"
+
+
+class IngestionJob(models.Model):
+    """Durable, space-scoped record of one document ingestion attempt."""
+
+    STATUS_CHOICES = [
+        ("queued", "Queued"),
+        ("processing", "Processing"),
+        ("retrying", "Retrying"),
+        ("succeeded", "Succeeded"),
+        ("failed", "Failed"),
+    ]
+    TRIGGER_CHOICES = [
+        ("upload", "Upload"),
+        ("batch", "Batch Upload"),
+        ("reindex", "Reindex"),
+        ("admin_retry", "Admin Retry"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="ingestion_jobs",
+    )
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="ingestion_jobs",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="requested_ingestion_jobs",
+    )
+    trigger = models.CharField(
+        max_length=20,
+        choices=TRIGGER_CHOICES,
+        default="upload",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="queued",
+        db_index=True,
+    )
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
+    attempt = models.PositiveSmallIntegerField(default=0)
+    max_attempts = models.PositiveSmallIntegerField(default=4)
+    last_error = models.CharField(max_length=1000, blank=True, default="")
+    retry_of = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="retries",
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_ingestionjob"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["space", "status", "-created_at"],
+                name="knowledge_i_space_i_658ba2_idx",
+            ),
+            models.Index(
+                fields=["document", "status"],
+                name="knowledge_i_documen_d529b8_idx",
+            ),
+            models.Index(
+                fields=["status", "space", "created_at"],
+                name="know_ing_st_sp_cr_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.document_id}: {self.status}"

@@ -1,7 +1,16 @@
 *.sqlite3
+venv/
+.venv/
+env/
+__pypackages__/
+*.egg-info/
 __pycache__
 *.pyc
 .pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
 .env
 .DS_Store
 .git
@@ -9,3 +18,8 @@ audit_reports
 *.md
 !README.md
 media
+db.sqlite3
+test_*.sqlite3
+crawled_knowledge/
+knowledge_docs/
+C:/

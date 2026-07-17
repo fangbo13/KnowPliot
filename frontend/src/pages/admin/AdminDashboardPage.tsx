@@ -13,8 +13,24 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import apiClient from '../../api/client';
+import {
+  adminApi,
+  type DocumentQuality,
+  type IngestionJob,
+  type SystemHealth,
+  type SystemMetrics,
+} from '../../api/admin';
 
 const { Text } = Typography;
+
+const READINESS_SERVICE_LABELS: Record<string, string> = {
+  migrations: 'health_migrations',
+  static_files: 'health_static_files',
+  media_storage: 'health_media_storage',
+  security_config: 'health_security_config',
+  export_limits: 'health_export_limits',
+  long_run_operations: 'health_long_run_operations',
+};
 
 interface UserRecord {
   id: string;
@@ -28,22 +44,15 @@ interface UserRecord {
   role_level: string | null;
 }
 
-interface SystemStatus {
-  backend_status: string;
-  celery_status: string;
-  db_status: string;
-  total_users: number;
-  active_users: number;
-  total_documents: number;
-}
-
-
-
 export default function AdminDashboardPage() {
   const { t } = useTranslation('common');
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
+  const [ingestionJobs, setIngestionJobs] = useState<IngestionJob[]>([]);
+  const [documentQuality, setDocumentQuality] = useState<DocumentQuality[]>([]);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
 
   const loadUsers = async () => {
@@ -63,58 +72,48 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // V4.2 UI-V4.2-011 + P1-4: System health now uses real API response data.
-  // Previously all status fields were hardcoded 'running'/'connected' regardless
-  // of API success/failure. Now:
-  // - backend_status: inferred from API reachability (if audit API responds → 'running')
-  // - db_status: inferred from successful queryset return (if data returned → 'connected')
-  // - celery_status: read from audit API response celery_status field if available,
-  //   otherwise inferred from backend reachability (if backend is running, celery likely is)
-  // On API failure: only failing services are marked 'unknown'/'down', rest stays undefined
+  // Phase 4B: health and metrics come from dedicated server-side checks.
   const loadSystemStatus = async () => {
     setStatusLoading(true);
     try {
-      // Health check — if audit API responds, backend & DB are operational
-      const auditRes = await apiClient.get('/audit/logs/', { timeout: 5000 });
-      const data = auditRes.data;
-      const resultCount = data?.count ?? (Array.isArray(data) ? data.length : 0);
-      // P1-4: Read real status values from API response if available.
-      // backend_status and db_status are inferred from successful API reachability
-      // (if Django can respond + query DB, both services are operational).
-      // celery_status is read from response if provided, otherwise inferred.
-      setSystemStatus({
-        backend_status: data?.backend_status ?? 'running',
-        celery_status: data?.celery_status ?? 'running',
-        db_status: data?.db_status ?? 'connected',
-        total_users: users.length,
-        active_users: users.filter(u => u.is_active).length,
-        total_documents: resultCount,
-      });
-    } catch (err: any) {
-      // API failure — backend may be down or unreachable
-      const backendDown = !err.response; // No response = network error / server unreachable
-      setSystemStatus({
-        backend_status: backendDown ? 'down' : 'degraded',
-        celery_status: 'unknown',
-        db_status: backendDown ? 'disconnected' : 'unknown',
-        total_users: users.length,
-        active_users: users.filter(u => u.is_active).length,
-        total_documents: 0,
-      });
+      const [health, metrics, jobs, quality] = await Promise.all([
+        adminApi.health(),
+        adminApi.metrics(),
+        adminApi.ingestionJobs(),
+        adminApi.documentQuality(),
+      ]);
+      setSystemHealth(health);
+      setSystemMetrics(metrics);
+      setIngestionJobs(jobs);
+      setDocumentQuality(quality);
+    } catch {
+      setSystemHealth(null);
+      setSystemMetrics(null);
+      setIngestionJobs([]);
+      setDocumentQuality([]);
+      message.error('Failed to load system operations data');
     } finally {
       setStatusLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
+  const retryIngestion = async (jobId: string) => {
+    setRetryingJobId(jobId);
+    try {
+      await adminApi.retryIngestionJob(jobId);
+      message.success('Ingestion retry queued');
+      await loadSystemStatus();
+    } catch {
+      message.error('Failed to retry ingestion job');
+    } finally {
+      setRetryingJobId(null);
+    }
+  };
 
   useEffect(() => {
-    if (users.length > 0) {
-      loadSystemStatus();
-    }
-  }, [users.length]);
+    loadUsers();
+    loadSystemStatus();
+  }, []);
 
   const roleStyleMap: Record<string, { bg: string; text: string; border: string }> = {
     admin: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
@@ -125,6 +124,9 @@ export default function AdminDashboardPage() {
   const healthStyleMap: Record<string, { bg: string; text: string; border: string }> = {
     running: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
     connected: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    up: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    configured: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
+    not_configured: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
     degraded: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
     unknown: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
     down: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
@@ -133,7 +135,7 @@ export default function AdminDashboardPage() {
 
   const renderHealthTag = (status: string) => {
     const style = healthStyleMap[status] || { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' };
-    const isGood = status === 'running' || status === 'connected';
+    const isGood = ['running', 'connected', 'up', 'configured'].includes(status);
     return (
       <span style={{
         display: 'inline-flex',
@@ -154,12 +156,36 @@ export default function AdminDashboardPage() {
             height: 6,
             borderRadius: '50%',
             backgroundColor: style.text,
-            marginRight: 6,
-            animation: 'pulseDot 1.6s infinite ease-in-out'
+            marginRight: 6
           }} />
         )}
         {status.toUpperCase()}
       </span>
+    );
+  };
+
+  const renderReadinessDetail = (key: string) => {
+    const service = systemHealth?.services[key];
+    if (!service) return null;
+    const details = [
+      service.detail,
+      service.missing && service.missing.length > 0
+        ? `${t('health_missing')}: ${service.missing.join(', ')}`
+        : null,
+      service.max_sync_rows != null
+        ? `${t('health_max_sync_rows')}: ${service.max_sync_rows}`
+        : null,
+    ].filter(Boolean).join(' · ');
+    return (
+      <Descriptions.Item
+        key={key}
+        label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>{t(READINESS_SERVICE_LABELS[key])}</span>}
+      >
+        <Space direction="vertical" size={2}>
+          {renderHealthTag(service.status)}
+          {details && <Text type="secondary" style={{ fontSize: 11.5 }}>{details}</Text>}
+        </Space>
+      </Descriptions.Item>
     );
   };
 
@@ -256,18 +282,43 @@ export default function AdminDashboardPage() {
           </span>
         );
       },
+
+
     },
   ];
 
   return (
     <div className="page" style={{ background: 'transparent' }}>
-      <div className="page-head" style={{ marginBottom: 32 }}>
+      <div className="page-head" style={{ marginBottom: 24 }}>
         <h1 className="page-title">{t('admin_dashboard') || 'Admin Dashboard'}</h1>
       </div>
+      
+      {systemMetrics && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Users</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.users.total}</div>
+          </Card>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Users</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{systemMetrics.users.active}</div>
+          </Card>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Documents</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.documents.total}</div>
+          </Card>
+          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generated Tokens</div>
+            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.model_api.total_tokens.toLocaleString()}</div>
+          </Card>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* Left: User list table */}
         <Card
-          style={{ flex: 2, minWidth: 320, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ flex: 2, minWidth: 320, borderRadius: 'var(--radius-lg)' }}
           styles={{ body: { padding: '24px' } }}
           title={
             <Space size="middle">
@@ -296,7 +347,8 @@ export default function AdminDashboardPage() {
 
         {/* Right: System status panel */}
         <Card
-          style={{ flex: 1, minWidth: 280, borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}
+          className="glass-panel hover-lift"
+          style={{ flex: 1, minWidth: 280, borderRadius: 'var(--radius-lg)' }}
           styles={{ body: { padding: '24px' } }}
           title={
             <Space size="middle">
@@ -311,23 +363,27 @@ export default function AdminDashboardPage() {
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Spin />
             </div>
-          ) : systemStatus ? (
+          ) : systemHealth && systemMetrics ? (
             <Descriptions column={1} size="small" bordered={false} style={{ marginBottom: 12 }}>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Backend</span>}>
-                {renderHealthTag(systemStatus.backend_status)}
+                {renderHealthTag(systemHealth.services.backend.status)}
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Celery</span>}>
-                {renderHealthTag(systemStatus.celery_status)}
+                {renderHealthTag(systemHealth.services.celery.status)}
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Database</span>}>
-                {renderHealthTag(systemStatus.db_status)}
+                {renderHealthTag(systemHealth.services.database.status)}
               </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Total Users</span>}>
-                <Text strong style={{ color: 'var(--color-text)' }}>{systemStatus.total_users}</Text>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Redis</span>}>
+                {renderHealthTag(systemHealth.services.redis.status)}
               </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Active Users</span>}>
-                <Text strong style={{ color: 'var(--color-success)' }}>{systemStatus.active_users}</Text>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Vector DB</span>}>
+                {renderHealthTag(systemHealth.services.vector_db.status)}
               </Descriptions.Item>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>LLM</span>}>
+                {renderHealthTag(systemHealth.services.llm.status)}
+              </Descriptions.Item>
+              {Object.keys(READINESS_SERVICE_LABELS).map(renderReadinessDetail)}
             </Descriptions>
           ) : (
             <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
@@ -345,6 +401,79 @@ export default function AdminDashboardPage() {
               </Text>
             </Space>
           </div>
+        </Card>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24 }}>
+        <Card
+          title="Ingestion queue"
+          extra={<Button icon={<ReloadOutlined />} onClick={loadSystemStatus}>Refresh</Button>}
+          className="glass-panel hover-lift"
+          style={{ borderRadius: 'var(--radius-lg)' }}
+        >
+          <Table<IngestionJob>
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 5 }}
+            dataSource={ingestionJobs}
+            columns={[
+              { title: 'Document', dataIndex: 'document_title', key: 'document_title', ellipsis: true },
+              { title: 'Space', dataIndex: 'space_name', key: 'space_name', ellipsis: true },
+              {
+                title: 'Status',
+                dataIndex: 'status',
+                key: 'status',
+                render: (value: string) => renderHealthTag(value === 'succeeded' ? 'up' : value === 'failed' ? 'down' : 'degraded'),
+              },
+              {
+                title: 'Action',
+                key: 'action',
+                render: (_value, record) => record.status === 'failed' ? (
+                  <Button
+                    size="small"
+                    loading={retryingJobId === record.id}
+                    onClick={() => retryIngestion(record.id)}
+                  >
+                    Retry
+                  </Button>
+                ) : null,
+              },
+            ]}
+          />
+        </Card>
+
+        <Card
+          title="Knowledge quality"
+          className="glass-panel hover-lift"
+          style={{ borderRadius: 'var(--radius-lg)' }}
+        >
+          <Table<DocumentQuality>
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 5 }}
+            dataSource={documentQuality}
+            columns={[
+              { title: 'Document', dataIndex: 'title', key: 'title', ellipsis: true },
+              { title: 'Status', dataIndex: 'status', key: 'status' },
+              { title: 'Citations', dataIndex: 'citation_count', key: 'citation_count' },
+              {
+                title: 'Avg relevance',
+                dataIndex: 'average_relevance',
+                key: 'average_relevance',
+                render: (value: number | null) => value == null ? '-' : value.toFixed(2),
+              },
+              {
+                title: 'Risk',
+                key: 'risk',
+                render: (_value, record) => (
+                  record.flags.stale_source ? 'Stale source'
+                    : record.flags.unused ? 'Unused'
+                      : record.flags.high_usage ? 'High use'
+                        : '-'
+                ),
+              },
+            ]}
+          />
         </Card>
       </div>
     </div>

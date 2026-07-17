@@ -13,18 +13,21 @@ import hashlib
 import logging
 import secrets
 
+from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .models import (
     InviteCode,
     KnowledgeSpace,
     Organization,
+    SpaceAccessRequest,
     SpaceEmailInvite,
     SpaceMembership,
 )
@@ -35,7 +38,9 @@ from .permissions import (
     SPACE_UPDATE,
     SPACE_VIEW,
     accessible_spaces,
+    admin_scope,
     can_create_space,
+    can_restore_space,
     effective_space_role,
     get_space_or_404,
     has_space_permission,
@@ -47,8 +52,13 @@ from .serializers import (
     InviteCodeSerializer,
     JoinByCodeSerializer,
     KnowledgeSpaceSerializer,
+    SpaceAccessRequestCreateSerializer,
+    SpaceAccessRequestSerializer,
+    SpaceCloneSerializer,
     SpaceCreateSerializer,
     SpaceMembershipSerializer,
+    SpaceOwnerTransferSerializer,
+    SpaceTransferSerializer,
     UpdateMemberRoleSerializer,
 )
 
@@ -64,7 +74,11 @@ def _audit(user, action, target_id=None, details=None, request=None, role_used=N
         create_audit_log(
             user=user,
             action=action,
-            target_type="KnowledgeSpace",
+            target_type=(
+                "ScenarioTemplate"
+                if action.startswith("template_")
+                else "KnowledgeSpace"
+            ),
             target_id=target_id,
             details=details or {},
             role_used=role_used or "",
@@ -181,6 +195,161 @@ def space_archive(request, pk):
     space.save(update_fields=["status", "updated_at"])
     _audit(request.user, "space_archive", target_id=space.id, request=request)
     return Response(KnowledgeSpaceSerializer(space, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_restore(request, pk):
+    space = get_space_or_404(pk)
+    if not can_restore_space(request.user, space):
+        raise PermissionDenied("You cannot restore this space.")
+    space.status = "active"
+    space.save(update_fields=["status", "updated_at"])
+    _audit(request.user, "space_restore", target_id=space.id, request=request)
+    return Response(KnowledgeSpaceSerializer(space, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_transfer(request, pk):
+    space = get_space_or_404(pk)
+    role = effective_space_role(request.user, space)
+    if role not in {"owner", "super_admin", "org_admin", "business_admin"}:
+        raise PermissionDenied("You cannot transfer this space.")
+    serializer = SpaceTransferSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    if "organization" in serializer.validated_data:
+        if serializer.validated_data["organization"].id != space.organization_id:
+            raise PermissionDenied("Cross-organization transfer is not supported.")
+    business_line = serializer.validated_data.get("business_line")
+    if business_line is None:
+        raise ValidationError({"business_line": "A target business line is required."})
+    if business_line.organization_id != space.organization_id:
+        raise PermissionDenied("Target business line must be in the same organization.")
+    if role == "business_admin":
+        _, line_ids = admin_scope(request.user)
+        if space.business_line_id not in line_ids or business_line.id not in line_ids:
+            raise PermissionDenied("Business administrators may only transfer inside their line.")
+    space.business_line = business_line
+    space.save(update_fields=["business_line", "updated_at"])
+    _audit(request.user, "space_transfer", target_id=space.id, details={"business_line": str(business_line.id)}, request=request)
+    return Response(KnowledgeSpaceSerializer(space, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_transfer_owner(request, pk):
+    space = get_space_or_404(pk)
+    if effective_space_role(request.user, space) not in {"owner", "super_admin", "org_admin", "business_admin"}:
+        raise PermissionDenied("You cannot transfer ownership of this space.")
+    serializer = SpaceOwnerTransferSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    membership = SpaceMembership.objects.filter(
+        space=space, user_id=serializer.validated_data["user"], status="active"
+    ).first()
+    if membership is None:
+        raise ValidationError({"user": "The new owner must be an active space member."})
+    with transaction.atomic():
+        SpaceMembership.objects.filter(space=space, role=SpaceMembership.ROLE_OWNER, status="active").exclude(pk=membership.pk).update(role=SpaceMembership.ROLE_MEMBER)
+        membership.role = SpaceMembership.ROLE_OWNER
+        membership.save(update_fields=["role", "updated_at"])
+    _audit(request.user, "space_owner_transfer", target_id=space.id, details={"new_owner": str(membership.user_id)}, request=request)
+    return Response(SpaceMembershipSerializer(membership).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_clone(request, pk):
+    space = get_space_or_404(pk)
+    if effective_space_role(request.user, space) not in {"owner", "super_admin", "org_admin", "business_admin"}:
+        raise PermissionDenied("You cannot clone this space.")
+    serializer = SpaceCloneSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    with transaction.atomic():
+        clone = KnowledgeSpace.objects.create(
+            organization=space.organization,
+            business_line=space.business_line,
+            name=serializer.validated_data["name"],
+            code=serializer.validated_data["code"],
+            description=space.description,
+            icon=space.icon,
+            language=space.language,
+            visibility=space.visibility,
+            settings=space.settings,
+            created_by=request.user,
+        )
+        SpaceMembership.objects.create(space=clone, user=request.user, role=SpaceMembership.ROLE_OWNER, status="active")
+    copied = []
+    if serializer.validated_data["copy_documents"]:
+        from apps.knowledge.ingestion import enqueue_document_ingestion
+        from apps.knowledge.models import Document
+        for source in space.documents.filter(status="active").select_related("category"):
+            try:
+                with source.file.open("rb") as source_file:
+                    copied_file = ContentFile(source_file.read(), name=source.file.name.rsplit("/", 1)[-1])
+                document = Document.objects.create(
+                    space=clone, title=source.title, file=copied_file,
+                    file_type=source.file_type, file_size=source.file_size,
+                    category=source.category, tags=source.tags, status="processing",
+                    version=source.version, effective_from=source.effective_from,
+                    effective_to=source.effective_to, uploaded_by=request.user,
+                    parent_document=source, content_hash=source.content_hash,
+                )
+                job = enqueue_document_ingestion(document, requested_by=request.user, trigger="upload")
+                copied.append({"document_id": str(document.id), "job_id": str(job.id)})
+            except Exception as exc:
+                _audit(request.user, "space_clone_document_failure", target_id=clone.id, details={"source_document": str(source.id), "error": exc.__class__.__name__}, request=request)
+    _audit(request.user, "space_clone", target_id=clone.id, details={"source_space": str(space.id), "copied_documents": len(copied)}, request=request)
+    data = KnowledgeSpaceSerializer(clone, context={"request": request}).data
+    data["copied_documents"] = copied
+    return Response(data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_access_request(request, pk):
+    space = get_space_or_404(pk)
+    if space.visibility == "private" or space.status != "active":
+        raise PermissionDenied("This space does not accept access requests.")
+    if effective_space_role(request.user, space) is not None:
+        raise ValidationError({"detail": "You already have access to this space."})
+    serializer = SpaceAccessRequestCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    access_request, created = SpaceAccessRequest.objects.get_or_create(
+        space=space,
+        user=request.user,
+        status=SpaceAccessRequest.STATUS_PENDING,
+        defaults=serializer.validated_data,
+    )
+    _audit(request.user, "space_access_request", target_id=space.id, request=request)
+    return Response(
+        SpaceAccessRequestSerializer(access_request).data,
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def discoverable_spaces(request):
+    """List requestable spaces inside organizations the user already belongs to.
+
+    Membership in any space establishes tenant membership; private spaces and
+    spaces already joined are never exposed as join candidates.
+    """
+    memberships = SpaceMembership.objects.filter(user=request.user, status="active")
+    organization_ids = memberships.values_list("space__organization_id", flat=True)
+    business_line_ids = memberships.exclude(space__business_line_id=None).values_list(
+        "space__business_line_id", flat=True
+    )
+    joined_ids = memberships.values_list("space_id", flat=True)
+    spaces = KnowledgeSpace.objects.filter(
+        status="active",
+        organization__status="active",
+    ).filter(
+        Q(visibility="organization", organization_id__in=organization_ids)
+        | Q(visibility="business_line", business_line_id__in=business_line_ids)
+    ).exclude(id__in=joined_ids).select_related("organization", "business_line").order_by("name")
+    return Response(KnowledgeSpaceSerializer(spaces, many=True, context={"request": request}).data)
 
 
 @api_view(["POST"])

@@ -48,8 +48,8 @@ class SpaceMembershipAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationMembership)
 class OrganizationMembershipAdmin(admin.ModelAdmin):
-    list_display = ["user", "role", "organization", "business_line", "created_at"]
-    list_filter = ["role", "organization"]
+    list_display = ["user", "role", "organization", "business_line", "is_active", "expires_at", "created_at"]
+    list_filter = ["role", "is_active", "organization"]
     search_fields = ["user__email", "organization__name"]
     readonly_fields = ["id", "created_at", "updated_at"]
 

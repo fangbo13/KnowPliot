@@ -5,14 +5,20 @@
  */
 
 import { create } from 'zustand';
-import { chatApi } from '../api/chat';
+import { chatApi, type ChatMessageRecord } from '../api/chat';
 import { getAuthToken, getActiveSpaceId } from '../api/client';
 import {
   createStreamAbortController,
   abortActiveStream,
   clearStreamOnComplete,
+  hasActiveStream,
 } from '../stream/StreamLifecycleManager';
 import { initTokenBatcher, appendToken, flushImmediate, resetTokenBatcher } from '../stream/TokenBatchRenderer';
+import { StoreSSEDecoder } from '../stream/SSEParser';
+import {
+  validateChatStreamMessage,
+  validateRecoveryResponseIdentity,
+} from '../stream/ChatStreamProtocol';
 // V4.0 DEFECT-008: BroadcastChannel cross-tab sync
 import { broadcastSessionSwitch } from '../sync/crossTabSync';
 
@@ -21,14 +27,30 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   citations?: Citation[];
+  confidenceScore?: number | null;
+  confidenceLabel?: 'high' | 'medium' | 'low' | 'insufficient' | '';
+  needsHumanReview?: boolean;
+  retrievalMode?: string;
+  retrievalLatencyMs?: number | null;
   createdAt: string;
 }
 
+export interface QualityData {
+  confidence: Message['confidenceLabel'];
+  score: number;
+  needs_human_review: boolean;
+  retrieval_mode: string;
+  retrieval_latency_ms: number;
+}
+
 export interface Citation {
+  source_id?: string;
+  source_url?: string | null;
   document_id: string;
   document_title: string;
   page_number?: number;
   score: number;
+  snippet?: string;
   quoted_text: string;
 }
 
@@ -36,7 +58,9 @@ export interface ChatSession {
   id: string;
   title: string;
   is_active: boolean;
+  isPinned: boolean;
   updatedAt: string;
+  recoveryState?: 'partial' | 'recovering' | 'recovered' | 'failed' | 'terminal';
 }
 
 // Words/phrases that don't make good titles
@@ -92,18 +116,69 @@ function generateSmartTitle(content: string): string {
 }
 
 // V3.5: Unified stream state machine — replaces isStreaming + thinkingPhase + connectionStatus
-type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completing' | 'error';
+export type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completing' | 'error';
+export type StreamRecoveryState = 'idle' | 'available' | 'recovering' | 'recovered' | 'failed';
+export type AnswerMode = 'fast' | 'deep';
+export type SafeProcessingPhase = 'accepted' | 'searching' | 'generating' | 'finalizing';
+
+export interface ProcessingTimings {
+  connectionMs?: number;
+  firstAnswerMs?: number;
+  totalMs?: number;
+}
+
+export interface SendMessageOptions {
+  answerMode?: AnswerMode;
+  /** Result of the current rollout flag + server capability decision. */
+  canUseDeep?: boolean;
+  /** Explicit user retry of the current failed deep Turn; never inferred. */
+  retryClientRequestId?: string;
+  /** Persisted assistant message whose answer version should be regenerated. */
+  regenerateMessageId?: string;
+}
+
+export const CHAT_STREAM_TIMEOUTS = Object.freeze({
+  connectionMs: 20_000,
+  idleMs: 45_000,
+  totalMs: 180_000,
+  recoveryRequestMs: 5_000,
+});
+
+export interface SessionTurnState {
+  phase: StreamPhase;
+  safePhase?: SafeProcessingPhase | null;
+  isLocked: boolean;
+  answerMode?: AnswerMode;
+  content: string;
+  citations: Citation[];
+  quality: QualityData | null;
+  error: string | null;
+  aiStatusText: string | null;
+  generationId: string | null;
+  clientRequestId?: string | null;
+  turnId?: string | null;
+  lastEventSeq?: number;
+  protocolVersion?: 1 | 2 | null;
+  recoveryState?: StreamRecoveryState;
+  timings?: ProcessingTimings;
+  startedAtMs?: number | null;
+}
 
 interface ChatState {
   sessions: ChatSession[];
+  sessionNextCursor: string | null;
   activeSessionId: string | null;
   messages: Message[];
+  messageNextCursor: string | null;
   // V3.5: allMessages holds full history for sliding window; messages is the visible slice
   allMessages: Message[];
   visibleRoundCount: number;
   hasOlderMessages: boolean;
   // V3.6 MED-003: Cached round count — avoids O(n) recomputation per message
   totalRoundCount: number;
+  turnsBySession: Record<string, SessionTurnState>;
+  localPartialsBySession: Record<string, Message[]>;
+  messageCacheBySession: Record<string, Message[]>;
   // V3.5: Unified stream phase replaces three separate fields
   streamPhase: StreamPhase;
   // V4.6: Track which session owns the stream so streaming UI only shows for matching session.
@@ -112,16 +187,13 @@ interface ChatState {
   streamingSessionId: string | null;
   streamContent: string;
   citations: Citation[];
+  streamQuality: QualityData | null;
   isLoadingMessages: boolean;
   sendError: string | null;
   // V3.5: Send lock to prevent double-send during async gap
   isSendLocked: boolean;
   // V3.6 HIGH-002: Flag to refresh session list only after new session creation
   _pendingSessionRefresh: boolean;
-  // V4.1 BUG-003: Flag to differentiate timeout abort from user-intentional abort.
-  // Set by abortInterval before controller.abort(), checked by AbortError handler.
-  // When true: show timeout error toast + preserve truncated content.
-  _isTimeoutAbort: boolean;
   aiStatusText: string | null;
 
   // Actions
@@ -134,10 +206,15 @@ interface ChatState {
   setStreamPhase: (phase: StreamPhase) => void;
   lockSend: () => void;
   unlockSend: () => void;
+  abortSessionStream: (sessionId: string) => void;
+  removeSessionState: (sessionId: string) => void;
+  dismissSessionError: (sessionId: string) => void;
   loadSessions: () => Promise<void>;
+  loadMoreSessions: () => Promise<void>;
   loadMessages: (sessionId: string) => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
-  finishStreamingMessage: (messageId: string, sessionId: string) => void;
+  loadOlderMessages: () => Promise<void>;
+  sendMessage: (content: string, options?: SendMessageOptions) => Promise<void>;
+  finishStreamingMessage: (messageId: string, sessionId: string, generationId?: string) => void;
   loadOlderRounds: (count: number) => void;
   setAIStatusText: (text: string | null) => void;
 }
@@ -172,89 +249,259 @@ function extractVisibleMessages(rounds: { id: string; messages: Message[] }[], v
   return rounds.slice(startIdx).flatMap(r => r.messages);
 }
 
+function idleTurn(): SessionTurnState {
+  return {
+    phase: 'idle',
+    safePhase: null,
+    isLocked: false,
+    answerMode: 'fast',
+    content: '',
+    citations: [],
+    quality: null,
+    error: null,
+    aiStatusText: null,
+    generationId: null,
+    clientRequestId: null,
+    turnId: null,
+    lastEventSeq: 0,
+    protocolVersion: null,
+    recoveryState: 'idle',
+    timings: {},
+    startedAtMs: null,
+  };
+}
+
+export function mapServerPhaseForUi(phase: unknown): {
+  streamPhase: StreamPhase;
+  safePhase: SafeProcessingPhase;
+} {
+  if (phase === 'accepted') {
+    return { streamPhase: 'connecting', safePhase: 'accepted' };
+  }
+  if (phase === 'retrieving' || phase === 'searching') {
+    return { streamPhase: 'searching', safePhase: 'searching' };
+  }
+  if (phase === 'saving' || phase === 'finalizing') {
+    return { streamPhase: 'completing', safePhase: 'finalizing' };
+  }
+  return { streamPhase: 'streaming', safePhase: 'generating' };
+}
+
+function elapsedMs(startedAtMs: number | null | undefined): number | undefined {
+  if (typeof startedAtMs !== 'number') return undefined;
+  return Math.max(0, Date.now() - startedAtMs);
+}
+
+function legacyMirror(turn: SessionTurnState, sessionId: string | null): Partial<ChatState> {
+  return {
+    streamPhase: turn.phase,
+    streamingSessionId: turn.isLocked ? sessionId : null,
+    streamContent: turn.content,
+    citations: turn.citations,
+    streamQuality: turn.quality,
+    sendError: turn.error,
+    isSendLocked: turn.isLocked,
+    aiStatusText: turn.aiStatusText,
+  };
+}
+
+function withTurnUpdate(
+  state: ChatState,
+  sessionId: string,
+  generationId: string | null,
+  patch: Partial<SessionTurnState>,
+): Partial<ChatState> {
+  const current = state.turnsBySession[sessionId] ?? idleTurn();
+  if (generationId !== null && current.generationId !== generationId) return {};
+  const next = { ...current, ...patch };
+  return {
+    turnsBySession: { ...state.turnsBySession, [sessionId]: next },
+    ...(state.activeSessionId === sessionId ? legacyMirror(next, sessionId) : {}),
+  };
+}
+
+function mapApiMessage(message: ChatMessageRecord): Message {
+  return {
+    id: message.id || crypto.randomUUID(),
+    role: message.role,
+    content: message.content || '',
+    citations: message.citations || [],
+    confidenceScore: message.confidence_score,
+    confidenceLabel: message.confidence_label,
+    needsHumanReview: message.needs_human_review,
+    retrievalMode: message.retrieval_mode,
+    retrievalLatencyMs: message.retrieval_latency_ms,
+    createdAt: message.created_at || message.createdAt || new Date().toISOString(),
+  };
+}
+
+function sortMessagesChronologically(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    const aTime = Date.parse(a.createdAt);
+    const bTime = Date.parse(b.createdAt);
+    return Number.isNaN(aTime) || Number.isNaN(bTime) ? 0 : aTime - bTime;
+  });
+}
+
+function appendUniqueById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+  const seen = new Set(existing.map((item) => item.id));
+  const merged = [...existing];
+  for (const item of incoming) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+const LOCAL_PARTIAL_RECONCILIATION_WINDOW_MS = 5 * 60 * 1000;
+
+function isReconciledLocalPartial(partial: Message, serverMessage: Message): boolean {
+  if (partial.role !== 'assistant' || serverMessage.role !== 'assistant') return false;
+  const partialContent = partial.content.trim();
+  const serverContent = serverMessage.content.trim();
+  if (!partialContent || !serverContent) return false;
+  if (!serverContent.startsWith(partialContent) && !partialContent.startsWith(serverContent)) return false;
+  const partialTime = Date.parse(partial.createdAt);
+  const serverTime = Date.parse(serverMessage.createdAt);
+  return Number.isFinite(partialTime)
+    && Number.isFinite(serverTime)
+    && Math.abs(serverTime - partialTime) <= LOCAL_PARTIAL_RECONCILIATION_WINDOW_MS;
+}
+
 const DEFAULT_VISIBLE_ROUNDS = 10;
 // V3.6 MED-001 / V3.7 P1.3: Hard cap on allMessages to prevent unbounded memory growth
 // V3.7: Reduced from 500 to 100 — 100 messages ≈ 50 rounds of conversation,
 // sufficient for most use cases while keeping JS Heap stable.
 // Messages beyond this cap are pruned from front and can be loaded via "load older".
 const MAX_ALL_MESSAGES = 100;
+let messageLoadSequence = 0;
+let messageLoadController: AbortController | null = null;
 
 export const useChatStore = create<ChatState>()((set, get) => ({
   sessions: [],
+  sessionNextCursor: null,
   activeSessionId: null,
   messages: [],
+  messageNextCursor: null,
   allMessages: [],
   visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
   hasOlderMessages: false,
   totalRoundCount: 0,
+  turnsBySession: {},
+  localPartialsBySession: {},
+  messageCacheBySession: {},
   // V3.5: Unified stream phase (replaces isStreaming/thinkingPhase/connectionStatus)
   streamPhase: 'idle',
   streamingSessionId: null,
   streamContent: '',
   citations: [],
+  streamQuality: null,
   isLoadingMessages: false,
   sendError: null,
   isSendLocked: false,
   _pendingSessionRefresh: false,
-  _isTimeoutAbort: false,
   aiStatusText: null,
 
-  // V3.5 CRIT-002: setActiveSession resets UI state but does NOT abort the stream.
-  // V4.6: Stream continues in background; when it completes, finishStreamingMessage handles
-  // the session mismatch by discarding local data (server already saved the message).
-  // When user switches back, loadMessages fetches the completed response from server.
+  // Switching views mirrors only the target session's turn. Other sessions keep streaming,
+  // and recoverable background partials remain available for a later remount.
   setActiveSession: (id) => {
-    // V4.6 FIX: Do NOT resetTokenBatcher() here. Resetting it nulls the batch
-    // callback and wipes the buffer, which severs the in-flight stream's rendering
-    // pipeline: the network stream keeps running (setActiveSession does not abort it),
-    // but appendToken→flushBatch finds batchCallback === null and silently drops every
-    // token, so streamContent freezes at the switch point and the response appears
-    // stopped/truncated when the user switches away and back. The batcher is a
-    // singleton owned by the in-flight stream — let it keep flushing into streamContent
-    // (which is gated for display by streamingSessionId === activeSessionId, so the
-    // other session never shows it). It is fully re-initialized by initTokenBatcher()
-    // on the next sendMessage. Only resetSession() (new chat) and an explicit abort
-    // should tear the batcher down.
+    if (get().activeSessionId === id) return;
+
+    messageLoadSequence += 1;
+    messageLoadController?.abort();
+    messageLoadController = null;
+
+    const turn = get().turnsBySession[id] ?? idleTurn();
+    const cachedMessages = get().messageCacheBySession[id] ?? [];
+    const cachedRounds = computeRounds(cachedMessages);
     broadcastSessionSwitch(id); // V4.0 DEFECT-008: notify other tabs of session switch
     set({
       activeSessionId: id,
-      messages: [],
-      allMessages: [],
-      sendError: null,
-      // V4.6: DON'T reset streamPhase/streamContent/streamingSessionId here.
-      // The stream continues in background; the UI uses streamingSessionId to
-      // decide whether to show streaming indicators (only when it matches activeSessionId).
-      hasOlderMessages: false,
-      totalRoundCount: 0,
+      messages: extractVisibleMessages(cachedRounds, DEFAULT_VISIBLE_ROUNDS),
+      allMessages: cachedMessages,
+      messageNextCursor: null,
+      isLoadingMessages: false,
+      hasOlderMessages: cachedRounds.length > DEFAULT_VISIBLE_ROUNDS,
+      totalRoundCount: cachedRounds.length,
       visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
       _pendingSessionRefresh: false,
-      _isTimeoutAbort: false,
+      ...legacyMirror(turn, id),
     });
   },
 
-  // V3.5 CRIT-002: resetSession aborts old stream (user explicitly starts new chat)
+  // Starting a new chat explicitly aborts and clears only the active session's turn.
   resetSession: () => {
-    abortActiveStream(); // Kill stream on new chat — user explicitly wants a fresh start
-    resetTokenBatcher();
+    const owningSessionId = get().activeSessionId;
+    let retainedOwnerTurn: SessionTurnState | null = null;
+    messageLoadSequence += 1;
+    messageLoadController?.abort();
+    messageLoadController = null;
+    if (owningSessionId) {
+      const owningGeneration = get().turnsBySession[owningSessionId]?.generationId;
+      if (owningGeneration) flushImmediate(owningSessionId, owningGeneration);
+      const owningTurn = get().turnsBySession[owningSessionId];
+      retainedOwnerTurn = owningTurn?.error
+        ? { ...owningTurn, isLocked: false }
+        : idleTurn();
+      if (owningGeneration && owningTurn?.generationId === owningGeneration && owningTurn.content.trim()) {
+        const partialMessage: Message = {
+          id: `local-${owningGeneration}`,
+          role: 'assistant',
+          content: owningTurn.content,
+          citations: owningTurn.citations,
+          createdAt: new Date().toISOString(),
+        };
+        set((state) => ({
+          localPartialsBySession: {
+            ...state.localPartialsBySession,
+            [owningSessionId]: appendUniqueById(
+              state.localPartialsBySession[owningSessionId] ?? [],
+              [partialMessage],
+            ),
+          },
+          messageCacheBySession: {
+            ...state.messageCacheBySession,
+            [owningSessionId]: appendUniqueById(
+              state.messageCacheBySession[owningSessionId] ?? [],
+              [partialMessage],
+            ).slice(-MAX_ALL_MESSAGES),
+          },
+        }));
+      }
+      abortActiveStream(owningSessionId, owningGeneration ?? undefined);
+      resetTokenBatcher(owningSessionId, owningGeneration ?? undefined);
+    }
     broadcastSessionSwitch(null); // V4.0 DEFECT-008: notify other tabs (null = no active session)
     set({
       activeSessionId: null,
+      turnsBySession: owningSessionId
+        ? { ...get().turnsBySession, [owningSessionId]: retainedOwnerTurn ?? idleTurn() }
+        : get().turnsBySession,
       messages: [],
       allMessages: [],
+      messageNextCursor: null,
+      isLoadingMessages: false,
       streamContent: '',
       citations: [],
+      streamQuality: null,
       streamPhase: 'idle',
       streamingSessionId: null,
       sendError: null,
+      isSendLocked: false,
       hasOlderMessages: false,
       totalRoundCount: 0,
       visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
       _pendingSessionRefresh: false,
-      _isTimeoutAbort: false,
+      aiStatusText: null,
     });
   },
 
-  setAIStatusText: (text) => set({ aiStatusText: text }),
+  setAIStatusText: (text) => {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return;
+    set((state) => withTurnUpdate(state, sessionId, null, { aiStatusText: text }));
+  },
 
   // V3.6 MED-001 / V3.7 P1.3: addMessage now prunes allMessages when exceeding MAX cap
   // V4.2 SYS-V4.2-016: Removed computeRounds() from addMessage — it was redundant
@@ -265,6 +512,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   // finishStreamingMessage() is the sole point that computes rounds + visibleMessages.
   addMessage: (message) => set((state) => {
     const newAllMessages = [...state.allMessages, message];
+    const sessionId = state.activeSessionId;
+    const cacheMessages = sessionId
+      ? [...(state.messageCacheBySession[sessionId] ?? []), message].slice(-MAX_ALL_MESSAGES)
+      : null;
+    const cacheUpdate = sessionId && cacheMessages
+      ? { messageCacheBySession: { ...state.messageCacheBySession, [sessionId]: cacheMessages } }
+      : {};
     // Prune front if exceeding cap — prevents unbounded memory growth
     // V4.2 SYS-V4.2-016: No computeRounds here — just prune raw array
     if (newAllMessages.length > MAX_ALL_MESSAGES) {
@@ -275,175 +529,555 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         messages: [...state.messages, message],
         allMessages: pruned,
         hasOlderMessages: true,
+        ...cacheUpdate,
       };
     }
     const newMessages = [...state.messages, message];
     return {
       messages: newMessages,
       allMessages: newAllMessages,
+      ...cacheUpdate,
     };
   }),
 
-  updateStreamContent: (content) => set({ streamContent: content }),
+  updateStreamContent: (content) => {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return;
+    set((state) => withTurnUpdate(state, sessionId, null, { content }));
+  },
 
-  setStreamCitations: (citations) => set({ citations }),
+  setStreamCitations: (citations) => {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return;
+    set((state) => withTurnUpdate(state, sessionId, null, { citations }));
+  },
 
-  setSendError: (sendError) => set({ sendError }),
+  setSendError: (sendError) => {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return set({ sendError });
+    set((state) => withTurnUpdate(state, sessionId, null, {
+      error: sendError,
+      ...(sendError === null && state.turnsBySession[sessionId]?.phase === 'error' ? { phase: 'idle' as const } : {}),
+    }));
+  },
 
   // V3.5: Stream phase transitions
-  setStreamPhase: (phase) => set({ streamPhase: phase }),
+  setStreamPhase: (phase) => {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return set({ streamPhase: phase });
+    set((state) => withTurnUpdate(state, sessionId, null, { phase }));
+  },
 
   // V3.5 HIGH-001: Send lock mechanism
-  lockSend: () => set({ isSendLocked: true }),
+  lockSend: () => {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return set({ isSendLocked: true });
+    set((state) => withTurnUpdate(state, sessionId, null, { isLocked: true }));
+  },
   // V3.6 LOW-001: Add dev-only warning for double-unlock detection
   unlockSend: () => {
-    if (!get().isSendLocked) {
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return set({ isSendLocked: false });
+    if (!get().turnsBySession[sessionId]?.isLocked) {
       console.warn('[chatStore] unlockSend called when isSendLocked is already false — possible double-unlock');
     }
-    set({ isSendLocked: false });
+    set((state) => withTurnUpdate(state, sessionId, null, { isLocked: false }));
+  },
+
+  abortSessionStream: (sessionId) => { abortActiveStream(sessionId); },
+
+  removeSessionState: (sessionId) => {
+    if (hasActiveStream(sessionId)) abortActiveStream(sessionId);
+    resetTokenBatcher(sessionId);
+    if (get().activeSessionId === sessionId) {
+      messageLoadSequence += 1;
+      messageLoadController?.abort();
+      messageLoadController = null;
+    }
+    set((state) => {
+      const { [sessionId]: _turn, ...turnsBySession } = state.turnsBySession;
+      const { [sessionId]: _cache, ...messageCacheBySession } = state.messageCacheBySession;
+      const { [sessionId]: _partial, ...localPartialsBySession } = state.localPartialsBySession;
+      const activeUpdates = state.activeSessionId === sessionId
+        ? {
+            activeSessionId: null,
+            messages: [],
+            allMessages: [],
+            messageNextCursor: null,
+            isLoadingMessages: false,
+            hasOlderMessages: false,
+            totalRoundCount: 0,
+            visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
+            ...legacyMirror(idleTurn(), null),
+          }
+        : {};
+      return {
+        turnsBySession,
+        messageCacheBySession,
+        localPartialsBySession,
+        ...activeUpdates,
+      };
+    });
+  },
+
+  dismissSessionError: (sessionId) => {
+    set((state) => withTurnUpdate(state, sessionId, null, { phase: 'idle', error: null }));
   },
 
   loadSessions: async () => {
     try {
-      const sessions = await chatApi.getSessions();
-      set({ sessions });
+      const page = await chatApi.getSessions();
+      set({ sessions: page.results, sessionNextCursor: page.next });
     } catch (error) {
       console.error('Failed to load sessions:', error);
     }
   },
 
-  loadMessages: async (sessionId: string) => {
-    set({ isLoadingMessages: true, sendError: null });
+  loadMoreSessions: async () => {
+    const cursor = get().sessionNextCursor;
+    if (!cursor) return;
+
     try {
-      const msgs = await chatApi.getMessages(sessionId);
-      const allMessages: Message[] = msgs.map((m: any) => ({
-        id: m.id || crypto.randomUUID(),
-        role: m.role,
-        content: m.content || '',
-        citations: m.citations || [],
-        createdAt: m.created_at || m.createdAt || new Date().toISOString(),
-      }));
+      const page = await chatApi.getSessions({ cursor });
+      set({
+        sessions: appendUniqueById(get().sessions, page.results),
+        sessionNextCursor: page.next,
+      });
+    } catch (error) {
+      console.error('Failed to load more sessions:', error);
+    }
+  },
+
+  loadMessages: async (sessionId: string) => {
+    messageLoadController?.abort();
+    const controller = new AbortController();
+    messageLoadController = controller;
+    const requestSequence = ++messageLoadSequence;
+    set({ isLoadingMessages: true });
+    try {
+      const page = await chatApi.getMessages(sessionId, { signal: controller.signal });
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
+      const serverMessages = page.results.map(mapApiMessage);
+      const localPartials = get().localPartialsBySession[sessionId] ?? [];
+      const remainingLocalPartials = localPartials.filter((partial) => (
+        !serverMessages.some((serverMessage) => isReconciledLocalPartial(partial, serverMessage))
+      ));
+      const allMessages = sortMessagesChronologically(
+        appendUniqueById(serverMessages, remainingLocalPartials),
+      );
 
       // V3.5: Sliding window — compute rounds, extract visible slice
       const rounds = computeRounds(allMessages);
       const visibleMessages = extractVisibleMessages(rounds, DEFAULT_VISIBLE_ROUNDS);
-      const hasOlder = rounds.length > DEFAULT_VISIBLE_ROUNDS;
+      const hasOlder = rounds.length > DEFAULT_VISIBLE_ROUNDS || page.next !== null;
 
-      set({
+      set((state) => ({
         activeSessionId: sessionId,
         allMessages,
         messages: visibleMessages,
+        messageCacheBySession: {
+          ...state.messageCacheBySession,
+          [sessionId]: allMessages.slice(-MAX_ALL_MESSAGES),
+        },
+        localPartialsBySession: {
+          ...state.localPartialsBySession,
+          [sessionId]: remainingLocalPartials,
+        },
+        messageNextCursor: page.next,
         hasOlderMessages: hasOlder,
         visibleRoundCount: DEFAULT_VISIBLE_ROUNDS,
         isLoadingMessages: false,
         // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks
         totalRoundCount: rounds.length,
-      });
+      }));
+      if (messageLoadController === controller) messageLoadController = null;
     } catch (error) {
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
       console.error('Failed to load messages:', error);
       // V3.6 MED-002: Use i18n error key instead of raw string
-      set({ isLoadingMessages: false, sendError: 'error_session' });
+      set((state) => ({
+        isLoadingMessages: false,
+        ...(state.turnsBySession[sessionId]?.error
+          ? {}
+          : withTurnUpdate(state, sessionId, null, { phase: 'error', error: 'error_session' })),
+      }));
+      if (messageLoadController === controller) messageLoadController = null;
+    }
+  },
+
+  loadOlderMessages: async () => {
+    const sessionId = get().activeSessionId;
+    const cursor = get().messageNextCursor;
+    if (!sessionId || !cursor) return;
+
+    messageLoadController?.abort();
+    const controller = new AbortController();
+    messageLoadController = controller;
+    const requestSequence = ++messageLoadSequence;
+    set({ isLoadingMessages: true });
+
+    try {
+      const page = await chatApi.getMessages(sessionId, { cursor, signal: controller.signal });
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
+      const serverMessages = page.results.map(mapApiMessage);
+      const localPartials = get().localPartialsBySession[sessionId] ?? [];
+      const reconciledLocalIds = new Set(
+        localPartials
+          .filter((partial) => serverMessages.some(
+            (serverMessage) => isReconciledLocalPartial(partial, serverMessage),
+          ))
+          .map((partial) => partial.id),
+      );
+      const remainingLocalPartials = localPartials.filter(
+        (partial) => !reconciledLocalIds.has(partial.id),
+      );
+      const existingMessages = get().allMessages.filter(
+        (message) => !reconciledLocalIds.has(message.id),
+      );
+      const allMessages = sortMessagesChronologically(
+        appendUniqueById(existingMessages, serverMessages),
+      );
+      const rounds = computeRounds(allMessages);
+      const visibleRoundCount = get().visibleRoundCount;
+
+      set((state) => ({
+        allMessages,
+        messages: extractVisibleMessages(rounds, visibleRoundCount),
+        messageCacheBySession: {
+          ...state.messageCacheBySession,
+          [sessionId]: allMessages.slice(-MAX_ALL_MESSAGES),
+        },
+        localPartialsBySession: {
+          ...state.localPartialsBySession,
+          [sessionId]: remainingLocalPartials,
+        },
+        messageNextCursor: page.next,
+        hasOlderMessages: visibleRoundCount < rounds.length || page.next !== null,
+        totalRoundCount: rounds.length,
+        isLoadingMessages: false,
+      }));
+      if (messageLoadController === controller) messageLoadController = null;
+    } catch (error) {
+      if (requestSequence !== messageLoadSequence || get().activeSessionId !== sessionId) return;
+
+      console.error('Failed to load older messages:', error);
+      set((state) => ({
+        isLoadingMessages: false,
+        ...(state.turnsBySession[sessionId]?.error
+          ? {}
+          : withTurnUpdate(state, sessionId, null, { phase: 'error', error: 'error_session' })),
+      }));
+      if (messageLoadController === controller) messageLoadController = null;
     }
   },
 
   // V3.5: Load older rounds (expand sliding window)
   // V3.6 MED-003: Use cached totalRoundCount for hasOlderMessages comparison
   loadOlderRounds: (count: number) => {
-    const { allMessages, visibleRoundCount, totalRoundCount } = get();
+    const { allMessages, visibleRoundCount, totalRoundCount, messageNextCursor } = get();
     const rounds = computeRounds(allMessages);
     const newVisibleCount = Math.min(visibleRoundCount + count, totalRoundCount);
     const visibleMessages = extractVisibleMessages(rounds, newVisibleCount);
     set({
       messages: visibleMessages,
       visibleRoundCount: newVisibleCount,
-      hasOlderMessages: newVisibleCount < totalRoundCount,
+      hasOlderMessages: newVisibleCount < totalRoundCount || messageNextCursor !== null,
     });
   },
 
-  sendMessage: async (content: string) => {
-    // V4.1 BUG-002: Atomic check+lock — combine streamPhase/isSendLocked check and
-    // lock into a single synchronous set() call to eliminate the gap between read and lock.
-    // Previously: get().streamPhase + get().isSendLocked check → get().lockSend() → set()
-    // This gap allowed double-click to fire two sendMessage calls within one render frame.
-    // Now: single set({ isSendLocked: true, streamPhase: 'connecting' }) if conditions met.
-    // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-002]
+  sendMessage: async (content: string, options: SendMessageOptions = {}) => {
     const state = get();
-    if (state.streamPhase !== 'idle' || state.isSendLocked) return;
+    let sessionId = state.activeSessionId;
+    const regenerateMessageId = options.regenerateMessageId;
+    const isRegeneration = Boolean(regenerateMessageId);
+    if (sessionId && state.turnsBySession[sessionId]?.isLocked) return;
+    if (!sessionId && state.isSendLocked) return;
+    if (isRegeneration && (!sessionId || !/^[0-9a-f-]{36}$/i.test(regenerateMessageId!))) {
+      set({ streamPhase: 'error', sendError: 'error_session', isSendLocked: false });
+      return;
+    }
 
-    // Atomic lock: check + lock in one synchronous operation (no gap between read and write)
-    // V4.6: Set streamingSessionId to current activeSessionId (or null if creating new session).
-    // If new session is created below, streamingSessionId will be updated in the next set() call.
-    set({ isSendLocked: true, sendError: null, streamPhase: 'connecting', streamingSessionId: state.activeSessionId });
+    const requestedMode: AnswerMode = options.answerMode === 'deep' ? 'deep' : 'fast';
+    if (requestedMode === 'deep' && options.canUseDeep !== true) {
+      if (sessionId) {
+        set((current) => withTurnUpdate(current, sessionId!, null, {
+          phase: 'error',
+          safePhase: null,
+          isLocked: false,
+          answerMode: 'fast',
+          error: 'error_deep_unavailable',
+        }));
+      } else {
+        set({ streamPhase: 'error', sendError: 'error_deep_unavailable', isSendLocked: false });
+      }
+      return;
+    }
+    const answerMode = requestedMode;
+    const retryClientRequestId = options.retryClientRequestId;
+    const retryTurn = sessionId && retryClientRequestId
+      ? state.turnsBySession[sessionId]
+      : undefined;
+    const isExplicitFastRetry = Boolean(
+      retryClientRequestId
+      && answerMode === 'fast'
+      && retryTurn?.clientRequestId === retryClientRequestId
+      && retryTurn.answerMode === 'deep'
+      && retryTurn.phase === 'error'
+      && retryTurn.error
+      && !retryTurn.isLocked,
+    );
+    if (retryClientRequestId && !isExplicitFastRetry) {
+      if (sessionId) {
+        set((current) => withTurnUpdate(current, sessionId!, null, {
+          phase: 'error',
+          isLocked: false,
+          error: 'error_generic',
+        }));
+      } else {
+        set({ streamPhase: 'error', sendError: 'error_generic', isSendLocked: false });
+      }
+      return;
+    }
 
-    let sessionId = get().activeSessionId;
     if (!sessionId) {
+      set({ isSendLocked: true, sendError: null, streamPhase: 'connecting' });
       try {
         const newSession = await chatApi.createSession({ title: generateSmartTitle(content) });
         sessionId = newSession.id;
         set({
           activeSessionId: sessionId,
-          streamingSessionId: sessionId,
           sessions: [newSession, ...get().sessions],
           // V3.6 HIGH-002: Mark that we need to refresh sessions after first message in new session
           _pendingSessionRefresh: true,
         });
       } catch (error) {
         console.error('Failed to create session:', error);
-        set({ streamPhase: 'idle', sendError: 'error_session', streamingSessionId: null });
-        get().unlockSend();
-        return;
-      }
-    } else {
-      // Validate sessionId format (M6: security enhancement)
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
-        set({ streamPhase: 'idle', sendError: 'error_session', streamingSessionId: null });
-        get().unlockSend();
+        set({ streamPhase: 'error', sendError: 'error_session', streamingSessionId: null, isSendLocked: false });
         return;
       }
     }
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    get().addMessage(userMessage);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+      set((current) => withTurnUpdate(current, sessionId, null, {
+        phase: 'error', isLocked: false, error: 'error_session', generationId: null,
+      }));
+      return;
+    }
+
+    const clientRequestId = isExplicitFastRetry
+      ? retryClientRequestId!
+      : crypto.randomUUID();
+    const generationId = crypto.randomUUID();
+    const startedAtMs = Date.now();
+    set((current) => withTurnUpdate(current, sessionId, null, {
+      phase: 'connecting',
+      safePhase: 'accepted',
+      isLocked: true,
+      answerMode,
+      content: '',
+      citations: [],
+      quality: null,
+      error: null,
+      aiStatusText: null,
+      generationId,
+      clientRequestId,
+      turnId: isExplicitFastRetry ? retryTurn?.turnId ?? null : null,
+      lastEventSeq: isExplicitFastRetry ? retryTurn?.lastEventSeq ?? 0 : 0,
+      protocolVersion: null,
+      recoveryState: 'idle',
+      timings: {},
+      startedAtMs,
+    }));
+
+    if (!isExplicitFastRetry && !isRegeneration) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        createdAt: new Date().toISOString(),
+      };
+      get().addMessage(userMessage);
+    }
 
     const token = getAuthToken();
-    const maxRetries = 2;
-
     // V3.5: Initialize token batch renderer for this stream
     // V4.2 SYS-V4.2-015: Changed from (fullContent: string) to incremental diff mode.
     // appendTokens mode: only passes new tokens → Zustand appends to existing streamContent
     // fullContent mode: passes complete string → Zustand replaces streamContent (for flushImmediate)
-    initTokenBatcher((update: { appendTokens: string } | { fullContent: string }) => {
+    initTokenBatcher(sessionId, generationId, (update: { appendTokens: string } | { fullContent: string }) => {
       if ('appendTokens' in update) {
-        // V4.2 SYS-V4.2-015: Incremental append — reduces per-frame GC pressure
-        set(state => ({ streamContent: state.streamContent + update.appendTokens }));
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          if (turn?.generationId !== generationId) return {};
+          return withTurnUpdate(current, sessionId, generationId, { content: turn.content + update.appendTokens });
+        });
       } else {
-        // V4.2 SYS-V4.2-015: Full content replacement (for flushImmediate on done/error/abort)
-        set({ streamContent: update.fullContent });
+        set((current) => withTurnUpdate(current, sessionId, generationId, { content: update.fullContent }));
       }
     });
 
-    const streamWithRetry = async (attempt: number): Promise<boolean> => {
-      // V3.5 CRIT-001: Create/recreate AbortController per attempt
-      // On retry > 0, the old controller was aborted, so we need a fresh one
-      const controller = createStreamAbortController(sessionId);
+    const saveLocalPartial = (partialContent: string, partialCitations: Citation[]) => {
+      if (!partialContent.trim()) return;
+      const partialMessage: Message = {
+        id: `local-${generationId}`,
+        role: 'assistant',
+        content: partialContent,
+        citations: partialCitations,
+        createdAt: new Date().toISOString(),
+      };
+      set((current) => {
+        if (current.turnsBySession[sessionId]?.generationId !== generationId) return {};
+        const localPartials = appendUniqueById(
+          current.localPartialsBySession[sessionId] ?? [],
+          [partialMessage],
+        );
+        const activeUpdates = current.activeSessionId === sessionId
+          ? {
+              messages: appendUniqueById(current.messages, [partialMessage]),
+              allMessages: appendUniqueById(current.allMessages, [partialMessage]),
+            }
+          : {};
+        return {
+          localPartialsBySession: {
+            ...current.localPartialsBySession,
+            [sessionId]: localPartials,
+          },
+          messageCacheBySession: {
+            ...current.messageCacheBySession,
+            [sessionId]: appendUniqueById(
+              current.messageCacheBySession[sessionId] ?? [],
+              [partialMessage],
+            ).slice(-MAX_ALL_MESSAGES),
+          },
+          ...activeUpdates,
+        };
+      });
+    };
+
+    const commitRegeneratedVersion = () => {
+      if (!regenerateMessageId) return;
+      set((current) => {
+        const withoutOldVersion = (messages: Message[]) => messages.filter(
+          (message) => message.id !== regenerateMessageId,
+        );
+        return {
+          messages: current.activeSessionId === sessionId
+            ? withoutOldVersion(current.messages)
+            : current.messages,
+          allMessages: current.activeSessionId === sessionId
+            ? withoutOldVersion(current.allMessages)
+            : current.allMessages,
+          messageCacheBySession: {
+            ...current.messageCacheBySession,
+            [sessionId]: withoutOldVersion(current.messageCacheBySession[sessionId] ?? []),
+          },
+        };
+      });
+    };
+
+    const finishRecoverable = (error: string | null, phase: StreamPhase = error ? 'error' : 'idle') => {
+      flushImmediate(sessionId, generationId);
+      const turn = get().turnsBySession[sessionId];
+      if (turn?.generationId !== generationId) return;
+      saveLocalPartial(turn.content, turn.citations);
+      resetTokenBatcher(sessionId, generationId);
+      clearStreamOnComplete(sessionId, generationId);
+      set((current) => withTurnUpdate(current, sessionId, generationId, {
+        phase,
+        safePhase: error ? get().turnsBySession[sessionId]?.safePhase ?? null : null,
+        isLocked: false,
+        content: '',
+        citations: [],
+        quality: null,
+        error,
+        aiStatusText: null,
+        recoveryState: error ? (turn.turnId ? turn.recoveryState : 'failed') : 'idle',
+      }));
+      if (get()._pendingSessionRefresh) {
+        set({ _pendingSessionRefresh: false });
+        get().loadSessions();
+      }
+    };
+
+    const streamOnce = async (): Promise<boolean> => {
+      const controller = createStreamAbortController(sessionId, generationId);
 
       // Progressive thinking phases + connection status tracking
-      let abortInterval: ReturnType<typeof setInterval> | undefined;
+      let connectionWatchdog: ReturnType<typeof setTimeout> | undefined;
+      let eventIdleWatchdog: ReturnType<typeof setTimeout> | undefined;
+      let totalWatchdog: ReturnType<typeof setTimeout> | undefined;
+      let abortReason: 'connection' | 'idle' | 'total' | null = null;
       let phaseTimerSearching: ReturnType<typeof setTimeout> | undefined;
       let phaseTimerGenerating: ReturnType<typeof setTimeout> | undefined;
+      let assistantContent = '';
 
-      const clearAllTimers = () => {
-        if (abortInterval) clearInterval(abortInterval);
+      const clearPhaseTimers = () => {
         if (phaseTimerSearching) clearTimeout(phaseTimerSearching);
         if (phaseTimerGenerating) clearTimeout(phaseTimerGenerating);
       };
 
+      const clearAllTimers = () => {
+        if (connectionWatchdog) clearTimeout(connectionWatchdog);
+        if (eventIdleWatchdog) clearTimeout(eventIdleWatchdog);
+        if (totalWatchdog) clearTimeout(totalWatchdog);
+        clearPhaseTimers();
+      };
+
+      const isCurrentGeneration = () => (
+        get().turnsBySession[sessionId]?.generationId === generationId
+      );
+      const abortForTimeout = (reason: 'connection' | 'idle' | 'total') => {
+        if (!isCurrentGeneration() || controller.signal.aborted) return;
+        abortReason = reason;
+        clearAllTimers();
+        controller.abort();
+      };
+      const armEventIdleWatchdog = () => {
+        if (eventIdleWatchdog) clearTimeout(eventIdleWatchdog);
+        eventIdleWatchdog = setTimeout(() => abortForTimeout('idle'), CHAT_STREAM_TIMEOUTS.idleMs);
+      };
+      const markAnswerStarted = () => {
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          const timings = turn?.timings ?? {};
+          return withTurnUpdate(current, sessionId, generationId, {
+            phase: 'streaming',
+            safePhase: 'generating',
+            timings: timings.firstAnswerMs === undefined
+              ? { ...timings, firstAnswerMs: elapsedMs(turn?.startedAtMs) }
+              : timings,
+          });
+        });
+      };
+      const applyUsageTimings = (data: Record<string, unknown>) => {
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          const timings = { ...(turn?.timings ?? {}) };
+          const firstAnswerMs = data.first_answer_token_ms ?? data.ttfe_ms;
+          const totalMs = data.total_duration_ms ?? data.latency_ms;
+          if (typeof firstAnswerMs === 'number' && Number.isFinite(firstAnswerMs)) {
+            timings.firstAnswerMs = Math.max(0, firstAnswerMs);
+          }
+          if (typeof totalMs === 'number' && Number.isFinite(totalMs)) {
+            timings.totalMs = Math.max(0, totalMs);
+          }
+          return withTurnUpdate(current, sessionId, generationId, { timings });
+        });
+      };
+      let recoverInterruptedStream: (() => Promise<boolean | null>) | null = null;
+
       try {
+        connectionWatchdog = setTimeout(
+          () => abortForTimeout('connection'),
+          CHAT_STREAM_TIMEOUTS.connectionMs,
+        );
+        totalWatchdog = setTimeout(
+          () => abortForTimeout('total'),
+          CHAT_STREAM_TIMEOUTS.totalMs,
+        );
         // V3.5 CRIT-001: Pass AbortController signal to fetch
         // V6.0: scope the SSE request to the active space (fetch bypasses the
         // axios interceptor, so set the header explicitly here).
@@ -453,93 +1087,336 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           Authorization: `Bearer ${token}`,
         };
         if (spaceId) sendHeaders['X-Space-Id'] = spaceId;
-        const response = await fetch(`/api/v1/chat/sessions/${sessionId}/send/`, {
+        const sendUrl = regenerateMessageId
+          ? `/api/v1/chat/messages/${regenerateMessageId}/regenerate/`
+          : `/api/v1/chat/sessions/${sessionId}/send/`;
+        const response = await fetch(sendUrl, {
           method: 'POST',
           headers: sendHeaders,
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({
+            content,
+            client_request_id: clientRequestId,
+            answer_mode: answerMode,
+            protocol_version: 2,
+          }),
           signal: controller.signal, // V3.5: AbortController signal
         });
 
+        if (connectionWatchdog) {
+          clearTimeout(connectionWatchdog);
+          connectionWatchdog = undefined;
+        }
+
         if (!response.ok) {
+          if (answerMode === 'deep' && (response.status === 403 || response.status === 409)) {
+            throw new Error('deep_unavailable');
+          }
           throw new Error(`HTTP ${response.status}`);
         }
 
+        const responseTurnId = response.headers?.get?.('X-Chat-Turn-Id') || null;
+        const responseClientRequestId = response.headers?.get?.('X-Chat-Client-Request-Id') || null;
+        if (responseClientRequestId && responseClientRequestId !== clientRequestId) {
+          finishRecoverable('error_generic');
+          return false;
+        }
+        if (responseTurnId) {
+          set((current) => withTurnUpdate(current, sessionId, generationId, {
+            turnId: responseTurnId,
+            recoveryState: 'available',
+          }));
+        }
+
         // Headers received — connection established → 'searching' phase
-        set({ streamPhase: 'searching' });
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          return withTurnUpdate(current, sessionId, generationId, {
+            phase: 'searching',
+            safePhase: 'searching',
+            timings: {
+              ...(turn?.timings ?? {}),
+              connectionMs: elapsedMs(turn?.startedAtMs),
+            },
+          });
+        });
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
-        let assistantContent = '';
-        let currentEvent = '';
-
-        // Progressive thinking phase timers
-        let lastTokenTime = Date.now();
-        const ABORT_THRESHOLD = 30000; // 30s — abort stream
+        const parser = new StoreSSEDecoder();
+        armEventIdleWatchdog();
 
         // Phase 1: After 3s of no tokens → "searching" phase (already set on connection)
         phaseTimerSearching = setTimeout(() => {
-          if (get().streamPhase === 'connecting') {
-            set({ streamPhase: 'searching' });
+          if (get().turnsBySession[sessionId]?.generationId === generationId
+            && get().turnsBySession[sessionId]?.phase === 'connecting') {
+            set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'searching' }));
           }
         }, 3000);
 
         // Phase 2: After 8s of no tokens → "streaming" phase indicator
         phaseTimerGenerating = setTimeout(() => {
-          if (get().streamPhase === 'searching' && !assistantContent) {
+          if (get().turnsBySession[sessionId]?.generationId === generationId
+            && get().turnsBySession[sessionId]?.phase === 'searching' && !assistantContent) {
             // Still waiting — keep in searching but indicate long retrieval
           }
         }, 8000);
 
-        // Abort timer: cancel stream if no tokens for 30s
-        // V4.1 BUG-003: Route abort through AbortController.abort() instead of reader.cancel().
-        // reader.cancel() throws DOMException with error.name !== 'AbortError', so the catch
-        // block on line ~510 does NOT match the AbortError branch. This means the preserved
-        // content logic never fires for timeout-induced aborts, and truncated content is lost.
-        // controller.abort() causes reader.read() to throw a proper AbortError, which IS
-        // caught by the correct branch that preserves truncated content.
-        // [Source: V4.1/ui_ux/ui_bug_list_V4.1.md §BUG-003]
-        abortInterval = setInterval(() => {
-          const elapsed = Date.now() - lastTokenTime;
-          if (elapsed > ABORT_THRESHOLD && get().streamPhase !== 'idle') {
-            clearAllTimers();
-            // V4.1 BUG-003: Mark this as a timeout abort so the AbortError handler
-            // can show appropriate feedback (timeout error toast) vs user-intentional abort
-            // (Stop button — silent, preserves truncated content).
-            set({ _isTimeoutAbort: true });
-            controller.abort(); // V4.1 BUG-003: Use AbortController instead of reader.cancel()
-            // No inline cleanup needed — AbortError catch branch will handle:
-            // flushImmediate() + clearStreamOnComplete() + truncated content preservation + unlockSend
+        recoverInterruptedStream = async (): Promise<boolean | null> => {
+          const turn = get().turnsBySession[sessionId];
+          if (!turn?.turnId || turn.generationId !== generationId) return null;
+
+          set((current) => withTurnUpdate(current, sessionId, generationId, {
+            phase: 'connecting',
+            safePhase: 'accepted',
+            recoveryState: 'recovering',
+          }));
+          const recoveryController = createStreamAbortController(sessionId, generationId);
+          const recoveryFetch = async (
+            url: string,
+            init: RequestInit,
+          ): Promise<[Response, () => void]> => {
+            const attemptController = new AbortController();
+            const abortFromOwner = () => attemptController.abort();
+            recoveryController.signal.addEventListener('abort', abortFromOwner, { once: true });
+            if (recoveryController.signal.aborted) attemptController.abort();
+            const timeout = setTimeout(() => {
+              attemptController.abort();
+            }, CHAT_STREAM_TIMEOUTS.recoveryRequestMs);
+            let released = false;
+            const release = () => {
+              if (released) return;
+              released = true;
+              clearTimeout(timeout);
+              recoveryController.signal.removeEventListener('abort', abortFromOwner);
+            };
+            try {
+              const response = await fetch(url, { ...init, signal: attemptController.signal });
+              return [response, release];
+            } catch (error) {
+              release();
+              throw error;
+            }
+          };
+          const recoveryHeaders: Record<string, string> = {
+            Accept: 'text/event-stream',
+            Authorization: `Bearer ${token}`,
+          };
+          const recoverySpaceId = getActiveSpaceId();
+          if (recoverySpaceId) recoveryHeaders['X-Space-Id'] = recoverySpaceId;
+
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+            if (attempt > 0) {
+              await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** (attempt - 1)));
+            }
+            if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+
+            let releaseRecoveryResponse = () => {};
+            try {
+              const cursor = get().turnsBySession[sessionId]?.lastEventSeq ?? 0;
+              const [replayResponse, releaseReplayResponse] = await recoveryFetch(
+                `/api/v1/chat/turns/${turn.turnId}/events/?after=${cursor}`,
+                {
+                  method: 'GET',
+                  headers: { ...recoveryHeaders, 'Last-Event-ID': String(cursor) },
+                  signal: recoveryController.signal,
+                },
+              );
+              releaseRecoveryResponse = releaseReplayResponse;
+              if (!replayResponse.ok) throw new Error(`HTTP ${replayResponse.status}`);
+              validateRecoveryResponseIdentity(
+                replayResponse.headers,
+                turn.turnId,
+                clientRequestId,
+              );
+
+              const replayReader = replayResponse.body?.getReader();
+              if (!replayReader) throw new Error('missing recovery stream');
+              const replayParser = new StoreSSEDecoder();
+              const replayDecoder = new TextDecoder();
+              while (true) {
+                const { done, value } = await replayReader.read();
+                const replayMessages = done
+                  ? [...replayParser.feed(replayDecoder.decode()), ...replayParser.end()]
+                  : replayParser.feed(replayDecoder.decode(value, { stream: true }));
+                for (const message of replayMessages) {
+                  if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+                  const event = validateChatStreamMessage(message, {
+                    protocolVersion: 2,
+                    expectedSessionId: sessionId,
+                    expectedTurnId: turn.turnId,
+                    expectedClientRequestId: clientRequestId,
+                  });
+                  const sequence = event.sequence!;
+                  if (sequence <= (get().turnsBySession[sessionId]?.lastEventSeq ?? 0)) {
+                    continue;
+                  }
+                  const data = event.data;
+                  switch (event.name) {
+                    case 'meta':
+                      break;
+                    case 'phase': {
+                      const phase = mapServerPhaseForUi(data.phase);
+                      set((current) => withTurnUpdate(current, sessionId, generationId, {
+                        phase: phase.streamPhase,
+                        safePhase: phase.safePhase,
+                      }));
+                      break;
+                    }
+                    case 'answer_delta':
+                      markAnswerStarted();
+                      assistantContent += data.text || '';
+                      appendToken(sessionId, generationId, data.text || '');
+                      break;
+                    case 'citations':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { citations: data }));
+                      break;
+                    case 'quality':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
+                      break;
+                    case 'usage':
+                      applyUsageTimings(data);
+                      break;
+                    case 'done':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                      flushImmediate(sessionId, generationId);
+                      commitRegeneratedVersion();
+                      get().finishStreamingMessage(data.message_id, data.session_id, generationId);
+                      set((current) => withTurnUpdate(current, sessionId, null, { recoveryState: 'recovered' }));
+                      return true;
+                    case 'error':
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                      finishRecoverable('error_generic');
+                      set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                      return false;
+                  }
+                  set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                }
+                if (done) break;
+              }
+
+              releaseRecoveryResponse();
+              const [statusResponse, releaseStatusResponse] = await recoveryFetch(`/api/v1/chat/turns/${turn.turnId}/`, {
+                method: 'GET',
+                headers: { ...recoveryHeaders, Accept: 'application/json' },
+                signal: recoveryController.signal,
+              });
+              releaseRecoveryResponse = releaseStatusResponse;
+              if (!statusResponse.ok) throw new Error(`HTTP ${statusResponse.status}`);
+              const statusData = await statusResponse.json();
+              if (statusData.id !== turn.turnId
+                || statusData.client_request_id !== clientRequestId
+                || statusData.session !== sessionId) {
+                finishRecoverable('error_generic');
+                set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                return false;
+              }
+              if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+              const statusSequence = Number(statusData.last_event_seq);
+              if (Number.isSafeInteger(statusSequence) && statusSequence > 0) {
+                set((current) => withTurnUpdate(current, sessionId, generationId, {
+                  lastEventSeq: Math.max(current.turnsBySession[sessionId]?.lastEventSeq ?? 0, statusSequence),
+                }));
+              }
+              if (statusData.status === 'completed' && statusData.answer) {
+                const answer = mapApiMessage(statusData.answer);
+                resetTokenBatcher(sessionId, generationId);
+                set((current) => withTurnUpdate(current, sessionId, generationId, {
+                  content: answer.content,
+                  citations: answer.citations ?? [],
+                  safePhase: 'finalizing',
+                  quality: {
+                    confidence: answer.confidenceLabel ?? '',
+                    score: answer.confidenceScore ?? 0,
+                    needs_human_review: answer.needsHumanReview ?? false,
+                    retrieval_mode: answer.retrievalMode ?? '',
+                    retrieval_latency_ms: answer.retrievalLatencyMs ?? 0,
+                  },
+                }));
+                commitRegeneratedVersion();
+                get().finishStreamingMessage(answer.id, sessionId, generationId);
+                set((current) => withTurnUpdate(current, sessionId, null, { recoveryState: 'recovered' }));
+                return true;
+              }
+              if (statusData.status === 'failed' || statusData.status === 'cancelled') {
+                finishRecoverable('error_generic');
+                set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+                return false;
+              }
+            } catch (error) {
+              if (error instanceof DOMException
+                && error.name === 'AbortError'
+                && recoveryController.signal.aborted) {
+                if (get().turnsBySession[sessionId]?.generationId === generationId) {
+                  finishRecoverable(null, 'idle');
+                }
+                return false;
+              }
+              if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+            } finally {
+              releaseRecoveryResponse();
+            }
           }
-        }, 3000);
+
+          finishRecoverable('error_timeout');
+          set((current) => withTurnUpdate(current, sessionId, generationId, { recoveryState: 'failed' }));
+          return false;
+        };
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) {
-            clearAllTimers();
-            break;
-          }
+          if (!done && value.length > 0) armEventIdleWatchdog();
+          const messages = done
+            ? [...parser.feed(decoder.decode()), ...parser.end()]
+            : parser.feed(decoder.decode(value, { stream: true }));
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.slice(7);
-            } else if (line.startsWith('data: ')) {
-              const data = JSON.parse(line.slice(6));
-              switch (currentEvent) {
+          for (const message of messages) {
+            armEventIdleWatchdog();
+            const currentTurn = get().turnsBySession[sessionId];
+            const event = validateChatStreamMessage(message, {
+              protocolVersion: currentTurn?.protocolVersion ?? null,
+              expectedSessionId: sessionId,
+              expectedTurnId: currentTurn?.turnId,
+              expectedClientRequestId: clientRequestId,
+            });
+            if (currentTurn?.protocolVersion == null) {
+              set((current) => withTurnUpdate(current, sessionId, generationId, {
+                protocolVersion: event.protocolVersion,
+              }));
+            }
+            const sequence = event.sequence;
+            if (sequence !== null && sequence <= (currentTurn?.lastEventSeq ?? 0)) continue;
+            const data = event.data;
+            {
+              switch (event.name) {
+                case 'meta': {
+                  set((current) => withTurnUpdate(current, sessionId, generationId, {
+                    turnId: data.turn_id,
+                    protocolVersion: 2,
+                    recoveryState: 'available',
+                  }));
+                  break;
+                }
+                case 'phase': {
+                  const phase = mapServerPhaseForUi(data.phase);
+                  set((current) => withTurnUpdate(current, sessionId, generationId, {
+                    phase: phase.streamPhase,
+                    safePhase: phase.safePhase,
+                  }));
+                  break;
+                }
                 case 'token':
-                  lastTokenTime = Date.now();
-                  clearAllTimers();
+                case 'answer_delta':
+                  clearPhaseTimers();
                   // V3.5: Transition to 'streaming' on first token
-                  if (get().streamPhase !== 'streaming') {
-                    set({ streamPhase: 'streaming' });
-                  }
-                  assistantContent += data.token || '';
+                  markAnswerStarted();
+                  assistantContent += (event.name === 'answer_delta' ? data.text : data.token) || '';
                   // V3.5 HIGH-005: Batch token updates via rAF instead of per-token set()
-                  appendToken(data.token);
+                  appendToken(
+                    sessionId,
+                    generationId,
+                    (event.name === 'answer_delta' ? data.text : data.token) || '',
+                  );
                   break;
                 case 'citations':
                   // V4.6 FIX: Reset the no-token stall timer on citations. Citations are
@@ -549,94 +1426,61 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   // backend (common when several conversations stream at once on the dev
                   // server) gets falsely aborted into a timeout error before the first token.
                   // Resetting here gives the LLM its own full window for time-to-first-token.
-                  lastTokenTime = Date.now();
-                  get().setStreamCitations(data);
+                  set((current) => withTurnUpdate(current, sessionId, generationId, { citations: data }));
+                  break;
+                case 'quality':
+                  set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
+                  break;
+                case 'usage':
+                  applyUsageTimings(data);
                   break;
                 case 'done':
                   clearAllTimers();
-                  flushImmediate(); // V3.5: Force flush remaining buffered tokens
-                  get().finishStreamingMessage(data.message_id, data.session_id);
+                  if (sequence !== null) {
+                    set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+                  }
+                  flushImmediate(sessionId, generationId);
+                  commitRegeneratedVersion();
+                  get().finishStreamingMessage(data.message_id, data.session_id, generationId);
                   return true;
                 case 'error':
                   clearAllTimers();
-                  flushImmediate();
-                  // V3.6 MED-002: Use consistent i18n error key instead of raw server string
-                  set({ streamPhase: 'error', sendError: 'error_generic', streamingSessionId: null });
-                  // V4.3 UAT FIX: Refresh sidebar sessions even when stream fails.
-                  // Previously, _pendingSessionRefresh was only cleared in finishStreamingMessage(),
-                  // which is NOT called on SSE error events. This meant the sidebar never
-                  // refreshed after the first message in a new session failed, showing "暂无会话".
-                  if (get()._pendingSessionRefresh) {
-                    set({ _pendingSessionRefresh: false });
-                    get().loadSessions();
+                  if (sequence !== null) {
+                    set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
                   }
-                  get().unlockSend();
-                  // Reset to idle after error is shown
-                  setTimeout(() => set({ streamPhase: 'idle' }), 100);
+                  finishRecoverable('error_generic');
                   return false;
+              }
+              if (sequence !== null) {
+                set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
               }
             }
           }
+
+          if (done) {
+            clearAllTimers();
+            const recovered = await recoverInterruptedStream();
+            if (recovered !== null) return recovered;
+            finishRecoverable('error_network');
+            return false;
+          }
         }
-        clearAllTimers();
-        return true;
       } catch (error) {
         clearAllTimers();
 
         // V3.5 CRIT-001: Handle AbortError — stream was intentionally aborted
         if (error instanceof DOMException && error.name === 'AbortError') {
-          // V4.1 BUG-003: Differentiate timeout abort vs user-intentional abort (Stop button).
-          // Timeout abort: controller.abort() called by abortInterval → show timeout error toast.
-          // User abort: abortActiveStream() called by Stop button → preserve content silently.
-          const isTimeout = get()._isTimeoutAbort;
-
-          // V4.0 UI-HIGH-001: Preserve already-output content as a truncated message
-          // instead of discarding it. This supports both "Stop Generation" button and
-          // timeout aborts — the partial AI response should remain visible.
-          flushImmediate();
-          clearStreamOnComplete();
-          const preservedContent = get().streamContent;
-          const preservedCitations = get().citations;
-          if (preservedContent && preservedContent.trim()) {
-            const truncatedMessage: Message = {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: preservedContent,
-              citations: preservedCitations,
-              createdAt: new Date().toISOString(),
-            };
-            get().addMessage(truncatedMessage);
+          const isTimeout = abortReason !== null;
+          if (abortReason && recoverInterruptedStream
+            && get().turnsBySession[sessionId]?.turnId) {
+            const recovered = await recoverInterruptedStream();
+            if (recovered !== null) return recovered;
           }
-          // V4.1 BUG-003: Clear timeout flag after processing
-          set({
-            streamPhase: isTimeout ? 'error' : 'idle',
-            streamContent: '',
-            citations: [],
-            streamingSessionId: null,
-            sendError: isTimeout ? 'error_timeout' : null,
-            _isTimeoutAbort: false,
-          });
-          // V4.3 UAT FIX: Refresh sidebar sessions on abort (timeout or user stop)
-          if (get()._pendingSessionRefresh) {
-            set({ _pendingSessionRefresh: false });
-            get().loadSessions();
-          }
-          get().unlockSend();
-          // For timeout, reset to idle after error is shown
-          if (isTimeout) {
-            setTimeout(() => set({ streamPhase: 'idle' }), 100);
-          }
-          return false; // Return false but don't treat as error
+          finishRecoverable(isTimeout ? 'error_timeout' : null, isTimeout ? 'error' : 'idle');
+          return false;
         }
 
-        console.error(`Streaming error (attempt ${attempt + 1}):`, error);
-        if (attempt < maxRetries) {
-          const delay = (attempt + 1) * 1000;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          return streamWithRetry(attempt + 1);
-        }
-
-        flushImmediate();
+        console.error('Streaming error:', error);
 
         // P0-2: Combine streamPhase + sendError into single set() call to prevent
         // a one-frame gap where streamPhase='error' but sendError=null.
@@ -645,7 +1489,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Now: single atomic update ensures ChatPage always sees both values together.
         const errorMsg = (error as Error).message;
         let errorKey: string;
-        if (errorMsg.includes('401') || errorMsg.includes('403')) {
+        if (errorMsg.includes('deep_unavailable')) {
+          errorKey = 'error_deep_unavailable';
+        } else if (errorMsg.includes('401') || errorMsg.includes('403')) {
           errorKey = 'error_auth';
         } else if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
           errorKey = 'error_server';
@@ -655,82 +1501,92 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           errorKey = 'error_generic';
         }
 
-        set({ streamPhase: 'error', sendError: errorKey, streamingSessionId: null });
-        // V4.3 UAT FIX: Refresh sidebar sessions after all retries exhausted
-        if (get()._pendingSessionRefresh) {
-          set({ _pendingSessionRefresh: false });
-          get().loadSessions();
+        if (recoverInterruptedStream && get().turnsBySession[sessionId]?.turnId) {
+          const recovered = await recoverInterruptedStream();
+          if (recovered !== null) return recovered;
         }
-        get().unlockSend();
-
-        // Reset to idle after error is shown
-        setTimeout(() => set({ streamPhase: 'idle' }), 100);
+        finishRecoverable(errorKey);
         return false;
       }
     };
 
-    await streamWithRetry(0);
-    // V3.6 LOW-001: All terminal paths of streamWithRetry guarantee unlockSend():
+    await streamOnce();
+    // V3.6 LOW-001: All terminal paths of streamOnce guarantee unlockSend():
     // - finishStreamingMessage (success + session mismatch)
-    // - AbortError handler, timeout handler, SSE error event, exhausted retries
+    // - AbortError handler, timeout handler, SSE error event, request errors
     // - Session creation/validation failures also call unlockSend before returning
     // No safety net needed — removed redundant double-unlock.
   },
 
   // V3.5 CRIT-002: Verify session ID match before committing stream data
-  finishStreamingMessage: (messageId: string, sessionId: string) => {
-    const currentSessionId = get().activeSessionId;
+  finishStreamingMessage: (messageId: string, sessionId: string, generationId?: string) => {
+    const ownerTurn = get().turnsBySession[sessionId];
+    const ownerGeneration = generationId ?? ownerTurn?.generationId;
+    if (!ownerTurn || !ownerGeneration || ownerTurn.generationId !== ownerGeneration) return;
 
-    // Session mismatch: stream data belongs to a different session
-    // (user switched sessions while stream was running)
-    if (currentSessionId !== sessionId) {
-      // Discard stale stream data, clean up
-      set({ streamPhase: 'idle', streamContent: '', citations: [], totalRoundCount: 0, streamingSessionId: null });
-      clearStreamOnComplete();
-      get().unlockSend();
-      return;
-    }
-
-    const { streamContent, citations } = get();
+    const { content, citations, quality } = ownerTurn;
 
     const assistantMessage: Message = {
       id: messageId,
       role: 'assistant',
-      content: streamContent,
+      content,
       citations,
+      confidenceScore: quality?.score,
+      confidenceLabel: quality?.confidence,
+      needsHumanReview: quality?.needs_human_review,
+      retrievalMode: quality?.retrieval_mode,
+      retrievalLatencyMs: quality?.retrieval_latency_ms,
       createdAt: new Date().toISOString(),
     };
 
-    // V3.5: Update both messages (visible slice) and allMessages (full history)
-    const newAllMessages = [...get().allMessages, assistantMessage];
-    // V3.6 MED-001 / V3.7 P1.3: Prune front if exceeding MAX cap — prevents unbounded memory growth
-    const prunedAllMessages = newAllMessages.length > MAX_ALL_MESSAGES
-      ? newAllMessages.slice(newAllMessages.length - MAX_ALL_MESSAGES)
-      : newAllMessages;
-    const rounds = computeRounds(prunedAllMessages);
-    const visibleMessages = extractVisibleMessages(rounds, get().visibleRoundCount);
-    const wasPruned = prunedAllMessages.length < newAllMessages.length;
+    set((current) => {
+      const activeUpdates: Partial<ChatState> = {};
+      const ownerMessages = appendUniqueById(
+        current.messageCacheBySession[sessionId] ?? [],
+        [assistantMessage],
+      ).slice(-MAX_ALL_MESSAGES);
+      if (current.activeSessionId === sessionId) {
+        const newAllMessages = appendUniqueById(current.allMessages, [assistantMessage]);
+        const prunedAllMessages = newAllMessages.length > MAX_ALL_MESSAGES
+          ? newAllMessages.slice(newAllMessages.length - MAX_ALL_MESSAGES)
+          : newAllMessages;
+        const rounds = computeRounds(prunedAllMessages);
+        const wasPruned = prunedAllMessages.length < newAllMessages.length;
+        Object.assign(activeUpdates, {
+          messages: extractVisibleMessages(rounds, current.visibleRoundCount),
+          allMessages: prunedAllMessages,
+          hasOlderMessages: wasPruned ? true : rounds.length > current.visibleRoundCount,
+          totalRoundCount: rounds.length,
+        });
+      }
 
-    // V3.7 P1.3: Verification log — proves memory is capped during testing
-    // Dev-only: can be removed before production release
-    console.log(`[V3.7 P1.3] finishStreamingMessage: allMessages=${prunedAllMessages.length} (cap=${MAX_ALL_MESSAGES}), visibleMessages=${visibleMessages.length}, wasPruned=${wasPruned}`);
-
-    set({
-      messages: visibleMessages,
-      allMessages: prunedAllMessages,
-      streamPhase: 'idle',
-      streamContent: '',
-      citations: [],
-      streamingSessionId: null,
-      // V3.6 MED-001: If pruned, older data exists on server → always show "load older"
-      hasOlderMessages: wasPruned ? true : rounds.length > get().visibleRoundCount,
-      // V3.6 MED-003: Cache round count for efficient hasOlderMessages checks
-      totalRoundCount: rounds.length,
+      return {
+        ...activeUpdates,
+        messageCacheBySession: {
+          ...current.messageCacheBySession,
+          [sessionId]: ownerMessages,
+        },
+        ...withTurnUpdate(current, sessionId, ownerGeneration, {
+          phase: 'idle',
+          safePhase: null,
+          isLocked: false,
+          content: '',
+          citations: [],
+          quality: null,
+          error: null,
+          aiStatusText: null,
+          generationId: null,
+          recoveryState: 'idle',
+          timings: {
+            ...(ownerTurn.timings ?? {}),
+            totalMs: ownerTurn.timings?.totalMs ?? elapsedMs(ownerTurn.startedAtMs),
+          },
+        }),
+      };
     });
 
-    clearStreamOnComplete();
-    get().unlockSend();
-    // V3.6 HIGH-002: Only refresh sessions after new session creation (not every message)
+    resetTokenBatcher(sessionId, ownerGeneration);
+    clearStreamOnComplete(sessionId, ownerGeneration);
     if (get()._pendingSessionRefresh) {
       set({ _pendingSessionRefresh: false });
       get().loadSessions();

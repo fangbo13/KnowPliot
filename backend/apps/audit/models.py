@@ -43,6 +43,7 @@ class AuditLog(models.Model):
         ("user_deactivate", "User Deactivate"),
         ("config_change", "Config Change"),
         ("system_health_view", "System Health View"),
+        ("ingestion_retry", "Ingestion Retry"),
         ("audit_export", "Audit Export"),
         ("role_change_log", "Role Change Log"),
         # ── Crawler domain (V4.1) — retained for historical log compatibility.
@@ -74,6 +75,25 @@ class AuditLog(models.Model):
         ("signup_approved", "Signup Approved"),
         ("signup_rejected", "Signup Rejected"),
         ("user_promote_superadmin", "User Promote Super Admin"),
+        # Phase 5A / V8.0 answer feedback actions.
+        ("feedback_submit", "Feedback Submit"),
+        ("feedback_update", "Feedback Update"),
+        ("feedback_withdraw", "Feedback Withdraw"),
+        ("feedback_review_assign", "Feedback Review Assign"),
+        ("feedback_review_claim", "Feedback Review Claim"),
+        ("feedback_review_resolve", "Feedback Review Resolve"),
+        ("feedback_review_dismiss", "Feedback Review Dismiss"),
+        ("feedback_review_reopen", "Feedback Review Reopen"),
+        ("knowledge_gap_create", "Knowledge Gap Create"),
+        ("knowledge_gap_assign", "Knowledge Gap Assign"),
+        ("knowledge_gap_resolve", "Knowledge Gap Resolve"),
+        ("knowledge_gap_reopen", "Knowledge Gap Reopen"),
+        # Phase 6B / V8.1 async operations and SLA actions.
+        ("export_job_create", "Export Job Create"),
+        ("export_job_complete", "Export Job Complete"),
+        ("export_job_retry", "Export Job Retry"),
+        ("audit_export_download", "Audit Export Download"),
+        ("sla_alert_created", "SLA Alert Created"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -91,11 +111,31 @@ class AuditLog(models.Model):
     # V4.0: role_used tracks which role was active during the operation
     # (hr/admin/superuser/employee) — critical for dual-role audit tracing
     role_used = models.CharField(max_length=20, blank=True, default="", help_text="Role used for this action")
+    organization_id = models.UUIDField(null=True, blank=True, db_index=True)
+    business_line_id = models.UUIDField(null=True, blank=True, db_index=True)
+    space_id = models.UUIDField(null=True, blank=True, db_index=True)
+    RESULT_CHOICES = [
+        ("success", "Success"),
+        ("denied", "Denied"),
+        ("failure", "Failure"),
+    ]
+    result = models.CharField(
+        max_length=10,
+        choices=RESULT_CHOICES,
+        default="success",
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "audit_auditlog"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["space_id", "action", "result", "created_at"],
+                name="audit_scope_action_result_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.action} by {self.user} at {self.created_at}"
