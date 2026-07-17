@@ -160,6 +160,16 @@ class CapabilityEndpointTest(TestCase):
             self.assertNotIn("chat.share", response.data["capabilities"])
             self.assertNotIn("chat.export", response.data["capabilities"])
 
+    @override_settings(DEEP_ANSWER_MODE=True)
+    def test_governed_deep_is_added_for_member_but_guest_is_always_denied(self):
+        member = self.get_capabilities(self.users["member"], self.space.id)
+        guest = self.get_capabilities(self.users["guest"], self.space.id)
+
+        self.assertEqual(member.status_code, 200)
+        self.assertIn("chat.deep", member.data["capabilities"])
+        self.assertEqual(guest.status_code, 200)
+        self.assertNotIn("chat.deep", guest.data["capabilities"])
+
     def test_organization_admin_is_governance_scoped_and_gets_selected_space_operations(self):
         response = self.get_capabilities(self.org_admin, self.space.id)
 

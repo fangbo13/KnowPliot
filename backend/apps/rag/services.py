@@ -80,7 +80,7 @@ def ingest_document(self, document_id: str, job_id: str | None = None) -> dict:
     doc.save(update_fields=["status"])
 
     try:
-        pipeline = RAGPipeline()
+        pipeline = RAGPipeline(ingestion=True)
         chunks = pipeline.ingest(doc)
 
         # Update document

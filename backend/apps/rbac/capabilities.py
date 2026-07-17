@@ -120,6 +120,7 @@ class CapabilityGrantSnapshot:
     business_line_ids: tuple[UUID, ...] = ()
     space_roles: Mapping[UUID, str] = field(default_factory=dict)
     selected_space_id: UUID | None = None
+    deep_space_ids: tuple[UUID, ...] = ()
 
 
 def _sorted_ids(values) -> list[str]:
@@ -159,11 +160,16 @@ def build_capability_payload(snapshot: CapabilityGrantSnapshot) -> dict:
     if snapshot.business_line_ids:
         capabilities.update(BUSINESS_ADMIN_CAPABILITIES)
     if snapshot.selected_space_id is not None:
+        selected_role = snapshot.space_roles.get(snapshot.selected_space_id, "")
         capabilities.update(
-            SPACE_ROLE_CAPABILITIES.get(
-                snapshot.space_roles.get(snapshot.selected_space_id, ""), frozenset()
-            )
+            SPACE_ROLE_CAPABILITIES.get(selected_role, frozenset())
         )
+        if (
+            selected_role != "guest"
+            and snapshot.selected_space_id in snapshot.deep_space_ids
+            and "chat.ask" in capabilities
+        ):
+            capabilities.add("chat.deep")
 
     return {
         "scopes": {
@@ -284,6 +290,16 @@ def resolve_capabilities(user, *, space_id=None) -> dict:
     if selected_space_id is not None and selected_space_id not in space_roles:
         raise NotFound("Space not found.")
 
+    deep_space_ids: tuple[UUID, ...] = ()
+    selected_role = space_roles.get(selected_space_id)
+    if selected_space_id is not None and selected_role != "guest":
+        from apps.spaces.generation_policy import deep_mode_available
+        from apps.spaces.models import KnowledgeSpace
+
+        selected_space = KnowledgeSpace.objects.filter(pk=selected_space_id).first()
+        if selected_space is not None and deep_mode_available(selected_space):
+            deep_space_ids = (selected_space_id,)
+
     return build_capability_payload(
         CapabilityGrantSnapshot(
             platform=platform,
@@ -291,5 +307,6 @@ def resolve_capabilities(user, *, space_id=None) -> dict:
             business_line_ids=tuple(business_line_ids),
             space_roles=space_roles,
             selected_space_id=selected_space_id,
+            deep_space_ids=deep_space_ids,
         )
     )

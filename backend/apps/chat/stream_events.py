@@ -35,6 +35,7 @@ _FORBIDDEN_KEYS = frozenset(
         "raw_exception",
         "raw_reasoning",
         "reasoning",
+        "reasoning_content",
         "system_prompt",
     }
 )

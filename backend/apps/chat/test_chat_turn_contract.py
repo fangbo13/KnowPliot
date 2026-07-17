@@ -251,6 +251,31 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
         self.assertEqual(repository.questions, [])
         self.assertEqual(repository.saved_turns, [failed])
 
+    def test_retryable_deep_failure_can_downgrade_to_fast_on_the_same_turn(self):
+        failed = self.existing(
+            status="failed",
+            answer_mode="deep",
+            model_id="deep-model",
+            error_code="provider_unavailable",
+        )
+        repository = FakeTurnRepository(failed)
+        repository.locked_session = self.session
+
+        result = begin_chat_turn(
+            session=self.session,
+            client_request_id=self.request_id,
+            content="same question",
+            answer_mode="fast",
+            model_id="fast-model",
+            repository=repository,
+            atomic_factory=self.atomic,
+        )
+
+        self.assertEqual(result.disposition, BeginTurnDisposition.RETRY)
+        self.assertEqual(result.turn.answer_mode, "fast")
+        self.assertEqual(result.turn.model_id, "fast-model")
+        self.assertEqual(repository.questions, [])
+
     def test_same_request_id_with_different_identity_is_a_conflict(self):
         repository = FakeTurnRepository(
             self.existing(question_message=SimpleNamespace(content="different"))
@@ -417,6 +442,20 @@ class ChatSessionResolutionServiceTest(SimpleTestCase):
 
 
 class ChatTurnTransitionTest(SimpleTestCase):
+    def test_model_snapshot_uses_the_full_database_field_width(self):
+        turn = SimpleNamespace(
+            status="accepted",
+            error_code="",
+            completed_at=None,
+            assistant_message=None,
+            model_id="",
+        )
+        model_id = "m" * 160
+
+        transition_chat_turn(turn, "retrieving", model_id=model_id, save=False)
+
+        self.assertEqual(turn.model_id, model_id)
+
     def test_allows_normal_lifecycle_and_stores_only_safe_error_codes(self):
         turn = SimpleNamespace(
             status="accepted",

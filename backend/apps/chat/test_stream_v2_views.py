@@ -29,6 +29,7 @@ from apps.spaces.models import KnowledgeSpace
 try:
     from apps.chat.views import (
         _checkpoint_turn_sequence,
+        _owned_recovery_turn,
         _stream_v2_enabled,
         chat_turn_events,
         send_message,
@@ -36,6 +37,7 @@ try:
 except ImportError:
     _stream_v2_enabled = None
     _checkpoint_turn_sequence = None
+    _owned_recovery_turn = None
     chat_turn_events = None
     from apps.chat.views import send_message
 
@@ -107,14 +109,27 @@ class SendMessageCoordinationTest(SimpleTestCase):
         self.session = scoped_session(self.user)
         self.turn = accepted_turn(self.session)
         self.factory = APIRequestFactory()
+        policy_patcher = patch(
+            "apps.chat.views._request_generation_policy",
+            return_value=SimpleNamespace(
+                answer_mode="fast",
+                model_id="qwen-plus",
+                thinking_enabled=False,
+                thinking_budget=None,
+                fallback_code="",
+            ),
+        )
+        policy_patcher.start()
+        self.addCleanup(policy_patcher.stop)
 
-    def _request(self, protocol_version=2):
+    def _request(self, protocol_version=2, answer_mode="fast"):
         request = self.factory.post(
             reverse("chat-send-message", kwargs={"session_id": self.session.id}),
             {
                 "content": "safe question",
                 "client_request_id": str(self.turn.client_request_id),
                 "protocol_version": protocol_version,
+                "answer_mode": answer_mode,
             },
             format="json",
         )
@@ -175,6 +190,30 @@ class SendMessageCoordinationTest(SimpleTestCase):
             ["meta", "error"],
         )
 
+    @override_settings(CHAT_STREAM_V2=True, DEEP_ANSWER_MODE=True)
+    def test_direct_deep_request_without_server_capability_creates_no_turn(self):
+        patches = self._base_patches()
+        begin = Mock()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patch(
+                "apps.chat.views.resolve_capabilities",
+                return_value={"capabilities": ["chat.ask"]},
+            ),
+            patch("apps.chat.views.begin_chat_turn", begin),
+        ):
+            response = send_message(
+                self._request(answer_mode="deep"),
+                self.session.id,
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["code"], "deep_mode_unavailable")
+        begin.assert_not_called()
+
     @override_settings(CHAT_STREAM_V2=True)
     def test_never_started_response_close_persists_error_and_releases_lease(self):
         redis = FakeRedis()
@@ -193,6 +232,7 @@ class SendMessageCoordinationTest(SimpleTestCase):
         self.assertNotIn(f"chat:session:{self.session.id}:turn", redis.values)
         self.assertEqual(self.turn.status, ChatTurn.STATUS_FAILED)
         self.assertEqual(self.turn.error_code, "client_disconnected")
+        self.assertEqual(self.turn.metrics["disconnect_count"], 1)
         replay = RedisTurnEventStore(redis, self.turn.id).replay()
         self.assertEqual([event.name for event in replay], ["meta", "error"])
 
@@ -254,6 +294,61 @@ class SendMessageCoordinationTest(SimpleTestCase):
         self.assertNotIn("id:", body)
         self.assertNotIn("private failure", body)
         self.assertNotIn(f"chat:session:{self.session.id}:turn", redis.values)
+
+    def test_protocol_one_success_records_all_safe_timings(self):
+        redis = FakeRedis()
+        pipeline = SimpleNamespace(
+            model_name="safe-model",
+            retrieve_and_generate=Mock(
+                return_value=iter(
+                    [
+                        {
+                            "event": "quality",
+                            "data": {"score": 0.9, "retrieval_latency_ms": 9},
+                        },
+                        {"event": "metrics", "data": {"reasoning_ms": 11}},
+                        {"event": "token", "data": {"token": "answer"}},
+                        {"event": "done", "data": {}},
+                    ]
+                )
+            ),
+        )
+        assistant = SimpleNamespace(id=uuid.uuid4())
+        patches = self._base_patches()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patch("apps.chat.views.create_redis_client", return_value=redis),
+            patch("apps.chat.views._conversation_history", return_value=[]),
+            patch("apps.chat.views.transaction.atomic", return_value=nullcontext()),
+            patch("apps.chat.views.Message.objects.create", return_value=assistant),
+            patch("apps.chat.views._save_citations"),
+            patch("apps.chat.views._estimate_token_count", return_value=1),
+            patch(
+                "apps.chat.views.ChatSession.objects.filter",
+                return_value=SimpleNamespace(update=Mock()),
+            ),
+            patch("apps.chat.models.ModelInvocation.objects.create"),
+            patch.dict(
+                sys.modules,
+                {"apps.rag.pipeline": SimpleNamespace(RAGPipeline=lambda: pipeline)},
+            ),
+        ):
+            response = send_message(
+                self._request(protocol_version=1),
+                self.session.id,
+            )
+            body = b"".join(response.streaming_content).decode()
+
+        self.assertIn("event: done", body)
+        self.assertIn("ttfe_ms", self.turn.metrics)
+        self.assertEqual(self.turn.metrics["retrieval_ms"], 9)
+        self.assertEqual(self.turn.metrics["reasoning_ms"], 11)
+        self.assertIn("first_answer_token_ms", self.turn.metrics)
+        self.assertIn("total_ms", self.turn.metrics)
 
     @override_settings(CHAT_STREAM_V2=True)
     def test_v2_maps_safe_events_persists_terminal_sequence_and_releases(self):
@@ -328,6 +423,12 @@ class SendMessageCoordinationTest(SimpleTestCase):
         )
         self.assertNotIn("reasoning", body)
         self.assertNotIn("private chain of thought", body)
+        self.assertIn('"phase": "retrieving"', body)
+        self.assertIn('"phase": "answering"', body)
+        self.assertIn('"phase": "saving"', body)
+        self.assertNotIn('"phase": "searching"', body)
+        self.assertNotIn('"phase": "generating"', body)
+        self.assertNotIn('"phase": "finalizing"', body)
         ids = [int(line.removeprefix("id: ")) for line in body.splitlines() if line.startswith("id: ")]
         self.assertEqual(ids, list(range(1, len(ids) + 1)))
         checkpoints.assert_called_once_with(self.turn.id, ids[-1])
@@ -553,6 +654,26 @@ class TurnEventsViewTest(SimpleTestCase):
             body = b"".join(response.streaming_content).decode()
         self.assertNotIn("id: 1\n", body)
         self.assertIn("id: 2\n", body)
+
+    def test_stale_convergence_runs_before_recovery_metrics_touch_updated_at(self):
+        order = []
+        request = SimpleNamespace(user=self.user)
+        with (
+            patch("apps.chat.views.get_object_or_404", return_value=self.turn),
+            patch("apps.chat.views._has_active_space_membership", return_value=True),
+            patch("apps.chat.views.create_redis_client", return_value=FakeRedis()),
+            patch(
+                "apps.chat.views.converge_stale_turn",
+                side_effect=lambda *_args, **_kwargs: order.append("converge"),
+            ),
+            patch(
+                "apps.chat.views._record_turn_metrics",
+                side_effect=lambda *_args, **_kwargs: order.append("metrics"),
+            ),
+        ):
+            _owned_recovery_turn(request, self.turn.id)
+
+        self.assertEqual(order, ["converge", "metrics"])
 
     def test_membership_denial_is_non_disclosing_and_does_not_touch_redis(self):
         request = APIRequestFactory().get("/events/")

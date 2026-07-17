@@ -77,7 +77,7 @@ class Message(models.Model):
     role = models.CharField(max_length=10, choices=ROLE_CHOICES)
     content = models.TextField()
     token_count = models.IntegerField(null=True, blank=True)
-    model_used = models.CharField(max_length=100, null=True, blank=True)
+    model_used = models.CharField(max_length=160, null=True, blank=True)
     response_time_ms = models.IntegerField(null=True, blank=True)
     retrieval_count = models.IntegerField(null=True, blank=True)
     confidence_score = models.FloatField(null=True, blank=True)
@@ -169,7 +169,8 @@ class ChatTurn(models.Model):
         choices=ANSWER_MODE_CHOICES,
         default=ANSWER_MODE_FAST,
     )
-    model_id = models.CharField(max_length=100, blank=True, default="")
+    model_id = models.CharField(max_length=160, blank=True, default="")
+    metrics = models.JSONField(default=dict)
     attempt_count = models.PositiveIntegerField(default=1)
     last_event_seq = models.PositiveIntegerField(default=0)
     error_code = models.CharField(max_length=64, blank=True, default="")
@@ -392,7 +393,7 @@ class ModelInvocation(models.Model):
         on_delete=models.SET_NULL,
         related_name="model_invocations_as_question",
     )
-    model = models.CharField(max_length=100, blank=True, default="")
+    model = models.CharField(max_length=160, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
     token_count = models.PositiveIntegerField(null=True, blank=True)
     latency_ms = models.PositiveIntegerField(null=True, blank=True)

@@ -421,6 +421,8 @@ class RedisTurnEventStoreTest(SimpleTestCase):
         with self.assertRaises(ValueError):
             store.append("phase", {"reasoning": "private chain of thought"})
         with self.assertRaises(ValueError):
+            store.append("phase", {"reasoning_content": "private provider text"})
+        with self.assertRaises(ValueError):
             store.append("unknown", {})
 
     def test_error_event_is_stable_and_does_not_forward_raw_exception(self):

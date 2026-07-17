@@ -196,6 +196,33 @@ class CapabilityMatrixTest(SimpleTestCase):
             with self.subTest(expected=expected):
                 self.assertEqual(build_capability_payload(snapshot)["default_console"], expected)
 
+    def test_deep_capability_is_selected_space_governed_and_guest_denied(self):
+        member = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "member", SPACE_B: "member"},
+                selected_space_id=SPACE_A,
+                deep_space_ids=(SPACE_A,),
+            )
+        )
+        wrong_space = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "member", SPACE_B: "member"},
+                selected_space_id=SPACE_B,
+                deep_space_ids=(SPACE_A,),
+            )
+        )
+        guest = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "guest"},
+                selected_space_id=SPACE_A,
+                deep_space_ids=(SPACE_A,),
+            )
+        )
+
+        self.assertIn("chat.deep", member["capabilities"])
+        self.assertNotIn("chat.deep", wrong_space["capabilities"])
+        self.assertNotIn("chat.deep", guest["capabilities"])
+
 
 class OrganizationMembershipEffectivenessTest(SimpleTestCase):
     def test_governance_membership_has_explicit_active_and_expiry_state(self):

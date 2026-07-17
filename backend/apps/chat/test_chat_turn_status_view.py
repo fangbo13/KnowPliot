@@ -32,6 +32,20 @@ def scoped_session(user):
 
 
 class ChatTurnStatusViewTest(SimpleTestCase):
+    def setUp(self):
+        policy_patcher = patch(
+            "apps.chat.views._request_generation_policy",
+            return_value=SimpleNamespace(
+                answer_mode="fast",
+                model_id="qwen-plus",
+                thinking_enabled=False,
+                thinking_budget=None,
+                fallback_code="",
+            ),
+        )
+        policy_patcher.start()
+        self.addCleanup(policy_patcher.stop)
+
     def test_route_is_owner_scoped_and_returns_no_question_content(self):
         user = get_user_model()(id=7, email="owner@example.com")
         session = ChatSession(id=uuid.uuid4(), user=user)

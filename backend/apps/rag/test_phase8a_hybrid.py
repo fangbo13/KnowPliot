@@ -210,6 +210,7 @@ class PipelineQualityEventTest(TestCase):
         pipeline.prompt_builder = Mock()
         pipeline.prompt_builder.build.return_value = "system"
         pipeline.llm = Mock()
+        pipeline.llm.stream_chat_parts = None
         pipeline.llm.stream_chat.return_value = iter(["answer"])
         pipeline.model_name = "test-model"
         return pipeline
@@ -351,7 +352,12 @@ class ChatQualitySseTest(APITestCase):
             ]
         )
 
-        with patch("apps.rag.pipeline.RAGPipeline", return_value=fake_pipeline):
+        from apps.chat.test_stream_coordination import FakeRedis
+
+        with (
+            patch("apps.rag.pipeline.RAGPipeline", return_value=fake_pipeline),
+            patch("apps.chat.views.create_redis_client", return_value=FakeRedis()),
+        ):
             response = self.client.post(
                 f"/api/v1/chat/sessions/{session.id}/send/",
                 {"content": "question"},

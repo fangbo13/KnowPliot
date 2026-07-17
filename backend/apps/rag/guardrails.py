@@ -11,12 +11,17 @@ with EmbeddingService for maximum connection reuse efficiency.
 """
 
 import json
-import re
 import logging
-import httpx
+import re
+import threading
+import time
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 
+import httpx
 from django.conf import settings
-from .embedding import get_shared_httpx_client, recreate_shared_httpx_client
+
+from .embedding import get_shared_httpx_client
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +75,7 @@ class GuardrailsService:
             return
 
         # V3.7 P1.1: Use module-level singleton (reuses global httpx.Client)
-        llm = LiteLLMChatService()
+        llm = get_llm_service()
         yield from llm.stream_chat(system_prompt, user_query)
 
 
@@ -78,6 +83,7 @@ class GuardrailsService:
 # This means the LLM streaming connection also benefits from TLS session resumption
 # and TCP keep-alive, saving ~100-200ms per /send/ request.
 _llm_service = None
+_llm_service_lock = threading.Lock()
 
 
 def get_llm_service() -> "LiteLLMChatService":
@@ -88,9 +94,68 @@ def get_llm_service() -> "LiteLLMChatService":
     """
     global _llm_service
     if _llm_service is None:
-        _llm_service = LiteLLMChatService()
+        with _llm_service_lock:
+            if _llm_service is None:
+                _llm_service = LiteLLMChatService()
         logger.info("[V3.7 P1.1] LiteLLMChatService singleton created — sharing global httpx.Client")
     return _llm_service
+
+
+@dataclass(frozen=True)
+class ProviderStreamPart:
+    """Typed provider output that cannot carry provider reasoning text."""
+
+    kind: str
+    text: str = ""
+    duration_ms: int | None = None
+
+
+def parse_provider_stream(
+    lines: Iterable[str | bytes],
+    *,
+    clock=time.monotonic,
+) -> Iterator[ProviderStreamPart]:
+    """Discard reasoning text while retaining numeric reasoning duration."""
+
+    reasoning_started_at = None
+    for raw_line in lines:
+        if isinstance(raw_line, bytes):
+            raw_line = raw_line.decode("utf-8", errors="ignore")
+        if not raw_line.startswith("data: "):
+            continue
+        data_str = raw_line[6:]
+        if data_str == "[DONE]":
+            break
+        try:
+            data = json.loads(data_str)
+            choices = data.get("choices")
+            if not isinstance(choices, list) or not choices:
+                continue
+            delta = choices[0].get("delta", {})
+            if not isinstance(delta, dict):
+                continue
+        except (json.JSONDecodeError, AttributeError, IndexError, TypeError):
+            continue
+
+        if delta.get("reasoning_content") and reasoning_started_at is None:
+            reasoning_started_at = clock()
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            if reasoning_started_at is not None:
+                yield ProviderStreamPart(
+                    kind="reasoning_duration",
+                    duration_ms=max(
+                        0, int(round((clock() - reasoning_started_at) * 1000))
+                    ),
+                )
+                reasoning_started_at = None
+            yield ProviderStreamPart(kind="answer_delta", text=str(content))
+
+    if reasoning_started_at is not None:
+        yield ProviderStreamPart(
+            kind="reasoning_duration",
+            duration_ms=max(0, int(round((clock() - reasoning_started_at) * 1000))),
+        )
 
 
 class LiteLLMChatService:
@@ -112,13 +177,21 @@ class LiteLLMChatService:
         # V3.7 P1.1: Reuse global shared httpx.Client — shared with EmbeddingService
         self._client = get_shared_httpx_client()
 
-    def stream_chat(self, system_prompt, user_query):
+    def stream_chat_parts(
+        self,
+        system_prompt,
+        user_query,
+        *,
+        model_id=None,
+        thinking_enabled=False,
+        thinking_budget=None,
+    ):
         """Stream chat response from LLM via SSE.
 
         V3.7: Uses global shared httpx.Client — no TLS handshake per request.
         """
         payload = {
-            "model": self.model,
+            "model": model_id or self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query},
@@ -126,7 +199,10 @@ class LiteLLMChatService:
             "stream": True,
             "temperature": 0.3,
             "max_tokens": 2000,
+            "enable_thinking": bool(thinking_enabled),
         }
+        if thinking_enabled and thinking_budget is not None:
+            payload["thinking_budget"] = int(thinking_budget)
 
         try:
             # V3.7: Reuse global shared connection — no TLS handshake per request
@@ -137,25 +213,29 @@ class LiteLLMChatService:
                 json=payload,
             ) as response:
                 response.raise_for_status()
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(data_str)
-                            content = (
-                                data.get("choices", [{}])[0]
-                                .get("delta", {})
-                                .get("content", "")
-                            )
-                            if content:
-                                yield content
-                        except (json.JSONDecodeError, IndexError, KeyError):
-                            pass
-        except httpx.ConnectError as e:
-            # Connection error — recreate global shared client
-            logger.warning(f"Stream connection error: {e}")
-            recreate_shared_httpx_client()
-            self._client = get_shared_httpx_client()
+                yield from parse_provider_stream(response.iter_lines())
+        except httpx.ConnectError:
+            # A shared client stays live for concurrent streams; the pool can recover.
+            logger.warning("provider_stream_connection_error code=connection_error")
             raise
+
+    def stream_chat(
+        self,
+        system_prompt,
+        user_query,
+        *,
+        model_id=None,
+        thinking_enabled=False,
+        thinking_budget=None,
+    ):
+        """Compatibility answer-only stream; provider reasoning never escapes."""
+
+        for part in self.stream_chat_parts(
+            system_prompt,
+            user_query,
+            model_id=model_id,
+            thinking_enabled=thinking_enabled,
+            thinking_budget=thinking_budget,
+        ):
+            if part.kind == "answer_delta":
+                yield part.text

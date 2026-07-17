@@ -490,11 +490,46 @@ class GovernancePolicy(models.Model):
         ordering = ["-revision", "-created_at"]
 
     def clean(self):
-        allowed = {"model_profile", "retrieval_top_k", "similarity_threshold", "needs_human_review", "max_answer_chars", "retention_days"}
+        allowed = {
+            "model_profile",
+            "fast_model_profile_id",
+            "deep_model_profile_id",
+            "deep_thinking_budget",
+            "retrieval_top_k",
+            "similarity_threshold",
+            "needs_human_review",
+            "max_answer_chars",
+            "retention_days",
+        }
         invalid = set(self.values) - allowed
         if invalid:
             from django.core.exceptions import ValidationError
             raise ValidationError({"values": f"Unsupported policy fields: {', '.join(sorted(invalid))}"})
+        for field_name in ("fast_model_profile_id", "deep_model_profile_id"):
+            profile_id = self.values.get(field_name)
+            if profile_id is None:
+                continue
+            try:
+                if not isinstance(profile_id, str):
+                    raise ValueError
+                uuid.UUID(profile_id)
+            except (TypeError, ValueError, AttributeError):
+                from django.core.exceptions import ValidationError
+
+                raise ValidationError(
+                    {"values": f"{field_name} must be a UUID string."}
+                ) from None
+        thinking_budget = self.values.get("deep_thinking_budget")
+        if thinking_budget is not None and (
+            isinstance(thinking_budget, bool)
+            or not isinstance(thinking_budget, int)
+            or not 1 <= thinking_budget <= 32768
+        ):
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError(
+                {"values": "deep_thinking_budget must be an integer from 1 to 32768."}
+            )
         top_k = self.values.get("retrieval_top_k")
         if top_k is not None and (not isinstance(top_k, int) or not 1 <= top_k <= 20):
             from django.core.exceptions import ValidationError

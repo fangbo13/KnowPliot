@@ -50,7 +50,7 @@ else:
     files = sorted([f for f in os.listdir(base_dir) if f.endswith('.md')])
     print(f'Found {len(files)} custom knowledge files to ingest')
 
-    pipeline = RAGPipeline()
+    pipeline = RAGPipeline(ingestion=True)
     total_chunks = 0
     errors = []
 

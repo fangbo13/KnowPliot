@@ -25,7 +25,7 @@ base_dir = '/app/crawled_knowledge/pages'
 files = sorted([f for f in os.listdir(base_dir) if f.endswith('.md')])
 print(f'Found {len(files)} markdown files to ingest')
 
-pipeline = RAGPipeline()
+pipeline = RAGPipeline(ingestion=True)
 total_chunks = 0
 errors = []
 

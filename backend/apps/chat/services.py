@@ -145,7 +145,7 @@ def transition_chat_turn(
 
     turn.status = target_status
     if model_id is not None:
-        turn.model_id = model_id[:100]
+        turn.model_id = model_id[:160]
     if assistant_message is not None:
         turn.assistant_message = assistant_message
     if target_status == ChatTurn.STATUS_FAILED:
@@ -314,13 +314,12 @@ def resolve_chat_session(
         )
 
 
-def _same_request_identity(turn, *, session, user, space, content, answer_mode) -> bool:
+def _same_request_scope_and_content(turn, *, session, user, space, content) -> bool:
     return (
         turn.session_id == session.id
         and turn.user_id == user.pk
         and turn.space_id == space.id
         and turn.question_message.content == content
-        and turn.answer_mode == answer_mode
     )
 
 
@@ -330,6 +329,7 @@ def begin_chat_turn(
     client_request_id,
     content: str,
     answer_mode: str,
+    model_id: str = "",
     repository: Any | None = None,
     atomic_factory=None,
 ) -> BeginTurnResult:
@@ -373,18 +373,28 @@ def begin_chat_turn(
                 client_request_id=client_request_id,
                 question_message=question_message,
                 answer_mode=answer_mode,
+                model_id=model_id,
             )
             repository.touch_session(session)
             return BeginTurnResult(turn, BeginTurnDisposition.CREATED)
 
-        if not _same_request_identity(
+        if not _same_request_scope_and_content(
             turn,
             session=session,
             user=user,
             space=space,
             content=content,
-            answer_mode=answer_mode,
         ):
+            return BeginTurnResult(turn, BeginTurnDisposition.CONFLICT)
+
+        mode_matches = turn.answer_mode == answer_mode
+        safe_deep_downgrade = (
+            turn.status == ChatTurn.STATUS_FAILED
+            and turn.error_code in RETRYABLE_ERROR_CODES
+            and turn.answer_mode == ChatTurn.ANSWER_MODE_DEEP
+            and answer_mode == ChatTurn.ANSWER_MODE_FAST
+        )
+        if not mode_matches and not safe_deep_downgrade:
             return BeginTurnResult(turn, BeginTurnDisposition.CONFLICT)
 
         if turn.status == ChatTurn.STATUS_COMPLETED:
@@ -399,7 +409,7 @@ def begin_chat_turn(
             turn.answer_mode = answer_mode
             turn.attempt_count += 1
             turn.error_code = ""
-            turn.model_id = ""
+            turn.model_id = model_id
             turn.assistant_message = None
             turn.completed_at = None
             repository.save_retry(turn)

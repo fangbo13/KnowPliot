@@ -21,6 +21,13 @@ from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
+from apps.rag.errors import ProviderGenerationError
+from apps.rbac.capabilities import resolve_capabilities
+from apps.spaces.generation_policy import (
+    ANSWER_MODE_DEEP,
+    resolve_generation_policy,
+)
+
 # V6.0: space isolation helpers.
 from apps.spaces.permissions import (
     CHAT_ASK,
@@ -36,6 +43,7 @@ from .coordination import (
     create_redis_client,
     lease_exists,
 )
+from .metrics import ChatStreamMetrics, merge_turn_metrics
 from .models import ChatSession, ChatTurn, Citation, Feedback, Message
 from .serializers import (
     ChatMessageRequestSerializer,
@@ -267,6 +275,12 @@ def _stream_v2_enabled(protocol_version):
     return bool(getattr(settings, "CHAT_STREAM_V2", False)) and protocol_version == 2
 
 
+def _request_generation_policy(space, requested_mode):
+    """Resolve governed fast policy even while the deep rollout stays off."""
+
+    return resolve_generation_policy(space, requested_mode)
+
+
 def _streaming_response(events, *, turn=None):
     response = StreamingHttpResponse(events, content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"
@@ -313,6 +327,18 @@ def _checkpoint_turn_sequence(turn_id, sequence):
     ).update(last_event_seq=sequence)
 
 
+def _record_turn_metrics(turn, *, increments=(), **values):
+    """Best-effort safe telemetry must never change Turn control flow."""
+
+    try:
+        merge_turn_metrics(turn, increments=increments, **values)
+    except Exception:
+        logger.warning(
+            "turn_metrics_persist_failed turn_id=%s code=persistence_error",
+            turn.id,
+        )
+
+
 def _has_active_space_membership(user, space) -> bool:
     """Recovery requires an active, unexpired membership in the Turn space."""
 
@@ -352,11 +378,21 @@ def _owned_recovery_turn(request, turn_id):
     try:
         client = create_redis_client()
     except CoordinationUnavailableError:
+        _record_turn_metrics(
+            turn,
+            increments=("recovery_count",),
+            recovery_count=1,
+        )
         return turn, None
     converge_stale_turn(
         turn,
         lease_exists=lambda session_id: lease_exists(client, session_id),
         now=timezone.now(),
+    )
+    _record_turn_metrics(
+        turn,
+        increments=("recovery_count",),
+        recovery_count=1,
     )
     return turn, client
 
@@ -421,6 +457,7 @@ def _completed_turn_events_v2(turn, store):
                     "client_request_id": str(turn.client_request_id),
                     "protocol_version": 2,
                     "answer_mode": turn.answer_mode,
+                    "model_id": turn.model_id or message.model_used or "",
                 },
             )
         ]
@@ -539,6 +576,7 @@ def send_message(request, session_id):
     ChatTurn identity/idempotency is durable here. The Redis session lock and
     replayable SSE v2 envelope are intentionally deferred to Task 3B.
     """
+    request_started_at = time.monotonic()
     serializer = ChatMessageRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
@@ -590,6 +628,25 @@ def send_message(request, session_id):
             status=403,
         )
 
+    if answer_mode == ANSWER_MODE_DEEP:
+        capability_payload = resolve_capabilities(user, space_id=space.id)
+        if "chat.deep" not in capability_payload["capabilities"]:
+            return Response(
+                {"code": "deep_mode_unavailable"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+    generation_policy = _request_generation_policy(space, answer_mode)
+    if (
+        answer_mode == ANSWER_MODE_DEEP
+        and generation_policy.answer_mode != ANSWER_MODE_DEEP
+    ):
+        return Response(
+            {"code": generation_policy.fallback_code or "deep_mode_unavailable"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    answer_mode = generation_policy.answer_mode
+
     # Update title if new or empty
     if created or not session.title:
         session.title = content[:50]
@@ -601,6 +658,7 @@ def send_message(request, session_id):
             client_request_id=client_request_id,
             content=content,
             answer_mode=answer_mode,
+            model_id=generation_policy.model_id,
         )
     except ChatTurnScopeError:
         return Response(
@@ -608,6 +666,10 @@ def send_message(request, session_id):
             status=status.HTTP_409_CONFLICT,
         )
     turn = begin_result.turn
+    _record_turn_metrics(
+        turn,
+        idempotency_disposition=begin_result.disposition.value,
+    )
 
     if begin_result.disposition == BeginTurnDisposition.CONFLICT:
         return _turn_response(
@@ -734,6 +796,7 @@ def send_message(request, session_id):
                     "client_request_id": str(turn.client_request_id),
                     "protocol_version": 2,
                     "answer_mode": turn.answer_mode,
+                    "model_id": turn.model_id,
                 },
             )
         except EventStoreUnavailableError:
@@ -784,6 +847,8 @@ def send_message(request, session_id):
         except Exception:
             logger.warning("Could not persist terminal event for Turn %s", turn.id)
 
+    stream_metrics = ChatStreamMetrics(started_at=request_started_at)
+
     def event_stream():
         start_time = time.time()
         # V4.2 SYS-V4.2-014: SSE timeout limit — abort stream if total time exceeds 60s
@@ -798,6 +863,7 @@ def send_message(request, session_id):
 
         if meta_event is not None:
             # First application event: history/RAG/model work has not started.
+            stream_metrics.mark_first_event(time.monotonic())
             yield meta_event.to_sse()
 
         def record_invocation(
@@ -837,11 +903,15 @@ def send_message(request, session_id):
             from apps.rag.pipeline import RAGPipeline
 
             pipeline = RAGPipeline()
+            pipeline.model_name = generation_policy.model_id
+            pipeline.answer_mode = generation_policy.answer_mode
+            pipeline.thinking_enabled = generation_policy.thinking_enabled
+            pipeline.thinking_budget = generation_policy.thinking_budget
             lease.ensure_owned()
             transition_chat_turn(
                 turn,
                 ChatTurn.STATUS_RETRIEVING,
-                model_id=pipeline.model_name,
+                model_id=generation_policy.model_id,
             )
             if use_v2:
                 yield v2_event("phase", {"phase": "retrieving"})
@@ -858,6 +928,8 @@ def send_message(request, session_id):
                 # when the client closes the connection
                 event_type = event.get("event")
                 data = event.get("data", {})
+                if event_type in {"citations", "quality", "token"}:
+                    stream_metrics.mark_first_event(time.monotonic())
 
                 if event_type == "citations":
                     citations_data = data
@@ -869,11 +941,23 @@ def send_message(request, session_id):
 
                 elif event_type == "quality":
                     quality_data = data
+                    retrieval_ms = data.get("retrieval_latency_ms")
+                    if isinstance(retrieval_ms, (int, float)) and not isinstance(
+                        retrieval_ms, bool
+                    ):
+                        stream_metrics.mark_retrieval(retrieval_ms)
                     if use_v2:
                         yield v2_event("quality", data)
                     else:
                         yield "event: quality\n"
                         yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "metrics":
+                    reasoning_ms = data.get("reasoning_ms")
+                    if isinstance(reasoning_ms, (int, float)) and not isinstance(
+                        reasoning_ms, bool
+                    ):
+                        stream_metrics.mark_reasoning(reasoning_ms)
 
                 elif event_type == "token":
                     # V4.2 SYS-V4.2-014: Check SSE timeout — abort if stream exceeds limit
@@ -884,10 +968,15 @@ def send_message(request, session_id):
                         )
                         record_invocation("timeout", error_code="stream_timeout")
                         _mark_turn_failed(turn, "stream_timeout")
+                        _record_turn_metrics(
+                            turn,
+                            **stream_metrics.snapshot(now=time.monotonic()),
+                        )
                         yield terminal_error("stream_timeout")
                         return
 
                     token = data.get("token", "")
+                    stream_metrics.mark_first_answer(time.monotonic())
                     if turn.status != ChatTurn.STATUS_ANSWERING:
                         transition_chat_turn(
                             turn,
@@ -918,17 +1007,40 @@ def send_message(request, session_id):
             except InvalidTurnTransitionError:
                 logger.info("Turn %s was already terminal on disconnect", turn.id)
             persist_terminal_event("client_disconnected")
+            _record_turn_metrics(
+                turn,
+                increments=("disconnect_count",),
+                **stream_metrics.snapshot(now=time.monotonic()),
+                disconnect_count=1,
+            )
+            return
+        except ProviderGenerationError:
+            record_invocation("failure", error_code="provider_unavailable")
+            _mark_turn_failed(turn, "provider_unavailable")
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
+            yield terminal_error("provider_unavailable")
             return
         except LeaseLostError:
             logger.warning("Session lease was lost for Turn %s", turn.id)
             record_invocation("failure", error_code="lease_lost")
             _mark_turn_failed(turn, "lease_lost")
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
             yield terminal_error("lease_lost")
             return
         except EventStoreUnavailableError:
             logger.warning("Event store became unavailable for Turn %s", turn.id)
             record_invocation("failure", error_code="coordination_unavailable")
             _mark_turn_failed(turn, "coordination_unavailable")
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
             return
         except Exception:
             logger.error(
@@ -938,6 +1050,10 @@ def send_message(request, session_id):
             )
             record_invocation("failure", error_code="stream_error")
             _mark_turn_failed(turn, "stream_error")
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
             with suppress(EventStoreUnavailableError):
                 yield terminal_error("stream_error")
             return
@@ -993,6 +1109,8 @@ def send_message(request, session_id):
                     assistant_message=assistant_message,
                     model_id=pipeline.model_name,
                 )
+                safe_timings = stream_metrics.snapshot(now=time.monotonic())
+                _record_turn_metrics(turn, **safe_timings)
         except GeneratorExit:
             record_invocation("cancelled", error_code="client_disconnected")
             try:
@@ -1004,16 +1122,30 @@ def send_message(request, session_id):
             except InvalidTurnTransitionError:
                 logger.info("Turn %s was already terminal on disconnect", turn.id)
             persist_terminal_event("client_disconnected")
+            _record_turn_metrics(
+                turn,
+                increments=("disconnect_count",),
+                **stream_metrics.snapshot(now=time.monotonic()),
+                disconnect_count=1,
+            )
             return
         except LeaseLostError:
             record_invocation("failure", error_code="lease_lost")
             turn.status = pre_save_status
             _mark_turn_failed(turn, "lease_lost")
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
             yield terminal_error("lease_lost")
             return
         except EventStoreUnavailableError:
             turn.status = pre_save_status
             _mark_turn_failed(turn, "coordination_unavailable")
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
             return
         except Exception:
             logger.error(
@@ -1034,6 +1166,10 @@ def send_message(request, session_id):
                     "code=persistence_error",
                     turn.id,
                 )
+            _record_turn_metrics(
+                turn,
+                **stream_metrics.snapshot(now=time.monotonic()),
+            )
             with suppress(EventStoreUnavailableError):
                 yield terminal_error("answer_save_error")
             return
@@ -1048,7 +1184,7 @@ def send_message(request, session_id):
         if use_v2:
             yield v2_event(
                 "usage",
-                {"output_tokens": token_count, "latency_ms": elapsed_ms},
+                {"output_tokens": token_count, **safe_timings},
             )
             yield v2_event("done", done_data, terminal=True)
         else:
@@ -1066,6 +1202,12 @@ def send_message(request, session_id):
             }:
                 _mark_turn_failed(turn, "client_disconnected")
                 persist_terminal_event("client_disconnected")
+                _record_turn_metrics(
+                    turn,
+                    increments=("disconnect_count",),
+                    **stream_metrics.snapshot(now=time.monotonic()),
+                    disconnect_count=1,
+                )
         except Exception:
             logger.warning("Could not persist stream-close event for Turn %s", turn.id)
         finally:
@@ -1079,11 +1221,14 @@ def send_message(request, session_id):
 
 
 def _feedback_question_for(message):
+    turn = getattr(message, "assistant_turn", None)
+    if turn is not None:
+        return turn.question_message
     return (
         Message.objects.filter(
             session=message.session,
             role="user",
-            created_at__lt=message.created_at,
+            created_at__lte=message.created_at,
         )
         .order_by("-created_at")
         .first()

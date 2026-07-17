@@ -251,6 +251,7 @@ CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "on",
 }
 CAPABILITY_NAV = env_bool("CAPABILITY_NAV", default=False)
+DEEP_ANSWER_MODE = env_bool("DEEP_ANSWER_MODE", default=False)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
