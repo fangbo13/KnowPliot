@@ -63,6 +63,30 @@ describe('chat stream protocol validation', () => {
     }, { ...context, protocolVersion: 2 })).toThrow(InvalidChatStreamEventError);
   });
 
+  it.each(['reasoning', 'reasoning_content', 'chain_of_thought', 'raw_reasoning'])(
+    'rejects forbidden provider reasoning fields from every browser event: %s',
+    (field) => {
+      expect(() => validateChatStreamMessage({
+        id: '9',
+        hasExplicitId: true,
+        event: 'usage',
+        data: JSON.stringify({ latency_ms: 10, [field]: 'private reasoning' }),
+      }, { ...context, protocolVersion: 2 })).toThrow(InvalidChatStreamEventError);
+    },
+  );
+
+  it.each(['accepted', 'searching', 'generating', 'finalizing'])(
+    'accepts the public safe processing phase %s',
+    (phase) => {
+      expect(validateChatStreamMessage({
+        id: '9',
+        hasExplicitId: true,
+        event: 'phase',
+        data: JSON.stringify({ phase }),
+      }, { ...context, protocolVersion: 2 })).toMatchObject({ name: 'phase', sequence: 9 });
+    },
+  );
+
   it('requires all v2 done identities and a valid message id', () => {
     expect(() => validateChatStreamMessage({
       id: '4',

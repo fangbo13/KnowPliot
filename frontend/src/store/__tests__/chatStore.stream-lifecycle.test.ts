@@ -107,6 +107,109 @@ afterEach(() => {
 });
 
 describe('sendMessage stream lifecycle', () => {
+  it('uses a shorter connection budget than the event-idle budget', async () => {
+    let pendingSignal!: AbortSignal;
+    mocks.fetch.mockImplementation((_url, init?: RequestInit) => {
+      pendingSignal = init?.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        pendingSignal.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const send = useChatStore.getState().sendMessage('connect');
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(20_001);
+    const didTimeout = pendingSignal.aborted;
+    if (!didTimeout) pendingSignal.dispatchEvent(new Event('abort'));
+    if (!didTimeout) mocks.controller?.abort();
+    await send;
+
+    expect(didTimeout).toBe(true);
+  });
+
+  it('does not spend the connection budget as the idle budget after headers arrive', async () => {
+    let markRead!: () => void;
+    const readStarted = new Promise<void>((resolve) => { markRead = resolve; });
+    mocks.fetch.mockImplementation(async (_url, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              markRead();
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener(
+                  'abort',
+                  () => reject(new DOMException('aborted', 'AbortError')),
+                  { once: true },
+                );
+              });
+            }),
+          }),
+        },
+      };
+    });
+
+    const send = useChatStore.getState().sendMessage('idle');
+    await readStarted;
+    const streamController = mocks.controller!;
+    await vi.advanceTimersByTimeAsync(30_001);
+    const abortedAtConnectionBudget = streamController.signal.aborted;
+    await vi.advanceTimersByTimeAsync(15_000);
+    const abortedAtIdleBudget = streamController.signal.aborted;
+    if (!abortedAtIdleBudget) mocks.controller?.abort();
+    await send;
+
+    expect(abortedAtConnectionBudget).toBe(false);
+    expect(abortedAtIdleBudget).toBe(true);
+  });
+
+  it('enforces a total budget even while keepalive bytes continually reset idle time', async () => {
+    let streamSignal!: AbortSignal;
+    mocks.fetch.mockImplementation(async (_url, init?: RequestInit) => {
+      streamSignal = init?.signal as AbortSignal;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => new Promise((resolve, reject) => {
+              const onAbort = () => {
+                clearTimeout(timer);
+                reject(new DOMException('aborted', 'AbortError'));
+              };
+              const timer = setTimeout(() => {
+                streamSignal.removeEventListener('abort', onAbort);
+                resolve({
+                  done: false,
+                  value: encoder.encode(': keepalive\n\n'),
+                });
+              }, 10_000);
+              streamSignal.addEventListener('abort', onAbort, { once: true });
+            })),
+          }),
+        },
+      };
+    });
+
+    const send = useChatStore.getState().sendMessage('long running');
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180_001);
+    const didTimeout = streamSignal.aborted;
+    if (!didTimeout) mocks.controller?.abort();
+    await send;
+
+    expect(didTimeout).toBe(true);
+  });
+
   it('keeps distinct request identities with their owning sessions across error and switch', async () => {
     const ids = [
       '10000000-0000-4000-8000-000000000001',
@@ -344,7 +447,7 @@ describe('sendMessage stream lifecycle', () => {
     const send = useChatStore.getState().sendMessage('hello');
     await firstRead;
     const streamSignal = mocks.controller!.signal;
-    await vi.advanceTimersByTimeAsync(30_001);
+    await vi.advanceTimersByTimeAsync(45_001);
     const didTimeout = streamSignal.aborted;
     if (!didTimeout) mocks.controller?.abort();
     await send;
@@ -456,7 +559,7 @@ describe('sendMessage stream lifecycle', () => {
     const send = useChatStore.getState().sendMessage('hello');
     await readerStalled;
     const streamSignal = mocks.controller!.signal;
-    await vi.advanceTimersByTimeAsync(33_001);
+    await vi.advanceTimersByTimeAsync(45_001);
     const didTimeout = streamSignal.aborted;
     if (!didTimeout) mocks.controller?.abort();
     await send;

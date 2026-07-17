@@ -8,6 +8,7 @@ import apiClient from './client';
 
 export type Capability =
   | 'chat.ask'
+  | 'chat.deep'
   | 'chat.export'
   | 'chat.history'
   | 'chat.share'

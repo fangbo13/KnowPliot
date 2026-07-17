@@ -114,10 +114,35 @@ function generateSmartTitle(content: string): string {
 // V3.5: Unified stream state machine — replaces isStreaming + thinkingPhase + connectionStatus
 export type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completing' | 'error';
 export type StreamRecoveryState = 'idle' | 'available' | 'recovering' | 'recovered' | 'failed';
+export type AnswerMode = 'fast' | 'deep';
+export type SafeProcessingPhase = 'accepted' | 'searching' | 'generating' | 'finalizing';
+
+export interface ProcessingTimings {
+  connectionMs?: number;
+  firstAnswerMs?: number;
+  totalMs?: number;
+}
+
+export interface SendMessageOptions {
+  answerMode?: AnswerMode;
+  /** Result of the current rollout flag + server capability decision. */
+  canUseDeep?: boolean;
+  /** Explicit user retry of the current failed deep Turn; never inferred. */
+  retryClientRequestId?: string;
+}
+
+export const CHAT_STREAM_TIMEOUTS = Object.freeze({
+  connectionMs: 20_000,
+  idleMs: 45_000,
+  totalMs: 180_000,
+  recoveryRequestMs: 5_000,
+});
 
 export interface SessionTurnState {
   phase: StreamPhase;
+  safePhase?: SafeProcessingPhase | null;
   isLocked: boolean;
+  answerMode?: AnswerMode;
   content: string;
   citations: Citation[];
   quality: QualityData | null;
@@ -129,6 +154,8 @@ export interface SessionTurnState {
   lastEventSeq?: number;
   protocolVersion?: 1 | 2 | null;
   recoveryState?: StreamRecoveryState;
+  timings?: ProcessingTimings;
+  startedAtMs?: number | null;
 }
 
 interface ChatState {
@@ -180,7 +207,7 @@ interface ChatState {
   loadMoreSessions: () => Promise<void>;
   loadMessages: (sessionId: string) => Promise<void>;
   loadOlderMessages: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, options?: SendMessageOptions) => Promise<void>;
   finishStreamingMessage: (messageId: string, sessionId: string, generationId?: string) => void;
   loadOlderRounds: (count: number) => void;
   setAIStatusText: (text: string | null) => void;
@@ -219,7 +246,9 @@ function extractVisibleMessages(rounds: { id: string; messages: Message[] }[], v
 function idleTurn(): SessionTurnState {
   return {
     phase: 'idle',
+    safePhase: null,
     isLocked: false,
+    answerMode: 'fast',
     content: '',
     citations: [],
     quality: null,
@@ -231,7 +260,30 @@ function idleTurn(): SessionTurnState {
     lastEventSeq: 0,
     protocolVersion: null,
     recoveryState: 'idle',
+    timings: {},
+    startedAtMs: null,
   };
+}
+
+export function mapServerPhaseForUi(phase: unknown): {
+  streamPhase: StreamPhase;
+  safePhase: SafeProcessingPhase;
+} {
+  if (phase === 'accepted') {
+    return { streamPhase: 'connecting', safePhase: 'accepted' };
+  }
+  if (phase === 'retrieving' || phase === 'searching') {
+    return { streamPhase: 'searching', safePhase: 'searching' };
+  }
+  if (phase === 'saving' || phase === 'finalizing') {
+    return { streamPhase: 'completing', safePhase: 'finalizing' };
+  }
+  return { streamPhase: 'streaming', safePhase: 'generating' };
+}
+
+function elapsedMs(startedAtMs: number | null | undefined): number | undefined {
+  if (typeof startedAtMs !== 'number') return undefined;
+  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function legacyMirror(turn: SessionTurnState, sessionId: string | null): Partial<ChatState> {
@@ -730,11 +782,53 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     });
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, options: SendMessageOptions = {}) => {
     const state = get();
     let sessionId = state.activeSessionId;
     if (sessionId && state.turnsBySession[sessionId]?.isLocked) return;
     if (!sessionId && state.isSendLocked) return;
+
+    const requestedMode: AnswerMode = options.answerMode === 'deep' ? 'deep' : 'fast';
+    if (requestedMode === 'deep' && options.canUseDeep !== true) {
+      if (sessionId) {
+        set((current) => withTurnUpdate(current, sessionId!, null, {
+          phase: 'error',
+          safePhase: null,
+          isLocked: false,
+          answerMode: 'fast',
+          error: 'error_deep_unavailable',
+        }));
+      } else {
+        set({ streamPhase: 'error', sendError: 'error_deep_unavailable', isSendLocked: false });
+      }
+      return;
+    }
+    const answerMode = requestedMode;
+    const retryClientRequestId = options.retryClientRequestId;
+    const retryTurn = sessionId && retryClientRequestId
+      ? state.turnsBySession[sessionId]
+      : undefined;
+    const isExplicitFastRetry = Boolean(
+      retryClientRequestId
+      && answerMode === 'fast'
+      && retryTurn?.clientRequestId === retryClientRequestId
+      && retryTurn.answerMode === 'deep'
+      && retryTurn.phase === 'error'
+      && retryTurn.error
+      && !retryTurn.isLocked,
+    );
+    if (retryClientRequestId && !isExplicitFastRetry) {
+      if (sessionId) {
+        set((current) => withTurnUpdate(current, sessionId!, null, {
+          phase: 'error',
+          isLocked: false,
+          error: 'error_generic',
+        }));
+      } else {
+        set({ streamPhase: 'error', sendError: 'error_generic', isSendLocked: false });
+      }
+      return;
+    }
 
     if (!sessionId) {
       set({ isSendLocked: true, sendError: null, streamPhase: 'connecting' });
@@ -761,11 +855,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return;
     }
 
-    const clientRequestId = crypto.randomUUID();
+    const clientRequestId = isExplicitFastRetry
+      ? retryClientRequestId!
+      : crypto.randomUUID();
     const generationId = crypto.randomUUID();
+    const startedAtMs = Date.now();
     set((current) => withTurnUpdate(current, sessionId, null, {
       phase: 'connecting',
+      safePhase: 'accepted',
       isLocked: true,
+      answerMode,
       content: '',
       citations: [],
       quality: null,
@@ -773,19 +872,23 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       aiStatusText: null,
       generationId,
       clientRequestId,
-      turnId: null,
-      lastEventSeq: 0,
+      turnId: isExplicitFastRetry ? retryTurn?.turnId ?? null : null,
+      lastEventSeq: isExplicitFastRetry ? retryTurn?.lastEventSeq ?? 0 : 0,
       protocolVersion: null,
       recoveryState: 'idle',
+      timings: {},
+      startedAtMs,
     }));
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    get().addMessage(userMessage);
+    if (!isExplicitFastRetry) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        createdAt: new Date().toISOString(),
+      };
+      get().addMessage(userMessage);
+    }
 
     const token = getAuthToken();
     // V3.5: Initialize token batch renderer for this stream
@@ -851,6 +954,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       clearStreamOnComplete(sessionId, generationId);
       set((current) => withTurnUpdate(current, sessionId, generationId, {
         phase,
+        safePhase: error ? get().turnsBySession[sessionId]?.safePhase ?? null : null,
         isLocked: false,
         content: '',
         citations: [],
@@ -871,7 +975,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Progressive thinking phases + connection status tracking
       let connectionWatchdog: ReturnType<typeof setTimeout> | undefined;
       let eventIdleWatchdog: ReturnType<typeof setTimeout> | undefined;
-      let abortReason: 'connection' | 'idle' | null = null;
+      let totalWatchdog: ReturnType<typeof setTimeout> | undefined;
+      let abortReason: 'connection' | 'idle' | 'total' | null = null;
       let phaseTimerSearching: ReturnType<typeof setTimeout> | undefined;
       let phaseTimerGenerating: ReturnType<typeof setTimeout> | undefined;
       let assistantContent = '';
@@ -884,13 +989,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       const clearAllTimers = () => {
         if (connectionWatchdog) clearTimeout(connectionWatchdog);
         if (eventIdleWatchdog) clearTimeout(eventIdleWatchdog);
+        if (totalWatchdog) clearTimeout(totalWatchdog);
         clearPhaseTimers();
       };
 
       const isCurrentGeneration = () => (
         get().turnsBySession[sessionId]?.generationId === generationId
       );
-      const abortForTimeout = (reason: 'connection' | 'idle') => {
+      const abortForTimeout = (reason: 'connection' | 'idle' | 'total') => {
         if (!isCurrentGeneration() || controller.signal.aborted) return;
         abortReason = reason;
         clearAllTimers();
@@ -898,12 +1004,47 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       };
       const armEventIdleWatchdog = () => {
         if (eventIdleWatchdog) clearTimeout(eventIdleWatchdog);
-        eventIdleWatchdog = setTimeout(() => abortForTimeout('idle'), 30_000);
+        eventIdleWatchdog = setTimeout(() => abortForTimeout('idle'), CHAT_STREAM_TIMEOUTS.idleMs);
+      };
+      const markAnswerStarted = () => {
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          const timings = turn?.timings ?? {};
+          return withTurnUpdate(current, sessionId, generationId, {
+            phase: 'streaming',
+            safePhase: 'generating',
+            timings: timings.firstAnswerMs === undefined
+              ? { ...timings, firstAnswerMs: elapsedMs(turn?.startedAtMs) }
+              : timings,
+          });
+        });
+      };
+      const applyUsageTimings = (data: Record<string, unknown>) => {
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          const timings = { ...(turn?.timings ?? {}) };
+          const firstAnswerMs = data.first_answer_token_ms ?? data.ttfe_ms;
+          const totalMs = data.total_duration_ms ?? data.latency_ms;
+          if (typeof firstAnswerMs === 'number' && Number.isFinite(firstAnswerMs)) {
+            timings.firstAnswerMs = Math.max(0, firstAnswerMs);
+          }
+          if (typeof totalMs === 'number' && Number.isFinite(totalMs)) {
+            timings.totalMs = Math.max(0, totalMs);
+          }
+          return withTurnUpdate(current, sessionId, generationId, { timings });
+        });
       };
       let recoverInterruptedStream: (() => Promise<boolean | null>) | null = null;
 
       try {
-        connectionWatchdog = setTimeout(() => abortForTimeout('connection'), 30_000);
+        connectionWatchdog = setTimeout(
+          () => abortForTimeout('connection'),
+          CHAT_STREAM_TIMEOUTS.connectionMs,
+        );
+        totalWatchdog = setTimeout(
+          () => abortForTimeout('total'),
+          CHAT_STREAM_TIMEOUTS.totalMs,
+        );
         // V3.5 CRIT-001: Pass AbortController signal to fetch
         // V6.0: scope the SSE request to the active space (fetch bypasses the
         // axios interceptor, so set the header explicitly here).
@@ -919,7 +1060,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           body: JSON.stringify({
             content,
             client_request_id: clientRequestId,
-            answer_mode: 'fast',
+            answer_mode: answerMode,
             protocol_version: 2,
           }),
           signal: controller.signal, // V3.5: AbortController signal
@@ -931,6 +1072,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         }
 
         if (!response.ok) {
+          if (answerMode === 'deep' && (response.status === 403 || response.status === 409)) {
+            throw new Error('deep_unavailable');
+          }
           throw new Error(`HTTP ${response.status}`);
         }
 
@@ -948,7 +1092,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         }
 
         // Headers received — connection established → 'searching' phase
-        set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'searching' }));
+        set((current) => {
+          const turn = current.turnsBySession[sessionId];
+          return withTurnUpdate(current, sessionId, generationId, {
+            phase: 'searching',
+            safePhase: 'searching',
+            timings: {
+              ...(turn?.timings ?? {}),
+              connectionMs: elapsedMs(turn?.startedAtMs),
+            },
+          });
+        });
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
@@ -977,6 +1131,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
           set((current) => withTurnUpdate(current, sessionId, generationId, {
             phase: 'connecting',
+            safePhase: 'accepted',
             recoveryState: 'recovering',
           }));
           const recoveryController = createStreamAbortController(sessionId, generationId);
@@ -990,7 +1145,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             if (recoveryController.signal.aborted) attemptController.abort();
             const timeout = setTimeout(() => {
               attemptController.abort();
-            }, 5_000);
+            }, CHAT_STREAM_TIMEOUTS.recoveryRequestMs);
             let released = false;
             const release = () => {
               if (released) return;
@@ -1064,13 +1219,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   switch (event.name) {
                     case 'meta':
                       break;
-                    case 'phase':
+                    case 'phase': {
+                      const phase = mapServerPhaseForUi(data.phase);
                       set((current) => withTurnUpdate(current, sessionId, generationId, {
-                        phase: data.phase === 'answering' ? 'streaming' : data.phase === 'saving' ? 'completing' : 'searching',
+                        phase: phase.streamPhase,
+                        safePhase: phase.safePhase,
                       }));
                       break;
+                    }
                     case 'answer_delta':
-                      set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'streaming' }));
+                      markAnswerStarted();
                       assistantContent += data.text || '';
                       appendToken(sessionId, generationId, data.text || '');
                       break;
@@ -1079,6 +1237,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                       break;
                     case 'quality':
                       set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
+                      break;
+                    case 'usage':
+                      applyUsageTimings(data);
                       break;
                     case 'done':
                       set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
@@ -1126,6 +1287,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 set((current) => withTurnUpdate(current, sessionId, generationId, {
                   content: answer.content,
                   citations: answer.citations ?? [],
+                  safePhase: 'finalizing',
                   quality: {
                     confidence: answer.confidenceLabel ?? '',
                     score: answer.confidenceScore ?? 0,
@@ -1198,21 +1360,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   break;
                 }
                 case 'phase': {
-                  const phase: StreamPhase = data.phase === 'answering'
-                    ? 'streaming'
-                    : data.phase === 'saving'
-                      ? 'completing'
-                      : 'searching';
-                  set((current) => withTurnUpdate(current, sessionId, generationId, { phase }));
+                  const phase = mapServerPhaseForUi(data.phase);
+                  set((current) => withTurnUpdate(current, sessionId, generationId, {
+                    phase: phase.streamPhase,
+                    safePhase: phase.safePhase,
+                  }));
                   break;
                 }
                 case 'token':
                 case 'answer_delta':
                   clearPhaseTimers();
                   // V3.5: Transition to 'streaming' on first token
-                  if (get().turnsBySession[sessionId]?.phase !== 'streaming') {
-                    set((current) => withTurnUpdate(current, sessionId, generationId, { phase: 'streaming' }));
-                  }
+                  markAnswerStarted();
                   assistantContent += (event.name === 'answer_delta' ? data.text : data.token) || '';
                   // V3.5 HIGH-005: Batch token updates via rAF instead of per-token set()
                   appendToken(
@@ -1235,6 +1394,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
                   break;
                 case 'usage':
+                  applyUsageTimings(data);
                   break;
                 case 'done':
                   clearAllTimers();
@@ -1272,7 +1432,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // V3.5 CRIT-001: Handle AbortError — stream was intentionally aborted
         if (error instanceof DOMException && error.name === 'AbortError') {
           const isTimeout = abortReason !== null;
-          if (abortReason === 'idle' && recoverInterruptedStream) {
+          if (abortReason && recoverInterruptedStream
+            && get().turnsBySession[sessionId]?.turnId) {
             const recovered = await recoverInterruptedStream();
             if (recovered !== null) return recovered;
           }
@@ -1289,7 +1450,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Now: single atomic update ensures ChatPage always sees both values together.
         const errorMsg = (error as Error).message;
         let errorKey: string;
-        if (errorMsg.includes('401') || errorMsg.includes('403')) {
+        if (errorMsg.includes('deep_unavailable')) {
+          errorKey = 'error_deep_unavailable';
+        } else if (errorMsg.includes('401') || errorMsg.includes('403')) {
           errorKey = 'error_auth';
         } else if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
           errorKey = 'error_server';
@@ -1366,6 +1529,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         },
         ...withTurnUpdate(current, sessionId, ownerGeneration, {
           phase: 'idle',
+          safePhase: null,
           isLocked: false,
           content: '',
           citations: [],
@@ -1374,6 +1538,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           aiStatusText: null,
           generationId: null,
           recoveryState: 'idle',
+          timings: {
+            ...(ownerTurn.timings ?? {}),
+            totalMs: ownerTurn.timings?.totalMs ?? elapsedMs(ownerTurn.startedAtMs),
+          },
         }),
       };
     });

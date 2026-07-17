@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAuthorizationAdapter, type LegacyAuthorizationUser } from './authorization';
+import {
+  createAuthorizationAdapter,
+  isDeepAnswerModeEnabled,
+  type LegacyAuthorizationUser,
+} from './authorization';
 import type { CapabilitySnapshot } from '../api/capabilities';
 
 const legacyAdmin: LegacyAuthorizationUser = {
@@ -25,6 +29,12 @@ const workspaceSnapshot: CapabilitySnapshot = {
 };
 
 describe('authorization compatibility adapter', () => {
+  it('enables deep answer rollout only for the literal true flag', () => {
+    expect(isDeepAnswerModeEnabled({ VITE_DEEP_ANSWER_MODE: 'true' })).toBe(true);
+    expect(isDeepAnswerModeEnabled({ VITE_DEEP_ANSWER_MODE: 'TRUE' })).toBe(false);
+    expect(isDeepAnswerModeEnabled({})).toBe(false);
+  });
+
   it('uses only server capabilities when capability navigation is enabled', () => {
     const access = createAuthorizationAdapter({
       capabilityNavigationEnabled: true,

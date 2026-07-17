@@ -75,5 +75,19 @@
   "feedback_source_placeholder": "可选来源建议",
   "feedback_flag_for_review": "提交审核",
   "feedback_submit": "提交反馈",
-  "feedback_cancel": "取消"
+  "feedback_cancel": "取消",
+  "answer_mode_label": "回答模式",
+  "answer_mode_fast": "快速",
+  "answer_mode_deep": "深度",
+  "error_deep_unavailable": "深度回答当前不可用，仍可使用快速回答。",
+  "processing_panel_label": "回答处理进度",
+  "processing_panel_toggle": "展开或收起回答处理进度",
+  "processing_phase_accepted": "已接受",
+  "processing_phase_searching": "正在检索",
+  "processing_phase_generating": "正在生成",
+  "processing_phase_finalizing": "正在整理",
+  "processing_connection": "连接用时",
+  "processing_first_answer": "首个回答",
+  "processing_total": "总用时",
+  "processing_answer_basis": "回答依据"
 }

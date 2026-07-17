@@ -10,13 +10,15 @@ import { useLocation } from 'react-router-dom';
 import { message as antMessage } from 'antd';
 import { CheckOutlined, CloseOutlined, ArrowDownOutlined, EditOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useChatStore } from '../store/chatStore';
+import { useChatStore, type AnswerMode } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 import ChatComposer from '../components/chat/ChatComposer';
+import ProcessingPanel from '../components/chat/ProcessingPanel';
 import { chatApi } from '../api/chat';
 import { useAuthorization } from '../auth/CapabilityProvider';
+import { DEEP_ANSWER_MODE_ENABLED } from '../auth/authorization';
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -43,7 +45,11 @@ function clipForScreenReader(text: string, maxLength = 100): string {
 
 export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
-  const canShare = useAuthorization().has('chat.share');
+  const authorization = useAuthorization();
+  const canShare = authorization.has('chat.share');
+  const canUseDeep = DEEP_ANSWER_MODE_ENABLED
+    && authorization.enabled
+    && authorization.has('chat.deep');
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
@@ -66,6 +72,8 @@ export default function ChatPageContainer() {
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
 
   const [inputValue, setInputValue] = useState('');
+  const [answerMode, setAnswerMode] = useState<AnswerMode>('fast');
+  const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
@@ -90,6 +98,12 @@ export default function ChatPageContainer() {
   useEffect(() => { loadedSessionRef.current = null; }, [location.pathname]);
 
   useEffect(() => {
+    if (answerMode !== 'deep' || canUseDeep) return;
+    setAnswerMode('fast');
+    setModeNotice('error_deep_unavailable');
+  }, [answerMode, canUseDeep]);
+
+  useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
       if (activeTurn?.isLocked) {
         loadedSessionRef.current = activeSessionId;
@@ -105,19 +119,25 @@ export default function ChatPageContainer() {
 
   const handleSend = () => {
     if (!inputValue.trim() || isStreaming || isSendLocked || isSendingRef.current) return;
+    if (answerMode === 'deep' && !canUseDeep) {
+      setAnswerMode('fast');
+      setModeNotice('error_deep_unavailable');
+      return;
+    }
     if (!navigator.onLine) {
       antMessage.warning(t('offline_send_warning') || 'You are offline. Please check your network.');
       return;
     }
     isSendingRef.current = true;
-    sendMessage(inputValue.trim());
+    sendMessage(inputValue.trim(), { answerMode, canUseDeep });
+    setModeNotice(null);
     setInputValue('');
     inputRef.current?.focus();
     requestAnimationFrame(() => { isSendingRef.current = false; });
   };
 
   const handleQuickAction = (question: string) => {
-    sendMessage(question);
+    sendMessage(question, { answerMode: 'fast' });
     inputRef.current?.focus();
   };
 
@@ -129,9 +149,25 @@ export default function ChatPageContainer() {
     }
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUserMsg) {
-      setSendError(null);
       isSendingRef.current = true;
-      sendMessage(lastUserMsg.content);
+      const reusesFailedDeepTurn = activeTurn?.answerMode === 'deep'
+        && activeTurn.phase === 'error'
+        && !activeTurn.isLocked
+        && Boolean(activeTurn.clientRequestId);
+      if (reusesFailedDeepTurn) {
+        setAnswerMode('fast');
+        setModeNotice(null);
+        sendMessage(lastUserMsg.content, {
+          answerMode: 'fast',
+          retryClientRequestId: activeTurn.clientRequestId!,
+        });
+      } else {
+        setSendError(null);
+        sendMessage(lastUserMsg.content, {
+          answerMode: answerMode === 'deep' && canUseDeep ? 'deep' : 'fast',
+          canUseDeep,
+        });
+      }
       requestAnimationFrame(() => { isSendingRef.current = false; });
     }
   };
@@ -241,6 +277,15 @@ export default function ChatPageContainer() {
               : t('thinking_generating'))}
         </div>
 
+        {isStreaming && activeTurn?.safePhase ? (
+          <ProcessingPanel
+            answerMode={activeTurn.answerMode ?? 'fast'}
+            phase={activeTurn.safePhase}
+            timings={activeTurn.timings}
+            citations={activeTurn.citations}
+          />
+        ) : null}
+
         {isLoadingMessages && messages.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px 0' }}>
             <div className="skeleton-msg" style={{ alignSelf: 'flex-end', width: '60%', padding: '14px 18px', borderRadius: 20 }}>
@@ -268,6 +313,14 @@ export default function ChatPageContainer() {
             </div>
           </div>
         )}
+
+        {modeNotice ? (
+          <div className="chat-mode-notice" role="alert">
+            {t(modeNotice, {
+              defaultValue: 'Deep answer is no longer available. Fast answer remains available.',
+            })}
+          </div>
+        ) : null}
 
         <div style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity var(--dur) var(--ease-out)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <VirtualizedMessageList
@@ -322,6 +375,17 @@ export default function ChatPageContainer() {
             multiline
             maxRows={6}
             showHint
+            answerMode={answerMode}
+            canUseDeep={canUseDeep}
+            onAnswerModeChange={(mode) => {
+              if (mode === 'deep' && !canUseDeep) {
+                setAnswerMode('fast');
+                setModeNotice('error_deep_unavailable');
+                return;
+              }
+              setAnswerMode(mode);
+              setModeNotice(null);
+            }}
           />
         </div>
       </div>

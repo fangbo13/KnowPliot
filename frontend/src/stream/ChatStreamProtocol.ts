@@ -27,7 +27,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SAFE_CODE = /^[a-z0-9_]{1,64}$/;
 const V1_EVENTS = new Set(['token', 'citations', 'quality', 'done', 'error']);
 const V2_EVENTS = new Set(['meta', 'phase', 'answer_delta', 'citations', 'quality', 'usage', 'done', 'error']);
-const SAFE_PHASES = new Set(['accepted', 'retrieving', 'reasoning', 'answering', 'saving']);
+const SAFE_PHASES = new Set([
+  'accepted',
+  'retrieving',
+  'reasoning',
+  'answering',
+  'saving',
+  'searching',
+  'generating',
+  'finalizing',
+]);
+const FORBIDDEN_REASONING_FIELDS = new Set([
+  'reasoning',
+  'reasoning_content',
+  'chain_of_thought',
+  'raw_reasoning',
+]);
 
 function invalid(): never {
   throw new InvalidChatStreamEventError();
@@ -39,9 +54,23 @@ function isRecord(value: unknown): value is Record<string, any> {
 
 function parseData(data: string): any {
   try {
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    rejectForbiddenReasoningFields(parsed);
+    return parsed;
   } catch {
     return invalid();
+  }
+}
+
+function rejectForbiddenReasoningFields(value: unknown): void {
+  if (Array.isArray(value)) {
+    value.forEach(rejectForbiddenReasoningFields);
+    return;
+  }
+  if (!isRecord(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (FORBIDDEN_REASONING_FIELDS.has(key.toLowerCase())) invalid();
+    rejectForbiddenReasoningFields(child);
   }
 }
 

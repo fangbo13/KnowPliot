@@ -289,6 +289,49 @@
 .chat-error-title { font-weight: 600; font-size: 14px; color: var(--color-text); margin-bottom: 2px; }
 .chat-error-desc { font-size: 13px; color: var(--color-text-secondary); }
 .chat-error-actions { display: flex; gap: 8px; margin-top: 10px; }
+.chat-mode-notice {
+  align-self: center;
+  background: rgba(var(--color-warning-rgb), 0.08);
+  border: 1px solid rgba(var(--color-warning-rgb), 0.24);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin: 0 24px 10px;
+  max-width: var(--content-max);
+  padding: 8px 12px;
+  width: calc(100% - 48px);
+}
+.processing-panel {
+  align-self: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 12px;
+  margin: 4px 24px 10px;
+  max-width: var(--content-max);
+  width: calc(100% - 48px);
+}
+.processing-panel-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  width: 100%;
+}
+.processing-panel-dot { background: var(--accent); border-radius: 50%; height: 6px; width: 6px; }
+.processing-panel-mode { margin-left: auto; }
+.processing-panel-body { border-top: 1px solid var(--color-border-secondary); padding: 8px 12px 10px; }
+.processing-panel-timings { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; }
+.processing-panel-timings div { display: flex; gap: 5px; }
+.processing-panel-timings dt { color: var(--color-text-tertiary); }
+.processing-panel-timings dd { color: var(--color-text-secondary); margin: 0; }
+.processing-panel-basis { color: var(--color-text-secondary); font-size: 12px; margin-top: 8px; }
+.processing-panel-basis ul { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; padding-left: 18px; }
 
 /* ============================================================================
    Message rows
@@ -468,6 +511,20 @@
 .composer.is-focused { border-color: var(--accent); box-shadow: var(--shadow-floating-input), 0 0 0 4px var(--accent-soft); }
 .composer.is-disabled { opacity: 0.65; }
 .composer-inner { display: flex; align-items: flex-end; gap: 10px; }
+.composer-mode { display: flex; gap: 4px; margin: 0 0 6px 10px; }
+.composer-mode-btn {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 11.5px;
+  line-height: 22px;
+  padding: 0 9px;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.composer-mode-btn[aria-pressed='true'] { background: var(--color-fill); color: var(--color-text); }
+.composer-mode-btn:disabled { cursor: default; opacity: 0.55; }
 .composer-textarea {
   flex: 1;
   border: none; outline: none; resize: none;

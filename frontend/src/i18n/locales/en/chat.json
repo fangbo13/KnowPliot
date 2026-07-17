@@ -75,5 +75,19 @@
   "feedback_source_placeholder": "Optional source suggestion",
   "feedback_flag_for_review": "Submit for review",
   "feedback_submit": "Submit feedback",
-  "feedback_cancel": "Cancel"
+  "feedback_cancel": "Cancel",
+  "answer_mode_label": "Answer mode",
+  "answer_mode_fast": "Fast",
+  "answer_mode_deep": "Deep",
+  "error_deep_unavailable": "Deep answer is no longer available. Fast answer remains available.",
+  "processing_panel_label": "Answer processing",
+  "processing_panel_toggle": "Show or hide answer processing",
+  "processing_phase_accepted": "Accepted",
+  "processing_phase_searching": "Searching",
+  "processing_phase_generating": "Generating",
+  "processing_phase_finalizing": "Finalizing",
+  "processing_connection": "Connected",
+  "processing_first_answer": "First answer",
+  "processing_total": "Total",
+  "processing_answer_basis": "Answer basis"
 }

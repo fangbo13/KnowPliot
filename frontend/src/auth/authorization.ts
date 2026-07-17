@@ -12,6 +12,16 @@ export const CAPABILITY_NAV_ENABLED =
   (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
     ?.VITE_CAPABILITY_NAV === 'true';
 
+export function isDeepAnswerModeEnabled(
+  env: Record<string, string | undefined> =
+    (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {},
+): boolean {
+  return env.VITE_DEEP_ANSWER_MODE === 'true';
+}
+
+/** Deep rollout is deliberately independent and default-off. */
+export const DEEP_ANSWER_MODE_ENABLED = isDeepAnswerModeEnabled();
+
 export type CapabilityStateStatus = 'loading' | 'ready' | 'denied' | 'error';
 
 /**
