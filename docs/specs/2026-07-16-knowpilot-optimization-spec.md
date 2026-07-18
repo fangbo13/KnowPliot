@@ -710,3 +710,7 @@ After production acceptance, prioritize route-level lazy loading/bundle splittin
 observability dashboards/alerts for the metrics in section 15, and compatibility
 cleanup. These follow-ups may not weaken idempotency, scope isolation, safe-phase
 privacy, or additive-data retention.
+<!-- Version1.74.1 ownership-continuity status (2026-07-18): implementation is
+in progress on codex/ownership-continuity. Canonical ownership transfer and
+atomic offboarding succession are locally covered; PostgreSQL and final release
+verification remain pending. -->

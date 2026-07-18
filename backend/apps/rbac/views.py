@@ -214,6 +214,20 @@ class UserRoleDetailView(generics.DestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if (
+            instance.is_active
+            and instance.role.name == "admin"
+            and not UserRole.objects.filter(
+                role__name="admin", is_active=True, user__is_active=True
+            ).exclude(pk=instance.pk).exists()
+        ):
+            return Response(
+                {
+                    "error_code": "last_platform_admin",
+                    "detail": "Assign another active platform administrator before revoking this role.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         instance.is_active = False
         instance.save(update_fields=["is_active"])
 
@@ -379,20 +393,39 @@ def admin_user_deactivate(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user.is_active = False
-    user.save(update_fields=["is_active"])
+    from .offboarding import OffboardingConflict, OffboardingImpactService, OffboardingService
 
-    # Also deactivate all user roles
-    UserRole.objects.filter(user=user).update(is_active=False)
+    try:
+        impact = OffboardingImpactService.inspect(actor=request.user, subject=user)
+    except OffboardingConflict:
+        return Response({"error_code": "insufficient_scope"}, status=status.HTTP_403_FORBIDDEN)
+    if impact["blockers"]["owned_spaces"]:
+        return Response(
+            {
+                "error_code": "offboarding_required",
+                "impact_url": f"/api/v1/admin/users/{user.id}/offboarding-impact/",
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    try:
+        OffboardingService.offboard(
+            actor=request.user,
+            subject_id=user.id,
+            impact_version=impact["impact_version"],
+            reason_code="admin_deactivate",
+            space_transfers=[],
+        )
+    except OffboardingConflict as error:
+        return Response({"error_code": str(error)}, status=status.HTTP_409_CONFLICT)
 
     create_audit_log(
         user=request.user,
         action="user_deactivate",
         target_type="User",
         target_id=str(user.id),
-        details={"deactivated_user": user.email},
+        details={"deactivated_user_id": str(user.id)},
         role_used="admin",
         request=request,
     )
 
-    return Response({"detail": f"User {user.email} deactivated successfully."})
+    return Response({"detail": "User deactivated successfully."})

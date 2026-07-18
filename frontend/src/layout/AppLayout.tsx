@@ -153,6 +153,7 @@ export default function AppLayout() {
     if (canUseHistory) {
       items.push({ key: 'history', icon: <HistoryOutlined />, label: t('nav_history'), onClick: () => navigate('/history') });
     }
+    items.push({ key: 'ownership-transfers', icon: <TeamOutlined />, label: t('ownership_transfers_title'), onClick: () => navigate('/ownership-transfers') });
     items.push({ key: 'discover-spaces', icon: <CompassOutlined />, label: t('space_discovery'), onClick: () => navigate('/spaces/discover') });
     items.push({ key: 'profile', icon: <SettingOutlined />, label: t('user_settings'), onClick: () => navigate('/profile') });
     items.push({ type: 'divider' as const });

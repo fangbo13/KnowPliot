@@ -61,6 +61,7 @@ const PLATFORM_CAPABILITIES = new Set<Capability>([
   'platform.access',
   'platform.organizations.manage',
   'platform.users.manage',
+  'platform.users.offboard',
   'platform.roles.manage',
   'platform.models.manage',
   'platform.metrics.read',

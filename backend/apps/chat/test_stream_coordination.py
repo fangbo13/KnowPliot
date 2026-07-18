@@ -230,6 +230,15 @@ class RedisSessionLeaseTest(SimpleTestCase):
             lease.ensure_owned()
         lease.release()
 
+    def test_ensure_owned_fails_closed_when_token_check_is_unavailable(self):
+        redis = FakeRedis()
+        lease = RedisSessionLease(redis, "session-1", token_factory=lambda: "owner-a")
+        self.assertTrue(lease.acquire())
+        redis.fail = True
+
+        with self.assertRaises(CoordinationUnavailableError):
+            lease.ensure_owned()
+
     def test_redis_error_fails_closed_without_exposing_connection_text(self):
         redis = FakeRedis()
         redis.fail = True

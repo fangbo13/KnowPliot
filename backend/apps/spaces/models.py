@@ -23,6 +23,7 @@ import uuid
 # FK declarations that follow it in the class body.
 from django.conf import settings as django_settings
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -117,6 +118,14 @@ class KnowledgeSpace(models.Model):
         on_delete=models.SET_NULL,
         related_name="created_spaces",
     )
+    # Canonical ownership authority. New writes must use
+    # ``create_space_with_owner`` and populate this field.
+    owner = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="owned_spaces",
+    )
+    ownership_version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -197,6 +206,77 @@ class SpaceMembership(models.Model):
         if self.expires_at and self.expires_at < timezone.now():
             return False
         return True
+
+
+class OwnershipTransfer(models.Model):
+    """Durable, idempotent ownership-transfer state machine record."""
+
+    MODE_VOLUNTARY = "voluntary"
+    MODE_FORCED = "forced"
+    MODE_OFFBOARDING = "offboarding"
+    MODE_CHOICES = [
+        (MODE_VOLUNTARY, "Voluntary"),
+        (MODE_FORCED, "Forced"),
+        (MODE_OFFBOARDING, "Offboarding"),
+    ]
+    STATUS_PENDING = "pending"
+    STATUS_COMPLETED = "completed"
+    STATUS_DECLINED = "declined"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_EXPIRED = "expired"
+    STATUS_INVALIDATED = "invalidated"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_DECLINED, "Declined"),
+        (STATUS_CANCELLED, "Cancelled"),
+        (STATUS_EXPIRED, "Expired"),
+        (STATUS_INVALIDATED, "Invalidated"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(KnowledgeSpace, on_delete=models.PROTECT, related_name="ownership_transfers")
+    from_owner = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ownership_transfers_from"
+    )
+    to_owner = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ownership_transfers_to"
+    )
+    requested_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ownership_transfers_requested"
+    )
+    accepted_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ownership_transfers_accepted",
+    )
+    mode = models.CharField(max_length=16, choices=MODE_CHOICES)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES)
+    expected_ownership_version = models.PositiveIntegerField()
+    reason_code = models.CharField(max_length=64)
+    reason_note = models.CharField(max_length=500, blank=True, default="")
+    idempotency_key = models.UUIDField()
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "spaces_ownershiptransfer"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["space"], condition=Q(status="pending"), name="spaces_one_pending_owner_transfer"
+            ),
+            models.UniqueConstraint(
+                fields=["requested_by", "idempotency_key"], name="spaces_owner_transfer_request_key"
+            ),
+            models.CheckConstraint(check=~Q(from_owner=models.F("to_owner")), name="spaces_owner_transfer_distinct"),
+            models.CheckConstraint(
+                check=~Q(status="completed") | Q(completed_at__isnull=False),
+                name="spaces_owner_transfer_completed_timestamp",
+            ),
+        ]
 
 
 class OrganizationMembership(models.Model):

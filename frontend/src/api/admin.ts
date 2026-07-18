@@ -19,6 +19,35 @@ export interface AdminUser {
   is_active: boolean;
 }
 
+export interface OffboardingImpact {
+  subject: { id: string; display_name: string; is_active: boolean };
+  impact_version: string;
+  blockers: {
+    owned_spaces: string[];
+    owned_space_details: Array<{
+      id: string;
+      display_name: string;
+      status: 'active' | 'archived';
+      ownership_version: number;
+    }>;
+    last_platform_admin: boolean;
+    last_organization_admin_scopes: Array<{ organization_id: string; business_line_id: string | null; role: string }>;
+    last_business_admin_scopes: Array<{ organization_id: string; business_line_id: string | null; role: string }>;
+  };
+  actions: {
+    active_sessions: number;
+    active_conversation_shares: number;
+    active_invite_codes: number;
+    active_admin_registration_codes: number;
+    pending_email_invites: number;
+    open_feedback_reviews: number;
+    open_knowledge_gap_tickets: number;
+    running_jobs: number;
+  };
+  protected_history: Record<string, number>;
+  can_deactivate_without_successor: boolean;
+}
+
 export interface Role { id: string; name: string; label: string; scope: string; }
 
 export interface AdminCode {
@@ -362,6 +391,45 @@ export const adminApi = {
   },
   async deactivateUser(userId: string): Promise<void> {
     await apiClient.post(`/rbac/users/${userId}/deactivate/`, {});
+  },
+  async offboardingImpact(userId: string): Promise<OffboardingImpact> {
+    const { data } = await apiClient.get(`/admin/users/${userId}/offboarding-impact/`);
+    return data;
+  },
+  async offboardingAdminSuccessorCandidates(
+    userId: string,
+    params: { organization_id?: string; business_line_id?: string | null; role: string; scope_type?: 'platform' },
+  ): Promise<Array<{ id: string; display_name: string }>> {
+    const { data } = await apiClient.get(`/admin/users/${userId}/offboarding-admin-candidates/`, { params });
+    return data.results;
+  },
+  async offboardUser(
+    userId: string,
+    body: {
+      impact_version: string;
+      reason_code: string;
+      space_transfers: Array<{
+        space_id: string;
+        successor_user_id: string;
+        expected_ownership_version: number;
+      }>;
+      admin_successions?: Array<
+        | {
+            organization_id: string;
+            business_line_id: string | null;
+            role: string;
+            successor_user_id: string;
+          }
+        | {
+            scope_type: 'platform';
+            role: 'admin';
+            successor_user_id: string;
+          }
+      >;
+    },
+  ): Promise<{ offboarded: boolean; subject_id: string }> {
+    const { data } = await apiClient.post(`/admin/users/${userId}/offboard/`, body);
+    return data;
   },
 
   // ── Admin registration codes (V7) ──

@@ -57,7 +57,6 @@ from .serializers import (
     SpaceCloneSerializer,
     SpaceCreateSerializer,
     SpaceMembershipSerializer,
-    SpaceOwnerTransferSerializer,
     SpaceTransferSerializer,
     UpdateMemberRoleSerializer,
 )
@@ -144,14 +143,15 @@ class SpaceListCreateView(generics.ListCreateAPIView):
             if organization is None:
                 organization = Organization.objects.create(name="Default Organization", slug="default")
 
-        with transaction.atomic():
-            space = serializer.save(organization=organization, created_by=request.user)
-            # Creator becomes the space owner.
-            SpaceMembership.objects.create(
-                space=space, user=request.user,
-                role=SpaceMembership.ROLE_OWNER, status="active",
-                last_accessed_at=timezone.now(),
-            )
+        from .ownership import create_space_with_owner
+
+        space_fields = serializer.validated_data.copy()
+        space_fields.pop("organization", None)
+        space = create_space_with_owner(
+            organization=organization,
+            owner=request.user,
+            **space_fields,
+        )
         _audit(request.user, "space_create", target_id=space.id,
                details={"code": space.code, "name": space.name}, request=request)
         out = KnowledgeSpaceSerializer(space, context={"request": request})
@@ -238,36 +238,18 @@ def space_transfer(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def space_transfer_owner(request, pk):
-    space = get_space_or_404(pk)
-    if effective_space_role(request.user, space) not in {"owner", "super_admin", "org_admin", "business_admin"}:
-        raise PermissionDenied("You cannot transfer ownership of this space.")
-    serializer = SpaceOwnerTransferSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    membership = SpaceMembership.objects.filter(
-        space=space, user_id=serializer.validated_data["user"], status="active"
-    ).first()
-    if membership is None:
-        raise ValidationError({"user": "The new owner must be an active space member."})
-    with transaction.atomic():
-        SpaceMembership.objects.filter(space=space, role=SpaceMembership.ROLE_OWNER, status="active").exclude(pk=membership.pk).update(role=SpaceMembership.ROLE_MEMBER)
-        membership.role = SpaceMembership.ROLE_OWNER
-        membership.save(update_fields=["role", "updated_at"])
-    _audit(request.user, "space_owner_transfer", target_id=space.id, details={"new_owner": str(membership.user_id)}, request=request)
-    return Response(SpaceMembershipSerializer(membership).data)
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
 def space_clone(request, pk):
     space = get_space_or_404(pk)
     if effective_space_role(request.user, space) not in {"owner", "super_admin", "org_admin", "business_admin"}:
         raise PermissionDenied("You cannot clone this space.")
     serializer = SpaceCloneSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    from .ownership import create_space_with_owner
+
     with transaction.atomic():
-        clone = KnowledgeSpace.objects.create(
+        clone = create_space_with_owner(
             organization=space.organization,
+            owner=request.user,
             business_line=space.business_line,
             name=serializer.validated_data["name"],
             code=serializer.validated_data["code"],
@@ -276,9 +258,7 @@ def space_clone(request, pk):
             language=space.language,
             visibility=space.visibility,
             settings=space.settings,
-            created_by=request.user,
         )
-        SpaceMembership.objects.create(space=clone, user=request.user, role=SpaceMembership.ROLE_OWNER, status="active")
     copied = []
     if serializer.validated_data["copy_documents"]:
         from apps.knowledge.ingestion import enqueue_document_ingestion
@@ -511,6 +491,11 @@ def space_member_detail(request, pk, user_id):
         raise NotFound("Member not found.")
 
     def _is_last_owner() -> bool:
+        # The canonical owner FK is authoritative during and after the
+        # compatibility period. A corrupt legacy owner mirror must never make
+        # the canonical owner removable through member-management endpoints.
+        if membership.user_id == space.owner_id:
+            return True
         if membership.role != SpaceMembership.ROLE_OWNER:
             return False
         owners = SpaceMembership.objects.filter(

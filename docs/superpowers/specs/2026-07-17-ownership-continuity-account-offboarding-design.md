@@ -712,3 +712,16 @@ activate 只恢复登录资格，不恢复：
 - 本地验证与筼筜现场验证边界被分别记录；
 - memory.md、实施进度和交接文档更新为真实状态；
 - 没有把“设计完成”错误标记为“生产已验收”。
+
+## 19. Implementation status (2026-07-18)
+
+The staged implementation is present on `codex/ownership-continuity`: canonical
+space ownership, versioned transfer state, capability-gated voluntary/forced
+handoff, impact preflight, and atomic offboarding are implemented. Offboarding
+now supports successor mappings for final platform, organization, and business
+administrator scopes before revoking the departing user's authority.
+
+Local SQLite focused regressions, Django checks, migration-drift checks,
+TypeScript, and i18n checks have passed. This is not a production acceptance:
+PostgreSQL constraint/lock rehearsal, full-suite/build evidence, and authenticated
+browser UAT remain required release gates.

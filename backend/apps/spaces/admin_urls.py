@@ -52,6 +52,7 @@ from apps.chat.report_views import (
     KnowledgeQualityReportView,
 )
 from apps.rag.evaluation_views import RAGEvaluationRunListView
+from apps.rbac.offboarding import offboard_user, offboarding_admin_successor_candidates, offboarding_impact
 
 urlpatterns = [
     path("registration-codes/", AdminRegistrationCodeListCreateView.as_view(),
@@ -71,6 +72,9 @@ urlpatterns = [
     path("spaces/<uuid:pk>/access-requests/<uuid:request_id>/reject/", space_access_request_reject, name="admin-space-access-request-reject"),
     path("users/", ScopedAdminUserListView.as_view(), name="admin-scoped-user-list"),
     path("users/<uuid:user_id>/assignments/", scoped_user_assignment, name="admin-scoped-user-assignment"),
+    path("users/<uuid:user_id>/offboarding-impact/", offboarding_impact, name="admin-user-offboarding-impact"),
+    path("users/<uuid:user_id>/offboarding-admin-candidates/", offboarding_admin_successor_candidates, name="admin-user-offboarding-admin-candidates"),
+    path("users/<uuid:user_id>/offboard/", offboard_user, name="admin-user-offboard"),
     path("model-profiles/", ModelProfileListCreateView.as_view(), name="admin-model-profiles"),
     path("governance/policies/", governance_policies, name="admin-governance-policies"),
     path("health/", SystemHealthView.as_view(), name="admin-health"),

@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -49,6 +51,8 @@ class Phase9BScopedGovernanceTests(APITestCase):
             space=self.space,
             role=SpaceMembership.ROLE_OWNER,
         )
+        self.space.owner = self.org_admin
+        self.space.save(update_fields=["owner"])
 
     def test_platform_admin_can_create_archive_and_restore_organization(self):
         self.client.force_authenticate(self.super_admin)
@@ -188,16 +192,22 @@ class Phase9BScopedGovernanceTests(APITestCase):
             "Use the approved project workspace instead.",
         )
 
-    def test_owner_can_transfer_ownership_and_clone_configuration(self):
+    def test_legacy_owner_transfer_endpoint_delegates_to_forced_transfer_and_clone_has_canonical_owner(self):
         target = User.objects.create_user(
             username="target@example.com", email="target@example.com", password="Strong-pass-123!"
         )
         SpaceMembership.objects.create(user=target, space=self.space, role="member")
-        self.client.force_authenticate(self.org_admin)
+        self.client.force_authenticate(self.super_admin)
         transferred = self.client.post(
-            f"/api/v1/spaces/{self.space.id}/transfer-owner/", {"user": str(target.id)}, format="json"
+            f"/api/v1/spaces/{self.space.id}/transfer-owner/",
+            {"user": str(target.id), "reason_code": "administrative_continuity"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
         self.assertEqual(transferred.status_code, status.HTTP_200_OK, transferred.data)
+        self.assertEqual(transferred.data["mode"], "forced")
+        self.assertEqual(transferred["Deprecation"], "true")
+        self.client.force_authenticate(self.org_admin)
         cloned = self.client.post(
             f"/api/v1/spaces/{self.space.id}/clone/",
             {"name": "Cloned space", "code": "cloned-space", "copy_documents": False},
@@ -206,6 +216,8 @@ class Phase9BScopedGovernanceTests(APITestCase):
         self.assertEqual(cloned.status_code, status.HTTP_201_CREATED, cloned.data)
         clone = KnowledgeSpace.objects.get(code="cloned-space")
         self.assertEqual(clone.organization_id, self.space.organization_id)
+        self.assertEqual(clone.owner_id, self.org_admin.id)
+        self.assertEqual(clone.ownership_version, 1)
         self.assertTrue(SpaceMembership.objects.filter(space=clone, user=self.org_admin, role="owner").exists())
 
     def test_archived_parent_makes_child_space_read_only(self):

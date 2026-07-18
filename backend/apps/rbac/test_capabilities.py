@@ -39,6 +39,7 @@ MEMBER = {
     "chat.export",
     "chat.history",
     "chat.share",
+    "workspace.ownership.transfer.accept",
 }
 BASE_CHAT = {"chat.ask", "chat.history"}
 OWNER_MANAGEMENT = {
@@ -55,6 +56,8 @@ OWNER_MANAGEMENT = {
     "workspace.manage",
     "workspace.members.manage",
     "workspace.settings.manage",
+    "workspace.ownership.read",
+    "workspace.ownership.transfer.request",
 }
 
 
@@ -103,6 +106,11 @@ class CapabilityMatrixTest(SimpleTestCase):
                     "platform.organizations.manage",
                     "platform.roles.manage",
                     "platform.users.manage",
+                    "platform.users.offboard",
+                    "workspace.ownership.read",
+                    "workspace.ownership.transfer.force",
+                    "governance.admin_succession.manage",
+                    "governance.users.suspend",
                 }
             ),
         )
@@ -119,6 +127,10 @@ class CapabilityMatrixTest(SimpleTestCase):
                     "governance.spaces.manage",
                     "governance.templates.manage",
                     "governance.users.manage",
+                    "workspace.ownership.read",
+                    "workspace.ownership.transfer.force",
+                    "governance.admin_succession.manage",
+                    "governance.users.suspend",
                 }
             ),
         )
@@ -132,6 +144,9 @@ class CapabilityMatrixTest(SimpleTestCase):
                     "governance.spaces.manage",
                     "governance.templates.manage",
                     "governance.users.manage",
+                    "workspace.ownership.read",
+                    "workspace.ownership.transfer.force",
+                    "governance.users.suspend",
                 }
             ),
         )

@@ -87,6 +87,40 @@ export interface SpaceAccessRequestRecord {
   updated_at: string;
 }
 
+export interface OwnershipTransfer {
+  id: string;
+  space_id: string;
+  from_owner_id: string;
+  to_owner_id: string;
+  mode: 'voluntary' | 'forced' | 'offboarding';
+  status: 'pending' | 'completed' | 'declined' | 'cancelled' | 'expired' | 'invalidated';
+  expected_ownership_version: number;
+  expires_at: string | null;
+  completed_at: string | null;
+}
+
+export interface OwnershipDetail {
+  owner: { id: string; display_name: string; is_active: boolean } | null;
+  ownership_version: number;
+  pending_transfer: OwnershipTransfer | null;
+}
+
+export interface OwnershipCandidate {
+  id: string;
+  display_name: string;
+  role?: SpaceRole;
+  requires_membership: boolean;
+}
+
+export interface OwnershipCandidatePage {
+  results: OwnershipCandidate[];
+  next: number | null;
+}
+
+export interface PendingOwnershipTransfer extends OwnershipTransfer {
+  space: { id: string; display_name: string; status: 'active' | 'archived' };
+}
+
 export const spacesApi = {
   async list(): Promise<KnowledgeSpace[]> {
     const { data } = await apiClient.get('/spaces/');
@@ -133,8 +167,63 @@ export const spacesApi = {
     return data;
   },
 
-  async transferOwner(id: string, user: string): Promise<SpaceMember> {
-    const { data } = await apiClient.post(`/spaces/${id}/transfer-owner/`, { user });
+  async ownership(id: string): Promise<OwnershipDetail> {
+    const { data } = await apiClient.get(`/spaces/${id}/ownership/`);
+    return data;
+  },
+
+  async pendingOwnershipTransfers(): Promise<PendingOwnershipTransfer[]> {
+    const { data } = await apiClient.get('/spaces/ownership-transfers/pending/');
+    return Array.isArray(data) ? data : data.results ?? [];
+  },
+
+  async ownershipCandidates(
+    id: string,
+    query = '',
+    purpose: 'voluntary' | 'forced' = 'voluntary',
+  ): Promise<OwnershipCandidate[]> {
+    return (await this.ownershipCandidatePage(id, query, purpose)).results;
+  },
+
+  async ownershipCandidatePage(
+    id: string,
+    query = '',
+    purpose: 'voluntary' | 'forced' = 'voluntary',
+    offset = 0,
+  ): Promise<OwnershipCandidatePage> {
+    const { data } = await apiClient.get(`/spaces/${id}/ownership-candidates/`, {
+      params: { purpose, q: query, ...(offset ? { offset } : {}) },
+    });
+    return Array.isArray(data) ? { results: data, next: null } : { results: data.results ?? [], next: data.next ?? null };
+  },
+
+  async requestOwnershipTransfer(
+    id: string,
+    body: { to_user_id: string; expected_ownership_version: number; reason_code?: string },
+  ): Promise<OwnershipTransfer> {
+    const { data } = await apiClient.post(`/spaces/${id}/ownership-transfers/`, body, {
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    return data;
+  },
+
+  async forceOwnershipTransfer(
+    id: string,
+    body: { to_user_id: string; expected_ownership_version: number; reason_code: string },
+  ): Promise<OwnershipTransfer> {
+    const { data } = await apiClient.post(`/spaces/${id}/ownership-transfers/force/`, body, {
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    return data;
+  },
+
+  async acceptOwnershipTransfer(id: string, transferId: string): Promise<OwnershipTransfer> {
+    const { data } = await apiClient.post(`/spaces/${id}/ownership-transfers/${transferId}/accept/`, {});
+    return data;
+  },
+
+  async declineOwnershipTransfer(id: string, transferId: string): Promise<OwnershipTransfer> {
+    const { data } = await apiClient.post(`/spaces/${id}/ownership-transfers/${transferId}/decline/`, {});
     return data;
   },
 

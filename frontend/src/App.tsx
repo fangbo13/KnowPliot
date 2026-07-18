@@ -43,6 +43,7 @@ import ScopedUsersPage from './pages/console/ScopedUsersPage';
 import GovernancePoliciesPage from './pages/console/GovernancePoliciesPage';
 import ModelProfilesPage from './pages/console/ModelProfilesPage';
 import WorkspaceLifecyclePage from './pages/console/WorkspaceLifecyclePage';
+import OwnershipTransfersPage from './pages/OwnershipTransfersPage';
 
 function WorkspaceAuditRoute() {
   const { spaceId } = useParams<{ spaceId: string }>();
@@ -107,6 +108,7 @@ function App({
           <Route path="shared/:token" element={<SharedConversationPage />} />
           <Route path="spaces/discover" element={<SpaceDiscoveryPage />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="ownership-transfers" element={<OwnershipTransfersPage />} />
           <Route
             path="spaces/manage"
             element={capabilityNavigationEnabled ? (

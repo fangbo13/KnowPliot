@@ -289,3 +289,48 @@ Verified: `manage.py check` 0 issues; `showmigrations` no longer lists crawler;
 `makemigrations --check --dry-run` "No changes detected"; `CrawlerRemovedTest`
 passes; live login works; gunicorn reloaded with no errors. No other app imported
 crawler (confirmed zero external references), so removal is safe.
+
+## 11. Ownership continuity handoff (2026-07-18)
+
+Work is in progress on `codex/ownership-continuity` in the Onborading-AI
+workspace. The implementation adds canonical `KnowledgeSpace.owner`, staged
+ownership migrations/auditing, transactionally versioned voluntary and forced
+transfers, and an atomic offboarding service. The latter preflights impact,
+requires successor mappings, transfers owned spaces, succeeds final platform /
+organization / business administrators, revokes sessions/shares/invites and
+authority, requeues open review work, and deactivates the account.
+
+Focused local evidence includes 14 offboarding tests, focused ownership
+regressions, TypeScript, i18n, Django checks, and no migration drift. Do not
+call this production-complete: browser UAT and a production rollback rehearsal
+remain pending. No production system or credentials were used.
+
+Latest local evidence: the full affected Django surface (`apps.rbac`,
+`apps.spaces`, `apps.users`) passed **167/167** in 203.910 seconds on
+2026-07-18 under `config.settings.local_test`. The command used a process-only
+`QWEN_CHAT_MODEL=qwen-plus` override because the local `.env` selects
+`qwen3.6-flash`, which contradicts the governed-default assertions; the `.env`
+file was not modified. This remains SQLite evidence, not PostgreSQL acceptance.
+
+Complete local Django evidence (2026-07-18): **411/411 passed** in 356.509
+seconds with `config.settings.local_test` and the same process-only
+`QWEN_CHAT_MODEL=qwen-plus` override. This run also fixed a lease-observation
+race: `RedisSessionLease.ensure_owned()` synchronously compares its Redis token,
+so a replaced lease fails closed before another renewal-thread timeslice.
+
+Complete frontend evidence (2026-07-18): **45 test files / 271 tests passed**;
+`tsc --noEmit`, i18n key validation (83 source files), and the production Vite
+build (4,028 modules) passed. This is local unit/build evidence only; it does
+not establish authenticated browser UAT or mobile/accessibility acceptance.
+
+PostgreSQL Stage-A rehearsal (2026-07-18): the approved local Docker Compose
+database applied `spaces.0009_ownership_continuity_stage_a` and
+`users.0004_user_offboarding_metadata` successfully. The no-write audit found
+five zero-owner spaces and one multi-owner space, with no exactly-one legacy
+owner candidates; it did not run `--apply`. Stage C is therefore deliberately
+blocked pending explicit remediation, never an arbitrary owner selection. The
+secret-free identifiers and migration record are in
+`audit_reports/current/ownership_continuity_postgres_stage_a_2026-07-18.md`.
+The PostgreSQL-only ownership regression suite passed **3/3** in 86.095 seconds:
+it observed real `FOR UPDATE`, proved the pending-transfer conditional unique
+constraint, and verified two concurrent accepts yield exactly one completion.

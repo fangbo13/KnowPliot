@@ -153,6 +153,18 @@ class RedisSessionLease:
     def ensure_owned(self) -> None:
         if not self._acquired or self._lost.is_set():
             raise LeaseLostError()
+        # The renewal thread is best-effort scheduling, not the authority for
+        # whether this worker may emit another event. Recheck the token here so
+        # a lease replacement is observable immediately even if that thread has
+        # not received a timeslice yet.
+        try:
+            current_token = self.client.get(self.key)
+        except Exception as exc:
+            self._lost.set()
+            raise CoordinationUnavailableError() from exc
+        if current_token != self._token:
+            self._lost.set()
+            raise LeaseLostError()
 
     def release(self) -> bool:
         self._stop.set()

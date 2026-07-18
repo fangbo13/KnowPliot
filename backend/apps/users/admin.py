@@ -25,3 +25,8 @@ class UserAdmin(BaseUserAdmin):
             ),
         }),
     )
+
+    def has_delete_permission(self, request, obj=None):
+        """User deletion is intentionally unavailable while retention is enforced."""
+
+        return False

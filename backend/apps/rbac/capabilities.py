@@ -32,6 +32,7 @@ MEMBER_CAPABILITIES = frozenset(
         "chat.export",
         "chat.history",
         "chat.share",
+        "workspace.ownership.transfer.accept",
     }
 )
 
@@ -70,6 +71,8 @@ SPACE_ROLE_CAPABILITIES: Mapping[str, frozenset[str]] = {
         "workspace.manage",
         "workspace.members.manage",
         "workspace.settings.manage",
+        "workspace.ownership.read",
+        "workspace.ownership.transfer.request",
     },
 }
 
@@ -82,6 +85,11 @@ PLATFORM_CAPABILITIES = frozenset(
         "platform.organizations.manage",
         "platform.roles.manage",
         "platform.users.manage",
+        "platform.users.offboard",
+        "workspace.ownership.read",
+        "workspace.ownership.transfer.force",
+        "governance.admin_succession.manage",
+        "governance.users.suspend",
     }
 )
 
@@ -96,6 +104,10 @@ ORGANIZATION_ADMIN_CAPABILITIES = frozenset(
         "governance.spaces.manage",
         "governance.templates.manage",
         "governance.users.manage",
+        "workspace.ownership.read",
+        "workspace.ownership.transfer.force",
+        "governance.admin_succession.manage",
+        "governance.users.suspend",
     }
 )
 
@@ -107,6 +119,9 @@ BUSINESS_ADMIN_CAPABILITIES = frozenset(
         "governance.spaces.manage",
         "governance.templates.manage",
         "governance.users.manage",
+        "workspace.ownership.read",
+        "workspace.ownership.transfer.force",
+        "governance.users.suspend",
     }
 )
 
