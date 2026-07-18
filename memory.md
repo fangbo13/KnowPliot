@@ -258,3 +258,34 @@ container; `.env` `QWEN_CHAT_MODEL=qwen3.6-flash` overrides the `qwen-plus`
 default in `generation_policy` — proven: with `QWEN_CHAT_MODEL=qwen-plus` the
 `test_generation_policy` suite passes 6/6); none are regressions from these
 fixes (the changed locking paths have no existing real-ORM tests).
+
+## 10. Crawler dead-code removal (2026-07-18)
+
+The V6.0-retired web crawler had been retained "inert" (app code + tools + data
+kept for historical/migration safety, with no routes/tasks/UI). On
+`fix/v1.74.1-acceptance-bugs` the dead crawler code was fully removed:
+
+- Deleted `backend/apps/crawler/` (app: models `CrawledDocument`/`CrawlTaskLog`,
+  views/urls/services/tasks/serializers/validators/cleaners/admin + migration
+  `0001_initial`), `backend/tools/ey_data_collector/` (standalone crawler CLI),
+  `backend/crawled_knowledge/` (crawler output data), `backend/ingest_knowledge.py`
+  (ingested crawled data), and root garbage `--selector`/`--viewport` PNGs.
+- Removed `"apps.crawler"` from `LOCAL_APPS` and stale V6.0 "crawler retained /
+  removed" comments in `config/settings/base.py`, `config/urls.py`,
+  `config/celery.py`; fixed `ingest_onboarding_docs.py` docstring (it only reads
+  `knowledge_docs/`, not crawled data).
+- Finalized the user's pre-existing working-tree deletions (root `crawl_knowledge.py`,
+  root `crawled_knowledge/`, `knowpilot-demo-video/`, `.playwright-cli/`,
+  `generate_ppt.py`, `v42_audit_screenshot.js`, `verify_fixes.mjs`).
+- Intentionally kept (harmless historical, no migration churn): the orphaned DB
+  tables `crawler_crawleddocument`/`crawler_crawltasklog` (SPEC M5 "may remain for
+  data retention"); `audit` action choices `document_crawl`/`document_crawl_withdraw`
+  (locked in migrations 0004/0005); the `IngestionJob.trigger` `'crawler'` value in
+  `frontend/src/api/admin.ts` (mirrors backend historical trigger); the
+  `CrawlerRemovedTest` guard (asserts `/api/v1/crawl/` → 404); the `tests/` root
+  v4.2 suite (left untouched per scope).
+
+Verified: `manage.py check` 0 issues; `showmigrations` no longer lists crawler;
+`makemigrations --check --dry-run` "No changes detected"; `CrawlerRemovedTest`
+passes; live login works; gunicorn reloaded with no errors. No other app imported
+crawler (confirmed zero external references), so removal is safe.

@@ -78,8 +78,6 @@ LOCAL_APPS = [
     "apps.rbac",
     "apps.notifications",  # V7.0: in-app notifications + announcements
     "apps.scenario_templates",  # V7.1: Scenario templates center
-    # apps.crawler retained inert (V6.0): tables/migrations kept, no API/UI/tasks.
-    "apps.crawler",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -171,10 +169,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Site framework
 SITE_ID = 1
 
-# V6.0: Web crawler settings removed — the crawler feature has been retired.
-# Knowledge is now sourced only from admin uploads and manually maintained
-# documents (see SPEC.MD M4 / M5).
-
 # Django REST Framework
 REST_FRAMEWORK = {
     # ``format`` is a business query parameter for compliance and chat exports.
@@ -264,11 +258,7 @@ CELERY_TASK_SOFT_TIME_LIMIT = 1500  # 25 min soft timeout (was 240/4min)
 CELERY_TASK_MAX_RETRIES = 3
 # V4.2 SYS-V4.2-013: Queue routing — critical tasks get dedicated slots
 # Previous: all tasks in single default queue, competing for 4 slots equally.
-# Now: critical queue for fast/important tasks (crawl, reindex), default for slow tasks (ingest).
-# Two workers each handle 2 slots — total capacity unchanged (4 slots), but isolation prevents
-# slow ingest tasks from blocking critical crawl/reindex tasks.
 CELERY_TASK_ROUTES = {
-    # V6.0: crawler queue route removed (Web crawler feature retired).
     "apps.knowledge.tasks.*": {"queue": "default"},
     "apps.rag.tasks.*": {"queue": "default"},
 }

@@ -19,9 +19,6 @@ urlpatterns = [
     path("api/v1/notifications/", include("apps.notifications.urls")),  # V7.0: notifications
     path("api/v1/admin/", include("apps.spaces.admin_urls")),  # V7.0: admin governance
     path("api/v1/templates/", include("apps.scenario_templates.urls")),  # V7.1: Scenario templates center
-    # V6.0: Web crawler feature removed. The crawler API is no longer exposed.
-    # The apps.crawler Django app and its tables are retained inert for historical
-    # data/migration safety, but no routes, tasks, or UI reference it.
 ]
 
 # V4.1 KB-V4.1-007: Removed DEBUG-only media serving.
