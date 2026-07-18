@@ -130,7 +130,7 @@ class FeedbackReviewDetailView(APIView):
     def get_object(self, request, pk, for_update=False):
         qs = Feedback.objects.select_related("space", "reviewer", "user", "message")
         if for_update:
-            qs = qs.select_for_update()
+            qs = qs.select_for_update(of=("self",))
         feedback = qs.get(id=pk)
         if not _can_review(request.user, feedback.space):
             return None

@@ -69,7 +69,10 @@
   transition: width var(--dur-slow) var(--ease-out);
   backdrop-filter: var(--header-blur);
   -webkit-backdrop-filter: var(--header-blur);
-  z-index: 40;
+  /* Bug-6: raised above the ChatPage fixed bottom bar (z-index:100) so the
+     sidebar footer's Logout button stays clickable. The bar's transparent
+     full-width wrappers otherwise intercept clicks over the sidebar footer. */
+  z-index: 200;
 }
 .sidebar.is-collapsed { width: 0; border-right: none; }
 

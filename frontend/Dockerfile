@@ -1,17 +1,20 @@
-# V4.6 FIX: Docker BuildKit on Windows uses git-tracked content as build context,
-# ignoring unstaged working-directory changes → vite build inside Docker always
-# produces stale JS bundles.  Fix: pre-build on host, just copy dist into nginx.
+# V4.6: The frontend image builds from source inside the container. Stage 1
+# (builder) runs `vite build`, and Stage 2 (final) copies that dist into nginx.
+# The served bundle therefore always matches the source tree and never depends
+# on a host-prebuilt dist/ — this removes the prior Windows-BuildKit workaround
+# that copied a host dist/ (which could be stale or missing on CI / other
+# machines, causing blank capability-console routes and other stale-bundle
+# symptoms).
 #
 # Usage:
-#   cd frontend && npx vite build          # build locally first
-#   docker compose build frontend          # then build image (fast, no npm install)
-#   docker compose up -d frontend          # deploy
+#   docker compose build frontend        # builds in-container, reproducible
+#   docker compose up -d frontend
 #
-# Old multi-stage builder is kept as a fallback (stage name "builder") so CI
-# pipelines that prefer in-container builds can still use:
-#   docker build --target final-alt frontend/
+# Note: Docker BuildKit uses the build context as staged/committed content.
+# If you have unstaged frontend changes, commit or stage them before building so
+# the in-container `vite build` sees the current source.
 
-# ── Stage 1: Builder (fallback for CI — NOT used by default) ──
+# ── Stage 1: Builder (builds dist/ from source) ──
 FROM node:20-slim AS builder
 
 WORKDIR /app
@@ -24,24 +27,13 @@ RUN npm config set registry https://registry.npmmirror.com \
 COPY . .
 RUN npx vite build
 
-# ── Stage 2: Serve pre-built dist (primary — fast, reliable) ──
+# ── Stage 2: Serve the built dist via nginx (reproducible from source) ──
 FROM nginx:alpine AS final
 
 # V4.2 SYS-V4.2-011: nginx config for SPA + API proxy
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy locally pre-built dist/ — this is the primary path.
-# Requires `npx vite build` to have been run on the host beforehand.
-COPY dist/ /usr/share/nginx/html/
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
-
-# ── Stage 3: Serve in-container build (fallback for CI) ──
-FROM nginx:alpine AS final-alt
-
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# dist/ is produced by Stage 1's `vite build` — never copied from the host.
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

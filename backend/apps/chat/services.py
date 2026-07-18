@@ -188,7 +188,7 @@ class DjangoTurnRepository:
 
     def lock_session(self, session_id):
         return (
-            ChatSession.objects.select_for_update()
+            ChatSession.objects.select_for_update(of=("self",))
             .select_related("user", "space")
             .filter(pk=session_id)
             .first()
@@ -196,7 +196,7 @@ class DjangoTurnRepository:
 
     def find_turn(self, user, client_request_id):
         return (
-            ChatTurn.objects.select_for_update()
+            ChatTurn.objects.select_for_update(of=("self",))
             .select_related("session", "question_message", "assistant_message")
             .filter(user=user, client_request_id=client_request_id)
             .first()
@@ -239,7 +239,7 @@ class DjangoSessionRepository:
 
     def find_session(self, session_id):
         return (
-            ChatSession.objects.select_for_update()
+            ChatSession.objects.select_for_update(of=("self",))
             .select_related("user", "space")
             .filter(pk=session_id)
             .first()
