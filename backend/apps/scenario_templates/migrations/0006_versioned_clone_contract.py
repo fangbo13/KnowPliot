@@ -226,6 +226,15 @@ def remove_published_revision_guard(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # atomic=False: scenario_templates_revision has DEFERRABLE INITIALLY DEFERRED
+    # FK constraint triggers (created_by -> users_user, template -> ScenarioTemplate).
+    # The backfill RunPython UPDATEs rows on this table, queuing deferred trigger
+    # events that block the subsequent AddConstraint ALTER TABLE within the same
+    # transaction ("cannot ALTER TABLE ... pending trigger events"). Running each
+    # operation in its own transaction lets the deferred triggers fire at commit
+    # before the ALTER, clearing the pending events.
+    atomic = False
+
     dependencies = [
         ("scenario_templates", "0005_phase8b_catalog_assets"),
         ("chat", "0017_independent_thinking_snapshot"),

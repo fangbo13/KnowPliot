@@ -71,22 +71,19 @@ def install_postgresql_source_trigger(apps, schema_editor):
                 IF NEW.access_code_id IS NULL
                    OR NEW.access_code_version IS NULL
                    OR NEW.discovery_policy_version IS NOT NULL THEN
-                    RAISE EXCEPTION
-                        'access-code request source shape is invalid for request %%', NEW.id
-                        USING ERRCODE = '23514';
+                    RAISE EXCEPTION USING ERRCODE = '23514',
+                        MESSAGE = 'access-code request source shape is invalid for request ' || NEW.id::text;
                 END IF;
             ELSIF NEW.source_kind = 'discovery' THEN
                 IF NEW.access_code_id IS NOT NULL
                    OR NEW.access_code_version IS NOT NULL
                    OR NEW.discovery_policy_version IS NULL THEN
-                    RAISE EXCEPTION
-                        'discovery request source shape is invalid for request %%', NEW.id
-                        USING ERRCODE = '23514';
+                    RAISE EXCEPTION USING ERRCODE = '23514',
+                        MESSAGE = 'discovery request source shape is invalid for request ' || NEW.id::text;
                 END IF;
             ELSE
-                RAISE EXCEPTION
-                    'unknown access-request source for request %%', NEW.id
-                    USING ERRCODE = '23514';
+                RAISE EXCEPTION USING ERRCODE = '23514',
+                    MESSAGE = 'unknown access-request source for request ' || NEW.id::text;
             END IF;
             RETURN NULL;
         END;

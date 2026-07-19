@@ -61,9 +61,8 @@ def install_postgresql_taxonomy_triggers(apps, schema_editor):
                   FROM spaces_businessline
                  WHERE id = v_business_line;
                 IF NOT FOUND OR v_parent_organization IS DISTINCT FROM v_organization THEN
-                    RAISE EXCEPTION
-                        'workspace business line organization mismatch for space %%',
-                        p_space USING ERRCODE = '23514';
+                    RAISE EXCEPTION USING ERRCODE = '23514',
+                        MESSAGE = 'workspace business line organization mismatch for space ' || p_space::text;
                 END IF;
             END IF;
 
@@ -75,9 +74,8 @@ def install_postgresql_taxonomy_triggers(apps, schema_editor):
                 IF NOT FOUND
                    OR v_business_line IS NULL
                    OR v_group_business_line IS DISTINCT FROM v_business_line THEN
-                    RAISE EXCEPTION
-                        'workspace work group business line mismatch for space %%',
-                        p_space USING ERRCODE = '23514';
+                    RAISE EXCEPTION USING ERRCODE = '23514',
+                        MESSAGE = 'workspace work group business line mismatch for space ' || p_space::text;
                 END IF;
             END IF;
 
@@ -89,9 +87,8 @@ def install_postgresql_taxonomy_triggers(apps, schema_editor):
                  WHERE link.space_id = p_space
                    AND location.organization_id IS DISTINCT FROM v_organization
             ) THEN
-                RAISE EXCEPTION
-                    'workspace office location organization mismatch for space %%',
-                    p_space USING ERRCODE = '23514';
+                RAISE EXCEPTION USING ERRCODE = '23514',
+                    MESSAGE = 'workspace office location organization mismatch for space ' || p_space::text;
             END IF;
 
             IF v_state = 'complete'
@@ -101,9 +98,8 @@ def install_postgresql_taxonomy_triggers(apps, schema_editor):
                           FROM spaces_knowledgespace_office_locations link
                          WHERE link.space_id = p_space
                     )) THEN
-                RAISE EXCEPTION
-                    'complete workspace classification is incomplete for space %%',
-                    p_space USING ERRCODE = '23514';
+                RAISE EXCEPTION USING ERRCODE = '23514',
+                    MESSAGE = 'complete workspace classification is incomplete for space ' || p_space::text;
             END IF;
         END;
         $$;

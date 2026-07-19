@@ -309,11 +309,11 @@ def install_postgresql_purge_guards(apps, schema_editor):
         LANGUAGE plpgsql
         AS $$
         DECLARE
-            v_request spaces_governedactionrequest%%ROWTYPE;
-            v_detail spaces_workspacedeletionrequestdetail%%ROWTYPE;
-            v_job spaces_workspacepurgejob%%ROWTYPE;
-            v_tombstone spaces_workspacetombstone%%ROWTYPE;
-            v_locator spaces_workspacelocatorreservation%%ROWTYPE;
+            v_request spaces_governedactionrequest;
+            v_detail spaces_workspacedeletionrequestdetail;
+            v_job spaces_workspacepurgejob;
+            v_tombstone spaces_workspacetombstone;
+            v_locator spaces_workspacelocatorreservation;
             v_count integer;
             v_external integer;
             v_database integer;

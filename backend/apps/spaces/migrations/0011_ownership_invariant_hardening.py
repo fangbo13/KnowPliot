@@ -48,8 +48,8 @@ def install_postgresql_owner_triggers(apps, schema_editor):
                OR owner_is_active IS DISTINCT FROM TRUE
                OR mirror_count <> 1
                OR canonical_mirror_count <> 1 THEN
-                RAISE EXCEPTION 'canonical owner mirror invariant failed for space %%', p_space
-                    USING ERRCODE = '23514';
+                RAISE EXCEPTION USING ERRCODE = '23514',
+                    MESSAGE = 'canonical owner mirror invariant failed for space ' || p_space::text;
             END IF;
         END;
         $$;
