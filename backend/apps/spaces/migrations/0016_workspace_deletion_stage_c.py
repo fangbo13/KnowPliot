@@ -323,7 +323,6 @@ def install_postgresql_purge_guards(apps, schema_editor):
               FROM spaces_governedactionrequest
              WHERE action_type = 'workspace_permanent_delete'
                AND status = 'executing'
-               AND target_space_id = OLD.id
                AND target_space_uuid = OLD.id;
             IF v_count <> 1 THEN
                 RAISE EXCEPTION 'workspace purge guard: executing request mismatch'
@@ -334,7 +333,6 @@ def install_postgresql_purge_guards(apps, schema_editor):
               FROM spaces_governedactionrequest
              WHERE action_type = 'workspace_permanent_delete'
                AND status = 'executing'
-               AND target_space_id = OLD.id
                AND target_space_uuid = OLD.id;
             SELECT * INTO STRICT v_detail
               FROM spaces_workspacedeletionrequestdetail
