@@ -7,7 +7,11 @@ from django.utils import timezone
 
 
 class WorkspaceDeletionStageAMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    # On PostgreSQL, TransactionTestCase.flush + serialized_rollback re-inserts
+    # django_content_type rows already recreated by the contenttypes
+    # post_migrate signal -> duplicate-key. Disable on PG (keep for SQLite,
+    # where flush removes migration-seeded registry rows between classes).
+    serialized_rollback = connection.vendor != "postgresql"
     migrate_from = ("spaces", "0014_workspace_join_v2")
     migrate_to = ("spaces", "0015_workspace_deletion_stage_a")
     users_target = ("users", "0005_test_principal_metadata")
@@ -35,6 +39,7 @@ class WorkspaceDeletionStageAMigrationTests(TransactionTestCase):
         User = self.old_apps.get_model("users", "User")
         Organization = self.old_apps.get_model("spaces", "Organization")
         KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
         GovernancePolicy = self.old_apps.get_model("spaces", "GovernancePolicy")
 
         owner = User.objects.create(
@@ -48,13 +53,26 @@ class WorkspaceDeletionStageAMigrationTests(TransactionTestCase):
             slug="deletion-stage-a-org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            owner=owner,
-            name="Historical archived workspace",
-            code="historical-archived-workspace",
-            status="archived",
-        )
+        # spaces.0011 installs a DEFERRABLE INITIALLY DEFERRED constraint
+        # trigger enforcing "every space with an owner has exactly one active
+        # owner membership". Create the space + its owner mirror inside one
+        # transaction so the trigger (which fires at commit) sees the mirror;
+        # autocommit per statement would fire it before the membership exists.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                owner=owner,
+                name="Historical archived workspace",
+                code="historical-archived-workspace",
+                status="archived",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=owner,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
         policy = GovernancePolicy.objects.create(
             organization=organization,
             space=space,

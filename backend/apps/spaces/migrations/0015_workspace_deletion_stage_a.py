@@ -112,6 +112,18 @@ def backfill_stage_a_snapshots(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # atomic=False: when this migration runs against a database that already
+    # holds spaces_knowledgespace rows (e.g. the stage_a migration-contract
+    # test, which seeds a historical archived workspace before migrating to
+    # 0015), the deferred FK / ownership-invariant constraint triggers on
+    # spaces_knowledgespace queue pending trigger events that block the
+    # AddField/AddConstraint ALTER TABLE operations within the same atomic
+    # transaction ("cannot ALTER TABLE ... pending trigger events"). Running
+    # each operation in its own transaction lets the deferred triggers fire
+    # at each commit before the next ALTER. On a fresh DB (normal `migrate`)
+    # there are no pre-existing rows, so the issue does not arise.
+    atomic = False
+
     dependencies = [
         ("spaces", "0014_workspace_join_v2"),
         ("notifications", "0003_actionable_notification_contract"),
