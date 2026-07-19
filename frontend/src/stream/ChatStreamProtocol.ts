@@ -9,6 +9,18 @@ export interface ChatStreamValidationContext {
   expectedClientRequestId: string;
 }
 
+/** Safe, server-owned execution fields carried by v2 meta/replay events. */
+export interface ChatExecutionSnapshotPayload {
+  requested_answer_mode: 'fast' | 'deep';
+  answer_mode: 'fast' | 'deep';
+  requested_thinking_enabled: boolean;
+  thinking_enabled: boolean;
+  thinking_snapshot_known: boolean;
+  thinking_budget: number | null;
+  model_id: string;
+  policy_fallback_code: string;
+}
+
 export interface ValidatedChatStreamEvent {
   name: string;
   data: any;
@@ -42,6 +54,16 @@ const FORBIDDEN_REASONING_FIELDS = new Set([
   'reasoning_content',
   'chain_of_thought',
   'raw_reasoning',
+]);
+const SNAPSHOT_FIELDS = new Set([
+  'requested_answer_mode',
+  'answer_mode',
+  'requested_thinking_enabled',
+  'thinking_enabled',
+  'thinking_snapshot_known',
+  'thinking_budget',
+  'model_id',
+  'policy_fallback_code',
 ]);
 
 function invalid(): never {
@@ -106,6 +128,34 @@ function validateQuality(data: unknown): void {
     || (data.retrieval_latency_ms != null && typeof data.retrieval_latency_ms !== 'number')) invalid();
 }
 
+function validateExecutionSnapshot(data: unknown): asserts data is ChatExecutionSnapshotPayload {
+  if (!isRecord(data)
+    || (data.requested_answer_mode !== 'fast' && data.requested_answer_mode !== 'deep')
+    || (data.answer_mode !== 'fast' && data.answer_mode !== 'deep')
+    || typeof data.requested_thinking_enabled !== 'boolean'
+    || typeof data.thinking_enabled !== 'boolean'
+    || typeof data.thinking_snapshot_known !== 'boolean'
+    || (data.thinking_budget !== null
+      && (typeof data.thinking_budget !== 'number'
+        || !Number.isSafeInteger(data.thinking_budget)
+        || data.thinking_budget < 1
+        || data.thinking_budget > 32768))
+    || typeof data.model_id !== 'string'
+    || data.model_id.length > 160
+    || typeof data.policy_fallback_code !== 'string'
+    || (data.policy_fallback_code !== '' && !SAFE_CODE.test(data.policy_fallback_code))
+    || (!data.thinking_snapshot_known && data.thinking_budget !== null)
+    || (data.thinking_snapshot_known && !data.thinking_enabled && data.thinking_budget !== null)
+    || (data.thinking_snapshot_known && data.thinking_enabled && data.thinking_budget === null)) invalid();
+}
+
+function validateOptionalExecutionSnapshot(data: Record<string, any>): void {
+  const nested = data.execution_snapshot;
+  if (nested !== undefined) validateExecutionSnapshot(nested);
+  const hasFlatSnapshotField = [...SNAPSHOT_FIELDS].some((field) => field in data);
+  if (hasFlatSnapshotField) validateExecutionSnapshot(data);
+}
+
 function validateV1(name: string, data: any, context: ChatStreamValidationContext): void {
   if (!V1_EVENTS.has(name)) invalid();
   if (name === 'token' && (!isRecord(data) || typeof data.token !== 'string')) invalid();
@@ -132,6 +182,7 @@ function validateV2(name: string, data: any, context: ChatStreamValidationContex
       || data.session_id !== context.expectedSessionId
       || data.client_request_id !== context.expectedClientRequestId
       || (context.expectedTurnId && data.turn_id !== context.expectedTurnId)) invalid();
+    validateOptionalExecutionSnapshot(data);
   } else if (name === 'phase') {
     if (!isRecord(data) || !SAFE_PHASES.has(data.phase)) invalid();
   } else if (name === 'answer_delta') {

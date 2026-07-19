@@ -11,8 +11,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from apps.rbac.capabilities import (
+    ARCHIVED_OWNER_CAPABILITIES,
     BUSINESS_ADMIN_CAPABILITIES,
     ORGANIZATION_ADMIN_CAPABILITIES,
     PLATFORM_CAPABILITIES,
@@ -27,6 +29,7 @@ from apps.spaces.models import (
     SpaceMembership,
 )
 from apps.spaces.permissions import admin_scope, is_platform_admin
+from apps.spaces.ownership import create_space_with_owner
 
 User = get_user_model()
 ENDPOINT = "/api/v1/rbac/me/capabilities/"
@@ -44,33 +47,39 @@ class CapabilityEndpointTest(TestCase):
             name="Active line",
             code="CAP-A",
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.users = {}
+        for role in ("owner", "knowledge_admin", "reviewer", "member", "guest"):
+            cls.users[role] = User.objects.create_user(
+                email=f"cap-{role}@example.test",
+                username=f"cap-{role}",
+                password="not-used",
+            )
+        cls.space = create_space_with_owner(
             organization=cls.organization,
+            owner=cls.users["owner"],
             business_line=cls.business_line,
             name="Private capability space",
             code="capabilities-private",
             visibility="private",
         )
+        for role in ("knowledge_admin", "reviewer", "member", "guest"):
+            SpaceMembership.objects.create(user=cls.users[role], space=cls.space, role=role)
         cls.other_organization = Organization.objects.create(
             name="Other organization",
             slug="capabilities-other",
         )
-        cls.other_space = KnowledgeSpace.objects.create(
+        cls.other_owner = User.objects.create_user(
+            email="cap-other-owner@example.test",
+            username="cap-other-owner",
+            password="not-used",
+        )
+        cls.other_space = create_space_with_owner(
             organization=cls.other_organization,
+            owner=cls.other_owner,
             name="Other private space",
             code="capabilities-other-private",
             visibility="private",
         )
-
-        cls.users = {}
-        for role in ("owner", "knowledge_admin", "reviewer", "member", "guest"):
-            user = User.objects.create_user(
-                email=f"cap-{role}@example.test",
-                username=f"cap-{role}",
-                password="not-used",
-            )
-            SpaceMembership.objects.create(user=user, space=cls.space, role=role)
-            cls.users[role] = user
 
         cls.org_admin = User.objects.create_user(
             email="cap-org@example.test",
@@ -145,7 +154,7 @@ class CapabilityEndpointTest(TestCase):
                 self.assertEqual(response.status_code, 200, response.data)
                 self.assertEqual(
                     response.data["capabilities"],
-                    sorted(SPACE_ROLE_CAPABILITIES[role]),
+                    sorted(SPACE_ROLE_CAPABILITIES[role] | {"workspace.creation.request"}),
                 )
                 self.assertEqual(response.data["scopes"]["space_ids"], [str(self.space.id)])
                 expected_console = (
@@ -161,7 +170,8 @@ class CapabilityEndpointTest(TestCase):
             self.assertNotIn("chat.export", response.data["capabilities"])
 
     @override_settings(DEEP_ANSWER_MODE=True)
-    def test_governed_deep_is_added_for_member_but_guest_is_always_denied(self):
+    @patch("apps.spaces.generation_policy.deep_mode_available", return_value=True)
+    def test_governed_deep_is_added_for_member_but_guest_is_always_denied(self, _deep_ready):
         member = self.get_capabilities(self.users["member"], self.space.id)
         guest = self.get_capabilities(self.users["guest"], self.space.id)
 
@@ -170,7 +180,7 @@ class CapabilityEndpointTest(TestCase):
         self.assertEqual(guest.status_code, 200)
         self.assertNotIn("chat.deep", guest.data["capabilities"])
 
-    def test_organization_admin_is_governance_scoped_and_gets_selected_space_operations(self):
+    def test_organization_admin_is_governance_scoped_without_workspace_content_capabilities(self):
         response = self.get_capabilities(self.org_admin, self.space.id)
 
         self.assertEqual(response.status_code, 200, response.data)
@@ -178,10 +188,13 @@ class CapabilityEndpointTest(TestCase):
         self.assertEqual(response.data["scopes"]["business_line_ids"], [])
         self.assertEqual(
             response.data["capabilities"],
-            sorted(ORGANIZATION_ADMIN_CAPABILITIES | SPACE_ROLE_CAPABILITIES["owner"]),
+            sorted(ORGANIZATION_ADMIN_CAPABILITIES | {"workspace.creation.request"}),
         )
+        self.assertEqual(response.data["scopes"]["space_ids"], [])
         self.assertEqual(response.data["default_console"], "/governance")
         self.assertNotIn("platform.access", response.data["capabilities"])
+        self.assertNotIn("chat.ask", response.data["capabilities"])
+        self.assertNotIn("knowledge.read", response.data["capabilities"])
 
     def test_business_admin_cannot_receive_organization_or_platform_authority(self):
         response = self.get_capabilities(self.business_admin, self.space.id)
@@ -194,8 +207,9 @@ class CapabilityEndpointTest(TestCase):
         )
         self.assertEqual(
             response.data["capabilities"],
-            sorted(BUSINESS_ADMIN_CAPABILITIES | SPACE_ROLE_CAPABILITIES["owner"]),
+            sorted(BUSINESS_ADMIN_CAPABILITIES | {"workspace.creation.request"}),
         )
+        self.assertEqual(response.data["scopes"]["space_ids"], [])
         self.assertEqual(response.data["default_console"], "/governance")
         self.assertNotIn("governance.organization.settings.manage", response.data["capabilities"])
         self.assertNotIn("platform.access", response.data["capabilities"])
@@ -210,11 +224,44 @@ class CapabilityEndpointTest(TestCase):
                 self.assertTrue(
                     set(response.data["capabilities"]).issuperset(PLATFORM_CAPABILITIES)
                 )
-                self.assertTrue(
-                    set(response.data["capabilities"]).issuperset(
-                        SPACE_ROLE_CAPABILITIES["owner"]
-                    )
-                )
+                self.assertEqual(response.data["scopes"]["space_ids"], [])
+                self.assertNotIn("chat.ask", response.data["capabilities"])
+                self.assertNotIn("knowledge.read", response.data["capabilities"])
+
+    @override_settings(WORKSPACE_PERMANENT_DELETE=True)
+    def test_delete_capability_is_canonical_owner_only_and_archived_owner_is_bounded(self):
+        active_owner = self.get_capabilities(self.users["owner"], self.space.id)
+        platform = self.get_capabilities(self.superuser, self.space.id)
+
+        self.assertIn("workspace.delete.permanent", active_owner.data["capabilities"])
+        self.assertNotIn("workspace.delete.permanent", platform.data["capabilities"])
+
+        self.space.status = "archived"
+        self.space.archived_at = timezone.now()
+        self.space.save(update_fields=["status", "archived_at", "updated_at"])
+        archived_owner = self.get_capabilities(self.users["owner"], self.space.id)
+
+        self.assertEqual(archived_owner.status_code, 200, archived_owner.data)
+        self.assertEqual(
+            set(archived_owner.data["capabilities"]),
+            set(ARCHIVED_OWNER_CAPABILITIES)
+            | {"workspace.creation.request", "workspace.delete.permanent"},
+        )
+        for unauthorized in (self.superuser, self.users["member"]):
+            with self.subTest(user=unauthorized.username):
+                denied = self.get_capabilities(unauthorized, self.space.id)
+                self.assertEqual(denied.status_code, 404, denied.data)
+
+    @override_settings(THINKING_MODE=True)
+    @patch("apps.spaces.generation_policy.thinking_mode_available", return_value=True, create=True)
+    def test_thinking_requires_explicit_non_guest_membership(self, _thinking_ready):
+        member = self.get_capabilities(self.users["member"], self.space.id)
+        guest = self.get_capabilities(self.users["guest"], self.space.id)
+        platform = self.get_capabilities(self.superuser, self.space.id)
+
+        self.assertIn("chat.thinking", member.data["capabilities"])
+        self.assertNotIn("chat.thinking", guest.data["capabilities"])
+        self.assertNotIn("chat.thinking", platform.data["capabilities"])
 
     def test_inactive_global_role_does_not_grant_platform_authority(self):
         self.admin_role.is_active = False
@@ -224,7 +271,7 @@ class CapabilityEndpointTest(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertFalse(response.data["scopes"]["platform"])
-        self.assertEqual(response.data["capabilities"], [])
+        self.assertEqual(response.data["capabilities"], ["workspace.creation.request"])
         self.assertEqual(response.data["default_console"], "/chat")
 
     def test_authoritative_platform_check_rejects_an_inactive_global_role(self):
@@ -257,18 +304,16 @@ class CapabilityEndpointTest(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(
-            response.data,
+            response.data["scopes"],
             {
-                "scopes": {
-                    "platform": False,
-                    "organization_ids": [],
-                    "business_line_ids": [],
-                    "space_ids": [],
-                },
-                "capabilities": [],
-                "default_console": "/chat",
+                "platform": False,
+                "organization_ids": [],
+                "business_line_ids": [],
+                "space_ids": [],
             },
         )
+        self.assertEqual(response.data["capabilities"], ["workspace.creation.request"])
+        self.assertEqual(response.data["default_console"], "/chat")
         hidden = self.get_capabilities(self.unscoped_legacy, self.space.id)
         self.assertEqual(hidden.status_code, 404)
 
@@ -307,7 +352,12 @@ class CapabilityEndpointTest(TestCase):
         self.space.save(update_fields=["status"])
         archived_space = self.get_capabilities(self.users["owner"])
         self.assertNotIn(str(self.space.id), archived_space.data["scopes"]["space_ids"])
-        self.assertEqual(self.get_capabilities(self.users["owner"], self.space.id).status_code, 404)
+        archived_owner = self.get_capabilities(self.users["owner"], self.space.id)
+        self.assertEqual(archived_owner.status_code, 200, archived_owner.data)
+        self.assertEqual(
+            set(archived_owner.data["capabilities"]),
+            set(ARCHIVED_OWNER_CAPABILITIES) | {"workspace.creation.request"},
+        )
 
         self.space.status = "active"
         self.space.save(update_fields=["status"])
@@ -348,9 +398,10 @@ class CapabilityEndpointTest(TestCase):
                 self.assertEqual(response.data["detail"], "Space not found.")
 
     @override_settings(ENABLE_PUBLIC_DEMO_SPACES=True)
-    def test_active_public_demo_is_a_guest_scope_only(self):
-        public_space = KnowledgeSpace.objects.create(
+    def test_active_public_demo_does_not_synthesize_guest_or_chat_authority(self):
+        public_space = create_space_with_owner(
             organization=self.other_organization,
+            owner=self.other_owner,
             name="Public demo",
             code="capabilities-public",
             visibility="public_demo",
@@ -363,15 +414,13 @@ class CapabilityEndpointTest(TestCase):
 
         response = self.get_capabilities(outsider, public_space.id)
 
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["capabilities"], ["chat.ask"])
-        self.assertEqual(response.data["scopes"]["space_ids"], [str(public_space.id)])
-        self.assertEqual(response.data["default_console"], "/chat")
+        self.assertEqual(response.status_code, 404, response.data)
 
     @override_settings(ENABLE_PUBLIC_DEMO_SPACES=False)
     def test_public_demo_flag_disabled_does_not_create_guest_authority(self):
-        public_space = KnowledgeSpace.objects.create(
+        public_space = create_space_with_owner(
             organization=self.other_organization,
+            owner=self.other_owner,
             name="Disabled public demo",
             code="capabilities-public-disabled",
             visibility="public_demo",

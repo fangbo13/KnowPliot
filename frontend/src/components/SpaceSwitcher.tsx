@@ -4,53 +4,89 @@
  * See LICENSE file in the project root for full license details.
  */
 
-// SpaceSwitcher — V6.0 workspace switcher (SPEC.MD §7.2/§7.3).
-// Shows the active knowledge space and lets the user switch, join by access
-// code, or (for platform admins) create a new space.
-
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Dropdown,
   Button,
-  Modal,
+  Dropdown,
   Input,
-  Select,
-  Typography,
+  Modal,
   Tag,
+  Typography,
   message as antdMessage,
   type MenuProps,
 } from 'antd';
 import {
-  DownOutlined,
-  PlusOutlined,
-  LoginOutlined,
-  CheckOutlined,
   AppstoreOutlined,
+  CheckOutlined,
+  DownOutlined,
+  LoginOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+
+import { getRateLimitDetails, isAbortError } from '../api/client';
+import { useAuthorization, useCapabilities } from '../auth/CapabilityProvider';
 import { useSpaceStore } from '../store/spaceStore';
-import { useAuthorization } from '../auth/CapabilityProvider';
 
 const { Text } = Typography;
+
+function getModalTransitionName(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
+  return reducedMotion || !('TransitionEvent' in window) ? '' : undefined;
+}
+
+function openCreationRequestPage() {
+  window.history.pushState({}, '', '/spaces/create');
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
 
 export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boolean }) {
   const { t } = useTranslation('common');
   const access = useAuthorization();
-  const { spaces, activeSpaceId, setActiveSpace, joinByCode, createSpace } = useSpaceStore();
-
-  const canCreateSpace = access.hasAny([
-    'platform.organizations.manage',
-    'governance.spaces.manage',
-  ]);
-  const active = spaces.find((s) => s.id === activeSpaceId) || null;
+  const capabilities = useCapabilities();
+  const { spaces, activeSpaceId, setActiveSpace, joinByCode } = useSpaceStore();
+  const active = spaces.find((space) => space.id === activeSpaceId) ?? null;
+  const canRequestWorkspace = access.has('workspace.creation.request');
+  const joinV2Enabled = capabilities.snapshot?.feature_availability.workspace_join_v2 ?? false;
+  const modalTransitionName = getModalTransitionName();
 
   const [joinOpen, setJoinOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
   const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newCode, setNewCode] = useState('');
-  const [newVisibility, setNewVisibility] = useState('private');
+  const [joinBusy, setJoinBusy] = useState(false);
+  const mountedRef = useRef(true);
+  const joinGenerationRef = useRef(0);
+  const joinPendingRef = useRef(false);
+  const joinControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      joinGenerationRef.current += 1;
+      joinPendingRef.current = false;
+      joinControllerRef.current?.abort();
+    };
+  }, []);
+
+  const closeJoin = useCallback(() => {
+    joinGenerationRef.current += 1;
+    joinPendingRef.current = false;
+    joinControllerRef.current?.abort();
+    joinControllerRef.current = null;
+    setJoinOpen(false);
+    setCode('');
+    setJoinBusy(false);
+  }, []);
+
+  useEffect(() => {
+    if (!joinOpen) return undefined;
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeJoin();
+    };
+    document.addEventListener('keydown', handleDocumentKeyDown);
+    return () => document.removeEventListener('keydown', handleDocumentKeyDown);
+  }, [closeJoin, joinOpen]);
 
   const handleSwitch = async (id: string) => {
     if (id === activeSpaceId) return;
@@ -62,75 +98,65 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
   };
 
   const handleJoin = async () => {
-    if (!code.trim()) return;
-    setBusy(true);
+    const normalizedCode = code.trim();
+    if (!normalizedCode || joinPendingRef.current) return;
+    const generation = ++joinGenerationRef.current;
+    const controller = new AbortController();
+    joinPendingRef.current = true;
+    joinControllerRef.current = controller;
+    setJoinBusy(true);
     try {
-      const space = await joinByCode(code.trim());
-      antdMessage.success((t('space_join_success') || 'Joined') + `: ${space.name}`);
-      setJoinOpen(false);
-      setCode('');
-    } catch {
-      antdMessage.error(t('space_join_failed') || 'Invalid or expired access code');
+      const accessRequest = await joinByCode(normalizedCode, controller.signal);
+      if (!mountedRef.current || controller.signal.aborted || joinGenerationRef.current !== generation) return;
+      antdMessage.success(
+        accessRequest.status === 'pending'
+          ? (t('space_access_requested') || 'Access request submitted for owner review')
+          : (t('space_access_request_exists') || 'Your access request already exists'),
+      );
+      closeJoin();
+    } catch (error: unknown) {
+      if (!mountedRef.current || controller.signal.aborted || joinGenerationRef.current !== generation) return;
+      if (!isAbortError(error)) {
+        const rateLimit = getRateLimitDetails(error);
+        antdMessage.error(rateLimit
+          ? `${t('rate_limited') || 'Too many requests'}${rateLimit.retryAfterSeconds == null ? '' : ` — retry in ${rateLimit.retryAfterSeconds}s`}`
+          : (t('space_join_failed') || 'Invalid or expired access code'));
+      }
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleCreate = async () => {
-    if (!newName.trim() || !newCode.trim()) return;
-    setBusy(true);
-    try {
-      const space = await createSpace({
-        name: newName.trim(),
-        code: newCode.trim().toLowerCase().replace(/\s+/g, '-'),
-        visibility: newVisibility as any,
-      });
-      antdMessage.success((t('space_create_success') || 'Space created') + `: ${space.name}`);
-      setCreateOpen(false);
-      setNewName('');
-      setNewCode('');
-    } catch (e: any) {
-      const detail = e?.response?.data?.code?.[0] || e?.response?.data?.detail;
-      antdMessage.error(detail || t('space_create_failed') || 'Failed to create space');
-    } finally {
-      setBusy(false);
+      if (mountedRef.current && joinGenerationRef.current === generation) {
+        joinPendingRef.current = false;
+        setJoinBusy(false);
+        joinControllerRef.current = null;
+      }
     }
   };
 
   const items: MenuProps['items'] = [
-    {
-      key: 'header',
-      type: 'group',
-      label: t('switch_space') || 'Switch space',
-    },
-    ...spaces.map((s) => ({
-      key: s.id,
-      icon: s.id === activeSpaceId ? <CheckOutlined /> : <AppstoreOutlined />,
+    { key: 'header', type: 'group', label: t('switch_space') || 'Switch space' },
+    ...spaces.map((space) => ({
+      key: space.id,
+      icon: space.id === activeSpaceId ? <CheckOutlined /> : <AppstoreOutlined />,
       label: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          {s.name}
-          {s.status === 'archived' && <Tag color="default">{t('space_archived') || 'Archived'}</Tag>}
+          {space.name}
+          {space.status === 'archived' && <Tag color="default">{t('space_archived') || 'Archived'}</Tag>}
         </span>
       ),
-      onClick: () => handleSwitch(s.id),
+      onClick: () => void handleSwitch(space.id),
     })),
     { type: 'divider' as const },
-    {
+    ...(joinV2Enabled ? [{
       key: 'join',
       icon: <LoginOutlined />,
       label: t('join_space') || 'Join with access code',
       onClick: () => setJoinOpen(true),
-    },
-    ...(canCreateSpace
-      ? [
-          {
-            key: 'create',
-            icon: <PlusOutlined />,
-            label: t('create_space') || 'Create space',
-            onClick: () => setCreateOpen(true),
-          },
-        ]
-      : []),
+    }] : []),
+    ...(canRequestWorkspace ? [{
+      key: 'create',
+      icon: <PlusOutlined />,
+      label: t('create_space') || 'Request a workspace',
+      onClick: openCreationRequestPage,
+    }] : []),
   ];
 
   return (
@@ -163,60 +189,34 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
         </Button>
       </Dropdown>
 
-      <Modal
-        styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade"
-        title={t('join_space') || 'Join with access code'}
-        open={joinOpen}
-        onOk={handleJoin}
-        confirmLoading={busy}
-        onCancel={() => setJoinOpen(false)}
-        okText={t('join') || 'Join'}
-      >
-        <Text type="secondary">
-          {t('join_space_hint') || 'Enter the access code shared with you to join a space.'}
-        </Text>
-        <Input
-          autoFocus
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          onPressEnter={handleJoin}
-          placeholder={t('access_code') || 'Access code'}
-          style={{ marginTop: 12 }}
-        />
-      </Modal>
-
-      <Modal
-        styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade"
-        title={t('create_space') || 'Create space'}
-        open={createOpen}
-        onOk={handleCreate}
-        confirmLoading={busy}
-        onCancel={() => setCreateOpen(false)}
-        okText={t('create') || 'Create'}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {(joinOpen || joinBusy) && (
+        <Modal
+          styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+          transitionName={modalTransitionName}
+          maskTransitionName={modalTransitionName}
+          title={t('join_space') || 'Join with access code'}
+          open={joinOpen}
+          onOk={() => void handleJoin()}
+          okButtonProps={{ loading: joinBusy, disabled: joinBusy }}
+          onCancel={closeJoin}
+          maskProps={{ onClick: closeJoin }}
+          maskClosable
+          keyboard
+          okText={t('join') || 'Join'}
+        >
+          <Text type="secondary">
+            {t('join_space_hint') || 'Enter the access code shared with you to join a space.'}
+          </Text>
           <Input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder={t('space_name') || 'Space name'}
+            autoFocus
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            onPressEnter={() => void handleJoin()}
+            placeholder={t('access_code') || 'Access code'}
+            style={{ marginTop: 12 }}
           />
-          <Input
-            value={newCode}
-            onChange={(e) => setNewCode(e.target.value)}
-            placeholder={t('space_code') || 'Short code (e.g. audit-ipo-a)'}
-          />
-          <Select
-            value={newVisibility}
-            onChange={setNewVisibility}
-            options={[
-              { value: 'private', label: t('visibility_private') || 'Private' },
-              { value: 'business_line', label: t('visibility_business_line') || 'Business line' },
-              { value: 'organization', label: t('visibility_organization') || 'Organization' },
-              { value: 'public_demo', label: t('visibility_public_demo') || 'Public demo' },
-            ]}
-          />
-        </div>
-      </Modal>
+        </Modal>
+      )}
     </>
   );
 }

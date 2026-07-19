@@ -18,7 +18,9 @@ import {
 import {
   capabilitiesApi,
   type CapabilitySnapshot,
+  type NavigationMode,
 } from '../api/capabilities';
+import { getRateLimitDetails } from '../api/client';
 import { useSpaceStore } from '../store/spaceStore';
 import { useAuth } from './AuthProvider';
 import {
@@ -33,8 +35,10 @@ interface CapabilityContextValue {
   status: CapabilityStateStatus;
   snapshot: CapabilitySnapshot | null;
   errorCode: string | null;
+  retryAfterSeconds?: number | null;
   resolvedUserId: string | null;
   resolvedSpaceId: string | null;
+  expectedNavigationMode: NavigationMode;
   refresh: () => void;
 }
 
@@ -48,6 +52,7 @@ export function CapabilityProvider({
   enabled?: boolean;
 }) {
   const { user } = useAuth();
+  const expectedNavigationMode: NavigationMode = enabled ? 'capability' : 'legacy';
   const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const requestSequence = useRef(0);
@@ -55,12 +60,14 @@ export function CapabilityProvider({
     status: CapabilityStateStatus;
     snapshot: CapabilitySnapshot | null;
     errorCode: string | null;
+    retryAfterSeconds: number | null;
     resolvedUserId: string | null;
     resolvedSpaceId: string | null;
   }>(() => ({
-    status: enabled ? 'loading' : 'ready',
+    status: 'loading',
     snapshot: null,
     errorCode: null,
+    retryAfterSeconds: null,
     resolvedUserId: null,
     resolvedSpaceId: null,
   }));
@@ -69,21 +76,12 @@ export function CapabilityProvider({
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
-    if (!enabled) {
-      setState({
-        status: 'ready',
-        snapshot: null,
-        errorCode: null,
-        resolvedUserId: null,
-        resolvedSpaceId: null,
-      });
-      return;
-    }
     if (!user?.id) {
       setState({
         status: 'denied',
         snapshot: null,
         errorCode: 'capability_denied',
+        retryAfterSeconds: null,
         resolvedUserId: null,
         resolvedSpaceId: null,
       });
@@ -97,6 +95,7 @@ export function CapabilityProvider({
       status: 'loading',
       snapshot: null,
       errorCode: null,
+      retryAfterSeconds: null,
       resolvedUserId: null,
       resolvedSpaceId: null,
     });
@@ -113,21 +112,25 @@ export function CapabilityProvider({
           snapshot = await capabilitiesApi.me(null, controller.signal);
         }
         if (controller.signal.aborted || sequence !== requestSequence.current) return;
+        const navigationMatches = snapshot.navigation_mode === expectedNavigationMode;
         setState({
-          status: 'ready',
+          status: navigationMatches ? 'ready' : 'mismatch',
           snapshot,
-          errorCode: null,
+          errorCode: navigationMatches ? null : 'navigation_mode_mismatch',
+          retryAfterSeconds: null,
           resolvedUserId: requestedUserId,
           resolvedSpaceId: requestedSpaceId,
         });
       } catch (error: unknown) {
         if (!isCurrent()) return;
         const status = (error as { response?: { status?: number } })?.response?.status;
+        const rateLimit = getRateLimitDetails(error);
         if (status === 403 || status === 404) {
           setState({
             status: 'denied',
             snapshot: null,
             errorCode: 'capability_denied',
+            retryAfterSeconds: null,
             resolvedUserId: requestedUserId,
             resolvedSpaceId: requestedSpaceId,
           });
@@ -135,7 +138,8 @@ export function CapabilityProvider({
           setState({
             status: 'error',
             snapshot: null,
-            errorCode: 'capability_unavailable',
+            errorCode: rateLimit ? 'rate_limited' : 'capability_unavailable',
+            retryAfterSeconds: rateLimit?.retryAfterSeconds ?? null,
             resolvedUserId: requestedUserId,
             resolvedSpaceId: requestedSpaceId,
           });
@@ -145,11 +149,11 @@ export function CapabilityProvider({
     void resolveCapabilities();
 
     return () => controller.abort();
-  }, [activeSpaceId, enabled, refreshVersion, user?.id]);
+  }, [activeSpaceId, expectedNavigationMode, refreshVersion, user?.id]);
 
   const value = useMemo<CapabilityContextValue>(
-    () => ({ enabled, ...state, refresh }),
-    [enabled, refresh, state],
+    () => ({ enabled, ...state, expectedNavigationMode, refresh }),
+    [enabled, expectedNavigationMode, refresh, state],
   );
 
   return <CapabilityContext.Provider value={value}>{children}</CapabilityContext.Provider>;

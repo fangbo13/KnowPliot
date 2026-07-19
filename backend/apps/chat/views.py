@@ -29,6 +29,7 @@ from apps.rag.errors import ProviderGenerationError
 from apps.rbac.capabilities import resolve_capabilities
 from apps.spaces.generation_policy import (
     ANSWER_MODE_DEEP,
+    GenerationPolicyNotReady,
     resolve_generation_policy,
 )
 
@@ -40,6 +41,7 @@ from apps.spaces.permissions import (
     CHAT_VIEW_HISTORY,
     DOCUMENT_DOWNLOAD,
     effective_space_role,
+    ensure_workspace_writable,
     has_space_permission,
     resolve_request_space,
     spaces_with_permission,
@@ -236,6 +238,7 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         space = resolve_request_space(self.request, require_perm=CHAT_ASK, required=False) \
             or _default_space_for(self.request.user)
+        ensure_workspace_writable(space)
         serializer.save(user=self.request.user, space=space)
 
 
@@ -320,6 +323,8 @@ def branch_from_message(request, message_id):
     )
     source_session = source_message.session
     space = source_session.space
+    if space is not None:
+        ensure_workspace_writable(space)
     if (
         space is None
         or effective_space_role(request.user, space) is None
@@ -452,7 +457,7 @@ class ChatSessionMessagesView(generics.ListAPIView):
         )
         if self.request.query_params.get("include_versions") != "true":
             queryset = queryset.exclude(role="assistant", is_current_version=False)
-        return queryset.order_by("created_at").prefetch_related(
+        return queryset.select_related("assistant_turn").order_by("created_at").prefetch_related(
             "citations__document",
             "citations__space__organization",
             "citations__space__business_line",
@@ -501,6 +506,7 @@ def conversation_share_collection(request, session_id):
         shares = session.shares.filter(owner=request.user)
         return Response(ConversationShareSerializer(shares, many=True).data)
 
+    ensure_workspace_writable(space)
     payload = ConversationShareRequestSerializer(data=request.data)
     payload.is_valid(raise_exception=True)
     request_id = payload.validated_data["client_request_id"]
@@ -668,10 +674,33 @@ def _stream_v2_enabled(protocol_version):
     return bool(getattr(settings, "CHAT_STREAM_V2", False)) and protocol_version == 2
 
 
-def _request_generation_policy(space, requested_mode):
+def _request_generation_policy(
+    space,
+    requested_mode,
+    requested_thinking_enabled=False,
+):
     """Resolve governed fast policy even while the deep rollout stays off."""
 
-    return resolve_generation_policy(space, requested_mode)
+    return resolve_generation_policy(
+        space,
+        requested_mode,
+        requested_thinking_enabled,
+    )
+
+
+def _turn_execution_snapshot(turn):
+    """One safe snapshot shared by live meta, replay, status, and history."""
+
+    return {
+        "requested_answer_mode": turn.requested_answer_mode,
+        "answer_mode": turn.answer_mode,
+        "requested_thinking_enabled": turn.requested_thinking_enabled,
+        "thinking_enabled": turn.thinking_enabled,
+        "thinking_snapshot_known": turn.thinking_snapshot_known,
+        "thinking_budget": turn.thinking_budget,
+        "model_id": turn.model_id,
+        "policy_fallback_code": turn.policy_fallback_code,
+    }
 
 
 def _streaming_response(events, *, turn=None):
@@ -836,8 +865,7 @@ def _completed_turn_events_v2(turn, store):
                     "session_id": str(turn.session_id),
                     "client_request_id": str(turn.client_request_id),
                     "protocol_version": 2,
-                    "answer_mode": turn.answer_mode,
-                    "model_id": turn.model_id or message.model_used or "",
+                    **_turn_execution_snapshot(turn),
                 },
             )
         ]
@@ -1004,7 +1032,8 @@ def send_message(request, session_id=None, message_id=None):
 
     content = serializer.validated_data["content"]
     client_request_id = serializer.validated_data["client_request_id"]
-    answer_mode = serializer.validated_data["answer_mode"]
+    requested_answer_mode = serializer.validated_data["answer_mode"]
+    requested_thinking_enabled = serializer.validated_data["thinking_enabled"]
     protocol_version = serializer.validated_data["protocol_version"]
     use_v2 = _stream_v2_enabled(protocol_version)
     user = request.user
@@ -1050,24 +1079,33 @@ def send_message(request, session_id=None, message_id=None):
             status=403,
         )
 
-    if answer_mode == ANSWER_MODE_DEEP:
+    capability_payload = None
+    if requested_answer_mode == ANSWER_MODE_DEEP or requested_thinking_enabled:
         capability_payload = resolve_capabilities(user, space_id=space.id)
+    if requested_answer_mode == ANSWER_MODE_DEEP:
         if "chat.deep" not in capability_payload["capabilities"]:
             return Response(
-                {"code": "deep_mode_unavailable"},
+                {"code": "answer_mode_not_allowed"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    if requested_thinking_enabled:
+        if "chat.thinking" not in capability_payload["capabilities"]:
+            return Response(
+                {"code": "thinking_not_allowed"},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-    generation_policy = _request_generation_policy(space, answer_mode)
-    if (
-        answer_mode == ANSWER_MODE_DEEP
-        and generation_policy.answer_mode != ANSWER_MODE_DEEP
-    ):
-        return Response(
-            {"code": generation_policy.fallback_code or "deep_mode_unavailable"},
-            status=status.HTTP_409_CONFLICT,
+    try:
+        generation_policy = _request_generation_policy(
+            space,
+            requested_answer_mode,
+            requested_thinking_enabled,
         )
-    answer_mode = generation_policy.answer_mode
+    except GenerationPolicyNotReady:
+        return Response(
+            {"code": "model_policy_not_ready"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     # Update title if new or empty
     if created or not session.title:
@@ -1079,7 +1117,12 @@ def send_message(request, session_id=None, message_id=None):
             session=session,
             client_request_id=client_request_id,
             content=content,
-            answer_mode=answer_mode,
+            requested_answer_mode=requested_answer_mode,
+            answer_mode=generation_policy.answer_mode,
+            requested_thinking_enabled=requested_thinking_enabled,
+            thinking_enabled=generation_policy.thinking_enabled,
+            thinking_budget=generation_policy.thinking_budget,
+            policy_fallback_code=generation_policy.fallback_code,
             model_id=generation_policy.model_id,
             question_message=question_message_override,
         )
@@ -1093,6 +1136,9 @@ def send_message(request, session_id=None, message_id=None):
         turn,
         idempotency_disposition=begin_result.disposition.value,
         idempotency_rollout_enabled=bool(settings.CHAT_TURN_IDEMPOTENCY),
+        effective_answer_mode=turn.answer_mode,
+        thinking_enabled=turn.thinking_enabled,
+        policy_fallback_code=turn.policy_fallback_code,
     )
 
     if begin_result.disposition == BeginTurnDisposition.CONFLICT:
@@ -1219,8 +1265,7 @@ def send_message(request, session_id=None, message_id=None):
                     "session_id": str(session.id),
                     "client_request_id": str(turn.client_request_id),
                     "protocol_version": 2,
-                    "answer_mode": turn.answer_mode,
-                    "model_id": turn.model_id,
+                    **_turn_execution_snapshot(turn),
                 },
             )
         except EventStoreUnavailableError:
@@ -1327,10 +1372,10 @@ def send_message(request, session_id=None, message_id=None):
             from apps.rag.pipeline import RAGPipeline
 
             pipeline = RAGPipeline()
-            pipeline.model_name = generation_policy.model_id
-            pipeline.answer_mode = generation_policy.answer_mode
-            pipeline.thinking_enabled = generation_policy.thinking_enabled
-            pipeline.thinking_budget = generation_policy.thinking_budget
+            pipeline.model_name = turn.model_id
+            pipeline.answer_mode = turn.answer_mode
+            pipeline.thinking_enabled = turn.thinking_enabled
+            pipeline.thinking_budget = turn.thinking_budget
             lease.ensure_owned()
             transition_chat_turn(
                 turn,

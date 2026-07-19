@@ -9,16 +9,37 @@ V3.7 P0.2: DocumentChunk.embedding now uses pgvector VectorField in production
 The retriever automatically selects the appropriate search method.
 """
 
+import hashlib
+import unicodedata
 import uuid
 
 from django.db import models
 from django.conf import settings
 
 
+def _locator_digest(value):
+    canonical = unicodedata.normalize("NFC", value or "")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class DocumentCategory(models.Model):
     """Category for knowledge documents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="document_categories",
+    )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="children",
+    )
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True)
     description = models.TextField(blank=True, default="")
@@ -182,6 +203,26 @@ class BatchImportResultRecord(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="batch_import_results",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="batch_import_results",
+    )
+    legacy_scope_unknown = models.BooleanField(default=False)
     total_files = models.IntegerField(default=0, help_text="Total valid files in ZIP")
     success_count = models.IntegerField(default=0, help_text="Files successfully imported")
     duplicate_skipped_count = models.IntegerField(default=0, help_text="Files skipped as duplicates")
@@ -190,13 +231,60 @@ class BatchImportResultRecord(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     error_message = models.TextField(blank=True, default="", help_text="Error details if batch failed")
     result_details = models.JSONField(default=list, blank=True, help_text="Per-file import results")
-    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    uploaded_by_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    sensitive_payload_scrubbed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "knowledge_batchimportresultrecord"
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        legacy_scope_unknown=True,
+                        space__isnull=True,
+                        space_uuid__isnull=True,
+                    )
+                    | models.Q(
+                        legacy_scope_unknown=False,
+                        space_uuid__isnull=False,
+                    )
+                ),
+                name="knowledge_batch_scope_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="knowledge_batch_locator_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.space_id:
+            if not self.space_uuid:
+                self.space_uuid = self.space_id
+            if not self.organization_uuid:
+                self.organization_uuid = self.space.organization_id
+            if not self.locator_digest:
+                locator = getattr(self.space, "locator_reservation", None)
+                if locator is not None:
+                    self.locator_digest = _locator_digest(
+                        locator.normalized_locator
+                    )
+            self.legacy_scope_unknown = False
+        if self.uploaded_by_id and not self.uploaded_by_uuid:
+            self.uploaded_by_uuid = self.uploaded_by_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Batch {self.id}: {self.success_count}/{self.total_files} imported"
@@ -222,12 +310,29 @@ class IngestionJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     document = models.ForeignKey(
         Document,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="ingestion_jobs",
     )
+    document_uuid = models.UUIDField(null=True, blank=True, editable=False)
     space = models.ForeignKey(
         "spaces.KnowledgeSpace",
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ingestion_jobs",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="ingestion_jobs",
     )
     requested_by = models.ForeignKey(
@@ -237,6 +342,7 @@ class IngestionJob(models.Model):
         on_delete=models.SET_NULL,
         related_name="requested_ingestion_jobs",
     )
+    requested_by_uuid = models.UUIDField(null=True, blank=True, editable=False)
     trigger = models.CharField(
         max_length=20,
         choices=TRIGGER_CHOICES,
@@ -252,6 +358,7 @@ class IngestionJob(models.Model):
     attempt = models.PositiveSmallIntegerField(default=0)
     max_attempts = models.PositiveSmallIntegerField(default=4)
     last_error = models.CharField(max_length=1000, blank=True, default="")
+    sensitive_payload_scrubbed_at = models.DateTimeField(null=True, blank=True)
     retry_of = models.ForeignKey(
         "self",
         null=True,
@@ -281,6 +388,40 @@ class IngestionJob(models.Model):
                 name="know_ing_st_sp_cr_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(space__isnull=False)
+                    | models.Q(space_uuid__isnull=False)
+                ),
+                name="knowledge_ingestion_space_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="knowledge_ingestion_locator_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.document_id and not self.document_uuid:
+            self.document_uuid = self.document_id
+        if self.space_id:
+            if not self.space_uuid:
+                self.space_uuid = self.space_id
+            if not self.organization_uuid:
+                self.organization_uuid = self.space.organization_id
+            if not self.locator_digest:
+                locator = getattr(self.space, "locator_reservation", None)
+                if locator is not None:
+                    self.locator_digest = _locator_digest(
+                        locator.normalized_locator
+                    )
+        if self.requested_by_id and not self.requested_by_uuid:
+            self.requested_by_uuid = self.requested_by_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.document_id}: {self.status}"

@@ -1,27 +1,46 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Empty, Popconfirm, Space, Tag, Typography, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import { spacesApi, type PendingOwnershipTransfer } from '../api/spaces';
+import { getRateLimitDetails, isAbortError } from '../api/client';
 
 export default function OwnershipTransfersPage() {
   const { t } = useTranslation('common');
   const [transfers, setTransfers] = useState<PendingOwnershipTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const requestSequence = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     try {
-      setTransfers(await spacesApi.pendingOwnershipTransfers());
-    } catch {
-      message.error(t('ownership_transfers_load_failed'));
+      setTransfers(await spacesApi.pendingOwnershipTransfers(controller.signal));
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== requestSequence.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current && !controller.signal.aborted) setLoading(false);
     }
   }, [t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => {
+      requestSequence.current += 1;
+      controllerRef.current?.abort();
+    };
+  }, [load]);
 
   const respond = async (transfer: PendingOwnershipTransfer, response: 'accept' | 'decline') => {
     setBusyId(transfer.id);
@@ -33,9 +52,14 @@ export default function OwnershipTransfersPage() {
       }
       message.success(response === 'accept' ? t('ownership_transfer_accepted') : t('ownership_transfer_declined'));
       await load();
-    } catch {
-      message.error(t('ownership_transfer_response_failed'));
-      await load();
+    } catch (error: unknown) {
+      if (!isAbortError(error)) {
+        const rateLimit = getRateLimitDetails(error);
+        message.error(rateLimit
+          ? `${t('rate_limited') || 'Too many requests'}${rateLimit.retryAfterSeconds == null ? '' : ` — retry in ${rateLimit.retryAfterSeconds}s`}`
+          : t('ownership_transfer_response_failed'));
+      }
+      if (!isAbortError(error)) await load();
     } finally {
       setBusyId(null);
     }
@@ -48,6 +72,17 @@ export default function OwnershipTransfersPage() {
           <h1 className="page-title">{t('ownership_transfers_title')}</h1>
           <p style={{ color: 'var(--color-text-secondary)' }}>{t('ownership_transfers_description')}</p>
         </div>
+        {loadError && (
+          <Alert
+            style={{ marginBottom: 16 }}
+            type="error"
+            showIcon
+            message={loadError.code === 'rate_limited'
+              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — retry in ${loadError.retryAfterSeconds}s`}`
+              : t('ownership_transfers_load_failed')}
+            action={<Button onClick={() => void load()}>{t('error_retry') || 'Retry'}</Button>}
+          />
+        )}
         <Card className="glass-panel" loading={loading} styles={{ body: { padding: 20 } }}>
           {transfers.length === 0 ? <Empty description={t('ownership_transfers_empty')} /> : (
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>

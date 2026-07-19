@@ -5,7 +5,14 @@ from datetime import timedelta
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from .models import KnowledgeSpace, OwnershipTransfer, SpaceMembership
+from .models import (
+    BusinessLine,
+    KnowledgeSpace,
+    Organization,
+    OrganizationMembership,
+    OwnershipTransfer,
+    SpaceMembership,
+)
 from .ownership import (
     effective_business_admin,
     effective_org_admin,
@@ -20,6 +27,26 @@ class OwnershipConflict(Exception):
 
 
 class OwnershipTransferService:
+    @staticmethod
+    def _lock_users(*user_ids):
+        from django.contrib.auth import get_user_model
+
+        rows = list(
+            get_user_model()
+            .objects.select_for_update(of=("self",))
+            .filter(pk__in=set(user_ids))
+            .order_by("pk")
+        )
+        return {str(row.pk): row for row in rows}
+
+    @staticmethod
+    def _lock_space(space_id):
+        return (
+            KnowledgeSpace.objects.select_for_update(of=("self",))
+            .order_by("pk")
+            .get(pk=space_id)
+        )
+
     @staticmethod
     def _audit_transition(*, actor, transfer, event):
         """Persist a scope-addressable, secret-free ownership transition audit."""
@@ -81,8 +108,13 @@ class OwnershipTransferService:
     @staticmethod
     def request(*, actor, space_id, to_owner_id, expected_ownership_version, idempotency_key, reason_code):
         with transaction.atomic():
+            locked_users = OwnershipTransferService._lock_users(actor.pk, to_owner_id)
+            locked_actor = locked_users.get(str(actor.pk))
+            target_user = locked_users.get(str(to_owner_id))
+            if locked_actor is None or target_user is None or not effective_user(target_user):
+                raise OwnershipConflict("invalid_successor")
             replay = OwnershipTransferService._idempotency_replay(
-                actor=actor,
+                actor=locked_actor,
                 idempotency_key=idempotency_key,
                 space_id=space_id,
                 to_owner_id=to_owner_id,
@@ -92,26 +124,26 @@ class OwnershipTransferService:
             )
             if replay:
                 return replay
-            space = KnowledgeSpace.objects.select_for_update().get(pk=space_id)
-            if space.owner_id != actor.id:
+            space = OwnershipTransferService._lock_space(space_id)
+            if space.owner_id != locked_actor.id:
                 raise OwnershipConflict("only_current_owner_may_request")
             if space.ownership_version != expected_ownership_version:
                 raise OwnershipConflict("ownership_changed")
             if space.owner_id is None:
                 raise OwnershipConflict("owner_continuity_required")
-            target_membership = SpaceMembership.objects.select_for_update().select_related("user").filter(
+            target_membership = SpaceMembership.objects.select_for_update(of=("self",)).filter(
                 space=space, user_id=to_owner_id
-            ).first()
+            ).order_by("pk").first()
             if not target_membership or target_membership.role == SpaceMembership.ROLE_GUEST or not effective_space_membership(target_membership):
                 raise OwnershipConflict("invalid_successor")
-            if target_membership.user_id == actor.id:
+            if target_membership.user_id == locked_actor.id:
                 raise OwnershipConflict("invalid_successor")
             try:
                 transfer = OwnershipTransfer.objects.create(
                     space=space,
-                    from_owner=actor,
-                    to_owner=target_membership.user,
-                    requested_by=actor,
+                    from_owner=locked_actor,
+                    to_owner=target_user,
+                    requested_by=locked_actor,
                     mode=OwnershipTransfer.MODE_VOLUNTARY,
                     status=OwnershipTransfer.STATUS_PENDING,
                     expected_ownership_version=expected_ownership_version,
@@ -120,10 +152,10 @@ class OwnershipTransferService:
                     expires_at=timezone.now() + timedelta(hours=72),
                 )
                 OwnershipTransferService._audit_transition(
-                    actor=actor, transfer=transfer, event="ownership_transfer_requested"
+                    actor=locked_actor, transfer=transfer, event="ownership_transfer_requested"
                 )
                 OwnershipTransferService._notify_after_commit(
-                    target_membership.user,
+                    target_user,
                     title="Ownership transfer requested",
                     body="You have been nominated to take ownership of a knowledge space.",
                     metadata={"transfer_id": str(transfer.id), "space_id": str(space.id)},
@@ -134,26 +166,52 @@ class OwnershipTransferService:
 
     @staticmethod
     def accept(*, actor, transfer_id):
+        reference = OwnershipTransfer.objects.only(
+            "space_id", "from_owner_id", "to_owner_id"
+        ).get(pk=transfer_id)
         conflict = None
         with transaction.atomic():
-            transfer = OwnershipTransfer.objects.select_for_update().get(pk=transfer_id)
-            space = KnowledgeSpace.objects.select_for_update().get(pk=transfer.space_id)
+            locked_users = OwnershipTransferService._lock_users(
+                actor.pk, reference.from_owner_id, reference.to_owner_id
+            )
+            locked_actor = locked_users.get(str(actor.pk))
+            space = OwnershipTransferService._lock_space(reference.space_id)
+            membership_rows = list(
+                SpaceMembership.objects.select_for_update(of=("self",))
+                .filter(
+                    space_id=reference.space_id,
+                    user_id__in={reference.from_owner_id, reference.to_owner_id},
+                )
+                .order_by("pk")
+            )
+            memberships = {row.user_id: row for row in membership_rows}
+            transfer = (
+                OwnershipTransfer.objects.select_for_update(of=("self",))
+                .order_by("pk")
+                .get(pk=transfer_id)
+            )
+            if (
+                transfer.space_id != reference.space_id
+                or transfer.from_owner_id != reference.from_owner_id
+                or transfer.to_owner_id != reference.to_owner_id
+            ):
+                raise OwnershipConflict("transfer_invalidated")
             if transfer.status != OwnershipTransfer.STATUS_PENDING:
                 raise OwnershipConflict("transfer_not_pending")
-            if transfer.to_owner_id != actor.id:
+            if locked_actor is None or transfer.to_owner_id != locked_actor.id:
                 raise OwnershipConflict("transfer_not_for_actor")
             if transfer.expires_at and transfer.expires_at <= timezone.now():
                 transfer.status = OwnershipTransfer.STATUS_EXPIRED
                 transfer.save(update_fields=["status"])
                 conflict = "transfer_expired"
             else:
-                target = SpaceMembership.objects.select_for_update().select_related("user").get(
-                    space=space, user_id=actor.id
-                )
-                current = SpaceMembership.objects.select_for_update().get(space=space, user_id=space.owner_id)
+                target = memberships.get(transfer.to_owner_id)
+                current = memberships.get(transfer.from_owner_id)
+                if target is None or current is None:
+                    conflict = "transfer_invalidated"
                 if space.owner_id != transfer.from_owner_id or space.ownership_version != transfer.expected_ownership_version:
                     conflict = "transfer_invalidated"
-                elif target.role == SpaceMembership.ROLE_GUEST or not effective_user(actor) or not effective_space_membership(target):
+                elif target is None or target.role == SpaceMembership.ROLE_GUEST or not effective_user(locked_actor) or not effective_space_membership(target):
                     conflict = "transfer_invalidated"
                 if conflict:
                     transfer.status = OwnershipTransfer.STATUS_INVALIDATED
@@ -163,15 +221,15 @@ class OwnershipTransferService:
                     current.save(update_fields=["role", "updated_at"])
                     target.role = SpaceMembership.ROLE_OWNER
                     target.save(update_fields=["role", "updated_at"])
-                    space.owner_id = actor.id
+                    space.owner_id = locked_actor.id
                     space.ownership_version += 1
                     space.save(update_fields=["owner", "ownership_version", "updated_at"])
                     transfer.status = OwnershipTransfer.STATUS_COMPLETED
-                    transfer.accepted_by = actor
+                    transfer.accepted_by = locked_actor
                     transfer.completed_at = timezone.now()
                     transfer.save(update_fields=["status", "accepted_by", "completed_at"])
                     OwnershipTransferService._audit_transition(
-                        actor=actor, transfer=transfer, event="ownership_transfer_accepted"
+                        actor=locked_actor, transfer=transfer, event="ownership_transfer_accepted"
                     )
                     OwnershipTransferService._notify_after_commit(
                         transfer.from_owner,
@@ -186,7 +244,7 @@ class OwnershipTransferService:
     @staticmethod
     def decline(*, actor, transfer_id):
         with transaction.atomic():
-            transfer = OwnershipTransfer.objects.select_for_update().get(pk=transfer_id)
+            transfer = OwnershipTransfer.objects.select_for_update(of=("self",)).order_by("pk").get(pk=transfer_id)
             if transfer.status != OwnershipTransfer.STATUS_PENDING:
                 raise OwnershipConflict("transfer_not_pending")
             if transfer.to_owner_id != actor.id:
@@ -207,7 +265,7 @@ class OwnershipTransferService:
     @staticmethod
     def cancel(*, actor, transfer_id):
         with transaction.atomic():
-            transfer = OwnershipTransfer.objects.select_for_update().get(pk=transfer_id)
+            transfer = OwnershipTransfer.objects.select_for_update(of=("self",)).order_by("pk").get(pk=transfer_id)
             if transfer.status != OwnershipTransfer.STATUS_PENDING:
                 raise OwnershipConflict("transfer_not_pending")
             if transfer.requested_by_id != actor.id:
@@ -223,11 +281,21 @@ class OwnershipTransferService:
     def force(*, actor, space_id, to_owner_id, expected_ownership_version, idempotency_key, reason_code):
         """Immediately transfer ownership when the actor governs the space scope."""
 
-        from django.contrib.auth import get_user_model
+        if str(actor.pk) == str(to_owner_id):
+            raise OwnershipConflict("actor_target_separation_required")
+
+        space_reference = KnowledgeSpace.objects.only(
+            "id", "organization_id", "business_line_id"
+        ).get(pk=space_id)
 
         with transaction.atomic():
+            locked_users = OwnershipTransferService._lock_users(actor.pk, to_owner_id)
+            locked_actor = locked_users.get(str(actor.pk))
+            target = locked_users.get(str(to_owner_id))
+            if locked_actor is None or target is None or not effective_user(target):
+                raise OwnershipConflict("invalid_successor")
             replay = OwnershipTransferService._idempotency_replay(
-                actor=actor,
+                actor=locked_actor,
                 idempotency_key=idempotency_key,
                 space_id=space_id,
                 to_owner_id=to_owner_id,
@@ -237,11 +305,35 @@ class OwnershipTransferService:
             )
             if replay:
                 return replay
-            space = KnowledgeSpace.objects.select_for_update().get(pk=space_id)
+            organization = (
+                Organization.objects.select_for_update(of=("self",))
+                .order_by("pk")
+                .get(pk=space_reference.organization_id)
+            )
+            business_line = None
+            if space_reference.business_line_id:
+                business_line = (
+                    BusinessLine.objects.select_for_update(of=("self",))
+                    .order_by("pk")
+                    .get(pk=space_reference.business_line_id)
+                )
+            space = OwnershipTransferService._lock_space(space_id)
+            list(
+                OrganizationMembership.objects.select_for_update(of=("self",))
+                .filter(user_id=locked_actor.pk, organization_id=organization.pk)
+                .order_by("pk")
+            )
+            from apps.rbac.models import UserRole
+
+            list(
+                UserRole.objects.select_for_update(of=("self",))
+                .filter(user_id=locked_actor.pk)
+                .order_by("pk")
+            )
             can_force = (
-                effective_platform_admin(actor)
-                or effective_org_admin(actor, space.organization)
-                or (space.business_line_id and effective_business_admin(actor, space.business_line))
+                effective_platform_admin(locked_actor)
+                or effective_org_admin(locked_actor, organization)
+                or (business_line is not None and effective_business_admin(locked_actor, business_line))
             )
             if not can_force:
                 raise OwnershipConflict("insufficient_scope")
@@ -251,36 +343,42 @@ class OwnershipTransferService:
                 raise OwnershipConflict("owner_continuity_required")
             if space.owner_id == to_owner_id:
                 raise OwnershipConflict("invalid_successor")
-            target = get_user_model().objects.select_for_update().get(pk=to_owner_id)
-            if not effective_user(target):
-                raise OwnershipConflict("invalid_successor")
-            belongs_to_org = SpaceMembership.objects.select_related("user").filter(
+            target_org_memberships = list(
+                SpaceMembership.objects.select_for_update(of=("self",)).filter(
                 user=target,
                 space__organization=space.organization,
                 status="active",
-            ).exists()
-            if not belongs_to_org:
-                raise OwnershipConflict("invalid_successor")
-            target_membership, _ = SpaceMembership.objects.select_for_update().get_or_create(
-                space=space,
-                user=target,
-                defaults={"role": SpaceMembership.ROLE_MEMBER, "status": "active"},
+                ).order_by("pk")
             )
+            if not target_org_memberships:
+                raise OwnershipConflict("invalid_successor")
+            current_space_memberships = list(
+                SpaceMembership.objects.select_for_update(of=("self",))
+                .filter(space=space, user_id__in={space.owner_id, target.pk})
+                .order_by("pk")
+            )
+            membership_by_user = {row.user_id: row for row in current_space_memberships}
+            target_membership = membership_by_user.get(target.pk)
+            if target_membership is None:
+                target_membership = SpaceMembership.objects.create(
+                    space=space,
+                    user=target,
+                    role=SpaceMembership.ROLE_MEMBER,
+                    status="active",
+                )
             if target_membership.status != "active":
                 target_membership.status = "active"
             target_membership.role = SpaceMembership.ROLE_OWNER
             pending_transfers = list(
-                OwnershipTransfer.objects.select_for_update().filter(
+                OwnershipTransfer.objects.select_for_update(of=("self",)).filter(
                     space=space,
                     status=OwnershipTransfer.STATUS_PENDING,
-                )
+                ).order_by("pk")
             )
             for pending in pending_transfers:
                 pending.status = OwnershipTransfer.STATUS_INVALIDATED
                 pending.save(update_fields=["status"])
-            current = SpaceMembership.objects.select_for_update().filter(
-                space=space, user_id=space.owner_id
-            ).first()
+            current = membership_by_user.get(space.owner_id)
             if current is None:
                 raise OwnershipConflict("owner_continuity_required")
             current.role = SpaceMembership.ROLE_MEMBER
@@ -293,7 +391,7 @@ class OwnershipTransferService:
                 space=space,
                 from_owner_id=current.user_id,
                 to_owner=target,
-                requested_by=actor,
+                requested_by=locked_actor,
                 mode=OwnershipTransfer.MODE_FORCED,
                 status=OwnershipTransfer.STATUS_COMPLETED,
                 expected_ownership_version=expected_ownership_version,
@@ -302,7 +400,7 @@ class OwnershipTransferService:
                 completed_at=timezone.now(),
             )
             OwnershipTransferService._audit_transition(
-                actor=actor, transfer=transfer, event="ownership_transfer_forced"
+                actor=locked_actor, transfer=transfer, event="ownership_transfer_forced"
             )
             OwnershipTransferService._notify_after_commit(
                 target,

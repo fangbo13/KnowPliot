@@ -4,14 +4,17 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
+  const location = useLocation();
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    const query = new URLSearchParams({ next }).toString();
+    return <Navigate to={`/login?${query}`} replace />;
   }
 
   return <>{children}</>;

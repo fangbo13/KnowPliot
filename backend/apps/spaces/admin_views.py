@@ -832,6 +832,11 @@ def scoped_user_assignment(request, user_id):
             raise PermissionDenied("You cannot manage this space.")
         if role not in dict(SpaceMembership.ROLE_CHOICES):
             raise ValidationError({"role": "Invalid space role."})
+        if role == SpaceMembership.ROLE_OWNER:
+            return Response(
+                {"error_code": "ownership_workflow_required"},
+                status=status.HTTP_409_CONFLICT,
+            )
         if request.method == "POST":
             assignment, _ = SpaceMembership.objects.update_or_create(
                 user=target,

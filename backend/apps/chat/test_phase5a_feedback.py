@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from apps.audit.models import AuditLog
 from apps.chat.models import ChatSession, Feedback, Message, ModelInvocation
 from apps.spaces.models import BusinessLine, KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -18,7 +19,7 @@ class Phase5AFeedbackBase(APITestCase):
         cls.line = BusinessLine.objects.create(
             organization=cls.org, name="Feedback Line", code="feedback-line"
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.org,
             business_line=cls.line,
             name="Feedback Space",

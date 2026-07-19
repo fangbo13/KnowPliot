@@ -20,10 +20,15 @@ V4.2 SYS-V4.2-022: Added self-deactivation prevention.
   - /api/v1/users/<id>/deactivate/     POST   HasPermission('user.deactivate')
 """
 
+import uuid
+
+from django.conf import settings
+from django.db.models import Q
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
+from django.utils import timezone
 
 from apps.audit.views import create_audit_log
 from apps.core.permissions import HasPermission, HasRole
@@ -65,6 +70,108 @@ def my_capabilities(request):
             request.user,
             space_id=request.query_params.get("space_id"),
         )
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def expired_test_principals(request):
+    """List exact expired test principals without guessing identities.
+
+    This is an operator inventory only. It neither mutates accounts nor offers
+    a bulk action; each returned identity points at the governed offboarding
+    impact workflow.
+    """
+
+    capabilities = resolve_capabilities(request.user)["capabilities"]
+    if "platform.users.offboard" not in capabilities:
+        return Response(
+            {"code": "permission_denied"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    state = request.query_params.get("state", "expired_active")
+    if state != "expired_active":
+        return Response(
+            {"code": "invalid_state"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    cursor = request.query_params.get("cursor")
+    cursor_id = None
+    if cursor:
+        try:
+            cursor_id = uuid.UUID(cursor)
+        except (TypeError, ValueError, AttributeError):
+            return Response(
+                {"code": "invalid_cursor"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    approved_legacy_ids = []
+    for value in getattr(settings, "TEST_PRINCIPAL_LEGACY_ALLOWLIST", ()):
+        try:
+            approved_legacy_ids.append(uuid.UUID(str(value)))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    queryset = (
+        User.objects.filter(is_active=True)
+        .filter(
+            Q(
+                account_purpose="test",
+                test_principal_expires_at__isnull=False,
+                test_principal_expires_at__lte=timezone.now(),
+            )
+            | Q(id__in=approved_legacy_ids)
+        )
+        .order_by("id")
+    )
+    if cursor_id is not None:
+        queryset = queryset.filter(id__gt=cursor_id)
+    page = list(queryset[:26])
+    has_more = len(page) > 25
+    page = page[:25]
+
+    from .offboarding import OffboardingImpactService
+
+    results = []
+    for principal in page:
+        impact = OffboardingImpactService.inspect(
+            actor=request.user,
+            subject=principal,
+        )
+        blockers = impact["blockers"]
+        results.append(
+            {
+                "id": str(principal.id),
+                "display_name": principal.get_full_name() or principal.username,
+                "email": principal.email,
+                "is_active": principal.is_active,
+                "expires_at": (
+                    principal.test_principal_expires_at.isoformat()
+                    if principal.test_principal_expires_at
+                    else None
+                ),
+                "test_run_id": principal.test_run_id,
+                "inventory_source": (
+                    "explicit_metadata"
+                    if principal.account_purpose == "test"
+                    else "approved_exact_allowlist"
+                ),
+                "has_owner_blocker": bool(blockers["owned_spaces"]),
+                "has_admin_blocker": bool(
+                    blockers["last_platform_admin"]
+                    or blockers["last_organization_admin_scopes"]
+                    or blockers["last_business_admin_scopes"]
+                ),
+                "ownership_impact_url": (
+                    f"/api/v1/admin/users/{principal.id}/offboarding-impact/"
+                ),
+            }
+        )
+    return Response(
+        {
+            "results": results,
+            "next_cursor": str(page[-1].id) if has_more and page else None,
+        }
     )
 
 

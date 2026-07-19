@@ -25,13 +25,13 @@ from apps.notifications.models import Announcement, Notification
 from apps.spaces.models import (
     AdminRegistrationCode,
     BusinessLine,
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
     SpaceEmailInvite,
     SpaceMembership,
 )
 from apps.spaces.services import generate_admin_code, hash_code
+from apps.spaces.test_utils import create_test_space
 
 User = get_user_model()
 
@@ -47,21 +47,17 @@ class V7IdentityTests(APITestCase):
         self.bl_tax, _ = BusinessLine.objects.get_or_create(
             organization=self.org, code="tax", defaults={"name": "Tax"}
         )
-        self.general, _ = KnowledgeSpace.objects.get_or_create(
+        self.general = create_test_space(
+            organization=self.org,
             code="general",
-            defaults={
-                "organization": self.org,
-                "name": "General",
-                "visibility": "organization",
-            },
+            name="General",
+            visibility="organization",
         )
-        self.assurance_space, _ = KnowledgeSpace.objects.get_or_create(
+        self.assurance_space = create_test_space(
+            organization=self.org,
             code="assurance-onboarding",
-            defaults={
-                "organization": self.org,
-                "name": "Assurance Onboarding",
-                "visibility": "business_line",
-            },
+            name="Assurance Onboarding",
+            visibility="business_line",
         )
         self.superuser = User.objects.create_superuser(
             username="root@test.com", email="root@test.com", password=PW

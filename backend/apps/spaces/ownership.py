@@ -4,10 +4,17 @@ The owner foreign key is the authority; the owner membership is retained only
 as a compatibility mirror for existing permission and member-list consumers.
 """
 
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
-from .models import BusinessLine, KnowledgeSpace, Organization, OrganizationMembership, SpaceMembership
+from .models import (
+    BusinessLine,
+    KnowledgeSpace,
+    Organization,
+    OrganizationMembership,
+    SpaceMembership,
+    WorkspaceLocatorReservation,
+)
 
 
 def effective_user(user) -> bool:
@@ -77,6 +84,8 @@ def effective_business_admin(user, business_line: BusinessLine) -> bool:
 def create_space_with_owner(*, organization, owner, **space_fields):
     """Create a space with its canonical owner and one owner mirror atomically."""
 
+    if not effective_user(owner):
+        raise ValueError("eligible_owner_required")
     with transaction.atomic():
         space = KnowledgeSpace.objects.create(
             organization=organization,
@@ -92,4 +101,38 @@ def create_space_with_owner(*, organization, owner, **space_fields):
             status="active",
             last_accessed_at=timezone.now(),
         )
+        # Every newly live workspace needs durable locator evidence. Governed
+        # approval already owns a request-reserved row and transitions it after
+        # this helper returns; compatibility creation paths bind a live row
+        # here so ownership/retention records can never lack a locator digest.
+        from .governed import normalize_locator
+
+        normalized_locator = normalize_locator(organization.slug, space.code)
+        locator = (
+            WorkspaceLocatorReservation.objects.select_for_update(of=("self",))
+            .filter(organization=organization, normalized_code=space.code)
+            .first()
+        )
+        if locator is None:
+            WorkspaceLocatorReservation.objects.create(
+                organization=organization,
+                normalized_code=space.code,
+                normalized_locator=normalized_locator,
+                state=WorkspaceLocatorReservation.STATE_LIVE,
+                live_space=space,
+            )
+        elif locator.state == WorkspaceLocatorReservation.STATE_RELEASED:
+            locator.normalized_locator = normalized_locator
+            locator.state = WorkspaceLocatorReservation.STATE_LIVE
+            locator.live_space = space
+            locator.save(
+                update_fields=[
+                    "normalized_locator",
+                    "state",
+                    "live_space",
+                    "updated_at",
+                ]
+            )
+        elif locator.state != WorkspaceLocatorReservation.STATE_REQUEST_RESERVED:
+            raise IntegrityError("space_locator_conflict")
     return space

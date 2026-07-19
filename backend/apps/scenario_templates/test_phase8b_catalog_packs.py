@@ -1,19 +1,19 @@
 """Phase 8B template catalog, revision, and isolated knowledge-pack tests."""
 
+import uuid
 from copy import deepcopy
-from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from apps.knowledge.models import Document, IngestionJob
+from apps.knowledge.models import Document
 from apps.spaces.models import (
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
 )
+from apps.spaces.ownership import create_space_with_owner
 
 from .models import (
     ScenarioTemplate,
@@ -23,6 +23,7 @@ from .models import (
     TemplateCategory,
     TemplateTag,
 )
+from .contract import revision_snapshot
 
 
 User = get_user_model()
@@ -62,8 +63,24 @@ class TemplateCatalogTest(Phase8BBase):
             organization=self.org,
             category=category,
         )
+        revision = ScenarioTemplateRevision.objects.create(
+            template=popular,
+            version=1,
+            snapshot=revision_snapshot({
+                "category_tree": [],
+                "scenario_definitions": [],
+                "quality_rubric": {},
+                "workspace_defaults": {},
+                "model_policy_refs": [],
+            }),
+            published_at=timezone.now(),
+            created_by=self.user,
+        )
+        popular.current_revision = revision
+        popular.save(update_fields=["current_revision", "updated_at"])
         ScenarioTemplateApplication.objects.create(
             template=popular,
+            template_revision=revision,
             organization=self.org,
             created_by=self.user,
         )
@@ -93,15 +110,30 @@ class TemplateRevisionActionsTest(Phase8BBase):
         first = ScenarioTemplateRevision.objects.create(
             template=template,
             version=1,
-            snapshot={"description": "first", "template_name": "Rollback"},
+            snapshot=revision_snapshot({
+                "category_tree": [],
+                "scenario_definitions": [{"key": "first"}],
+                "quality_rubric": {},
+                "workspace_defaults": {},
+                "model_policy_refs": [],
+            }),
+            published_at=timezone.now(),
             created_by=self.user,
         )
         second = ScenarioTemplateRevision.objects.create(
             template=template,
             version=2,
-            snapshot={"description": "second", "template_name": "Rollback"},
+            snapshot=revision_snapshot({
+                "category_tree": [],
+                "scenario_definitions": [{"key": "second"}],
+                "quality_rubric": {},
+                "workspace_defaults": {},
+                "model_policy_refs": [],
+            }),
             created_by=self.user,
         )
+        template.current_revision = first
+        template.save(update_fields=["current_revision", "updated_at"])
         original_snapshots = {
             first.id: deepcopy(first.snapshot),
             second.id: deepcopy(second.snapshot),
@@ -113,18 +145,15 @@ class TemplateRevisionActionsTest(Phase8BBase):
         )
         rollback = self.client.post(
             f"/api/v1/templates/{template.id}/rollback/",
-            {"revision": 1},
+            {"revision": 1, "expected_template_version": 2},
             format="json",
         )
 
         self.assertEqual(diff.status_code, 200)
-        self.assertEqual(
-            diff.data["changes"]["description"],
-            {"from": "first", "to": "second"},
-        )
+        self.assertIn("components", diff.data["changes"])
         self.assertEqual(rollback.status_code, 200)
         template.refresh_from_db()
-        self.assertEqual(template.description, "first")
+        self.assertEqual(template.current_revision_id, first.id)
         self.assertEqual(template.revisions.first().version, 3)
         for revision_id, snapshot in original_snapshots.items():
             self.assertEqual(
@@ -135,11 +164,11 @@ class TemplateRevisionActionsTest(Phase8BBase):
 
 class TemplateKnowledgePackTest(Phase8BBase):
     def make_document(self, org, title="Source"):
-        space = KnowledgeSpace.objects.create(
+        space = create_space_with_owner(
             organization=org,
+            owner=self.user,
             name=f"{title} Space",
             code=f"{org.slug}-{title.lower()}",
-            created_by=self.user,
         )
         return Document.objects.create(
             space=space,
@@ -151,7 +180,7 @@ class TemplateKnowledgePackTest(Phase8BBase):
             status="active",
         )
 
-    def test_asset_is_physically_copied_and_has_independent_ingestion(self):
+    def test_asset_attachment_and_document_copy_are_disabled(self):
         template = ScenarioTemplate.objects.create(
             name="Pack",
             code="pack",
@@ -164,41 +193,19 @@ class TemplateKnowledgePackTest(Phase8BBase):
             {"document": str(source.id)},
             format="json",
         )
-        def fake_enqueue(document, **kwargs):
-            return IngestionJob.objects.create(
-                document=document,
-                space=document.space,
-                requested_by=self.user,
-                status="queued",
-                celery_task_id="task-1",
-            )
-
-        with patch(
-            "apps.scenario_templates.views.enqueue_document_ingestion",
-            side_effect=fake_enqueue,
-        ):
-            response = self.client.post(
-                f"/api/v1/templates/{template.id}/create-space/",
-                {
-                    "name": "Target",
-                    "code": "target-pack",
-                    "organization": str(self.org.id),
-                },
-                format="json",
-            )
-
-        self.assertEqual(attach.status_code, 201)
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["asset_total"], 1)
-        self.assertEqual(response.data["provisioning_status"], "processing")
-        application = ScenarioTemplateApplication.objects.get(
-            id=response.data["application_id"]
+        response = self.client.post(
+            f"/api/v1/templates/{template.id}/create-space/",
+            {"name": "Target", "code": "target-pack"},
+            format="json",
         )
-        copied = application.asset_applications.get().target_document
-        self.assertNotEqual(copied.id, source.id)
-        self.assertEqual(copied.space_id, application.space_id)
-        self.assertNotEqual(copied.file.name, source.file.name)
-        self.assertFalse(copied.chunks.exists())
+
+        self.assertEqual(attach.status_code, 409)
+        self.assertEqual(attach.data["code"], "template_asset_attachment_disabled")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data["code"], "template_revision_not_ready")
+        self.assertFalse(ScenarioTemplateAsset.objects.exists())
+        self.assertFalse(ScenarioTemplateApplication.objects.exists())
+        self.assertEqual(Document.objects.filter(pk=source.pk).count(), 1)
 
     def test_cross_organization_document_cannot_be_attached(self):
         other = Organization.objects.create(name="Other", slug="other-phase8b")
@@ -216,82 +223,23 @@ class TemplateKnowledgePackTest(Phase8BBase):
             format="json",
         )
 
-        self.assertIn(response.status_code, {403, 404})
+        self.assertEqual(response.status_code, 409)
         self.assertFalse(ScenarioTemplateAsset.objects.filter(document=foreign).exists())
 
-    def test_partial_failure_keeps_space_and_retry_only_processes_failed_asset(self):
+    def test_historical_asset_retry_is_disabled_without_resource_lookup(self):
         template = ScenarioTemplate.objects.create(
             name="Retry Pack",
             code="retry-pack",
             organization=self.org,
             created_by=self.user,
         )
-        good = self.make_document(self.org, "Good")
-        bad = self.make_document(self.org, "Bad")
-        for document in (good, bad):
-            self.client.post(
-                f"/api/v1/templates/{template.id}/assets/",
-                {"document": str(document.id)},
-                format="json",
-            )
-
-        calls = []
-
-        def initial_enqueue(document, **kwargs):
-            calls.append(document.title)
-            if document.title == "Bad":
-                raise RuntimeError("broker unavailable")
-            return IngestionJob.objects.create(
-                document=document,
-                space=document.space,
-                status="queued",
-                celery_task_id="good-task",
-            )
-
-        with patch(
-            "apps.scenario_templates.views.enqueue_document_ingestion",
-            side_effect=initial_enqueue,
-        ):
-            created = self.client.post(
-                f"/api/v1/templates/{template.id}/create-space/",
-                {
-                    "name": "Retry Target",
-                    "code": "retry-target",
-                    "organization": str(self.org.id),
-                },
-                format="json",
-            )
-
-        self.assertEqual(created.status_code, 201)
-        self.assertEqual(created.data["provisioning_status"], "partial_failure")
-        application = ScenarioTemplateApplication.objects.get(
-            id=created.data["application_id"]
+        retried = self.client.post(
+            f"/api/v1/templates/{template.id}/applications/{uuid.uuid4()}/retry-assets/",
+            {},
+            format="json",
         )
-        self.assertTrue(application.space_id)
-        self.assertEqual(application.space.documents.count(), 1)
 
-        def retry_enqueue(document, **kwargs):
-            calls.append(f"retry:{document.title}")
-            return IngestionJob.objects.create(
-                document=document,
-                space=document.space,
-                status="queued",
-                celery_task_id="retry-task",
-            )
-
-        with patch(
-            "apps.scenario_templates.views.enqueue_document_ingestion",
-            side_effect=retry_enqueue,
-        ):
-            retried = self.client.post(
-                f"/api/v1/templates/{template.id}/applications/{application.id}/retry-assets/",
-                {},
-                format="json",
-            )
-
-        self.assertEqual(retried.status_code, 200)
-        self.assertEqual(retried.data["provisioning_status"], "processing")
-        self.assertEqual(calls.count("Good"), 1)
-        self.assertEqual(calls.count("retry:Bad"), 1)
-        self.assertNotIn("retry:Good", calls)
-        self.assertEqual(application.space.documents.count(), 2)
+        self.assertEqual(retried.status_code, 503)
+        self.assertEqual(retried.data["code"], "template_asset_copy_disabled")
+        self.assertFalse(ScenarioTemplateAsset.objects.exists())
+        self.assertFalse(ScenarioTemplateApplication.objects.exists())

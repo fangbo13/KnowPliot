@@ -14,11 +14,11 @@ from apps.chat.models import ChatSession, Citation, Message
 from apps.knowledge.models import Document, DocumentChunk
 from apps.spaces.models import (
     BusinessLine,
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
     SpaceMembership,
 )
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -35,13 +35,13 @@ class Phase4BBase(APITestCase):
         cls.bl_b = BusinessLine.objects.create(
             organization=cls.org_b, name="Audit B", code="ops-b"
         )
-        cls.space_a = KnowledgeSpace.objects.create(
+        cls.space_a = create_test_space(
             organization=cls.org_a,
             business_line=cls.bl_a,
             name="Ops Space A",
             code="ops-space-a",
         )
-        cls.space_b = KnowledgeSpace.objects.create(
+        cls.space_b = create_test_space(
             organization=cls.org_b,
             business_line=cls.bl_b,
             name="Ops Space B",
@@ -249,26 +249,26 @@ class DocumentLifecycleTest(Phase4BBase):
         self.assertTrue(DocumentChunk.objects.filter(id=chunk.id).exists())
         self.assertTrue(Citation.objects.filter(id=citation.id).exists())
 
-    def test_hard_delete_is_superuser_only_and_rejects_cited_documents(self):
+    def test_hard_delete_requires_workspace_content_authority_and_rejects_citations(self):
         document, _, _ = self.make_cited_document()
         self.client.force_authenticate(self.member)
         member_response = self.client.delete(
             f"/api/v1/documents/{document.id}/?hard=true",
             HTTP_X_SPACE_ID=str(self.space_a.id),
         )
-        self.assertEqual(member_response.status_code, 403)
+        self.assertEqual(member_response.status_code, 409)
 
         self.client.force_authenticate(self.superuser)
         super_response = self.client.delete(
             f"/api/v1/documents/{document.id}/?hard=true",
             HTTP_X_SPACE_ID=str(self.space_a.id),
         )
-        self.assertEqual(super_response.status_code, 409)
+        self.assertEqual(super_response.status_code, 404)
         self.assertTrue(Document.objects.filter(id=document.id).exists())
 
-    def test_superuser_can_hard_delete_uncited_document(self):
+    def test_knowledge_admin_can_hard_delete_uncited_document(self):
         document = self.make_document(self.space_a, "uncited-lifecycle")
-        self.client.force_authenticate(self.superuser)
+        self.client.force_authenticate(self.member)
 
         response = self.client.delete(
             f"/api/v1/documents/{document.id}/?hard=true",
@@ -281,7 +281,7 @@ class DocumentLifecycleTest(Phase4BBase):
     def test_archived_documents_are_hidden_unless_explicitly_filtered(self):
         archived = self.make_document(self.space_a, "archived-list", status="archived")
         active = self.make_document(self.space_a, "active-list")
-        self.client.force_authenticate(self.superuser)
+        self.client.force_authenticate(self.member)
 
         default_response = self.client.get(
             "/api/v1/documents/",
@@ -306,7 +306,7 @@ class DocumentLifecycleTest(Phase4BBase):
 
     def test_archived_document_cannot_be_reindexed(self):
         archived = self.make_document(self.space_a, "archived-reindex", status="archived")
-        self.client.force_authenticate(self.superuser)
+        self.client.force_authenticate(self.member)
 
         response = self.client.post(
             f"/api/v1/documents/{archived.id}/reindex/",

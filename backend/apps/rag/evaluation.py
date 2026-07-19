@@ -3,13 +3,16 @@
 import hashlib
 import math
 import re
+from datetime import timedelta
 from math import ceil
 
 from django.contrib.auth import get_user_model
 from django.db import connection, transaction
+from django.utils import timezone
 
 from apps.knowledge.models import Document, DocumentChunk
 from apps.spaces.models import KnowledgeSpace, Organization
+from apps.spaces.ownership import canonical_owner, create_space_with_owner
 
 
 EVALUATION_DOCUMENTS = (
@@ -46,18 +49,33 @@ class DeterministicEvaluationEmbedder:
 def seed_evaluation_corpus() -> dict:
     """Idempotently provision the isolated Phase 8A benchmark corpus."""
     User = get_user_model()
-    user, _ = User.objects.get_or_create(
+    user, _ = User.objects.update_or_create(
         email="rag-evaluation@local.invalid",
-        defaults={"username": "rag-evaluation", "is_active": False},
+        defaults={
+            "username": "rag-evaluation",
+            "is_active": True,
+            "account_purpose": "test",
+            "test_principal_expires_at": timezone.now() + timedelta(days=1),
+            "test_run_id": "rag-evaluation-v1",
+        },
     )
     organization, _ = Organization.objects.get_or_create(
         slug="rag-evaluation",
         defaults={"name": "RAG Evaluation"},
     )
-    space, _ = KnowledgeSpace.objects.get_or_create(
+    space = KnowledgeSpace.objects.filter(
         code="evaluation-hr",
-        defaults={"name": "Evaluation HR", "organization": organization},
-    )
+        organization=organization,
+    ).first()
+    if space is None:
+        space = create_space_with_owner(
+            organization=organization,
+            owner=user,
+            code="evaluation-hr",
+            name="Evaluation HR",
+        )
+    elif canonical_owner(space) != user:
+        raise RuntimeError("evaluation_space_owner_not_ready")
     for title, content in EVALUATION_DOCUMENTS:
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         document, _ = Document.objects.update_or_create(

@@ -7,7 +7,8 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.spaces.admin_operations import collect_system_health
-from apps.spaces.models import BusinessLine, KnowledgeSpace, Organization, OrganizationMembership
+from apps.spaces.models import BusinessLine, Organization, OrganizationMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -20,7 +21,7 @@ class Phase6AHardeningBase(APITestCase):
         cls.line = BusinessLine.objects.create(
             organization=cls.org, name="Hardening Line", code="hardening-line"
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.org,
             business_line=cls.line,
             name="Hardening Space",

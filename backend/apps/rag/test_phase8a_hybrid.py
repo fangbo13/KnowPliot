@@ -9,13 +9,20 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
 from apps.chat.models import ChatSession, Message
 from apps.chat.serializers import MessageSerializer
 from apps.knowledge.models import Document, DocumentChunk
-from apps.spaces.models import KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.models import (
+    GovernancePolicy,
+    KnowledgeSpace,
+    ModelProfile,
+    Organization,
+    SpaceMembership,
+)
+from apps.spaces.test_utils import create_test_space
 from apps.rag.hybrid import (
     HybridRetriever,
     _normalized_lexical_query,
@@ -125,12 +132,12 @@ class HybridRetrieverIsolationTest(TestCase):
             password="test",
         )
         cls.org = Organization.objects.create(name="Phase 8", slug="phase-8")
-        cls.space_a = KnowledgeSpace.objects.create(
+        cls.space_a = create_test_space(
             organization=cls.org,
             name="Space A",
             code="phase8-a",
         )
-        cls.space_b = KnowledgeSpace.objects.create(
+        cls.space_b = create_test_space(
             organization=cls.org,
             name="Space B",
             code="phase8-b",
@@ -285,7 +292,7 @@ class MessageQualityPersistenceTest(TestCase):
             password="test",
         )
         org = Organization.objects.create(name="Quality Message", slug="quality-message")
-        space = KnowledgeSpace.objects.create(
+        space = create_test_space(
             organization=org,
             name="Quality Message",
             code="quality-message",
@@ -313,6 +320,10 @@ class MessageQualityPersistenceTest(TestCase):
 
 
 class ChatQualitySseTest(APITestCase):
+    @override_settings(
+        RAG_LLM_MODEL="qwen3.6-flash",
+        QWEN_CHAT_MODEL="qwen3.6-flash",
+    )
     def test_quality_event_is_forwarded_and_persisted(self):
         user = User.objects.create_user(
             username="quality-sse",
@@ -320,10 +331,19 @@ class ChatQualitySseTest(APITestCase):
             password="test",
         )
         org = Organization.objects.create(name="Quality SSE", slug="quality-sse")
-        space = KnowledgeSpace.objects.create(
+        space = create_test_space(
             organization=org,
             name="Quality SSE",
             code="quality-sse",
+        )
+        fast_profile = ModelProfile.objects.create(
+            name="phase8a-quality-fast",
+            provider="dashscope",
+            model_id="qwen3.6-flash",
+        )
+        GovernancePolicy.objects.create(
+            space=space,
+            values={"fast_model_profile_id": str(fast_profile.id)},
         )
         SpaceMembership.objects.create(
             user=user,

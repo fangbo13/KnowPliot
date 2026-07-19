@@ -7,9 +7,11 @@
 from django.contrib import admin
 from django.conf import settings
 from django.urls import path, include
+from apps.spaces.join_views import invitation_redeem
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/v1/", include("apps.core.urls")),
     path("api/v1/auth/", include("apps.users.urls")),
     path("api/v1/chat/", include("apps.chat.urls")),
     path("api/v1/documents/", include("apps.knowledge.urls")),
@@ -19,6 +21,7 @@ urlpatterns = [
     path("api/v1/notifications/", include("apps.notifications.urls")),  # V7.0: notifications
     path("api/v1/admin/", include("apps.spaces.admin_urls")),  # V7.0: admin governance
     path("api/v1/templates/", include("apps.scenario_templates.urls")),  # V7.1: Scenario templates center
+    path("api/v1/space-invitations/redeem/", invitation_redeem, name="space-invitation-redeem"),
 ]
 
 # V4.1 KB-V4.1-007: Removed DEBUG-only media serving.

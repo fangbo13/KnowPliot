@@ -19,6 +19,7 @@ from apps.chat.models import (
 from apps.knowledge.models import IngestionJob
 from apps.notifications.models import Notification
 from apps.spaces.models import BusinessLine, KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -31,14 +32,15 @@ class Phase7BBase(APITestCase):
         cls.line = BusinessLine.objects.create(
             organization=cls.org, name="Scale Line", code="scale-line"
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.owner = User.objects.create_user(
+            username="scale-owner", email="scale-owner@example.com", password="test"
+        )
+        cls.space = create_test_space(
             organization=cls.org,
+            owner=cls.owner,
             business_line=cls.line,
             name="Scale Space",
             code="scale-space",
-        )
-        cls.owner = User.objects.create_user(
-            username="scale-owner", email="scale-owner@example.com", password="test"
         )
         cls.reviewer = User.objects.create_user(
             username="scale-reviewer", email="scale-reviewer@example.com", password="test"
@@ -49,7 +51,6 @@ class Phase7BBase(APITestCase):
         cls.other = User.objects.create_user(
             username="scale-other", email="scale-other@example.com", password="test"
         )
-        SpaceMembership.objects.create(user=cls.owner, space=cls.space, role=SpaceMembership.ROLE_OWNER)
         SpaceMembership.objects.create(user=cls.reviewer, space=cls.space, role=SpaceMembership.ROLE_REVIEWER)
         SpaceMembership.objects.create(user=cls.member, space=cls.space, role=SpaceMembership.ROLE_MEMBER)
 

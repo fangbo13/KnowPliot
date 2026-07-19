@@ -16,13 +16,36 @@ import MessageBubble from '../components/chat/MessageBubble';
 import { EmptyState, PageHeader, Surface } from '../design/primitives';
 import { useDebounce } from '../hooks/useDebounce';
 import i18n from '../i18n';
-import { useChatStore, type ChatSession, type Message } from '../store/chatStore';
+import { useChatStore, type ChatExecutionSnapshot, type ChatSession, type Message } from '../store/chatStore';
+import * as chatStoreSnapshotApi from '../store/chatStore';
 import { computeGroupOrder, formatDate, getDateGroupKey, getGroupLabel } from '../utils/dateGroup';
 
 const { Text } = Typography;
 
 const TIME_FILTERS = new Set<HistoryTimeFilter>(['all', 'today', 'this_week', 'this_month', 'older']);
 const STATUS_FILTERS = new Set<HistoryStatusFilter>(['all', 'partial', 'recovering', 'recovered', 'failed', 'terminal']);
+
+function parseHistorySnapshot(value: unknown): ChatExecutionSnapshot | null {
+  try {
+    const parser = (chatStoreSnapshotApi as {
+      parseChatExecutionSnapshot?: (input: unknown) => ChatExecutionSnapshot | null;
+    }).parseChatExecutionSnapshot;
+    return parser ? parser(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function legacyHistorySnapshot(): ChatExecutionSnapshot | null {
+  try {
+    const snapshot = (chatStoreSnapshotApi as {
+      LEGACY_UNKNOWN_EXECUTION_SNAPSHOT?: ChatExecutionSnapshot;
+    }).LEGACY_UNKNOWN_EXECUTION_SNAPSHOT;
+    return snapshot ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function initialFilters() {
   const params = new URLSearchParams(window.location.search);
@@ -126,6 +149,10 @@ export default function HistoryPage() {
         role: message.role,
         content: message.content || '',
         citations: message.citations || [],
+        ...(message.role === 'assistant' ? {
+          executionSnapshot: parseHistorySnapshot(message.execution_snapshot ?? message.executionSnapshot)
+            ?? legacyHistorySnapshot(),
+        } : {}),
         createdAt: message.created_at || message.createdAt || new Date().toISOString(),
       })).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)));
       setViewNextCursor(page.next);
@@ -156,6 +183,10 @@ export default function HistoryPage() {
         role: message.role,
         content: message.content || '',
         citations: message.citations || [],
+        ...(message.role === 'assistant' ? {
+          executionSnapshot: parseHistorySnapshot(message.execution_snapshot ?? message.executionSnapshot)
+            ?? legacyHistorySnapshot(),
+        } : {}),
         createdAt: message.created_at || message.createdAt || new Date().toISOString(),
       }));
       setViewMessages((current) => {

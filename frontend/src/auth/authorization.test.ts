@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAuthorizationAdapter,
   isDeepAnswerModeEnabled,
+  isThinkingModeEnabled,
   type LegacyAuthorizationUser,
 } from './authorization';
 import type { CapabilitySnapshot } from '../api/capabilities';
@@ -18,6 +19,15 @@ const legacyAdmin: LegacyAuthorizationUser = {
 };
 
 const workspaceSnapshot: CapabilitySnapshot = {
+  navigation_mode: 'capability',
+  configuration_revision: 'config-v3',
+  feature_availability: {
+    deep: true,
+    thinking: false,
+    workspace_creation_approval: true,
+    workspace_join_v2: true,
+    workspace_permanent_delete: false,
+  },
   scopes: {
     platform: false,
     organization_ids: [],
@@ -50,19 +60,45 @@ describe('authorization compatibility adapter', () => {
     expect(access.defaultConsole).toBe('/workspace/space-1/manage');
   });
 
-  it('keeps the legacy role fallback only while capability navigation is disabled', () => {
+  it('uses the exact server capability set in paired legacy navigation', () => {
     const access = createAuthorizationAdapter({
       capabilityNavigationEnabled: false,
-      status: 'loading',
-      snapshot: null,
+      status: 'ready',
+      snapshot: {
+        ...workspaceSnapshot,
+        navigation_mode: 'legacy',
+        capabilities: ['workspace.manage', 'workspace.members.manage'],
+        default_console: '/spaces/manage',
+      },
       legacyUser: legacyAdmin,
       activeSpaceRole: 'owner',
       activeSpaceId: 'space-1',
     });
 
-    expect(access.has('platform.access')).toBe(true);
+    expect(access.has('platform.access')).toBe(false);
     expect(access.has('workspace.members.manage')).toBe(true);
-    expect(access.defaultConsole).toBe('/admin');
+    expect(access.defaultConsole).toBe('/spaces/manage');
+  });
+
+  it('keeps thinking rollout independent and literal-true only', () => {
+    expect(isThinkingModeEnabled({ VITE_THINKING_MODE: 'true' })).toBe(true);
+    expect(isThinkingModeEnabled({ VITE_THINKING_MODE: 'TRUE' })).toBe(false);
+    expect(isThinkingModeEnabled({})).toBe(false);
+  });
+
+  it('fails every capability closed on a navigation-mode mismatch', () => {
+    const access = createAuthorizationAdapter({
+      capabilityNavigationEnabled: true,
+      status: 'mismatch',
+      snapshot: { ...workspaceSnapshot, navigation_mode: 'legacy' },
+      legacyUser: legacyAdmin,
+      activeSpaceRole: 'owner',
+      activeSpaceId: 'space-1',
+    });
+
+    expect(access.has('workspace.manage')).toBe(false);
+    expect(access.has('platform.access')).toBe(false);
+    expect(access.defaultConsole).toBe('/chat');
   });
 
   it('fails closed while enabled capabilities are not ready', () => {

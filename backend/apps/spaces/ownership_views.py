@@ -125,7 +125,7 @@ def ownership_candidates(request, pk):
         users = type(request.user).objects.filter(is_active=True).filter(
             space_memberships__space__organization=space.organization,
             space_memberships__status="active",
-        ).exclude(pk=space.owner_id).distinct()
+        ).exclude(pk=space.owner_id).exclude(pk=request.user.pk).distinct()
         if search:
             users = users.filter(Q(username__icontains=search) | Q(email__icontains=search))
         page = list(users.order_by("username")[offset:offset + limit + 1])

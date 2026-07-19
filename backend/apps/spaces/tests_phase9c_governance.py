@@ -3,14 +3,15 @@ from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 
-from apps.spaces.models import GovernancePolicy, Organization, KnowledgeSpace, create_policy_revision, resolve_effective_policy
+from apps.spaces.models import GovernancePolicy, Organization, create_policy_revision, resolve_effective_policy
 from apps.spaces.retention import run_retention
+from apps.spaces.test_utils import create_test_space
 
 
 class Phase9CGovernanceTests(TestCase):
     def test_space_policy_overrides_organization_and_defaults(self):
         org = Organization.objects.create(name="Policy Org", slug="policy-org")
-        space = KnowledgeSpace.objects.create(organization=org, name="Policy Space", code="policy-space")
+        space = create_test_space(organization=org, name="Policy Space", code="policy-space")
         GovernancePolicy.objects.create(organization=org, values={"retrieval_top_k": 9, "retention_days": 50})
         GovernancePolicy.objects.create(space=space, values={"retrieval_top_k": 3})
         policy = resolve_effective_policy(space)

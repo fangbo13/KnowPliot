@@ -22,6 +22,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Notification(models.Model):
@@ -31,6 +32,8 @@ class Notification(models.Model):
     TYPE_SPACE_INVITE = "space_invite"
     TYPE_ROLE_GRANTED = "role_granted"
     TYPE_DOCUMENT_REVIEW = "document_review"
+    TYPE_SPACE_INVITATION = "space_invitation"
+    TYPE_SPACE_ACCESS_REQUEST = "space_access_request"
     TYPE_ACCOUNT = "account"
     TYPE_SYSTEM = "system_broadcast"
     TYPE_CHOICES = [
@@ -38,6 +41,8 @@ class Notification(models.Model):
         (TYPE_SPACE_INVITE, "Space Invite"),
         (TYPE_ROLE_GRANTED, "Role Granted"),
         (TYPE_DOCUMENT_REVIEW, "Document Review"),
+        (TYPE_SPACE_INVITATION, "Space Invitation"),
+        (TYPE_SPACE_ACCESS_REQUEST, "Space Access Request"),
         (TYPE_ACCOUNT, "Account"),
         (TYPE_SYSTEM, "System"),
     ]
@@ -47,6 +52,17 @@ class Notification(models.Model):
         ("success", "Success"),
         ("warning", "Warning"),
         ("error", "Error"),
+    ]
+    ACTION_NONE = "none"
+    ACTION_AVAILABLE = "available"
+    ACTION_ACTIONED = "actioned"
+    ACTION_STALE = "stale"
+    ACTION_KIND_RESOURCE_DELETED = "resource_deleted"
+    ACTION_STATE_CHOICES = [
+        (ACTION_NONE, "None"),
+        (ACTION_AVAILABLE, "Available"),
+        (ACTION_ACTIONED, "Actioned"),
+        (ACTION_STALE, "Stale"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -62,6 +78,18 @@ class Notification(models.Model):
     # Optional in-app deep link, e.g. "/spaces/manage" or "/chat".
     link = models.CharField(max_length=300, blank=True, default="")
     metadata = models.JSONField(default=dict, blank=True)
+    action_kind = models.CharField(max_length=40, blank=True, default="")
+    resource_type = models.CharField(max_length=40, blank=True, default="")
+    resource_uuid = models.UUIDField(null=True, blank=True)
+    resource_version = models.PositiveBigIntegerField(null=True, blank=True)
+    allowed_actions = models.JSONField(default=list, blank=True)
+    action_state = models.CharField(
+        max_length=12,
+        choices=ACTION_STATE_CHOICES,
+        default=ACTION_NONE,
+    )
+    deep_link = models.CharField(max_length=300, blank=True, default="")
+    actioned_at = models.DateTimeField(null=True, blank=True)
     is_read = models.BooleanField(default=False)
     read_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -75,10 +103,144 @@ class Notification(models.Model):
                 fields=["recipient", "type", "is_read", "created_at"],
                 name="notif_rec_type_read_cr_idx",
             ),
+            models.Index(
+                fields=["recipient", "action_state", "created_at"],
+                name="notif_rec_action_state_idx",
+            ),
+            models.Index(
+                fields=["resource_type", "resource_uuid"],
+                name="notif_resource_lookup_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (
+                        models.Q(action_kind="")
+                        & models.Q(resource_type="")
+                        & models.Q(resource_uuid__isnull=True)
+                        & models.Q(action_state="none")
+                        & models.Q(deep_link="")
+                    )
+                    | (
+                        ~models.Q(action_kind__in=["", "resource_deleted"])
+                        & ~models.Q(resource_type="")
+                        & models.Q(resource_uuid__isnull=False)
+                        & models.Q(action_state__in=["available", "actioned", "stale"])
+                        & models.Q(deep_link__startswith="/")
+                        & ~models.Q(deep_link__startswith="//")
+                    )
+                    | (
+                        models.Q(action_kind="resource_deleted")
+                        & ~models.Q(resource_type="")
+                        & models.Q(resource_uuid__isnull=False)
+                        & models.Q(action_state="stale")
+                        & models.Q(allowed_actions=[])
+                        & models.Q(deep_link="")
+                    )
+                ),
+                name="notif_actionable_resource_shape",
+            ),
+            models.CheckConstraint(
+                check=(
+                    ~models.Q(action_state="actioned")
+                    | models.Q(actioned_at__isnull=False)
+                ),
+                name="notif_actioned_has_timestamp",
+            ),
         ]
 
     def __str__(self):
         return f"[{self.type}] {self.title} -> {self.recipient_id}"
+
+
+class ActionOutboxEvent(models.Model):
+    """Durable external-delivery intent for an independent domain aggregate.
+
+    The row deliberately stores only a stable recipient key and a safe payload.
+    Raw invitation tokens, email addresses, and provider credentials belong in
+    neither the outbox nor its retry diagnostics.
+    """
+
+    STATE_PENDING = "pending"
+    STATE_DELIVERING = "delivering"
+    STATE_DELIVERED = "delivered"
+    STATE_FAILED = "failed"
+    STATE_CHOICES = [
+        (STATE_PENDING, "Pending"),
+        (STATE_DELIVERING, "Delivering"),
+        (STATE_DELIVERED, "Delivered"),
+        (STATE_FAILED, "Failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    aggregate_type = models.CharField(max_length=48)
+    aggregate_uuid = models.UUIDField()
+    transition = models.CharField(max_length=48)
+    transition_version = models.PositiveBigIntegerField()
+    recipient_key = models.CharField(max_length=96)
+    payload = models.JSONField(default=dict)
+    payload_digest = models.CharField(max_length=64)
+    state = models.CharField(
+        max_length=12,
+        choices=STATE_CHOICES,
+        default=STATE_PENDING,
+    )
+    attempt_count = models.PositiveIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now, null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    last_error_code = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notifications_actionoutboxevent"
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "aggregate_type",
+                    "aggregate_uuid",
+                    "transition",
+                    "transition_version",
+                    "recipient_key",
+                ],
+                name="notif_outbox_transition_recipient_uniq",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    state__in=["pending", "delivering", "delivered", "failed"]
+                ),
+                name="notif_outbox_state_valid",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(state="delivered", delivered_at__isnull=False)
+                    | (
+                        ~models.Q(state="delivered")
+                        & models.Q(delivered_at__isnull=True)
+                    )
+                ),
+                name="notif_outbox_delivered_has_time",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["state", "next_attempt_at", "created_at"],
+                name="notif_outbox_due_idx",
+            ),
+            models.Index(
+                fields=["aggregate_type", "aggregate_uuid"],
+                name="notif_outbox_aggregate_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.aggregate_type}:{self.aggregate_uuid}:"
+            f"{self.transition}@{self.transition_version}"
+        )
 
 
 class Announcement(models.Model):

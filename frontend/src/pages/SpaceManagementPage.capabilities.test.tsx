@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { spacesApi } from '../api/spaces';
 import { useAuthorization } from '../auth/CapabilityProvider';
+import { useParams } from 'react-router-dom';
 import SpaceManagementPage from './SpaceManagementPage';
 
 const activeSpace = {
@@ -26,16 +27,24 @@ const activeSpace = {
   updated_at: '',
 };
 
+let mockActiveSpaceId: string | null = 'space-1';
+let mockActiveSpace: typeof activeSpace | null = activeSpace;
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 vi.mock('../auth/CapabilityProvider', () => ({ useAuthorization: vi.fn() }));
 
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useParams: vi.fn() };
+});
+
 vi.mock('../store/spaceStore', () => ({
   useSpaceStore: () => ({
-    activeSpaceId: 'space-1',
-    getActiveSpace: () => activeSpace,
+    activeSpaceId: mockActiveSpaceId,
+    getActiveSpace: () => mockActiveSpace,
     loadSpaces: vi.fn(),
   }),
 }));
@@ -46,6 +55,7 @@ vi.mock('../api/spaces', async () => {
     ...actual,
     spacesApi: {
       members: vi.fn(),
+      get: vi.fn(),
       listInvites: vi.fn(),
       update: vi.fn(),
       createInvite: vi.fn(),
@@ -79,6 +89,9 @@ describe('SpaceManagementPage capability actions', () => {
   });
 
   beforeEach(() => {
+    mockActiveSpaceId = 'space-1';
+    mockActiveSpace = activeSpace;
+    vi.mocked(useParams).mockReturnValue({});
     vi.mocked(useAuthorization).mockReturnValue({
       enabled: true,
       status: 'ready',
@@ -89,6 +102,7 @@ describe('SpaceManagementPage capability actions', () => {
       defaultConsole: '/workspace/space-1/manage',
     });
     vi.mocked(spacesApi.members).mockReset().mockResolvedValue([]);
+    vi.mocked(spacesApi.get).mockReset().mockResolvedValue(activeSpace);
     vi.mocked(spacesApi.listInvites).mockReset().mockResolvedValue([]);
   });
 
@@ -123,5 +137,39 @@ describe('SpaceManagementPage capability actions', () => {
     expect(screen.queryByRole('button', { name: 'save' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'add_member' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'generate_code' })).toBeNull();
+  });
+
+  it('resolves the route workspace for a direct scoped-console URL', async () => {
+    const routeSpace = { ...activeSpace, id: 'route-space', name: 'Route Workspace' };
+    mockActiveSpaceId = null;
+    mockActiveSpace = null;
+    vi.mocked(useParams).mockReturnValue({ spaceId: routeSpace.id });
+    vi.mocked(spacesApi.get).mockResolvedValue(routeSpace);
+    vi.mocked(useAuthorization).mockReturnValue({
+      enabled: true,
+      status: 'ready',
+      snapshot: null,
+      has: (capability) => capability === 'workspace.members.manage',
+      hasAny: (capabilities) => capabilities.includes('workspace.members.manage'),
+      hasAll: (capabilities) => capabilities.every(
+        (capability) => capability === 'workspace.members.manage',
+      ),
+      defaultConsole: `/workspace/${routeSpace.id}/manage`,
+    });
+
+    render(<SpaceManagementPage />);
+
+    await waitFor(() => expect(spacesApi.get).toHaveBeenCalledWith(
+      routeSpace.id,
+      expect.any(AbortSignal),
+    ));
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: /Route Workspace/,
+    })).toBeTruthy());
+    expect(spacesApi.members).toHaveBeenCalledWith(routeSpace.id);
+    expect(spacesApi.members).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(spacesApi.get).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(spacesApi.members).mock.invocationCallOrder[0],
+    );
   });
 });

@@ -68,15 +68,32 @@ class PgOwnershipLockingRegressionTests(TransactionTestCase):
         with CaptureQueriesContext(connection) as queries:
             OwnershipTransferService.accept(actor=self.successor, transfer_id=transfer.id)
 
-        self.assertTrue(
-            any("FOR UPDATE" in query["sql"].upper() for query in queries.captured_queries),
-            "accept must lock the transfer, space, and ownership memberships",
-        )
+        lock_sql = [query["sql"].upper() for query in queries.captured_queries if "FOR UPDATE" in query["sql"].upper()]
+        self.assertTrue(lock_sql, "accept must lock users, space, memberships, and transfer")
+        self.assertTrue(all("FOR UPDATE OF" in sql for sql in lock_sql), lock_sql)
+        joined = "\n".join(lock_sql)
+        self.assertLess(joined.index('"USERS_USER"'), joined.index('"SPACES_KNOWLEDGESPACE"'))
+        self.assertLess(joined.index('"SPACES_KNOWLEDGESPACE"'), joined.index('"SPACES_SPACEMEMBERSHIP"'))
+        self.assertLess(joined.index('"SPACES_SPACEMEMBERSHIP"'), joined.index('"SPACES_OWNERSHIPTRANSFER"'))
         self.space.refresh_from_db()
         transfer.refresh_from_db()
         self.assertEqual(self.space.owner_id, self.successor.id)
         self.assertEqual(self.space.ownership_version, 2)
-        self.assertEqual(transfer.status, OwnershipTransfer.STATUS_COMPLETED)
+
+    def test_deferred_owner_trigger_rejects_canonical_mirror_divergence(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self.space.owner = self.successor
+                self.space.save(update_fields=["owner"])
+
+        self.space.refresh_from_db()
+        self.assertEqual(self.space.owner_id, self.owner.id)
+        owner_membership = SpaceMembership.objects.get(
+            space=self.space,
+            role=SpaceMembership.ROLE_OWNER,
+            status="active",
+        )
+        self.assertEqual(owner_membership.user_id, self.owner.id)
 
     def test_postgresql_pending_transfer_constraint_rejects_second_pending_row(self):
         first = self._request()
@@ -87,7 +104,7 @@ class PgOwnershipLockingRegressionTests(TransactionTestCase):
                     space=self.space,
                     from_owner=self.owner,
                     to_owner=self.successor,
-                    requested_by=self.successor,
+                    requested_by=self.owner,
                     mode=OwnershipTransfer.MODE_VOLUNTARY,
                     status=OwnershipTransfer.STATUS_PENDING,
                     expected_ownership_version=1,

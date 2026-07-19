@@ -29,6 +29,15 @@ const snapshot = (
   defaultConsole: string,
   capabilities: CapabilitySnapshot['capabilities'] = ['chat.ask'],
 ): CapabilitySnapshot => ({
+  navigation_mode: 'capability',
+  configuration_revision: 'config-v3',
+  feature_availability: {
+    deep: true,
+    thinking: false,
+    workspace_creation_approval: true,
+    workspace_join_v2: true,
+    workspace_permanent_delete: false,
+  },
   scopes: {
     platform: false,
     organization_ids: [],
@@ -46,6 +55,7 @@ function Probe() {
       <span data-testid="status">{state.status}</span>
       <span data-testid="console">{state.snapshot?.default_console ?? ''}</span>
       <span data-testid="error">{state.errorCode ?? ''}</span>
+      <span data-testid="mode">{state.snapshot?.navigation_mode ?? ''}</span>
     </div>
   );
 }
@@ -162,6 +172,29 @@ describe('CapabilityProvider', () => {
     expect(screen.getByTestId('error').textContent).toBe('capability_denied');
   });
 
+  it.each([
+    [true, 'legacy'],
+    [false, 'capability'],
+  ] as const)(
+    'reports one bounded mismatch for build=%s and server=%s without a second bootstrap',
+    async (enabled, serverMode) => {
+      vi.mocked(capabilitiesApi.me).mockResolvedValue({
+        ...snapshot('/chat'),
+        navigation_mode: serverMode,
+      });
+
+      render(
+        <CapabilityProvider enabled={enabled}>
+          <Probe />
+        </CapabilityProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('mismatch'));
+      expect(screen.getByTestId('error').textContent).toBe('navigation_mode_mismatch');
+      expect(capabilitiesApi.me).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('falls back to an unscoped snapshot for a revoked persisted workspace', async () => {
     spaceState.activeSpaceId = 'revoked-space';
     const unscoped = {
@@ -209,14 +242,21 @@ describe('CapabilityProvider', () => {
     expect(screen.getByTestId('workspace-capability').textContent).toBe('false');
   });
 
-  it('keeps the compatibility mode ready without calling the capability endpoint', () => {
+  it('bootstraps exact capabilities once in paired legacy mode', async () => {
+    vi.mocked(capabilitiesApi.me).mockResolvedValue({
+      ...snapshot('/admin'),
+      navigation_mode: 'legacy',
+    });
+
     render(
       <CapabilityProvider enabled={false}>
         <Probe />
       </CapabilityProvider>,
     );
 
-    expect(screen.getByTestId('status').textContent).toBe('ready');
-    expect(capabilitiesApi.me).not.toHaveBeenCalled();
+    expect(screen.getByTestId('status').textContent).toBe('loading');
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('ready'));
+    expect(screen.getByTestId('mode').textContent).toBe('legacy');
+    expect(capabilitiesApi.me).toHaveBeenCalledTimes(1);
   });
 });

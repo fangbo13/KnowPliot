@@ -5,9 +5,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Dropdown, Drawer, Modal, Button, Tooltip, message as antMessage } from 'antd';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Outlet, useNavigate } from 'react-router-dom';
 import {
   MessageOutlined, BookOutlined, UserOutlined, LogoutOutlined,
   SunOutlined, MoonOutlined, GlobalOutlined, SettingOutlined, PlusOutlined,
@@ -17,7 +15,7 @@ import {
   PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
   CompassOutlined,
 } from '@ant-design/icons';
-import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { buildManagementEntries } from '../auth/managementEntries';
@@ -27,10 +25,6 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useHotkeys } from '../hooks/useHotkeys';
 import { useChatStore } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
-import SpaceSwitcher from '../components/SpaceSwitcher';
-import NotificationBell from '../components/NotificationBell';
-import SessionRenameModal from '../components/chat/SessionRenameModal';
-import CommandPalette from '../components/CommandPalette';
 import { chatApi } from '../api/chat';
 import { getDateGroupKey, getGroupLabel, computeGroupOrder } from '../utils/dateGroup';
 import { hasActiveStream } from '../stream/StreamLifecycleManager';
@@ -38,9 +32,12 @@ import i18n from '../i18n';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { initCrossTabSync, broadcastSessionDelete } from '../sync/crossTabSync';
-import { designTokens } from '../design/tokens';
+import { notify } from '../utils/notifications';
 
-const PAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
+const SpaceSwitcher = lazy(() => import('../components/SpaceSwitcher'));
+const NotificationBell = lazy(() => import('../components/NotificationBell'));
+const SessionRenameModal = lazy(() => import('../components/chat/SessionRenameModal'));
+const CommandPalette = lazy(() => import('../components/CommandPalette'));
 
 function clampToViewport(x: number, y: number, w = 180, h = 140) {
   return { x: Math.max(8, Math.min(x, window.innerWidth - w - 8)), y: Math.max(8, Math.min(y, window.innerHeight - h - 8)) };
@@ -54,7 +51,6 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const access = useAuthorization();
   const navigate = useNavigate();
-  const location = useLocation();
   const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
   const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
   const managementEntries = buildManagementEntries(access, activeSpaceId);
@@ -64,6 +60,15 @@ export default function AppLayout() {
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const { t } = useTranslation('common');
+  const [shellEnhancementsReady, setShellEnhancementsReady] = useState(false);
+
+  // The route and composer are interactive after the first commit. Secondary
+  // workspace/notification controls start loading on the next task so their
+  // Ant Design implementation is not part of the authenticated `/chat` entry.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShellEnhancementsReady(true), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(['7days', '30days', 'earlier']));
@@ -112,11 +117,13 @@ export default function AppLayout() {
   }, [onboardingVisible, handleOnboardingClose]);
 
   useEffect(() => {
+    const controller = new AbortController();
     (async () => {
-      try { await useSpaceStore.getState().loadSpaces(); } catch { /* default-space fallback */ }
-      if (canUseHistory) await loadSessions();
+      try { await useSpaceStore.getState().loadSpaces(controller.signal); } catch { /* route-owned error state */ }
+      if (canUseHistory && !controller.signal.aborted) await loadSessions();
     })();
     initCrossTabSync();
+    return () => controller.abort();
   }, [canUseHistory, loadSessions]);
 
   useEffect(() => {
@@ -162,7 +169,7 @@ export default function AppLayout() {
       onClick: async () => {
         const ok = await logout();
         if (ok) navigate('/login');
-        else antMessage.error(t('logout_failed') || 'Logout failed — please try again');
+        else void notify('error', t('logout_failed') || 'Logout failed — please try again');
       },
     });
     return { items };
@@ -237,15 +244,15 @@ export default function AppLayout() {
   const handleRenameSession = useCallback(async (nextTitle: string) => {
     if (!renameSessionTarget) return;
     const trimmed = nextTitle.trim();
-    if (!trimmed) { antMessage.warning(i18n.language?.startsWith('zh') ? '请输入对话标题' : 'Please enter a conversation title'); return; }
+    if (!trimmed) { void notify('warning', i18n.language?.startsWith('zh') ? '请输入对话标题' : 'Please enter a conversation title'); return; }
     try {
       await chatApi.renameSession(renameSessionTarget.id, trimmed);
       await loadSessions();
-      antMessage.success(i18n.language?.startsWith('zh') ? '对话已重命名' : 'Conversation renamed');
+      void notify('success', i18n.language?.startsWith('zh') ? '对话已重命名' : 'Conversation renamed');
       setRenameSessionTarget(null);
     } catch (err) {
       console.error('Failed to rename session:', err);
-      antMessage.error(i18n.language?.startsWith('zh') ? '重命名失败，请重试' : 'Rename failed. Please try again');
+      void notify('error', i18n.language?.startsWith('zh') ? '重命名失败，请重试' : 'Rename failed. Please try again');
     }
   }, [loadSessions, renameSessionTarget]);
 
@@ -331,7 +338,7 @@ export default function AppLayout() {
       <span className="sidebar-user-email">{user?.email}</span>
       <button className="icon-btn" style={{ width: 30, height: 30 }} aria-label={t('logout')} onClick={async () => {
         const ok = await logout();
-        if (ok) navigate('/login'); else antMessage.error(t('logout_failed') || 'Logout failed — please try again');
+        if (ok) navigate('/login'); else void notify('error', t('logout_failed') || 'Logout failed — please try again');
         setMobileDrawerOpen(false);
       }}><LogoutOutlined /></button>
     </div>
@@ -343,33 +350,58 @@ export default function AppLayout() {
     </div>
   ) : null;
 
+  const renderMenuItems = (items: any[]) => items.map((item, index) => (
+    item.type === 'divider'
+      ? <div className="menu-pop-divider" role="separator" key={`divider-${index}`} />
+      : <button
+          type="button"
+          className="menu-pop-item"
+          key={item.key ?? `menu-${index}`}
+          onClick={(event) => {
+            item.onClick?.();
+            const details = event.currentTarget.closest('details');
+            if (details) details.open = false;
+          }}
+        >
+          {item.icon}
+          <span>{item.label}</span>
+        </button>
+  ));
+
   return (
     <div className="app-shell">
       {/* Onboarding */}
-      <Modal open={onboardingVisible} onCancel={handleOnboardingClose} footer={null} centered width={560} className="onboarding-modal">
-        <div className="onboarding-card">
-          <div className="onboarding-mark">K</div>
-          <h2 className="onboarding-title">{t('onboarding_title')}</h2>
-          <p className="onboarding-sub">{t('onboarding_subtitle')}</p>
-          <div className="onboarding-grid">
-            {onboardingFeatures.map((f) => (
-              <div className="onboarding-feature" key={f.title}>
-                <div className="onboarding-feature-icon">{f.icon}</div>
-                <div className="onboarding-feature-title">{f.title}</div>
-                <div className="onboarding-feature-desc">{f.desc}</div>
-              </div>
-            ))}
-          </div>
-          <Button type="primary" size="large" icon={<RocketOutlined />} onClick={handleOnboardingClose} style={{ borderRadius: 14, padding: '0 30px' }}>
-            {t('onboarding_start')}
-          </Button>
-          <div style={{ marginTop: 12, minHeight: 22 }}>
-            {showSkipHint
-              ? <button className="msg-action-btn" style={{ margin: '0 auto' }} onClick={handleOnboardingClose}>{t('skip_for_now')}</button>
-              : <span className="onboarding-skip-hint">{t('skip_hint_loading') || ''}</span>}
-          </div>
+      {onboardingVisible && (
+        <div
+          className="onboarding-modal"
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) handleOnboardingClose(); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: 24, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(6px)' }}
+        >
+          <section className="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" style={{ width: 'min(560px, 100%)', maxHeight: 'min(720px, 90vh)', overflow: 'auto' }}>
+            <div className="onboarding-mark">K</div>
+            <h2 id="onboarding-title" className="onboarding-title">{t('onboarding_title')}</h2>
+            <p className="onboarding-sub">{t('onboarding_subtitle')}</p>
+            <div className="onboarding-grid">
+              {onboardingFeatures.map((f) => (
+                <div className="onboarding-feature" key={f.title}>
+                  <div className="onboarding-feature-icon">{f.icon}</div>
+                  <div className="onboarding-feature-title">{f.title}</div>
+                  <div className="onboarding-feature-desc">{f.desc}</div>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="primary-btn hover-lift btn-press" onClick={handleOnboardingClose} style={{ borderRadius: 14, padding: '0 30px', minHeight: 44 }}>
+              <RocketOutlined aria-hidden="true" /> {t('onboarding_start')}
+            </button>
+            <div style={{ marginTop: 12, minHeight: 22 }}>
+              {showSkipHint
+                ? <button className="msg-action-btn" style={{ margin: '0 auto' }} onClick={handleOnboardingClose}>{t('skip_for_now')}</button>
+                : <span className="onboarding-skip-hint">{t('skip_hint_loading') || ''}</span>}
+            </div>
+          </section>
         </div>
-      </Modal>
+      )}
 
       <a href="#main-content" className="skip-link">{t('skip_to_content') || 'Skip to main content'}</a>
 
@@ -381,11 +413,11 @@ export default function AppLayout() {
               <span className="sidebar-brand-mark">K</span>
               <span className="sidebar-brand-name">KnowPilot</span>
             </div>
-            <Tooltip title={`${t('collapse_sidebar') || 'Collapse'}  ⌘B`} placement="bottom">
-              <button className="icon-btn" onClick={toggleSidebarCollapsed} aria-label={t('collapse_sidebar') || 'Collapse sidebar'}><MenuFoldOutlined /></button>
-            </Tooltip>
+            <button className="icon-btn" title={t('collapse_sidebar') || 'Collapse sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('collapse_sidebar') || 'Collapse sidebar'}><MenuFoldOutlined /></button>
           </div>
-          <div className="sidebar-section"><SpaceSwitcher collapsed={false} /></div>
+          <div className="sidebar-section">
+            {shellEnhancementsReady ? <Suspense fallback={<div className="sidebar-switcher-placeholder" aria-hidden="true" />}><SpaceSwitcher collapsed={false} /></Suspense> : <div className="sidebar-switcher-placeholder" aria-hidden="true" />}
+          </div>
           {newChatBtn}
           {canUseHistory && renderSearch()}
           {canUseHistory && renderList()}
@@ -394,69 +426,58 @@ export default function AppLayout() {
       )}
 
       {/* Mobile drawer */}
-      {isMobile && (
-        <Drawer placement="left" onClose={() => setMobileDrawerOpen(false)} open={mobileDrawerOpen} width={300}
-          styles={{ 
-            body: { padding: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-sunken)' }, 
-            header: { display: 'none' },
-          }}>
+      {isMobile && mobileDrawerOpen && (
+        <div className="mobile-drawer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileDrawerOpen(false); }} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,.28)' }}>
+          <aside role="dialog" aria-modal="true" aria-label={t('mobile_menu') || 'Menu'} style={{ width: 300, height: '100%', background: 'var(--color-bg-sunken)', display: 'flex', flexDirection: 'column' }}>
           <div className="sidebar-header">
             <div className="sidebar-brand"><span className="sidebar-brand-mark">K</span><span className="sidebar-brand-name">KnowPilot</span></div>
             <button className="icon-btn" onClick={() => setMobileDrawerOpen(false)} aria-label={t('cancel') || 'Close'}><CloseOutlined /></button>
           </div>
-          <div className="sidebar-section"><SpaceSwitcher collapsed={false} /></div>
+          <div className="sidebar-section">
+            {shellEnhancementsReady ? <Suspense fallback={<div className="sidebar-switcher-placeholder" aria-hidden="true" />}><SpaceSwitcher collapsed={false} /></Suspense> : <div className="sidebar-switcher-placeholder" aria-hidden="true" />}
+          </div>
           {newChatBtn}
           {canUseHistory && renderSearch()}
           {canUseHistory && renderList()}
           {renderFooter()}
-        </Drawer>
+          </aside>
+        </div>
       )}
 
       {/* Main */}
       <div className="app-main">
         <header className="app-header">
           {!isMobile && sidebarCollapsed && (
-            <Tooltip title={`${t('expand_sidebar') || 'Expand'}  ⌘B`} placement="bottomLeft">
-              <button className="icon-btn" onClick={toggleSidebarCollapsed} aria-label={t('expand_sidebar') || 'Expand sidebar'}><MenuUnfoldOutlined /></button>
-            </Tooltip>
+            <button className="icon-btn" title={t('expand_sidebar') || 'Expand sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('expand_sidebar') || 'Expand sidebar'}><MenuUnfoldOutlined /></button>
           )}
           {isMobile && <button className="icon-btn" onClick={() => setMobileDrawerOpen(true)} aria-label={t('mobile_menu') || 'Open menu'}><MenuOutlined /></button>}
-          <Tooltip title="⌘K" placement="bottom">
-            <button className="icon-btn" onClick={() => setCmdkOpen(true)} aria-label={t('cmdk_placeholder', { defaultValue: 'Search' })}><SearchOutlined /></button>
-          </Tooltip>
+          <button className="icon-btn" title="⌘K" onClick={() => setCmdkOpen(true)} aria-label={t('cmdk_placeholder', { defaultValue: 'Search' })}><SearchOutlined /></button>
 
           <span className="spacer" />
 
-          <Dropdown menu={langMenu} placement="bottomRight">
-            <button className="icon-btn" aria-label={t('language_switch') || 'Switch language'} style={{ color: currentLang === 'zh' ? 'var(--accent)' : undefined }}><GlobalOutlined /></button>
-          </Dropdown>
+          <details className="header-menu">
+            <summary className="icon-btn" aria-label={t('language_switch') || 'Switch language'} style={{ color: currentLang === 'zh' ? 'var(--accent)' : undefined }}><GlobalOutlined /></summary>
+            <div className="menu-pop header-menu-pop">{renderMenuItems(langMenu.items)}</div>
+          </details>
           <button className="icon-btn" onClick={() => setThemeMode(isDark ? 'light' : 'dark')} aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')} title={isDark ? t('switch_to_light') : t('switch_to_dark')}>
             {isDark ? <SunOutlined /> : <MoonOutlined />}
           </button>
-          <NotificationBell />
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <button className="icon-btn" aria-label={t('user_menu') || 'User menu'} style={{ width: 'auto', gap: 8, padding: '0 8px' }}>
+          {shellEnhancementsReady ? <Suspense fallback={<button className="icon-btn" aria-label={t('notifications_aria') || 'Notifications'} disabled>•</button>}><NotificationBell /></Suspense> : <button className="icon-btn" aria-label={t('notifications_aria') || 'Notifications'} disabled>•</button>}
+          <details className="header-menu">
+            <summary className="icon-btn" aria-label={t('user_menu') || 'User menu'} style={{ width: 'auto', gap: 8, padding: '0 8px' }}>
               <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>
               {!isMobile && <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>}
-            </button>
-          </Dropdown>
+            </summary>
+            <div className="menu-pop header-menu-pop">{renderMenuItems(userMenu.items)}</div>
+          </details>
         </header>
 
         <NetworkStatusBanner />
         <main id="main-content" role="main" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <ErrorBoundary title={t('error_boundary_title')} description={t('error_boundary_desc')} retryText={t('error_boundary_retry')}>
-            <AnimatePresence mode="wait">
-              <motion.div 
-                key={location.pathname}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: PAGE_TRANSITION_SECONDS, ease: 'easeOut' }}
-                style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-              >
-                <Outlet />
-              </motion.div>
-            </AnimatePresence>
+            <div className="section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <Outlet />
+            </div>
           </ErrorBoundary>
         </main>
       </div>
@@ -483,18 +504,22 @@ export default function AppLayout() {
         </div>
       )}
 
-      <SessionRenameModal
-        open={!!renameSessionTarget}
-        initialTitle={renameSessionTarget?.title || ''}
-        title={i18n.language?.startsWith('zh') ? '重命名对话' : 'Rename conversation'}
-        okText={i18n.language?.startsWith('zh') ? '保存' : 'Save'}
-        cancelText={i18n.language?.startsWith('zh') ? '取消' : 'Cancel'}
-        placeholder={i18n.language?.startsWith('zh') ? '输入新的对话标题' : 'Enter a new conversation title'}
-        onCancel={() => setRenameSessionTarget(null)}
-        onConfirm={handleRenameSession}
-      />
+      {renameSessionTarget ? (
+        <Suspense fallback={null}>
+          <SessionRenameModal
+            open
+            initialTitle={renameSessionTarget.title}
+            title={i18n.language?.startsWith('zh') ? '重命名对话' : 'Rename conversation'}
+            okText={i18n.language?.startsWith('zh') ? '保存' : 'Save'}
+            cancelText={i18n.language?.startsWith('zh') ? '取消' : 'Cancel'}
+            placeholder={i18n.language?.startsWith('zh') ? '输入新的对话标题' : 'Enter a new conversation title'}
+            onCancel={() => setRenameSessionTarget(null)}
+            onConfirm={handleRenameSession}
+          />
+        </Suspense>
+      ) : null}
 
-      <CommandPalette open={cmdkOpen} onClose={() => setCmdkOpen(false)} />
+      {cmdkOpen ? <Suspense fallback={null}><CommandPalette open onClose={() => setCmdkOpen(false)} /></Suspense> : null}
     </div>
   );
 }

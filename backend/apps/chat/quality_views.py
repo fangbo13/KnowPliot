@@ -289,7 +289,11 @@ class KnowledgeGapActionView(APIView):
 
     def post(self, request, pk):
         with transaction.atomic():
-            ticket = KnowledgeGapTicket.objects.select_for_update().select_related("space").get(id=pk)
+            ticket = (
+                KnowledgeGapTicket.objects.select_for_update(of=("self",))
+                .select_related("space")
+                .get(id=pk)
+            )
             if not _can_review(request.user, ticket.space):
                 return _forbidden()
             if self.action == "assign":

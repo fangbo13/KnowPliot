@@ -1,22 +1,24 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Outlet } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App';
 
-const { accessState, adminLayoutSpy } = vi.hoisted(() => ({
+const { accessState, adminLayoutSpy, authState } = vi.hoisted(() => ({
   accessState: {
     allowed: new Set<string>(),
-    status: 'ready' as 'loading' | 'ready' | 'denied' | 'error',
+    status: 'ready' as 'loading' | 'ready' | 'denied' | 'error' | 'mismatch',
     defaultConsole: '/governance',
+    navigationMode: 'capability' as 'legacy' | 'capability',
   },
   adminLayoutSpy: vi.fn(),
+  authState: { isAuthenticated: true },
 }));
 
 vi.mock('./auth/AuthProvider', () => ({
-  useAuth: () => ({ isAuthenticated: true }),
+  useAuth: () => authState,
 }));
 
 vi.mock('./auth/ProtectedRoute', () => ({
@@ -47,6 +49,15 @@ vi.mock('./auth/CapabilityProvider', () => ({
     enabled: true,
     status: accessState.status,
     snapshot: {
+      navigation_mode: accessState.navigationMode,
+      configuration_revision: 'config-v3',
+      feature_availability: {
+        deep: true,
+        thinking: false,
+        workspace_creation_approval: true,
+        workspace_join_v2: true,
+        workspace_permanent_delete: false,
+      },
       scopes: { platform: false, organization_ids: [], business_line_ids: [], space_ids: ['space-1'] },
       capabilities: [...accessState.allowed],
       default_console: accessState.defaultConsole,
@@ -59,10 +70,24 @@ vi.mock('./auth/CapabilityProvider', () => ({
   useCapabilities: () => ({
     enabled: true,
     status: accessState.status,
-    snapshot: null,
-    errorCode: null,
+    snapshot: {
+      navigation_mode: accessState.navigationMode,
+      configuration_revision: 'config-v3',
+      feature_availability: {
+        deep: true,
+        thinking: false,
+        workspace_creation_approval: true,
+        workspace_join_v2: true,
+        workspace_permanent_delete: false,
+      },
+      scopes: { platform: false, organization_ids: [], business_line_ids: [], space_ids: ['space-1'] },
+      capabilities: [...accessState.allowed],
+      default_console: accessState.defaultConsole,
+    },
+    errorCode: accessState.status === 'mismatch' ? 'navigation_mode_mismatch' : null,
     resolvedUserId: 'user-1',
     resolvedSpaceId: 'space-1',
+    expectedNavigationMode: 'capability',
     refresh: vi.fn(),
   }),
 }));
@@ -77,7 +102,7 @@ vi.mock('./pages/SpaceManagementPage', () => ({ default: () => <div>Spaces</div>
 vi.mock('./auth/LoginPage', () => ({ default: () => <div>Login</div> }));
 vi.mock('./auth/ResetPasswordPage', () => ({ default: () => <div>Reset</div> }));
 vi.mock('./pages/admin/KnowledgeBasePage', () => ({ default: () => <div /> }));
-vi.mock('./pages/admin/AdminDashboardPage', () => ({ default: () => <div /> }));
+vi.mock('./pages/admin/AdminDashboardPage', () => ({ default: () => <div>Admin dashboard</div> }));
 vi.mock('./pages/admin/AdminUsersPage', () => ({ default: () => <div>Platform users</div> }));
 vi.mock('./pages/admin/AdminCodesPage', () => ({ default: () => <div /> }));
 vi.mock('./pages/admin/AdminAnnouncementsPage', () => ({ default: () => <div /> }));
@@ -109,6 +134,8 @@ describe('App history routing', () => {
     accessState.allowed = new Set();
     accessState.status = 'ready';
     accessState.defaultConsole = '/governance';
+    accessState.navigationMode = 'capability';
+    authState.isAuthenticated = true;
     adminLayoutSpy.mockReset();
   });
 
@@ -116,7 +143,7 @@ describe('App history routing', () => {
     document.body.innerHTML = '';
   });
 
-  it('renders the existing History page at /history', () => {
+  it('renders the existing History page at /history', async () => {
     accessState.allowed = new Set(['chat.history']);
     render(
       <MemoryRouter
@@ -127,7 +154,7 @@ describe('App history routing', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('History route content')).toBeTruthy();
+    expect(await screen.findByText('History route content')).toBeTruthy();
   });
 
   it('denies direct chat and history routes when their capabilities are missing', () => {
@@ -156,7 +183,8 @@ describe('App history routing', () => {
     expect(screen.queryByText('Chat')).toBeNull();
   });
 
-  it('keeps the old admin layout while the capability flag is disabled', () => {
+  it('keeps the old admin layout while the paired legacy mode is selected', async () => {
+    accessState.navigationMode = 'legacy';
     render(
       <MemoryRouter
         initialEntries={['/admin/users']}
@@ -166,11 +194,12 @@ describe('App history routing', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Platform users')).toBeTruthy();
+    expect(await screen.findByText('Platform users')).toBeTruthy();
     expect(adminLayoutSpy).toHaveBeenCalled();
   });
 
-  it('keeps legacy workspace management available to authenticated users while disabled', () => {
+  it('keeps legacy workspace management available in paired legacy mode', async () => {
+    accessState.navigationMode = 'legacy';
     render(
       <MemoryRouter
         initialEntries={['/spaces/manage']}
@@ -180,11 +209,12 @@ describe('App history routing', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Spaces')).toBeTruthy();
+    expect(await screen.findByText('Spaces')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Access denied' })).toBeNull();
   });
 
-  it('keeps new console URLs behind the disabled rollout flag', () => {
+  it('keeps new console URLs behind paired legacy navigation', async () => {
+    accessState.navigationMode = 'legacy';
     accessState.allowed = new Set(['platform.access', 'platform.users.manage']);
     render(
       <MemoryRouter
@@ -195,11 +225,11 @@ describe('App history routing', () => {
       </MemoryRouter>,
     );
 
-    expect(adminLayoutSpy).toHaveBeenCalled();
+    await waitFor(() => expect(adminLayoutSpy).toHaveBeenCalled());
     expect(screen.queryByText('Platform users')).toBeNull();
   });
 
-  it('redirects old admin URLs to default_console without mounting AdminLayout', () => {
+  it('redirects old admin URLs to default_console without mounting AdminLayout', async () => {
     accessState.allowed = new Set(['governance.access']);
     accessState.defaultConsole = '/governance';
 
@@ -212,7 +242,7 @@ describe('App history routing', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Governance')).toBeTruthy();
+    expect(await screen.findByText('Governance')).toBeTruthy();
     expect(adminLayoutSpy).not.toHaveBeenCalled();
     expect(screen.queryByText('Platform users')).toBeNull();
   });
@@ -231,7 +261,7 @@ describe('App history routing', () => {
     expect(screen.queryByText('Platform users')).toBeNull();
   });
 
-  it('routes platform users only after both console and page capabilities pass', () => {
+  it('routes platform users only after both console and page capabilities pass', async () => {
     accessState.allowed = new Set(['platform.access', 'platform.users.manage']);
     accessState.defaultConsole = '/platform-admin';
 
@@ -244,6 +274,57 @@ describe('App history routing', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Platform users')).toBeTruthy();
+    expect(await screen.findByText('Platform users')).toBeTruthy();
+  });
+
+  it('uses an authorized same-origin next path for an already-authenticated login route', async () => {
+    accessState.allowed = new Set(['platform.access', 'platform.users.manage']);
+    accessState.defaultConsole = '/platform-admin';
+
+    render(
+      <MemoryRouter
+        initialEntries={['/login?next=%2Fplatform-admin%2Fusers']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App capabilityNavigationEnabled />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Platform users')).toBeTruthy();
+  });
+
+  it('uses default_console for root entry without consulting role names', async () => {
+    accessState.allowed = new Set(['platform.access']);
+    accessState.defaultConsole = '/platform-admin';
+
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App capabilityNavigationEnabled />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Admin dashboard')).toBeTruthy();
+  });
+
+  it('shows one bounded mismatch state without mounting either console tree', () => {
+    accessState.status = 'mismatch';
+    accessState.navigationMode = 'legacy';
+    accessState.allowed = new Set(['platform.access', 'platform.users.manage']);
+
+    render(
+      <MemoryRouter
+        initialEntries={['/platform-admin/users']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App capabilityNavigationEnabled />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Navigation unavailable' })).toBeTruthy();
+    expect(adminLayoutSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText('Platform users')).toBeNull();
   });
 });

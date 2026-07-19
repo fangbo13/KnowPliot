@@ -5,7 +5,8 @@
  */
 
 import apiClient from './client';
-import type { ChatSession, Citation, Message } from '../store/chatStore';
+import type { ChatExecutionSnapshot, ChatSession, Citation, Message } from '../store/chatStore';
+export type { ChatExecutionSnapshot, ExecutionSnapshot } from '../store/chatStore';
 
 export interface CursorPage<T> {
   results: T[];
@@ -45,6 +46,9 @@ export interface ChatMessageRecord {
   needs_human_review?: boolean;
   retrieval_mode?: string;
   retrieval_latency_ms?: number | null;
+  /** Assistant-only server-owned execution snapshot; absent on user rows. */
+  execution_snapshot?: ChatExecutionSnapshot | null;
+  executionSnapshot?: ChatExecutionSnapshot | null;
   created_at?: string;
   createdAt?: string;
 }

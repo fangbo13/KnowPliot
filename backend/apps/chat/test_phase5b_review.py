@@ -12,6 +12,7 @@ from apps.chat.models import (
     Message,
 )
 from apps.spaces.models import BusinessLine, KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -24,13 +25,17 @@ class Phase5BBase(APITestCase):
         cls.line = BusinessLine.objects.create(
             organization=cls.org, name="Review Line", code="review-line"
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.owner = User.objects.create_user(
+            username="review-owner", email="review-owner@example.com", password="test"
+        )
+        cls.space = create_test_space(
             organization=cls.org,
+            owner=cls.owner,
             business_line=cls.line,
             name="Review Space",
             code="review-space",
         )
-        cls.other_space = KnowledgeSpace.objects.create(
+        cls.other_space = create_test_space(
             organization=cls.org,
             business_line=cls.line,
             name="Other Review Space",
@@ -42,17 +47,11 @@ class Phase5BBase(APITestCase):
         cls.reviewer = User.objects.create_user(
             username="reviewer", email="reviewer@example.com", password="test"
         )
-        cls.owner = User.objects.create_user(
-            username="review-owner", email="review-owner@example.com", password="test"
-        )
         SpaceMembership.objects.create(
             user=cls.member, space=cls.space, role=SpaceMembership.ROLE_MEMBER
         )
         SpaceMembership.objects.create(
             user=cls.reviewer, space=cls.space, role=SpaceMembership.ROLE_REVIEWER
-        )
-        SpaceMembership.objects.create(
-            user=cls.owner, space=cls.space, role=SpaceMembership.ROLE_OWNER
         )
 
     def setUp(self):

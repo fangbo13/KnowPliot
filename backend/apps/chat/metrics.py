@@ -18,7 +18,16 @@ _NUMERIC_KEYS = frozenset(
 _IDEMPOTENCY_VALUES = frozenset(
     {"created", "retry", "completed", "in_progress", "terminal", "conflict"}
 )
-_BOOLEAN_KEYS = frozenset({"idempotency_rollout_enabled"})
+_BOOLEAN_KEYS = frozenset({"idempotency_rollout_enabled", "thinking_enabled"})
+_ANSWER_MODES = frozenset({"fast", "deep"})
+_POLICY_FALLBACK_CODES = frozenset(
+    {
+        "",
+        "deep_mode_disabled",
+        "thinking_budget_invalid",
+        "thinking_mode_disabled",
+    }
+)
 
 
 def sanitize_turn_metrics(values: dict) -> dict:
@@ -32,6 +41,12 @@ def sanitize_turn_metrics(values: dict) -> dict:
             sanitized[key] = max(0, int(value))
             continue
         if key == "idempotency_disposition" and value in _IDEMPOTENCY_VALUES:
+            sanitized[key] = value
+            continue
+        if key == "effective_answer_mode" and value in _ANSWER_MODES:
+            sanitized[key] = value
+            continue
+        if key == "policy_fallback_code" and value in _POLICY_FALLBACK_CODES:
             sanitized[key] = value
             continue
         if key in _BOOLEAN_KEYS and isinstance(value, bool):

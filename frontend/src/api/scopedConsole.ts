@@ -5,7 +5,7 @@
  */
 
 import type { AuditLog, AuditLogQuery, SystemMetrics } from './admin';
-import apiClient from './client';
+import apiClient, { coalescedGet, getRequestSignal } from './client';
 
 export interface ScopedConsoleUser {
   id: string;
@@ -15,54 +15,80 @@ export interface ScopedConsoleUser {
 
 export interface SpaceAccessRequest {
   id: string;
-  user: string;
-  user_email?: string;
+  space_id: string;
+  requester_uuid: string;
+  source_kind: 'access_code' | 'discovery';
   reason: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
-  rejection_reason?: string;
-  created_at: string;
+  role: 'member' | 'guest';
+  role_ceiling: 'member' | 'guest';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'expired' | 'invalidated';
+  request_version: number;
+  expires_at: string;
+  decision_reason_code: string;
+  resulting_membership_uuid: string | null;
 }
 
 const unwrap = <T>(data: T[] | { results?: T[] }): T[] =>
-  Array.isArray(data) ? data : data.results ?? [];
+  Array.isArray(data)
+    ? data
+    : Array.isArray(data.results)
+      ? data.results
+      : (() => { throw new Error('invalid_scoped_console_list_response'); })();
+
+function readConfig(signal?: AbortSignal, params?: object) {
+  const effectiveSignal = signal ?? getRequestSignal();
+  if (effectiveSignal || params) return { ...(params ? { params } : {}), ...(effectiveSignal ? { signal: effectiveSignal } : {}) };
+  return undefined;
+}
 
 export const scopedConsoleApi = {
-  async users(query = ''): Promise<ScopedConsoleUser[]> {
-    const { data } = await apiClient.get('/admin/users/', {
-      params: query ? { q: query } : {},
-    });
+  async users(query = '', signal?: AbortSignal): Promise<ScopedConsoleUser[]> {
+    const { data } = await coalescedGet<ScopedConsoleUser[] | { results?: ScopedConsoleUser[] }>(
+      '/admin/users/',
+      readConfig(signal, query ? { q: query } : {}),
+    );
     return unwrap<ScopedConsoleUser>(data);
   },
 
-  async metrics(): Promise<SystemMetrics> {
-    const { data } = await apiClient.get('/admin/metrics/');
+  async metrics(signal?: AbortSignal): Promise<SystemMetrics> {
+    const { data } = await coalescedGet<SystemMetrics>('/admin/metrics/', readConfig(signal));
     return data;
   },
 
-  async audit(params: AuditLogQuery = {}): Promise<AuditLog[]> {
-    const { data } = await apiClient.get('/audit/logs/', { params });
+  async audit(params: AuditLogQuery = {}, signal?: AbortSignal): Promise<AuditLog[]> {
+    const { data } = await coalescedGet<AuditLog[] | { results?: AuditLog[] }>('/audit/logs/', readConfig(signal, params));
     return unwrap<AuditLog>(data);
   },
 
-  async accessRequests(spaceId: string): Promise<SpaceAccessRequest[]> {
-    const { data } = await apiClient.get(
-      `/admin/spaces/${spaceId}/access-requests/`,
+  async accessRequests(spaceId: string, signal?: AbortSignal): Promise<SpaceAccessRequest[]> {
+    const { data } = await coalescedGet<SpaceAccessRequest[] | { results?: SpaceAccessRequest[] }>(
+      `/spaces/${spaceId}/access-requests/`,
+      readConfig(signal),
     );
     return unwrap<SpaceAccessRequest>(data);
   },
 
-  async approveAccessRequest(spaceId: string, requestId: string): Promise<SpaceAccessRequest> {
+  async approveAccessRequest(spaceId: string, request: SpaceAccessRequest): Promise<SpaceAccessRequest> {
     const { data } = await apiClient.post(
-      `/admin/spaces/${spaceId}/access-requests/${requestId}/approve/`,
-      {},
+      `/spaces/${spaceId}/access-requests/${request.id}/approve/`,
+      {
+        expected_request_version: request.request_version,
+        role: request.role_ceiling === 'guest' ? 'guest' : 'member',
+      },
+      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
     );
     return data;
   },
 
-  async rejectAccessRequest(spaceId: string, requestId: string, reason: string): Promise<SpaceAccessRequest> {
+  async rejectAccessRequest(spaceId: string, request: SpaceAccessRequest, reason: string): Promise<SpaceAccessRequest> {
     const { data } = await apiClient.post(
-      `/admin/spaces/${spaceId}/access-requests/${requestId}/reject/`,
-      { reason },
+      `/spaces/${spaceId}/access-requests/${request.id}/reject/`,
+      {
+        expected_request_version: request.request_version,
+        reason_code: 'owner_rejected',
+        reason_text: reason,
+      },
+      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
     );
     return data;
   },

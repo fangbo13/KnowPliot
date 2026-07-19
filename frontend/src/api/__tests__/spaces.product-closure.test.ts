@@ -16,10 +16,13 @@ describe('workspace product closure APIs', () => {
     await spacesApi.requestAccess('space-1', { reason: 'Need policy access', role: 'member' });
 
     expect(get).toHaveBeenCalledWith('/spaces/discoverable/');
-    expect(post).toHaveBeenCalledWith('/spaces/space-1/access-requests/', {
-      reason: 'Need policy access',
-      role: 'member',
-    });
+    expect(post).toHaveBeenCalledWith(
+      '/spaces/space-1/access-requests/',
+      { reason: 'Need policy access' },
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+      }),
+    );
   });
 
   it('uses explicit lifecycle endpoints for restore, clone, and transfers', async () => {
@@ -117,11 +120,28 @@ describe('workspace product closure APIs', () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] });
     const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: {} });
 
-    await scopedConsoleApi.approveAccessRequest('space-1', 'request-1');
+    await scopedConsoleApi.approveAccessRequest('space-1', {
+      id: 'request-1',
+      space_id: 'space-1',
+      requester_uuid: 'user-1',
+      source_kind: 'access_code',
+      reason: '',
+      role: 'member',
+      role_ceiling: 'member',
+      status: 'pending',
+      request_version: 3,
+      expires_at: '2026-07-26T00:00:00Z',
+      decision_reason_code: '',
+      resulting_membership_uuid: null,
+    });
     await adminApi.modelProfiles();
     await adminApi.governancePolicies('space-1');
 
-    expect(post).toHaveBeenCalledWith('/admin/spaces/space-1/access-requests/request-1/approve/', {});
+    expect(post).toHaveBeenCalledWith(
+      '/spaces/space-1/access-requests/request-1/approve/',
+      { expected_request_version: 3, role: 'member' },
+      expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }),
+    );
     expect(get).toHaveBeenCalledWith('/admin/model-profiles/');
     expect(get).toHaveBeenCalledWith('/admin/governance/policies/', { params: { space: 'space-1' } });
   });

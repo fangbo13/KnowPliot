@@ -163,7 +163,12 @@ class FakeTurnRepository:
 class ChatTurnBeginServiceTest(SimpleTestCase):
     def setUp(self):
         self.user = SimpleNamespace(pk=7)
-        self.space = SimpleNamespace(id=uuid.uuid4())
+        self.space = SimpleNamespace(
+            id=uuid.uuid4(),
+            status="active",
+            organization=SimpleNamespace(status="active"),
+            business_line_id=None,
+        )
         self.session = SimpleNamespace(
             id=uuid.uuid4(),
             pk=None,
@@ -305,6 +310,7 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
             session=self.session,
             client_request_id=self.request_id,
             content="same question",
+            requested_answer_mode="deep",
             answer_mode="fast",
             model_id="fast-model",
             repository=repository,

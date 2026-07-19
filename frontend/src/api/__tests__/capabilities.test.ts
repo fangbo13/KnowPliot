@@ -9,6 +9,15 @@ describe('capabilities api', () => {
   it('requests the effective capability contract for the selected space', async () => {
     const signal = new AbortController().signal;
     const payload = {
+      navigation_mode: 'capability',
+      configuration_revision: 'config-v3',
+      feature_availability: {
+        deep: true,
+        thinking: false,
+        workspace_creation_approval: true,
+        workspace_join_v2: true,
+        workspace_permanent_delete: false,
+      },
       scopes: {
         platform: false,
         organization_ids: ['org-1'],
@@ -22,7 +31,7 @@ describe('capabilities api', () => {
 
     await expect(capabilitiesApi.me('space-1', signal)).resolves.toEqual(payload);
     expect(get).toHaveBeenCalledWith('/rbac/me/capabilities/', {
-      params: { space_id: 'space-1' },
+      params: { contract_version: 2, space_id: 'space-1' },
       signal,
     });
   });
@@ -30,6 +39,15 @@ describe('capabilities api', () => {
   it('omits space_id when no space is selected', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({
       data: {
+        navigation_mode: 'capability',
+        configuration_revision: 'config-v3',
+        feature_availability: {
+          deep: true,
+          thinking: false,
+          workspace_creation_approval: true,
+          workspace_join_v2: true,
+          workspace_permanent_delete: false,
+        },
         scopes: { platform: false, organization_ids: [], business_line_ids: [], space_ids: [] },
         capabilities: ['chat.ask'],
         default_console: '/chat',
@@ -39,8 +57,20 @@ describe('capabilities api', () => {
     await capabilitiesApi.me(null);
 
     expect(get).toHaveBeenCalledWith('/rbac/me/capabilities/', {
-      params: {},
+      params: { contract_version: 2 },
       signal: undefined,
     });
+  });
+
+  it('rejects an incomplete v2 bootstrap instead of guessing a navigation mode', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      data: {
+        scopes: { platform: false, organization_ids: [], business_line_ids: [], space_ids: [] },
+        capabilities: ['chat.ask'],
+        default_console: '/chat',
+      },
+    } as any);
+
+    await expect(capabilitiesApi.me(null)).rejects.toThrow('invalid_capability_contract');
   });
 });

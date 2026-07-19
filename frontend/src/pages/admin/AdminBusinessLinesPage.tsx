@@ -5,17 +5,21 @@
  */
 
 // V7.0 admin console — organizations & business lines.
-import { useEffect, useState, useCallback } from 'react';
-import { Card, Table, Button, Tag, Modal, Input, Select, Space, message as antdMessage } from 'antd';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Alert, Card, Table, Button, Tag, Modal, Input, Select, Space, message as antdMessage } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type BusinessLine, type Organization } from '../../api/admin';
+import { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 
 export default function AdminBusinessLinesPage() {
   const { t } = useTranslation('common');
   const [lines, setLines] = useState<BusinessLine[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const sequenceRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -24,15 +28,38 @@ export default function AdminBusinessLinesPage() {
   const [code, setCode] = useState('');
 
   const refresh = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     try {
-      const [b, o] = await Promise.all([adminApi.businessLines().catch(() => []), adminApi.organizations().catch(() => [])]);
+      const [b, o] = await Promise.all([
+        withRequestSignal(controller.signal, () => adminApi.businessLines()),
+        withRequestSignal(controller.signal, () => adminApi.organizations()),
+      ]);
+      if (controller.signal.aborted || sequence !== sequenceRef.current) return;
       setLines(b); setOrgs(o);
       if (!orgId && o.length) setOrgId(o[0].id);
-    } finally { setLoading(false); }
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== sequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
+    } finally {
+      if (sequence === sequenceRef.current && !controller.signal.aborted) setLoading(false);
+    }
   }, [orgId]);
 
-  useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void refresh();
+    return () => {
+      sequenceRef.current += 1;
+      controllerRef.current?.abort();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async () => {
     if (!orgId || !name.trim() || !code.trim()) return;
@@ -96,6 +123,17 @@ export default function AdminBusinessLinesPage() {
         </Space>
       </div>
       <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+        {loadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={loadError.code === 'rate_limited'
+              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: loadError.retryAfterSeconds })}`}`
+              : t('load_error')}
+            action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
+          />
+        )}
         <Table rowKey="id" loading={loading} dataSource={lines} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 

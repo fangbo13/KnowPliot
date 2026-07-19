@@ -6,9 +6,8 @@
 
 Two permission layers stack:
 
-1. **Platform RBAC** (``apps.rbac``): global roles ``admin`` / ``hr`` and the
-   Django ``is_superuser`` flag. A platform admin / superuser is treated as
-   **Super Admin** with full access to every space.
+1. **Platform/governance RBAC** (``apps.rbac``): controls platform metadata and
+   governed workflows, but never synthesizes workspace content access.
 
 2. **Space roles** (``SpaceMembership.role``): owner / knowledge_admin /
    reviewer / member / guest, granting a fixed set of space-scoped permission
@@ -22,7 +21,6 @@ All checks here are **server-side**. Frontend role guards are UX only.
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -85,12 +83,14 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
 }
 
-# Synthetic roles granting full access within a scope.
+# Legacy role labels retained for compatibility responses only. They are never
+# returned by ``effective_space_role`` and do not synthesize content access.
 ROLE_SUPER_ADMIN = "super_admin"  # platform-wide (superuser / global 'admin')
 ROLE_ORG_ADMIN = "org_admin"  # full access within one organization
 ROLE_BUSINESS_ADMIN = "business_admin"  # full access within one business line
 
-# Roles that bypass the per-role permission matrix (full access in scope).
+# Legacy compatibility set; effective workspace roles come only from explicit
+# membership/public-demo policy.
 _FULL_ACCESS_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_BUSINESS_ADMIN}
 
 
@@ -204,8 +204,9 @@ def can_restore_space(user, space: KnowledgeSpace) -> bool:
     """Authorize the exceptional transition from archived to active.
 
     Archived spaces are intentionally outside the normal effective-role
-    boundary. Restoration therefore rechecks an explicit owner/governance grant
-    while still requiring active organization and business-line parents.
+    boundary. Restoration therefore rechecks the explicit canonical owner
+    membership while still requiring active organization and business-line
+    parents.
     """
 
     if not user or not user.is_authenticated:
@@ -214,13 +215,8 @@ def can_restore_space(user, space: KnowledgeSpace) -> bool:
         return False
     if space.business_line_id and space.business_line.status != "active":
         return False
-    if is_platform_admin(user):
-        return True
-    organization_ids, business_line_ids = admin_scope(user)
-    if space.organization_id in organization_ids:
-        return True
-    if space.business_line_id and space.business_line_id in business_line_ids:
-        return True
+    if space.owner_id != user.id:
+        return False
     membership = (
         SpaceMembership.objects.filter(
             user=user,
@@ -236,21 +232,14 @@ def can_restore_space(user, space: KnowledgeSpace) -> bool:
 def effective_space_role(user, space: KnowledgeSpace) -> str | None:
     """Resolve the user's effective role in ``space``.
 
-    Returns ``ROLE_SUPER_ADMIN`` for platform admins, the membership role for
-    active members, ``guest`` for public-demo spaces, else ``None`` (no access).
+    Returns the explicit effective membership role, ``guest`` for an enabled
+    public-demo space, or ``None``. Governance scopes never synthesize content
+    access or workspace ownership.
     """
     if not user or not user.is_authenticated:
         return None
     if not _space_lifecycle_is_active(space):
         return None
-    if is_platform_admin(user):
-        return ROLE_SUPER_ADMIN
-    # Org-/business-line admins have full access within their scope.
-    org_ids, bl_ids = admin_scope(user)
-    if space.organization_id in org_ids:
-        return ROLE_ORG_ADMIN
-    if space.business_line_id and space.business_line_id in bl_ids:
-        return ROLE_BUSINESS_ADMIN
     membership = (
         effective_space_memberships(user)
         .filter(space=space)
@@ -259,11 +248,6 @@ def effective_space_role(user, space: KnowledgeSpace) -> str | None:
     )
     if membership:
         return membership.role
-    if (
-        getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False)
-        and space.visibility == "public_demo"
-    ):
-        return SpaceMembership.ROLE_GUEST
     return None
 
 
@@ -283,46 +267,34 @@ def spaces_with_permission(user, perm: str):
     spaces = active_spaces()
     if not user or not user.is_authenticated:
         return spaces.none()
-    if is_platform_admin(user):
-        return spaces
-
     eligible_roles = [
         role for role, permissions in ROLE_PERMISSIONS.items() if perm in permissions
     ]
     member_space_ids = effective_space_memberships(user).filter(
         role__in=eligible_roles
     ).values_list("space_id", flat=True)
-    org_ids, bl_ids = admin_scope(user)
-    access = (
-        Q(id__in=member_space_ids)
-        | Q(organization_id__in=list(org_ids))
-        | Q(business_line_id__in=list(bl_ids))
-    )
-    if (
-        getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False)
-        and perm in ROLE_PERMISSIONS[SpaceMembership.ROLE_GUEST]
-    ):
-        access |= Q(visibility="public_demo")
+    access = Q(id__in=member_space_ids)
     return spaces.filter(access).distinct()
 
 
 def accessible_spaces(user):
     """Queryset of spaces the user may see."""
     spaces = active_spaces()
-    if is_platform_admin(user):
-        return spaces
     member_space_ids = effective_space_memberships(user).values_list(
         "space_id", flat=True
     )
-    org_ids, bl_ids = admin_scope(user)
-    access = (
-        Q(id__in=member_space_ids)
-        | Q(organization_id__in=list(org_ids))
-        | Q(business_line_id__in=list(bl_ids))
-    )
-    if getattr(settings, "ENABLE_PUBLIC_DEMO_SPACES", False):
-        access |= Q(visibility="public_demo")
+    access = Q(id__in=member_space_ids)
     return spaces.filter(access).distinct()
+
+
+def ensure_workspace_writable(space: KnowledgeSpace) -> None:
+    """Fence every content/grant write once the tenant lifecycle is inactive."""
+
+    if _space_lifecycle_is_active(space):
+        return
+    from .governed import GovernedWorkflowError
+
+    raise GovernedWorkflowError("workspace_not_writable")
 
 
 def get_space_or_404(space_id) -> KnowledgeSpace:
@@ -370,9 +342,10 @@ class SpaceDocumentPermission(BasePermission):
     """Document management gated by the *active space's* permissions (V6.0).
 
     Maps the HTTP method to a document permission code and checks it against the
-    active space (from the X-Space-Id header). Platform admins bypass. Space
-    owners and knowledge admins can manage their space's documents; members can
-    only view. When no space is selected, only platform admins may proceed.
+    active space (from the X-Space-Id header). Space owners and knowledge
+    admins can manage their space's documents; members can only view. Platform
+    and governance metadata authority never substitutes for an explicit
+    workspace membership or content capability.
 
     Replaces the old global ``IsHROrAdmin`` gate, which could not express
     "knowledge admin of space X" without granting access to every space.
@@ -392,8 +365,6 @@ class SpaceDocumentPermission(BasePermission):
         user = request.user
         if not user or not user.is_authenticated:
             return False
-        if is_platform_admin(user):
-            return True
         # Raises NotFound if a space id is supplied but inaccessible.
         space = resolve_request_space(request, required=False)
         if space is None:

@@ -16,6 +16,9 @@ vi.mock('../../api/client', () => ({
   default: {
     get: vi.fn(),
   },
+  getRateLimitDetails: () => null,
+  isAbortError: () => false,
+  withRequestSignal: (_signal: AbortSignal, callback: () => unknown) => callback(),
 }));
 
 vi.mock('../../api/admin', () => ({

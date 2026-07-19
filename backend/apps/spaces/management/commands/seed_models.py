@@ -4,7 +4,7 @@
 
 """Seed governed model profiles and the default governance policy.
 
-Creates the two SPEC §7 model profiles (fast = qwen-plus, deep = qwen3.7-plus)
+Creates the two SPEC §7 model profiles (fast = qwen3.6-flash, deep = qwen3.7-plus)
 and an organization-level `GovernancePolicy` revision that binds them, so the
 RAG generation resolver no longer falls back to the `.env` `QWEN_CHAT_MODEL`
 value and governed fast/deep resolution can be exercised locally.
@@ -32,19 +32,21 @@ from apps.spaces.models import (
 )
 
 FAST_PROFILE = {
-    "name": "qwen-plus",
+    "name": "qwen3.6-flash",
     "provider": "dashscope",
-    "model_id": "qwen-plus",
+    "model_id": "qwen3.6-flash",
 }
 DEEP_PROFILE = {
     "name": "qwen3.7-plus",
     "provider": "dashscope",
     "model_id": "qwen3.7-plus",
 }
-# SPEC §7: fast = qwen-plus (thinking disabled); deep = qwen3.7-plus
-# (thinking enabled, initial budget 1024). retrieval_top_k mirrors the
+# SPEC §7: model tier and thinking are independent. Both governed budgets start
+# at 1024, and thinking remains off unless each question explicitly requests it.
+# retrieval_top_k mirrors the
 # project default (RAG_TOP_K=8).
 DESIRED_VALUES = {
+    "fast_thinking_budget": 1024,
     "deep_thinking_budget": 1024,
     "retrieval_top_k": 8,
 }
@@ -99,8 +101,7 @@ class Command(BaseCommand):
         )
         already_bound = (
             latest is not None
-            and latest.values.get("fast_model_profile_id") == desired_values["fast_model_profile_id"]
-            and latest.values.get("deep_model_profile_id") == desired_values["deep_model_profile_id"]
+            and all(latest.values.get(key) == value for key, value in desired_values.items())
         )
         if already_bound:
             out.write(
@@ -115,7 +116,8 @@ class Command(BaseCommand):
                 self.style.SUCCESS(
                     f"  + GovernancePolicy revision {policy.revision} created: "
                     f"fast={fast.name}, deep={deep.name}, "
-                    f"deep_thinking_budget={desired_values['deep_thinking_budget']}, "
+                    f"thinking_budgets={desired_values['fast_thinking_budget']}/"
+                    f"{desired_values['deep_thinking_budget']}, "
                     f"retrieval_top_k={desired_values['retrieval_top_k']}"
                 )
             )
@@ -124,8 +126,9 @@ class Command(BaseCommand):
             self.style.WARNING(
                 "\n  Note: deep execution also requires DEEP_ANSWER_MODE=true in the\n"
                 "  environment and a backend restart (generation_policy gates deep on\n"
-                "  that Django setting; this seed cannot flip it). fast resolves to\n"
-                "  qwen-plus regardless of the QWEN_CHAT_MODEL fallback.\n"
+                "  that Django setting; this seed cannot flip it). Independent thinking\n"
+                "  also requires THINKING_MODE=true. The legacy QWEN_CHAT_MODEL alias\n"
+                "  must remain exactly qwen3.6-flash or readiness fails closed.\n"
             )
         )
         out.write(self.style.SUCCESS("\n[OK] seed_models complete."))

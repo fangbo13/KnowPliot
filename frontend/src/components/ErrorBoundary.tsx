@@ -5,7 +5,6 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { Button } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 
 interface Props {
@@ -60,15 +59,14 @@ export default class ErrorBoundary extends Component<Props, State> {
           <div className="ambient-glow" style={{ width: 64, height: 64, borderRadius: 16, background: 'var(--color-error, #ff4d4f)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontFamily: 'var(--font-family-serif)', marginBottom: 24 }}>!</div>
           <h2 style={{ fontSize: 20, fontWeight: 600, color: 'var(--color-text)', marginBottom: 8, letterSpacing: '-0.01em' }}>{this.props.title}</h2>
           <p style={{ fontSize: 15, color: 'var(--color-text-secondary)', marginBottom: 24, maxWidth: 400 }}>{this.props.description}</p>
-          <Button
-            type="primary"
-            icon={<ReloadOutlined />}
+          <button
+            type="button"
             onClick={this.handleRetry}
-            className="hover-lift btn-press"
-            style={{ borderRadius: 8, height: 40, padding: '0 24px' }}
+            className="hover-lift btn-press primary-btn"
+            style={{ borderRadius: 8, minHeight: 40, padding: '0 24px' }}
           >
-            {this.props.retryText}
-          </Button>
+            <ReloadOutlined aria-hidden="true" /> {this.props.retryText}
+          </button>
         </div>
       );
     }

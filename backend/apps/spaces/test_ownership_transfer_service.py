@@ -168,6 +168,39 @@ class OwnershipTransferServiceTests(TestCase):
         self.assertEqual(self.space.owner_id, successor.id)
         self.assertEqual(membership.role, SpaceMembership.ROLE_OWNER)
 
+    def test_force_rejects_actor_as_target_even_when_actor_is_same_org_member(self):
+        from apps.spaces.ownership_services import OwnershipConflict, OwnershipTransferService
+
+        governor = get_user_model().objects.create_user(
+            username="self-target-governor",
+            email="self-target-governor@example.test",
+            password="safe-password",
+        )
+        OrganizationMembership.objects.create(
+            user=governor,
+            organization=self.space.organization,
+            role=OrganizationMembership.ROLE_ORG_ADMIN,
+        )
+        create_space_with_owner(
+            organization=self.space.organization,
+            owner=governor,
+            name="Governor home",
+            code="self-target-governor-home",
+        )
+
+        with self.assertRaisesRegex(OwnershipConflict, "actor_target_separation_required"):
+            OwnershipTransferService.force(
+                actor=governor,
+                space_id=self.space.id,
+                to_owner_id=governor.id,
+                expected_ownership_version=1,
+                idempotency_key=uuid.uuid4(),
+                reason_code="forced",
+            )
+
+        self.space.refresh_from_db()
+        self.assertEqual(self.space.owner_id, self.owner.id)
+
     def test_idempotency_replay_returns_original_but_changed_request_conflicts(self):
         from apps.spaces.ownership_services import OwnershipConflict, OwnershipTransferService
 

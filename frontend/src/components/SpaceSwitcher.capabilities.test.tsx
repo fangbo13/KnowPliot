@@ -14,7 +14,12 @@ vi.mock('../auth/AuthProvider', () => ({
   useAuth: () => ({ user: { is_superuser: true, roles: ['admin'] } }),
 }));
 
-vi.mock('../auth/CapabilityProvider', () => ({ useAuthorization: vi.fn() }));
+vi.mock('../auth/CapabilityProvider', () => ({
+  useAuthorization: vi.fn(),
+  useCapabilities: () => ({
+    snapshot: { feature_availability: { workspace_join_v2: true } },
+  }),
+}));
 
 vi.mock('../store/spaceStore', () => ({
   useSpaceStore: () => ({

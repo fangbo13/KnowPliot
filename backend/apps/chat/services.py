@@ -11,6 +11,8 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
+from apps.spaces.permissions import ensure_workspace_writable
+
 from .models import ChatSession, ChatTurn, Message
 
 ACTIVE_TURN_STATUSES = frozenset(
@@ -184,7 +186,13 @@ class DjangoTurnRepository:
     """Small ORM adapter so decision behavior stays database-free testable."""
 
     def lock_user(self, user_id):
-        get_user_model().objects.select_for_update().only("pk").get(pk=user_id)
+        (
+            get_user_model()
+            .objects.select_for_update(of=("self",))
+            .only("pk")
+            .order_by("pk")
+            .get(pk=user_id)
+        )
 
     def lock_session(self, session_id):
         return (
@@ -218,6 +226,9 @@ class DjangoTurnRepository:
             update_fields=[
                 "status",
                 "answer_mode",
+                "thinking_enabled",
+                "thinking_budget",
+                "policy_fallback_code",
                 "attempt_count",
                 "error_code",
                 "model_id",
@@ -235,7 +246,13 @@ class DjangoSessionRepository:
     """Serialize legacy session lookup/backfill/create for one user."""
 
     def lock_user(self, user_id):
-        get_user_model().objects.select_for_update().only("pk").get(pk=user_id)
+        (
+            get_user_model()
+            .objects.select_for_update(of=("self",))
+            .only("pk")
+            .order_by("pk")
+            .get(pk=user_id)
+        )
 
     def find_session(self, session_id):
         return (
@@ -314,12 +331,25 @@ def resolve_chat_session(
         )
 
 
-def _same_request_scope_and_content(turn, *, session, user, space, content) -> bool:
+def _same_request_scope_and_content(
+    turn,
+    *,
+    session,
+    user,
+    space,
+    content,
+    requested_answer_mode,
+    requested_thinking_enabled,
+) -> bool:
     return (
         turn.session_id == session.id
         and turn.user_id == user.pk
         and turn.space_id == space.id
         and turn.question_message.content == content
+        and getattr(turn, "requested_answer_mode", turn.answer_mode)
+        == requested_answer_mode
+        and bool(getattr(turn, "requested_thinking_enabled", False))
+        == requested_thinking_enabled
     )
 
 
@@ -329,6 +359,11 @@ def begin_chat_turn(
     client_request_id,
     content: str,
     answer_mode: str,
+    requested_answer_mode: str | None = None,
+    requested_thinking_enabled: bool = False,
+    thinking_enabled: bool = False,
+    thinking_budget: int | None = None,
+    policy_fallback_code: str = "",
     model_id: str = "",
     question_message=None,
     repository: Any | None = None,
@@ -338,6 +373,7 @@ def begin_chat_turn(
 
     repository = repository or DjangoTurnRepository()
     atomic_factory = atomic_factory or transaction.atomic
+    requested_answer_mode = requested_answer_mode or answer_mode
 
     with atomic_factory():
         expected_user_id = getattr(session, "user_id", None)
@@ -360,6 +396,7 @@ def begin_chat_turn(
         session = locked_session
         user = locked_session.user
         space = locked_session.space
+        ensure_workspace_writable(space)
         turn = repository.find_turn(user, client_request_id)
         if turn is None:
             if question_message is None:
@@ -381,7 +418,13 @@ def begin_chat_turn(
                 space=space,
                 client_request_id=client_request_id,
                 question_message=question_message,
+                requested_answer_mode=requested_answer_mode,
                 answer_mode=answer_mode,
+                requested_thinking_enabled=requested_thinking_enabled,
+                thinking_enabled=thinking_enabled,
+                thinking_snapshot_known=True,
+                thinking_budget=thinking_budget,
+                policy_fallback_code=policy_fallback_code,
                 model_id=model_id,
             )
             repository.touch_session(session)
@@ -393,17 +436,9 @@ def begin_chat_turn(
             user=user,
             space=space,
             content=content,
+            requested_answer_mode=requested_answer_mode,
+            requested_thinking_enabled=requested_thinking_enabled,
         ):
-            return BeginTurnResult(turn, BeginTurnDisposition.CONFLICT)
-
-        mode_matches = turn.answer_mode == answer_mode
-        safe_deep_downgrade = (
-            turn.status == ChatTurn.STATUS_FAILED
-            and turn.error_code in RETRYABLE_ERROR_CODES
-            and turn.answer_mode == ChatTurn.ANSWER_MODE_DEEP
-            and answer_mode == ChatTurn.ANSWER_MODE_FAST
-        )
-        if not mode_matches and not safe_deep_downgrade:
             return BeginTurnResult(turn, BeginTurnDisposition.CONFLICT)
 
         if turn.status == ChatTurn.STATUS_COMPLETED:
@@ -416,6 +451,9 @@ def begin_chat_turn(
         ):
             turn.status = ChatTurn.STATUS_ACCEPTED
             turn.answer_mode = answer_mode
+            turn.thinking_enabled = thinking_enabled
+            turn.thinking_budget = thinking_budget
+            turn.policy_fallback_code = policy_fallback_code
             turn.attempt_count += 1
             turn.error_code = ""
             turn.model_id = model_id

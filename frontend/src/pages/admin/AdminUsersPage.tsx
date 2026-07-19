@@ -5,13 +5,14 @@
  */
 
 // V7.0 admin console — users & global roles (reuses rbac endpoints).
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Alert, Card, Divider, Modal, Table, Button, Tag, Select, Space, Popconfirm, message as antdMessage } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type AdminUser, type OffboardingImpact } from '../../api/admin';
 import { spacesApi, type OwnershipCandidate } from '../../api/spaces';
 import { useAuthorization } from '../../auth/CapabilityProvider';
+import { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 
 type AdminScope = { organization_id: string; business_line_id: string | null; role: string };
 const adminScopeKey = (scope: AdminScope) => `${scope.organization_id}:${scope.business_line_id ?? 'organization'}:${scope.role}`;
@@ -30,14 +31,40 @@ export default function AdminUsersPage() {
   const [adminSuccessors, setAdminSuccessors] = useState<Record<string, string>>({});
   const [impactLoading, setImpactLoading] = useState(false);
   const [offboarding, setOffboarding] = useState(false);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const sequenceRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
   const canOffboard = access.has('platform.users.offboard');
 
   const refresh = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
     setLoading(true);
-    try { setUsers(await adminApi.users()); } catch { antdMessage.error(t('load_error') || 'Failed'); } finally { setLoading(false); }
+    controllerRef.current = controller;
+    setLoadError(null);
+    try {
+      const nextUsers = await withRequestSignal(controller.signal, () => adminApi.users());
+      if (controller.signal.aborted || sequence !== sequenceRef.current) return;
+      setUsers(nextUsers);
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== sequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
+    } finally {
+      if (sequence === sequenceRef.current && !controller.signal.aborted) setLoading(false);
+    }
   }, [t]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      sequenceRef.current += 1;
+      controllerRef.current?.abort();
+    };
+  }, [refresh]);
 
   const assignRole = async (userId: string, roleName: string) => {
     try { await adminApi.assignRole(userId, roleName); await refresh(); antdMessage.success(t('member_role_updated') || 'Role assigned'); }
@@ -226,6 +253,17 @@ export default function AdminUsersPage() {
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
         </div>
         <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+          {loadError && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={loadError.code === 'rate_limited'
+                ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: loadError.retryAfterSeconds })}`}`
+                : t('load_error')}
+              action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
+            />
+          )}
           <Table rowKey="id" loading={loading} dataSource={users} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
         </Card>
         <Modal

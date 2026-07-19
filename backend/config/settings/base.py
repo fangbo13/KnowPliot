@@ -2,6 +2,7 @@
 # Licensed under the CC BY-NC-SA 4.0 License.
 # See LICENSE file in the project root for full license details.
 
+import json
 import os
 import warnings
 from pathlib import Path
@@ -191,11 +192,15 @@ REST_FRAMEWORK = {
     ],
     # V4.1 SYS-V4.1-004: Added AnonRateThrottle (100/min per IP) alongside UserRateThrottle
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.UserRateThrottle",
+        "apps.core.throttling.AuthenticatedReadSustainedThrottle",
+        "apps.core.throttling.AuthenticatedReadBurstThrottle",
+        "apps.core.throttling.AuthenticatedMutationThrottle",
         "rest_framework.throttling.AnonRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "user": "30/minute",
+        "navigation_read_sustained": "240/minute",
+        "navigation_read_burst": "60/10seconds",
+        "user_mutation": "30/minute",
         "anon": "100/minute",  # Per IP — prevents mass registration + API abuse
         # V4.2 KB-V4.2-BATCH-004: Dedicated upload throttle rates
         "document_upload": "10/minute",  # Per user — prevents API resource exhaustion
@@ -237,7 +242,24 @@ CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:
 # Celery — V4.1 SYS-V4.1-010: Redis now requires password
 CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
+CELERY_BEAT_SCHEDULE = {
+    "notification-action-outbox-sweep": {
+        "task": "apps.notifications.tasks.sweep_action_outbox",
+        "schedule": 60.0,
+    },
+}
+ACTION_OUTBOX_DELIVERY_ADAPTER = os.environ.get(
+    "ACTION_OUTBOX_DELIVERY_ADAPTER",
+    "",
+)
 CHAT_COORDINATION_REDIS_URL = os.environ.get("CHAT_COORDINATION_REDIS_URL", CELERY_BROKER_URL)
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.environ.get("RATE_LIMIT_REDIS_URL", CELERY_BROKER_URL),
+        "KEY_PREFIX": "knowpilot",
+    }
+}
 CHAT_TURN_IDEMPOTENCY = env_bool("CHAT_TURN_IDEMPOTENCY", default=False)
 CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "1",
@@ -247,6 +269,30 @@ CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
 }
 CAPABILITY_NAV = env_bool("CAPABILITY_NAV", default=False)
 DEEP_ANSWER_MODE = env_bool("DEEP_ANSWER_MODE", default=False)
+THINKING_MODE = env_bool("THINKING_MODE", default=False)
+WORKSPACE_CREATION_APPROVAL = env_bool("WORKSPACE_CREATION_APPROVAL", default=False)
+# Historical Phase-8 asset copying is permanently outside the v3 template
+# contract.  If an old deployment enables it, readiness and template-backed
+# creation both fail closed.
+TEMPLATE_ASSET_COPY_ENABLED = env_bool("TEMPLATE_ASSET_COPY_ENABLED", default=False)
+WORKSPACE_JOIN_V2 = env_bool("WORKSPACE_JOIN_V2", default=False)
+WORKSPACE_PERMANENT_DELETE = env_bool("WORKSPACE_PERMANENT_DELETE", default=False)
+SPACE_CREDENTIAL_PEPPER_VERSION = int(
+    os.environ.get("SPACE_CREDENTIAL_PEPPER_VERSION", "1")
+)
+try:
+    SPACE_CREDENTIAL_PEPPERS = {
+        int(version): str(secret)
+        for version, secret in json.loads(
+            os.environ.get("SPACE_CREDENTIAL_PEPPERS", "{}")
+        ).items()
+        if str(secret)
+    }
+except (TypeError, ValueError, json.JSONDecodeError):
+    SPACE_CREDENTIAL_PEPPERS = {}
+SPACE_INVITATION_ENCRYPTION_KEY = os.environ.get(
+    "SPACE_INVITATION_ENCRYPTION_KEY", ""
+).strip()
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -290,7 +336,8 @@ SERVICE_LINE_DEFAULT_SPACE = {
 }
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "8"))
 RAG_SIMILARITY_THRESHOLD = float(os.environ.get("RAG_SIMILARITY_THRESHOLD", "0.55"))
-RAG_LLM_MODEL = os.environ.get("QWEN_CHAT_MODEL", "qwen-plus")
+QWEN_CHAT_MODEL = os.environ.get("QWEN_CHAT_MODEL", "qwen3.6-flash")
+RAG_LLM_MODEL = QWEN_CHAT_MODEL
 RAG_EMBEDDING_MODEL = os.environ.get("QWEN_EMBEDDING_MODEL", "text-embedding-v4")
 RAG_EMBEDDING_DIM = 1024
 
@@ -298,6 +345,11 @@ RAG_EMBEDDING_DIM = 1024
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 LITELLM_API_KEY = DASHSCOPE_API_KEY
 LITELLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+TEST_PRINCIPAL_LEGACY_ALLOWLIST = tuple(
+    value.strip()
+    for value in os.environ.get("TEST_PRINCIPAL_LEGACY_ALLOWLIST", "").split(",")
+    if value.strip()
+)
 
 # File Upload
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))

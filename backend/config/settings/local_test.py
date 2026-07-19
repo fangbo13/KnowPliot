@@ -6,13 +6,24 @@
 Local test settings - use SQLite instead of PostgreSQL for quick testing
 本地测试设置 - 使用SQLite替代PostgreSQL进行快速测试
 """
+import os
+
 from config.settings.base import *  # noqa: F401, F403
 
 # Override database to use SQLite
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": os.environ.get("LOCAL_TEST_DB_PATH") or BASE_DIR / "db.sqlite3",
+    }
+}
+
+# Keep local unit tests hermetic. Production and shared-worker profiles retain
+# the Redis cache configured in ``base.py``.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "knowpilot-local-tests",
     }
 }
 

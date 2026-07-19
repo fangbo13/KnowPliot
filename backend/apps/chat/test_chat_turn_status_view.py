@@ -80,6 +80,9 @@ class ChatTurnStatusViewTest(SimpleTestCase):
             client_request_id=uuid.uuid4(),
             session_id=session.id,
             assistant_message=SimpleNamespace(id=uuid.uuid4()),
+            answer_mode="fast",
+            thinking_enabled=False,
+            policy_fallback_code="",
         )
         request = APIRequestFactory().post(
             reverse("chat-send-message", kwargs={"session_id": session.id}),
@@ -126,7 +129,13 @@ class ChatTurnStatusViewTest(SimpleTestCase):
     def test_active_duplicate_has_stable_conflict_code_and_turn_id(self):
         user = get_user_model()(id=9, email="owner@example.com")
         session = scoped_session(user)
-        turn = SimpleNamespace(id=uuid.uuid4(), client_request_id=uuid.uuid4())
+        turn = SimpleNamespace(
+            id=uuid.uuid4(),
+            client_request_id=uuid.uuid4(),
+            answer_mode="fast",
+            thinking_enabled=False,
+            policy_fallback_code="",
+        )
         request = APIRequestFactory().post(
             reverse("chat-send-message", kwargs={"session_id": session.id}),
             {"content": "same question", "client_request_id": str(uuid.uuid4())},
@@ -169,6 +178,10 @@ class ChatTurnStatusViewTest(SimpleTestCase):
             session_id=session.id,
             status=ChatTurn.STATUS_ACCEPTED,
             model_id="",
+            answer_mode="fast",
+            thinking_enabled=False,
+            thinking_budget=None,
+            policy_fallback_code="",
             error_code="",
             completed_at=None,
             assistant_message=None,

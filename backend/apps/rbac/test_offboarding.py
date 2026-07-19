@@ -97,11 +97,19 @@ class OffboardingImpactTests(APITestCase):
             name="Eligible successor space",
             code="eligible-successor-space",
         )
-        create_space_with_owner(
+        inactive_space = create_space_with_owner(
             organization=self.space.organization,
-            owner=inactive,
+            owner=eligible,
             name="Inactive successor space",
             code="inactive-successor-space",
+        )
+        from apps.spaces.models import SpaceMembership
+
+        SpaceMembership.objects.create(
+            space=inactive_space,
+            user=inactive,
+            role=SpaceMembership.ROLE_MEMBER,
+            status="active",
         )
 
         self.client.force_authenticate(self.actor)
@@ -190,6 +198,19 @@ class OffboardingImpactTests(APITestCase):
         self.assertTrue(result["offboarded"])
         self.assertFalse(self.subject.is_active)
         self.assertTrue(UserRole.objects.filter(user=successor, role=role, is_active=True).exists())
+
+    def test_offboarding_successor_candidates_exclude_the_acting_administrator(self):
+        role = Role.objects.create(name="admin", label="Administrator", scope="system")
+        UserRole.objects.create(user=self.subject, role=role, assigned_by=self.actor)
+        self.client.force_authenticate(self.actor)
+
+        response = self.client.get(
+            f"/api/v1/admin/users/{self.subject.id}/offboarding-admin-candidates/",
+            {"scope_type": "platform", "role": "admin"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn(str(self.actor.id), {row["id"] for row in response.data["results"]})
 
     def test_offboard_with_successor_transfers_owner_revokes_sessions_and_deactivates_subject(self):
         from apps.audit.models import AuditLog

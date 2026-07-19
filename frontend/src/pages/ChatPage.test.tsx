@@ -121,11 +121,12 @@ describe('ChatPage stream ownership gating', () => {
     };
   });
 
-  it('does not expose or lock session A stream while session B is active', () => {
+  it('does not expose or lock session A stream while session B is active', async () => {
     render(<ChatPage />);
 
-    expect(screen.getByTestId('message-list').getAttribute('data-streaming')).toBe('false');
-    expect(screen.getByTestId('message-list').textContent).not.toContain('private partial from A');
+    const messageList = await screen.findByTestId('message-list');
+    expect(messageList.getAttribute('data-streaming')).toBe('false');
+    expect(messageList.textContent).not.toContain('private partial from A');
     expect(screen.getByTestId('composer').getAttribute('data-streaming')).toBe('false');
     expect(screen.getByTestId('composer').getAttribute('data-disabled')).toBe('false');
     expect(screen.queryByText(/private partial from A/)).toBeNull();
@@ -149,16 +150,16 @@ describe('ChatPage stream ownership gating', () => {
     expect(screen.queryByText('Generating')).toBeNull();
   });
 
-  it('passes the exact chat.share decision to message rendering', () => {
+  it('passes the exact chat.share decision to message rendering', async () => {
     const view = render(<ChatPage />);
-    expect(screen.getByTestId('message-list').getAttribute('data-can-share')).toBe('false');
+    expect((await screen.findByTestId('message-list')).getAttribute('data-can-share')).toBe('false');
 
     mocks.canShare = true;
     view.rerender(<ChatPage />);
     expect(screen.getByTestId('message-list').getAttribute('data-can-share')).toBe('true');
   });
 
-  it('renders only safe application phases, timings, and citation-derived basis', () => {
+  it('renders only safe application phases, timings, and citation-derived basis', async () => {
     mocks.chatState.turnsBySession = {
       'session-b': {
         phase: 'streaming',
@@ -183,8 +184,8 @@ describe('ChatPage stream ownership gating', () => {
 
     render(<ChatPage />);
 
-    expect(screen.getByRole('button', { name: 'processing_panel_toggle' })).not.toBeNull();
-    expect(screen.getByText('Employee handbook')).not.toBeNull();
+    expect(await screen.findByRole('button', { name: 'processing_panel_toggle' })).not.toBeNull();
+    expect(await screen.findByText('Employee handbook')).not.toBeNull();
     expect(screen.queryByText('private chain of thought')).toBeNull();
     expect(screen.queryByText('permitted citation excerpt')).toBeNull();
   });

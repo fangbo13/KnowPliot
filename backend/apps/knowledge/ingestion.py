@@ -3,6 +3,8 @@
 from django.db import transaction
 from django.utils import timezone
 
+from apps.spaces.permissions import ensure_workspace_writable
+
 from .models import IngestionJob
 
 
@@ -26,7 +28,12 @@ def enqueue_document_ingestion(
         raise ValueError("Ingestion requires a space-scoped document.")
 
     with transaction.atomic():
-        document.__class__.objects.select_for_update().get(pk=document.pk)
+        document = (
+            document.__class__.objects.select_for_update(of=("self",))
+            .select_related("space__organization", "space__business_line")
+            .get(pk=document.pk)
+        )
+        ensure_workspace_writable(document.space)
         if (
             prevent_duplicate
             and IngestionJob.objects.filter(

@@ -11,6 +11,7 @@ from .views import (
     mark_all_read,
     mark_read,
     notifications_feed,
+    notification_action,
     unread_count,
 )
 
@@ -19,6 +20,7 @@ urlpatterns = [
     path("unread-count/", unread_count, name="notifications-unread-count"),
     path("read-all/", mark_all_read, name="notifications-read-all"),
     path("<uuid:item_id>/read/", mark_read, name="notifications-read"),
+    path("<uuid:item_id>/actions/<str:action>/", notification_action, name="notifications-action"),
     # Admin: publish / list announcements (version updates).
     path("announcements/", announcements, name="notifications-announcements"),
 ]

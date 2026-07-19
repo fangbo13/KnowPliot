@@ -5,7 +5,7 @@ that the V7 Identity / Admin Console / Notification flows work end-to-end
 against a live SQLite database (seeded by seed_identity).
 
 Usage:
-    D:\\Github\\Onborading-AI\\.venv\\Scripts\\python.exe scripts/smoke_v7_api.py
+    .venv\\Scripts\\python.exe backend\\scripts\\smoke_v7_api.py
 """
 import io
 import json

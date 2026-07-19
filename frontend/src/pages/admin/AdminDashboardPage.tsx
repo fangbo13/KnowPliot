@@ -4,15 +4,15 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Typography, Spin, message, Descriptions } from 'antd';
+import { useEffect, useState, useRef } from 'react';
+import { Alert, Card, Table, Button, Space, Typography, Spin, message, Descriptions } from 'antd';
 import {
   ReloadOutlined, TeamOutlined,
   DashboardOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
-import apiClient from '../../api/client';
+import apiClient, { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 import {
   adminApi,
   type DocumentQuality,
@@ -54,46 +54,67 @@ export default function AdminDashboardPage() {
   const [documentQuality, setDocumentQuality] = useState<DocumentQuality[]>([]);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [statusError, setStatusError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const usersSequenceRef = useRef(0);
+  const usersControllerRef = useRef<AbortController | null>(null);
+  const statusSequenceRef = useRef(0);
+  const statusControllerRef = useRef<AbortController | null>(null);
 
   const loadUsers = async () => {
+    const sequence = ++usersSequenceRef.current;
+    usersControllerRef.current?.abort();
+    const controller = new AbortController();
+    usersControllerRef.current = controller;
     setLoading(true);
     try {
-      const response = await apiClient.get('/rbac/users/');
+      const response = await apiClient.get('/rbac/users/', { signal: controller.signal });
       const data = response.data;
-      setUsers(data.results || data);
-    } catch (err: any) {
-      if (err.response?.status === 403) {
+      if (controller.signal.aborted || sequence !== usersSequenceRef.current) return;
+      if (!Array.isArray(data) && !Array.isArray(data?.results)) throw new Error('invalid_admin_users_response');
+      setUsers(Array.isArray(data) ? data : data.results);
+    } catch (err: unknown) {
+      if (isAbortError(err) || controller.signal.aborted || sequence !== usersSequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(err);
+      if (rateLimit) {
+        message.error(`${t('rate_limited') || 'Too many requests'}${rateLimit.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: rateLimit.retryAfterSeconds })}`}`);
+      } else if ((err as { response?: { status?: number } })?.response?.status === 403) {
         message.error(t('permission_denied') || 'Permission denied');
       } else {
         message.error(t('load_error') || 'Failed to load users');
       }
     } finally {
-      setLoading(false);
+      if (sequence === usersSequenceRef.current && !controller.signal.aborted) setLoading(false);
     }
   };
 
   // Phase 4B: health and metrics come from dedicated server-side checks.
   const loadSystemStatus = async () => {
+    const sequence = ++statusSequenceRef.current;
+    statusControllerRef.current?.abort();
+    const controller = new AbortController();
+    statusControllerRef.current = controller;
     setStatusLoading(true);
+    setStatusError(null);
     try {
       const [health, metrics, jobs, quality] = await Promise.all([
-        adminApi.health(),
-        adminApi.metrics(),
-        adminApi.ingestionJobs(),
-        adminApi.documentQuality(),
+        withRequestSignal(controller.signal, () => adminApi.health()),
+        withRequestSignal(controller.signal, () => adminApi.metrics()),
+        withRequestSignal(controller.signal, () => adminApi.ingestionJobs()),
+        withRequestSignal(controller.signal, () => adminApi.documentQuality()),
       ]);
+      if (controller.signal.aborted || sequence !== statusSequenceRef.current) return;
       setSystemHealth(health);
       setSystemMetrics(metrics);
       setIngestionJobs(jobs);
       setDocumentQuality(quality);
-    } catch {
-      setSystemHealth(null);
-      setSystemMetrics(null);
-      setIngestionJobs([]);
-      setDocumentQuality([]);
-      message.error('Failed to load system operations data');
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== statusSequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setStatusError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
     } finally {
-      setStatusLoading(false);
+      if (sequence === statusSequenceRef.current && !controller.signal.aborted) setStatusLoading(false);
     }
   };
 
@@ -111,8 +132,14 @@ export default function AdminDashboardPage() {
   };
 
   useEffect(() => {
-    loadUsers();
-    loadSystemStatus();
+    void loadUsers();
+    void loadSystemStatus();
+    return () => {
+      usersSequenceRef.current += 1;
+      statusSequenceRef.current += 1;
+      usersControllerRef.current?.abort();
+      statusControllerRef.current?.abort();
+    };
   }, []);
 
   const roleStyleMap: Record<string, { bg: string; text: string; border: string }> = {
@@ -334,6 +361,17 @@ export default function AdminDashboardPage() {
             </Button>
           }
         >
+          {statusError && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={statusError.code === 'rate_limited'
+                ? `${t('rate_limited') || 'Too many requests'}${statusError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: statusError.retryAfterSeconds })}`}`
+                : t('load_error')}
+              action={<Button onClick={() => void loadSystemStatus()}>{t('error_retry')}</Button>}
+            />
+          )}
           <Table
             columns={userColumns}
             dataSource={users}
@@ -359,6 +397,16 @@ export default function AdminDashboardPage() {
             </Space>
           }
         >
+          {statusError && !statusLoading && !systemHealth && (
+            <Alert
+              type="error"
+              showIcon
+              message={statusError.code === 'rate_limited'
+                ? `${t('rate_limited') || 'Too many requests'}${statusError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: statusError.retryAfterSeconds })}`}`
+                : t('load_error')}
+              action={<Button onClick={() => void loadSystemStatus()}>{t('error_retry')}</Button>}
+            />
+          )}
           {statusLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Spin />

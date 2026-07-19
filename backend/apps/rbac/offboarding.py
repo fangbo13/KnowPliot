@@ -379,7 +379,7 @@ def offboarding_admin_successor_candidates(request, user_id):
         if not impact["blockers"]["last_platform_admin"] or request.query_params.get("role") != "admin":
             return Response({"error_code": "invalid_admin_scope"}, status=status.HTTP_400_BAD_REQUEST)
         query = request.query_params.get("q", "").strip()
-        users = User.objects.filter(is_active=True).exclude(pk=subject.pk)
+        users = User.objects.filter(is_active=True).exclude(pk=subject.pk).exclude(pk=request.user.pk)
         if query:
             users = users.filter(Q(username__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query))
         return Response({
@@ -416,7 +416,7 @@ def offboarding_admin_successor_candidates(request, user_id):
     users = User.objects.filter(
         is_active=True,
         space_memberships__in=memberships,
-    ).exclude(pk=subject.pk)
+    ).exclude(pk=subject.pk).exclude(pk=request.user.pk)
     if query:
         users = users.filter(Q(username__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query))
     results = [

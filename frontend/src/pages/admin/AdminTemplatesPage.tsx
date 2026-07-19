@@ -4,10 +4,10 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Card, Table, Button, Tag, Modal, Select, Input, Space, Form, Switch, Tooltip,
+  Alert, Card, Table, Button, Tag, Modal, Select, Input, Space, Form, Switch, Tooltip,
   message as antdMessage,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, BuildOutlined, FileTextOutlined } from '@ant-design/icons';
@@ -17,9 +17,11 @@ import {
   type ScenarioTemplate,
   type ScenarioTemplateApplication,
   type ScenarioTemplateRevision,
+  type ScenarioTemplateRevisionPreview,
 } from '../../api/templates';
 import { adminApi, type Organization, type BusinessLine } from '../../api/admin';
 import { AppShell, PageHeader } from '../../design/primitives';
+import { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 
 export default function AdminTemplatesPage() {
   const { t } = useTranslation('common');
@@ -29,6 +31,9 @@ export default function AdminTemplatesPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [lines, setLines] = useState<BusinessLine[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const sequenceRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
   const [searchText, setSearchText] = useState(searchParams.get('q') || '');
   const [scenarioFilter, setScenarioFilter] = useState<ScenarioTemplate['scenario_type'] | undefined>(
     (searchParams.get('scenario_type') as ScenarioTemplate['scenario_type']) || undefined,
@@ -45,7 +50,7 @@ export default function AdminTemplatesPage() {
 
   // Modal / Form state for space instantiation
   const [open, setOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<ScenarioTemplate | null>(null);
+  const [selectedTemplate] = useState<ScenarioTemplate | null>(null);
   const [form] = Form.useForm();
   const [instantiating, setInstantiating] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
@@ -72,6 +77,9 @@ export default function AdminTemplatesPage() {
   // Snapshot detail modal state
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [selectedRevision, setSelectedRevision] = useState<ScenarioTemplateRevision | null>(null);
+  const [revisionPreview, setRevisionPreview] = useState<ScenarioTemplateRevisionPreview | null>(null);
+  const [revisionPreviewLoading, setRevisionPreviewLoading] = useState(false);
+  const [activatingRevisionId, setActivatingRevisionId] = useState<string | null>(null);
 
   // Modal / Form state for cloning templates
   const [cloneModalOpen, setCloneModalOpen] = useState(false);
@@ -81,10 +89,14 @@ export default function AdminTemplatesPage() {
   const [cloneOrgId, setCloneOrgId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
     setLoading(true);
+    setLoadError(null);
     try {
       const [tpls, o, b] = await Promise.all([
-        templatesApi.list({
+        withRequestSignal(controller.signal, () => templatesApi.list({
           q: searchText.trim() || undefined,
           scenario_type: scenarioFilter,
           is_active: statusFilter === undefined ? undefined : statusFilter === 'active',
@@ -94,18 +106,25 @@ export default function AdminTemplatesPage() {
           category: categoryFilter || undefined,
           tags: tagsFilter || undefined,
           sort,
-        }).catch(() => []),
-        adminApi.organizations().catch(() => []),
-        adminApi.businessLines().catch(() => []),
+        })),
+        withRequestSignal(controller.signal, () => adminApi.organizations()),
+        withRequestSignal(controller.signal, () => adminApi.businessLines()),
       ]);
+      if (controller.signal.aborted || sequence !== sequenceRef.current) return;
       setTemplates(tpls);
       setOrgs(o);
       setLines(b);
       if (o.length > 0) {
         setSelectedOrgId(o[0].id);
       }
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== sequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
     } finally {
-      setLoading(false);
+      if (sequence === sequenceRef.current && !controller.signal.aborted) setLoading(false);
     }
   }, [categoryFilter, lineFilter, orgFilter, scenarioFilter, scopeFilter, searchText, sort, statusFilter, tagsFilter]);
 
@@ -120,22 +139,12 @@ export default function AdminTemplatesPage() {
   }, [categoryFilter, scenarioFilter, searchText, setSearchParams, sort, tagsFilter]);
 
   useEffect(() => {
-    refresh();
+    void refresh();
+    return () => {
+      sequenceRef.current += 1;
+      controllerRef.current?.abort();
+    };
   }, [refresh]);
-
-  // Space creation trigger
-  const openCreateModal = (tpl: ScenarioTemplate) => {
-    setSelectedTemplate(tpl);
-    setSelectedOrgId(orgs.length > 0 ? orgs[0].id : '');
-    form.setFieldsValue({
-      name: `${tpl.name} Space`,
-      code: `${tpl.code}-space`,
-      organization: orgs.length > 0 ? orgs[0].id : undefined,
-      business_line: undefined,
-      visibility: tpl.default_visibility,
-    });
-    setOpen(true);
-  };
 
   const handleCreateSpace = async () => {
     if (!selectedTemplate) return;
@@ -301,9 +310,47 @@ export default function AdminTemplatesPage() {
     }
   };
 
-  const openSnapshotModal = (rev: ScenarioTemplateRevision) => {
+  const openSnapshotModal = async (rev: ScenarioTemplateRevision) => {
+    if (!selectedRevTemplate) return;
     setSelectedRevision(rev);
+    setRevisionPreview(null);
     setSnapshotModalOpen(true);
+    setRevisionPreviewLoading(true);
+    try {
+      const preview = await templatesApi.revisionPreview(selectedRevTemplate.id, rev.id);
+      setRevisionPreview(preview);
+    } catch {
+      antdMessage.error(t('admin_template_revision_preview_failed'));
+    } finally {
+      setRevisionPreviewLoading(false);
+    }
+  };
+
+  const activateRevision = async (rev: ScenarioTemplateRevision) => {
+    if (!selectedRevTemplate) return;
+    setActivatingRevisionId(rev.id);
+    try {
+      await templatesApi.activateRevision(selectedRevTemplate.id, rev.id, {
+        expected_template_version: selectedRevTemplate.latest_version,
+        expected_revision_hash: rev.snapshot_hash,
+      });
+      const [nextTemplate, nextRevisions] = await Promise.all([
+        templatesApi.get(selectedRevTemplate.id),
+        templatesApi.revisions(selectedRevTemplate.id),
+      ]);
+      setSelectedRevTemplate(nextTemplate);
+      setRevisions(nextRevisions);
+      setTemplates((current) => current.map((item) => (
+        item.id === nextTemplate.id ? nextTemplate : item
+      )));
+      antdMessage.success(t('admin_template_revision_activated'));
+    } catch (error: any) {
+      antdMessage.error(
+        error?.response?.data?.detail || t('admin_template_revision_activate_failed'),
+      );
+    } finally {
+      setActivatingRevisionId(null);
+    }
   };
 
   const openCloneModal = (tpl: ScenarioTemplate) => {
@@ -587,10 +634,13 @@ export default function AdminTemplatesPage() {
             type="primary"
             size="small"
             disabled={!r.is_active}
-            onClick={() => openCreateModal(r)}
+            onClick={() => {
+              if (!r.current_revision_id) return;
+              navigate(`/spaces/create?template_version_id=${encodeURIComponent(r.current_revision_id)}`);
+            }}
             style={{ borderRadius: 6 }}
           >
-            {t('create_space') || 'Create Space'}
+            {t('create_space') || 'Use as starting point'}
           </Button>
         </Space>
       ),
@@ -617,6 +667,14 @@ export default function AdminTemplatesPage() {
             {t('admin_create_template') || 'Create Template'}
           </Button>
         </Space>}
+      />
+
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message={t('admin_template_contract_title')}
+        description={t('admin_template_contract_description')}
       />
 
       <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
@@ -735,6 +793,17 @@ export default function AdminTemplatesPage() {
       </Card>
 
       <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: 20 } }}>
+        {loadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={loadError.code === 'rate_limited'
+              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: loadError.retryAfterSeconds })}`}`
+              : t('load_error')}
+            action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
+          />
+        )}
         <Table rowKey="id" loading={loading} dataSource={templates} columns={columns} pagination={false} size="middle" />
       </Card>
 
@@ -751,6 +820,12 @@ export default function AdminTemplatesPage() {
         cancelText={t('cancel') || 'Cancel'}
         destroyOnClose
       >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t('admin_template_create_snapshot_notice')}
+        />
         <Form form={form} layout="vertical" style={{ paddingTop: 12 }}>
           <Form.Item
             name="name"
@@ -1043,7 +1118,30 @@ export default function AdminTemplatesPage() {
               title: t('admin_template_version') || 'Version',
               dataIndex: 'version',
               key: 'version',
-              render: (val: number) => <Tag color="purple">v{val}</Tag>,
+              render: (val: number, rev: ScenarioTemplateRevision) => (
+                <Tag color={rev.published_at ? 'green' : 'gold'}>v{val}</Tag>
+              ),
+            },
+            {
+              title: t('admin_template_revision_hash'),
+              dataIndex: 'snapshot_hash',
+              key: 'snapshot_hash',
+              render: (value: string) => (
+                <Tooltip title={value}>
+                  <code>{value.slice(0, 12)}…</code>
+                </Tooltip>
+              ),
+            },
+            {
+              title: t('admin_template_filter_status'),
+              key: 'published_at',
+              render: (_: unknown, rev: ScenarioTemplateRevision) => (
+                <Tag color={rev.published_at ? 'green' : 'gold'}>
+                  {rev.published_at
+                    ? t('admin_template_revision_published')
+                    : t('admin_template_revision_draft')}
+                </Tag>
+              ),
             },
             {
               title: t('change_note') || 'Change Note',
@@ -1067,11 +1165,17 @@ export default function AdminTemplatesPage() {
               title: t('summary') || 'Summary',
               key: 'summary',
               render: (_: any, rev: ScenarioTemplateRevision) => {
-                const snap = rev.snapshot || {};
-                const q_count = snap.quick_questions ? snap.quick_questions.length : 0;
+                const components = (
+                  rev.snapshot && typeof rev.snapshot.components === 'object'
+                    ? rev.snapshot.components as Record<string, unknown>
+                    : {}
+                );
+                const included = Object.values(components).filter((value) => (
+                  Array.isArray(value) ? value.length > 0 : Boolean(value && Object.keys(value as object).length)
+                )).length;
                 return (
                   <span style={{ fontSize: 13 }}>
-                    {snap.name || '-'} / {snap.scenario_type || '-'} (Q: {q_count})
+                    {t('admin_template_revision_components', { count: included })}
                   </span>
                 );
               },
@@ -1079,11 +1183,30 @@ export default function AdminTemplatesPage() {
             {
               title: '',
               key: 'actions',
-              render: (_: any, rev: ScenarioTemplateRevision) => (
-                <Button type="link" size="small" onClick={() => openSnapshotModal(rev)}>
-                  {t('view') || 'View'}
-                </Button>
-              ),
+              render: (_: any, rev: ScenarioTemplateRevision) => {
+                const canActivate = Boolean(
+                  selectedRevTemplate?.can_manage
+                  && !rev.published_at
+                  && rev.version === selectedRevTemplate.latest_version,
+                );
+                return (
+                  <Space size="small">
+                    <Button type="link" size="small" onClick={() => void openSnapshotModal(rev)}>
+                      {t('view') || 'View'}
+                    </Button>
+                    {canActivate && (
+                      <Button
+                        type="link"
+                        size="small"
+                        loading={activatingRevisionId === rev.id}
+                        onClick={() => void activateRevision(rev)}
+                      >
+                        {t('admin_template_revision_activate')}
+                      </Button>
+                    )}
+                  </Space>
+                );
+              },
             },
           ]}
         />
@@ -1095,23 +1218,53 @@ export default function AdminTemplatesPage() {
         transitionName="fade"
         title={`${t('admin_template_revision_snapshot') || 'Revision Snapshot'} - v${selectedRevision?.version ?? ''}`}
         open={snapshotModalOpen}
-        onCancel={() => setSnapshotModalOpen(false)}
+        onCancel={() => {
+          setSnapshotModalOpen(false);
+          setRevisionPreview(null);
+          setSelectedRevision(null);
+        }}
         footer={null}
         width={600}
         destroyOnClose
       >
-        <pre style={{
-          maxHeight: '400px',
-          overflow: 'auto',
-          backgroundColor: 'var(--color-bg-sunken)',
-          border: '1px solid var(--color-border-secondary)',
-          padding: '12px',
-          borderRadius: '6px',
-          fontSize: 13,
-          fontFamily: 'monospace',
-        }}>
-          {JSON.stringify(selectedRevision?.snapshot, null, 2)}
-        </pre>
+        {revisionPreviewLoading ? (
+          <div>{t('loading')}</div>
+        ) : revisionPreview ? (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <div>
+              <strong>{t('admin_template_revision_hash')}: </strong>
+              <code style={{ wordBreak: 'break-all' }}>{revisionPreview.snapshot_hash}</code>
+            </div>
+            <div>
+              <strong>{t('admin_template_revision_included')}: </strong>
+              {revisionPreview.included_components.length > 0
+                ? revisionPreview.included_components.map((component) => (
+                  <Tag key={component} color="blue">{component}</Tag>
+                ))
+                : '-'}
+            </div>
+            <Alert
+              type="warning"
+              showIcon
+              message={t('admin_template_revision_excluded')}
+              description={revisionPreview.excluded_components.join(', ')}
+            />
+            <pre style={{
+              maxHeight: '400px',
+              overflow: 'auto',
+              backgroundColor: 'var(--color-bg-sunken)',
+              border: '1px solid var(--color-border-secondary)',
+              padding: '12px',
+              borderRadius: '6px',
+              fontSize: 13,
+              fontFamily: 'monospace',
+            }}>
+              {JSON.stringify(revisionPreview.components, null, 2)}
+            </pre>
+          </Space>
+        ) : (
+          <Alert type="error" message={t('admin_template_revision_preview_failed')} />
+        )}
       </Modal>
 
       {/* 6. Modal for cloning templates */}

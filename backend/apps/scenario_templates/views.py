@@ -2,11 +2,9 @@
 # Licensed under the CC BY-NC-SA 4.0 License.
 # See LICENSE file in the project root for full license details.
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Q
-from django.core.files.base import ContentFile
-from pathlib import Path
-import uuid
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -25,18 +23,24 @@ from .models import (
 )
 from .serializers import (
     CloneScenarioTemplateSerializer,
-    CreateSpaceFromTemplateSerializer,
     ScenarioTemplateApplicationSerializer,
+    ScenarioTemplateRevisionActivateSerializer,
+    ScenarioTemplateRevisionCreateSerializer,
     ScenarioTemplateRevisionSerializer,
     ScenarioTemplateSerializer,
     ScenarioTemplateAssetSerializer,
 )
-from apps.knowledge.ingestion import enqueue_document_ingestion
 from apps.knowledge.models import Document
-from apps.spaces.models import KnowledgeSpace, SpaceMembership, Organization, BusinessLine
-from apps.spaces.serializers import KnowledgeSpaceSerializer
+from apps.spaces.models import KnowledgeSpace, Organization, BusinessLine
 from apps.spaces.permissions import is_platform_admin, admin_scope
 from apps.spaces.views import _audit
+from .contract import (
+    legacy_template_projection,
+    normalize_revision_snapshot,
+    preview_payload,
+    revision_snapshot,
+    snapshot_hash,
+)
 
 
 def is_any_admin(user):
@@ -290,77 +294,65 @@ def _template_snapshot(template):
 
 
 def _record_template_revision(template, user, change_note=""):
-    """Append a new immutable revision for a template."""
-    latest = (
-        ScenarioTemplateRevision.objects
-        .filter(template=template)
-        .order_by("-version")
-        .first()
+    """Append a draft revision without moving the published current pointer."""
+
+    from .contract import legacy_template_components
+
+    with transaction.atomic():
+        locked = ScenarioTemplate.objects.select_for_update(of=("self",)).get(
+            pk=template.pk
+        )
+        latest = locked.revisions.order_by("-version").first()
+        next_version = (latest.version if latest else 0) + 1
+        return ScenarioTemplateRevision.objects.create(
+            template=locked,
+            version=next_version,
+            snapshot=revision_snapshot(
+                legacy_template_components(_template_snapshot(locked))
+            ),
+            change_note=change_note,
+            created_by=user,
+        )
+
+
+def _create_component_revision(*, template, user, components, change_note=""):
+    with transaction.atomic():
+        locked = ScenarioTemplate.objects.select_for_update(of=("self",)).get(
+            pk=template.pk
+        )
+        latest = locked.revisions.order_by("-version").first()
+        return ScenarioTemplateRevision.objects.create(
+            template=locked,
+            version=(latest.version if latest else 0) + 1,
+            snapshot=revision_snapshot(components),
+            change_note=change_note,
+            created_by=user,
+        )
+
+
+def _latest_template_version(template) -> int:
+    return (
+        template.revisions.order_by("-version").values_list("version", flat=True).first()
+        or 0
     )
-    next_version = (latest.version if latest else 0) + 1
-    return ScenarioTemplateRevision.objects.create(
-        template=template,
-        version=next_version,
-        snapshot=_template_snapshot(template),
-        change_note=change_note,
-        created_by=user,
-    )
+
+
+def _assert_revision_integrity(revision):
+    if revision.snapshot_hash != snapshot_hash(revision.snapshot):
+        from apps.spaces.governed import GovernedWorkflowError
+
+        raise GovernedWorkflowError("template_revision_not_ready", status_code=503)
 
 
 def _provision_template_asset(application, asset, user):
-    """Copy one asset and enqueue independent ingestion without orphaning files."""
-    record, _ = TemplateAssetApplication.objects.get_or_create(
-        application=application,
-        asset=asset,
-        defaults={"source_document": asset.document, "status": "pending"},
+    """Historical asset copying is fail-closed under the v3 clone contract."""
+    from apps.spaces.governed import GovernedWorkflowError
+
+    raise GovernedWorkflowError(
+        "template_asset_copy_disabled",
+        "Template document copying is disabled by the v3 clone contract.",
+        status_code=503,
     )
-    if record.target_document_id and record.status == "processing":
-        return record, None
-    target = None
-    try:
-        source = asset.document
-        with source.file.open("rb") as source_file:
-            file_content = source_file.read()
-        target = Document(
-            space=application.space,
-            title=source.title,
-            file_type=source.file_type,
-            file_size=len(file_content),
-            category=source.category,
-            tags=source.tags,
-            status="draft",
-            version=1,
-            effective_from=source.effective_from,
-            effective_to=source.effective_to,
-            uploaded_by=user,
-            content_hash="",
-            chunk_count=0,
-        )
-        safe_name = f"{uuid.uuid4()}-{Path(source.file.name).name}"
-        target.file.save(safe_name, ContentFile(file_content), save=False)
-        target.save()
-        job = enqueue_document_ingestion(
-            target,
-            requested_by=user,
-            trigger="upload",
-            prevent_duplicate=True,
-        )
-        record.target_document = target
-        record.ingestion_job = job
-        record.status = "processing"
-        record.error_code = ""
-        record.save()
-        return record, job.celery_task_id or None
-    except Exception as exc:
-        if target and target.pk:
-            target.file.delete(save=False)
-            target.delete()
-        record.target_document = None
-        record.ingestion_job = None
-        record.status = "failed"
-        record.error_code = exc.__class__.__name__
-        record.save()
-        return record, None
 
 
 class ScenarioTemplateViewSet(viewsets.ModelViewSet):
@@ -373,7 +365,7 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = ScenarioTemplate.objects.select_related(
-            "organization", "business_line", "category"
+            "organization", "business_line", "category", "current_revision"
         ).prefetch_related("tags")
         if is_any_admin(user):
             qs = qs.filter(_template_scope_filter(user))
@@ -398,15 +390,56 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                 request=request,
             )
             raise PermissionDenied("Only administrators can create templates.")
-        serializer = self.get_serializer(data=request.data)
+        canonical_fields = {"scope_type", "scope_id", "key", "display_name"}
+        if canonical_fields.intersection(request.data):
+            unknown = sorted(set(request.data) - canonical_fields)
+            missing = sorted(canonical_fields - set(request.data))
+            if unknown or missing:
+                raise ValidationError(
+                    {"unknown_fields": unknown, "missing_fields": missing}
+                )
+            scope_type = request.data.get("scope_type")
+            scope_id = request.data.get("scope_id")
+            org = bl = None
+            try:
+                if scope_type == "global":
+                    if scope_id not in (None, ""):
+                        raise ValidationError(
+                            {"scope_id": "Global templates do not have a scope ID."}
+                        )
+                elif scope_type == "organization":
+                    org = Organization.objects.get(pk=scope_id)
+                elif scope_type == "business_line":
+                    bl = BusinessLine.objects.select_related("organization").get(
+                        pk=scope_id
+                    )
+                    org = bl.organization
+                else:
+                    raise ValidationError({"scope_type": "Unsupported template scope."})
+            except (Organization.DoesNotExist, BusinessLine.DoesNotExist, ValueError):
+                raise ValidationError({"scope_id": "Template scope was not found."})
+            serializer_input = {
+                "name": request.data.get("display_name"),
+                "code": request.data.get("key"),
+                "organization": str(org.id) if org else None,
+                "business_line": str(bl.id) if bl else None,
+            }
+        else:
+            serializer_input = request.data
+        serializer = self.get_serializer(data=serializer_input)
         serializer.is_valid(raise_exception=True)
         org, bl = _resolve_template_scope(
             request.user,
             serializer.validated_data.get("organization"),
             serializer.validated_data.get("business_line"),
         )
-        template = serializer.save(created_by=request.user, organization=org, business_line=bl)
-        _record_template_revision(template, request.user, "created")
+        with transaction.atomic():
+            template = serializer.save(
+                created_by=request.user,
+                organization=org,
+                business_line=bl,
+            )
+            _record_template_revision(template, request.user, "created")
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
@@ -427,15 +460,23 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                 request=request,
             )
             raise PermissionDenied("You cannot update this template.")
-        serializer = self.get_serializer(template, data=request.data, partial=kwargs.pop("partial", False))
-        serializer.is_valid(raise_exception=True)
-        org, bl = _resolve_template_scope(
-            request.user,
-            serializer.validated_data.get("organization", template.organization),
-            serializer.validated_data.get("business_line", template.business_line),
-        )
-        template = serializer.save(organization=org, business_line=bl)
-        _record_template_revision(template, request.user, "updated")
+        with transaction.atomic():
+            template = ScenarioTemplate.objects.select_for_update(of=("self",)).get(
+                pk=template.pk
+            )
+            serializer = self.get_serializer(
+                template,
+                data=request.data,
+                partial=kwargs.pop("partial", False),
+            )
+            serializer.is_valid(raise_exception=True)
+            org, bl = _resolve_template_scope(
+                request.user,
+                serializer.validated_data.get("organization", template.organization),
+                serializer.validated_data.get("business_line", template.business_line),
+            )
+            template = serializer.save(organization=org, business_line=bl)
+            _record_template_revision(template, request.user, "updated")
         return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
@@ -456,129 +497,69 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                 request=request,
             )
             raise PermissionDenied("You cannot delete this template.")
-        return super().destroy(request, *args, **kwargs)
+        from apps.spaces.governed import GovernedWorkflowError
+
+        raise GovernedWorkflowError(
+            "template_delete_disabled",
+            "Templates are archived; published revision history is not deleted.",
+        )
 
     @action(detail=True, methods=["post"], url_path="create-space")
     def create_space(self, request, pk=None):
-        """Instantiate a KnowledgeSpace from a ScenarioTemplate."""
-        if not is_any_admin(request.user):
-            _audit(
-                request.user,
-                "permission_denied",
-                details={"action": "space.create_from_template"},
-                request=request,
-            )
-            raise PermissionDenied("Only administrators can create spaces from templates.")
-
+        """Compatibility adapter: submit a governed request, never clone data."""
         try:
             template = self.get_queryset().get(pk=pk)
         except ScenarioTemplate.DoesNotExist:
             raise NotFound("Template not found.")
-
-        # Ensure active template or platform/org admin bypass
-        if not template.is_active and not is_platform_admin(request.user):
+        if not template.is_active or not _can_use_template(request.user, template):
             raise NotFound("Template not found.")
-        if not _can_use_template(request.user, template):
-            raise NotFound("Template not found.")
+        if bool(getattr(settings, "TEMPLATE_ASSET_COPY_ENABLED", False)):
+            from apps.spaces.governed import GovernedWorkflowError
 
-        serializer = CreateSpaceFromTemplateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+            raise GovernedWorkflowError("template_clone_not_ready", status_code=503)
+        revision = template.current_revision
+        if revision is None or revision.published_at is None:
+            from apps.spaces.governed import GovernedWorkflowError
 
-        name = serializer.validated_data["name"]
-        code = serializer.validated_data["code"]
-        org = serializer.validated_data.get("organization")
-        bl = serializer.validated_data.get("business_line")
-        visibility = serializer.validated_data.get("visibility", template.default_visibility)
+            raise GovernedWorkflowError("template_revision_not_ready", status_code=503)
+        _assert_revision_integrity(revision)
+        revision_defaults = legacy_template_projection(revision.snapshot)
+        allowed = {
+            "name",
+            "code",
+            "purpose",
+            "visibility",
+            "business_line_id",
+            "work_group_id",
+            "office_location_ids",
+        }
+        unknown = sorted(set(request.data) - allowed)
+        if unknown:
+            raise ValidationError({"unknown_fields": unknown})
+        from apps.spaces.creation_services import submit_creation_request
+        from apps.spaces.governed import require_idempotency_key
 
-        org, bl = _resolve_space_scope(request.user, org, bl)
-
-        with transaction.atomic():
-            space = KnowledgeSpace.objects.create(
-                organization=org,
-                business_line=bl,
-                name=name,
-                code=code,
-                description=template.description,
-                icon=template.icon,
-                language=template.default_language,
-                visibility=visibility,
-                status="active",
-                created_by=request.user,
-                settings={
-                    "template_id": str(template.id),
-                    "template_code": template.code,
-                    "scenario_type": template.scenario_type,
-                    "quick_questions": template.quick_questions,
-                },
-            )
-            
-            # Creator becomes space owner
-            SpaceMembership.objects.create(
-                space=space,
-                user=request.user,
-                role=SpaceMembership.ROLE_OWNER,
-                status="active",
-                last_accessed_at=timezone.now(),
-            )
-            application = ScenarioTemplateApplication.objects.create(
-                template=template,
-                space=space,
-                organization=org,
-                business_line=bl,
-                created_by=request.user,
-                template_snapshot={
-                    **_template_snapshot(template),
-                    "latest_version": template.revisions.order_by("-version").values_list("version", flat=True).first() or 0,
-                },
-            )
-
-        assets = list(template.assets.select_related("document"))
-        task_ids = []
-        failures = 0
-        for asset in assets:
-            asset_application, task_id = _provision_template_asset(
-                application, asset, request.user
-            )
-            if asset_application.status == "failed":
-                failures += 1
-            elif task_id:
-                task_ids.append(task_id)
-
-        application.asset_total = len(assets)
-        application.task_ids = task_ids
-        application.provisioning_status = (
-            "partial_failure" if failures else ("processing" if assets else "completed")
+        payload = {
+            "name": request.data.get("name"),
+            "code": request.data.get("code"),
+            "purpose": request.data.get("purpose", template.description),
+            "visibility": request.data.get(
+                "visibility",
+                revision_defaults.get("default_visibility", "private"),
+            ),
+            "business_line_id": request.data.get("business_line_id"),
+            "work_group_id": request.data.get("work_group_id"),
+            "office_location_ids": request.data.get("office_location_ids"),
+            "template_version_id": str(revision.id),
+        }
+        body = submit_creation_request(
+            actor=request.user,
+            payload=payload,
+            idempotency_key=require_idempotency_key(request),
         )
-        application.save(
-            update_fields=["asset_total", "task_ids", "provisioning_status"]
-        )
-
-        _audit(
-            request.user,
-            "space_create",
-            target_id=space.id,
-            details={
-                "code": space.code,
-                "name": space.name,
-                "template_code": template.code,
-                "scenario_type": template.scenario_type,
-                "template_application_id": str(application.id),
-                "asset_total": application.asset_total,
-                "provisioning_status": application.provisioning_status,
-            },
-            request=request,
-        )
-
-        out = dict(KnowledgeSpaceSerializer(space, context={"request": request}).data)
-        out.update(
-            {
-                "application_id": str(application.id),
-                "asset_total": application.asset_total,
-                "task_ids": application.task_ids,
-                "provisioning_status": application.provisioning_status,
-            }
-        )
-        return Response(out, status=status.HTTP_201_CREATED)
+        if isinstance(body, Response):
+            return body
+        return Response(body, status=status.HTTP_202_ACCEPTED)
 
     @action(
         detail=True,
@@ -586,49 +567,10 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         url_path=r"applications/(?P<application_id>[^/.]+)/retry-assets",
     )
     def retry_assets(self, request, pk=None, application_id=None):
-        template = self.get_object()
-        if not _can_manage_template(request.user, template):
-            raise PermissionDenied("You cannot retry assets for this template.")
-        try:
-            application = template.applications.get(
-                id=application_id,
-                created_by=request.user,
-            )
-        except ScenarioTemplateApplication.DoesNotExist:
-            raise NotFound("Application not found.")
-        task_ids = list(application.task_ids)
-        for failed in application.asset_applications.filter(status="failed").select_related(
-            "asset", "asset__document"
-        ):
-            record, task_id = _provision_template_asset(
-                application, failed.asset, request.user
-            )
-            if task_id:
-                task_ids.append(task_id)
-        remaining = application.asset_applications.filter(status="failed").exists()
-        application.task_ids = list(dict.fromkeys(task_ids))
-        application.provisioning_status = (
-            "partial_failure" if remaining else "processing"
-        )
-        application.save(update_fields=["task_ids", "provisioning_status"])
-        _audit(
-            request.user,
-            "template_update",
-            target_id=template.id,
-            details={
-                "operation": "asset_retry",
-                "application_id": str(application.id),
-                "provisioning_status": application.provisioning_status,
-            },
-            request=request,
-        )
-        return Response(
-            {
-                "application_id": str(application.id),
-                "asset_total": application.asset_total,
-                "task_ids": application.task_ids,
-                "provisioning_status": application.provisioning_status,
-            }
+        from apps.spaces.governed import GovernedWorkflowError
+
+        raise GovernedWorkflowError(
+            "template_asset_copy_disabled", status_code=503
         )
 
     @action(detail=True, methods=["get"], url_path="applications")
@@ -652,11 +594,9 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         serializer = ScenarioTemplateApplicationSerializer(qs, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=["get"], url_path="revisions")
+    @action(detail=True, methods=["get", "post"], url_path="revisions")
     def revisions(self, request, pk=None):
-        """List immutable revision snapshots for this template."""
-        if not is_any_admin(request.user):
-            raise PermissionDenied("Only administrators can view template revisions.")
+        """List revisions or append one exact, immutable draft snapshot."""
         try:
             template = self.get_queryset().get(pk=pk)
         except ScenarioTemplate.DoesNotExist:
@@ -664,14 +604,207 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         if not _can_use_template(request.user, template):
             raise NotFound("Template not found.")
 
+        if request.method == "POST":
+            if not _can_manage_template(request.user, template):
+                raise PermissionDenied("You cannot create revisions for this template.")
+            payload = ScenarioTemplateRevisionCreateSerializer(data=request.data)
+            payload.is_valid(raise_exception=True)
+            from apps.spaces.governed import (
+                complete_operation_record,
+                digest_payload,
+                operation_record,
+                replay_response,
+                require_idempotency_key,
+            )
+
+            request_digest = digest_payload(
+                {
+                    "template_id": template.id,
+                    "action": "template_revision_create",
+                    **payload.validated_data,
+                }
+            )
+            with transaction.atomic():
+                with operation_record(
+                    actor=request.user,
+                    operation_code="template.revision.create",
+                    key=require_idempotency_key(request),
+                    request_digest=request_digest,
+                    target_uuid=template.id,
+                ) as (operation, replay):
+                    if replay:
+                        return replay_response(operation)
+                    locked = ScenarioTemplate.objects.select_for_update(
+                        of=("self",)
+                    ).get(pk=template.pk)
+                    latest_version = _latest_template_version(locked)
+                    expected = payload.validated_data["expected_template_version"]
+                    if expected != latest_version:
+                        from apps.spaces.governed import GovernedWorkflowError
+
+                        raise GovernedWorkflowError(
+                            "stale_template_version",
+                            details={"current_version": latest_version},
+                        )
+                    revision = ScenarioTemplateRevision.objects.create(
+                        template=locked,
+                        version=latest_version + 1,
+                        snapshot=revision_snapshot(payload.validated_data["components"]),
+                        change_note="v3 draft",
+                        created_by=request.user,
+                    )
+                    _audit(
+                        request.user,
+                        "config_change",
+                        target_id=template.id,
+                        details={
+                            "action": "template.revision.create",
+                            "revision_id": str(revision.id),
+                            "revision_version": revision.version,
+                            "snapshot_hash": revision.snapshot_hash,
+                        },
+                        request=request,
+                    )
+                    body = ScenarioTemplateRevisionSerializer(revision).data
+                    complete_operation_record(
+                        operation,
+                        status_code=status.HTTP_201_CREATED,
+                        body=body,
+                        result_reference=revision.id,
+                    )
+            return Response(body, status=status.HTTP_201_CREATED)
+
         qs = (
             ScenarioTemplateRevision.objects
             .filter(template=template)
             .select_related("template", "created_by")
             .order_by("-version")
         )
+        if not _can_manage_template(request.user, template):
+            qs = qs.filter(published_at__isnull=False)
         serializer = ScenarioTemplateRevisionSerializer(qs, many=True)
         return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=r"revisions/(?P<revision_id>[^/.]+)/preview",
+    )
+    def revision_preview(self, request, pk=None, revision_id=None):
+        try:
+            template = self.get_queryset().get(pk=pk)
+        except ScenarioTemplate.DoesNotExist:
+            raise NotFound("Template not found.")
+        if not _can_use_template(request.user, template):
+            raise NotFound("Template not found.")
+        try:
+            revision = template.revisions.get(pk=revision_id)
+        except (ScenarioTemplateRevision.DoesNotExist, ValueError):
+            raise NotFound("Template revision not found.")
+        if revision.published_at is None and not _can_manage_template(
+            request.user, template
+        ):
+            raise NotFound("Template revision not found.")
+        _assert_revision_integrity(revision)
+        return Response(preview_payload(revision))
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"revisions/(?P<revision_id>[^/.]+)/activate",
+    )
+    def activate_revision(self, request, pk=None, revision_id=None):
+        template = self.get_object()
+        if not _can_manage_template(request.user, template):
+            raise PermissionDenied("You cannot activate revisions for this template.")
+        payload = ScenarioTemplateRevisionActivateSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        from apps.spaces.governed import (
+            complete_operation_record,
+            digest_payload,
+            operation_record,
+            replay_response,
+            require_idempotency_key,
+        )
+
+        request_digest = digest_payload(
+            {
+                "template_id": template.id,
+                "revision_id": revision_id,
+                "action": "template_revision_activate",
+                **payload.validated_data,
+            }
+        )
+
+        with transaction.atomic():
+            with operation_record(
+                actor=request.user,
+                operation_code="template.revision.activate",
+                key=require_idempotency_key(request),
+                request_digest=request_digest,
+                target_uuid=template.id,
+            ) as (operation, replay):
+                if replay:
+                    return replay_response(operation)
+                locked = ScenarioTemplate.objects.select_for_update(of=("self",)).get(
+                    pk=template.pk
+                )
+                try:
+                    revision = ScenarioTemplateRevision.objects.select_for_update(
+                        of=("self",)
+                    ).get(pk=revision_id, template=locked)
+                except (ScenarioTemplateRevision.DoesNotExist, ValueError):
+                    raise NotFound("Template revision not found.")
+                latest_version = _latest_template_version(locked)
+                expected_version = payload.validated_data["expected_template_version"]
+                if expected_version != latest_version or revision.version != latest_version:
+                    from apps.spaces.governed import GovernedWorkflowError
+
+                    raise GovernedWorkflowError(
+                        "stale_template_version",
+                        details={"current_version": latest_version},
+                    )
+                _assert_revision_integrity(revision)
+                if revision.snapshot_hash != payload.validated_data["expected_revision_hash"]:
+                    from apps.spaces.governed import GovernedWorkflowError
+
+                    raise GovernedWorkflowError(
+                        "template_revision_hash_mismatch",
+                        details={"current_version": latest_version},
+                    )
+                if revision.published_at is None:
+                    published_at = timezone.now()
+                    ScenarioTemplateRevision.objects.filter(
+                        pk=revision.pk,
+                        published_at__isnull=True,
+                    ).update(published_at=published_at)
+                    revision.published_at = published_at
+                projection = legacy_template_projection(revision.snapshot)
+                ScenarioTemplate.objects.filter(pk=locked.pk).update(
+                    current_revision=revision,
+                    updated_at=timezone.now(),
+                    **projection,
+                )
+                _audit(
+                    request.user,
+                    "config_change",
+                    target_id=template.id,
+                    details={
+                        "action": "template.revision.activate",
+                        "revision_id": str(revision.id),
+                        "revision_version": revision.version,
+                        "snapshot_hash": revision.snapshot_hash,
+                    },
+                    request=request,
+                )
+                body = ScenarioTemplateRevisionSerializer(revision).data
+                complete_operation_record(
+                    operation,
+                    status_code=status.HTTP_200_OK,
+                    body=body,
+                    result_reference=revision.id,
+                )
+        return Response(body)
 
     @action(detail=True, methods=["get"], url_path="diff")
     def revision_diff(self, request, pk=None):
@@ -701,44 +834,57 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         template = self.get_object()
         if not _can_manage_template(request.user, template):
             raise PermissionDenied("You cannot roll back this template.")
+        unknown = sorted(set(request.data) - {"revision", "expected_template_version"})
+        if unknown:
+            raise ValidationError({"unknown_fields": unknown})
         try:
-            revision = template.revisions.get(version=int(request.data["revision"]))
-        except (KeyError, TypeError, ValueError, ScenarioTemplateRevision.DoesNotExist):
-            raise ValidationError({"revision": "A valid revision is required."})
-        snapshot = revision.snapshot
-        fields = {
-            "name": "template_name",
-            "description": "description",
-            "scenario_type": "scenario_type",
-            "default_language": "default_language",
-            "icon": "icon",
-            "quick_questions": "quick_questions",
-            "prompt_policy": "prompt_policy",
-            "retrieval_policy": "retrieval_policy",
-            "default_visibility": "default_visibility",
-            "is_active": "is_active",
-            "featured": "featured",
-        }
-        for model_field, snapshot_field in fields.items():
-            if snapshot_field in snapshot:
-                setattr(template, model_field, snapshot[snapshot_field])
-        if "category" in snapshot:
-            template.category = TemplateCategory.objects.filter(
-                id=snapshot["category"]
-            ).first() if snapshot["category"] else None
-        template.save()
-        if "tags" in snapshot:
-            template.tags.set(TemplateTag.objects.filter(slug__in=snapshot["tags"]))
-        _record_template_revision(
-            template, request.user, f"rollback from revision {revision.version}"
-        )
+            source_version = int(request.data["revision"])
+            expected_version = int(request.data["expected_template_version"])
+        except (KeyError, TypeError, ValueError):
+            raise ValidationError(
+                {
+                    "detail": (
+                        "revision and expected_template_version are required integers."
+                    )
+                }
+            )
+        with transaction.atomic():
+            locked = ScenarioTemplate.objects.select_for_update(of=("self",)).get(
+                pk=template.pk
+            )
+            latest_version = _latest_template_version(locked)
+            if expected_version != latest_version:
+                from apps.spaces.governed import GovernedWorkflowError
+
+                raise GovernedWorkflowError(
+                    "stale_template_version",
+                    details={"current_version": latest_version},
+                )
+            try:
+                source_revision = locked.revisions.get(version=source_version)
+            except ScenarioTemplateRevision.DoesNotExist:
+                raise ValidationError({"revision": "A valid revision is required."})
+            _assert_revision_integrity(source_revision)
+            revision = ScenarioTemplateRevision.objects.create(
+                template=locked,
+                version=latest_version + 1,
+                snapshot=normalize_revision_snapshot(source_revision.snapshot),
+                created_by=request.user,
+                change_note=f"rollback draft from revision {source_revision.version}",
+            )
         _audit(
             request.user,
             "template_update",
             target_id=template.id,
-            details={"operation": "rollback", "revision": revision.version},
+            details={
+                "operation": "rollback",
+                "source_revision": source_revision.version,
+                "draft_revision": revision.version,
+                "snapshot_hash": revision.snapshot_hash,
+            },
             request=request,
         )
+        template.refresh_from_db()
         return Response(self.get_serializer(template).data)
 
     @action(detail=True, methods=["get", "post"], url_path="assets")
@@ -753,37 +899,11 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                     many=True,
                 ).data
             )
-        document_id = request.data.get("document")
-        qs = Document.objects.select_related("space", "space__organization")
-        if not is_platform_admin(request.user):
-            org_ids, bl_ids = admin_scope(request.user)
-            qs = qs.filter(
-                Q(space__organization_id__in=org_ids)
-                | Q(space__business_line_id__in=bl_ids)
-            )
-        try:
-            document = qs.get(id=document_id, status="active")
-        except (Document.DoesNotExist, ValueError):
-            raise NotFound("Document not found.")
-        asset, created = ScenarioTemplateAsset.objects.get_or_create(
-            template=template,
-            document=document,
-            defaults={"created_by": request.user},
-        )
-        _audit(
-            request.user,
-            "template_update",
-            target_id=template.id,
-            details={
-                "operation": "asset_attach",
-                "asset_id": str(asset.id),
-                "document_id": str(document.id),
-            },
-            request=request,
-        )
-        return Response(
-            ScenarioTemplateAssetSerializer(asset).data,
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        from apps.spaces.governed import GovernedWorkflowError
+
+        raise GovernedWorkflowError(
+            "template_asset_attachment_disabled",
+            "Document assets are historical evidence only and cannot be attached.",
         )
 
     @action(
@@ -835,6 +955,17 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         )
 
         with transaction.atomic():
+            source = ScenarioTemplate.objects.select_for_update(of=("self",)).select_related(
+                "current_revision"
+            ).get(pk=source.pk)
+            source_revision = source.current_revision
+            if source_revision is None or source_revision.published_at is None:
+                from apps.spaces.governed import GovernedWorkflowError
+
+                raise GovernedWorkflowError(
+                    "template_revision_not_ready", status_code=503
+                )
+            _assert_revision_integrity(source_revision)
             clone = ScenarioTemplate.objects.create(
                 name=serializer.validated_data["name"],
                 code=serializer.validated_data["code"],
@@ -851,7 +982,15 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
                 business_line=bl,
                 created_by=request.user,
             )
-            _record_template_revision(clone, request.user, f"cloned from {source.code}")
+            cloned_revision = ScenarioTemplateRevision.objects.create(
+                template=clone,
+                version=1,
+                snapshot=normalize_revision_snapshot(source_revision.snapshot),
+                change_note=(
+                    f"cloned draft from {source.code} revision {source_revision.version}"
+                ),
+                created_by=request.user,
+            )
 
         _audit(
             request.user,
@@ -860,6 +999,9 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
             details={
                 "action": "template.clone",
                 "source_template_code": source.code,
+                "source_revision_id": str(source_revision.id),
+                "source_revision_hash": source_revision.snapshot_hash,
+                "draft_revision_id": str(cloned_revision.id),
                 "template_code": clone.code,
             },
             request=request,
@@ -893,7 +1035,6 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         if template.is_active:
             template.is_active = False
             template.save(update_fields=["is_active", "updated_at"])
-            _record_template_revision(template, request.user, "archived")
 
         _audit(
             request.user,
@@ -930,7 +1071,6 @@ class ScenarioTemplateViewSet(viewsets.ModelViewSet):
         if not template.is_active:
             template.is_active = True
             template.save(update_fields=["is_active", "updated_at"])
-            _record_template_revision(template, request.user, "restored")
 
         _audit(
             request.user,

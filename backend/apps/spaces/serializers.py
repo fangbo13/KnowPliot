@@ -182,13 +182,15 @@ class SpaceEmailInviteSerializer(serializers.ModelSerializer):
 class AddMemberByEmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(
-        choices=[c[0] for c in SpaceMembership.ROLE_CHOICES],
+        choices=[c[0] for c in SpaceMembership.ROLE_CHOICES if c[0] != SpaceMembership.ROLE_OWNER],
         default=SpaceMembership.ROLE_MEMBER,
     )
 
 
 class UpdateMemberRoleSerializer(serializers.Serializer):
-    role = serializers.ChoiceField(choices=[c[0] for c in SpaceMembership.ROLE_CHOICES])
+    role = serializers.ChoiceField(
+        choices=[c[0] for c in SpaceMembership.ROLE_CHOICES if c[0] != SpaceMembership.ROLE_OWNER]
+    )
 
 
 class SpaceAccessRequestSerializer(serializers.ModelSerializer):

@@ -21,12 +21,12 @@ from apps.notifications.models import Announcement
 from apps.spaces.models import (
     AdminRegistrationCode,
     BusinessLine,
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
     SpaceMembership,
 )
 from apps.spaces.services import generate_admin_code, hash_code
+from apps.spaces.test_utils import create_test_space
 
 User = get_user_model()
 PW = "StrongPass123!"
@@ -43,13 +43,11 @@ class V7SmokeTests(APITestCase):
         self.bl_tax, _ = BusinessLine.objects.get_or_create(
             organization=self.org, code="tax", defaults={"name": "Tax"},
         )
-        KnowledgeSpace.objects.get_or_create(
+        create_test_space(
+            organization=self.org,
             code="general",
-            defaults={
-                "organization": self.org,
-                "name": "General",
-                "visibility": "organization",
-            },
+            name="General",
+            visibility="organization",
         )
         self.superuser = User.objects.create_superuser(
             username="root@smoke.com", email="root@smoke.com", password=PW,

@@ -26,7 +26,8 @@ from apps.core.validators import validate_file_content_type
 from apps.knowledge.batch import validate_inner_file_type, validate_zip_content
 from apps.knowledge.models import Document, IngestionJob
 from apps.knowledge.serializers import DocumentSerializer
-from apps.spaces.models import KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.models import Organization, SpaceMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -287,7 +288,7 @@ class DocumentUploadPolicyIntegrationTest(APITestCase):
             name="Upload Policy Organization",
             slug="upload-policy-organization",
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.organization,
             name="Upload Policy Space",
             code="upload-policy-space",
@@ -350,14 +351,14 @@ class DocumentDownloadSecurityTest(APITestCase):
             name="Phase 3 Organization",
             slug="phase-3-organization",
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.organization,
             name="Protected Knowledge",
             code="phase-3-protected",
             status="active",
             visibility="private",
         )
-        cls.other_space = KnowledgeSpace.objects.create(
+        cls.other_space = create_test_space(
             organization=cls.organization,
             name="Other Knowledge",
             code="phase-3-other",

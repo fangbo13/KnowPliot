@@ -32,6 +32,9 @@ export interface Message {
   needsHumanReview?: boolean;
   retrievalMode?: string;
   retrievalLatencyMs?: number | null;
+  /** Server-owned execution details for assistant history messages only. */
+  executionSnapshot?: ChatExecutionSnapshot | null;
+  execution_snapshot?: ChatExecutionSnapshot | null;
   createdAt: string;
 }
 
@@ -121,6 +124,48 @@ export type StreamRecoveryState = 'idle' | 'available' | 'recovering' | 'recover
 export type AnswerMode = 'fast' | 'deep';
 export type SafeProcessingPhase = 'accepted' | 'searching' | 'generating' | 'finalizing';
 
+/**
+ * The server-owned execution snapshot attached to a Turn.  The wire contract
+ * intentionally keeps the canonical snake_case names so the object can be
+ * passed through meta/replay/status/history without inventing client policy.
+ * `thinking_snapshot_known` is the authority for interpreting the boolean and
+ * budget sentinels on migrated historical Turns.
+ */
+export interface ChatExecutionSnapshot {
+  requested_answer_mode: AnswerMode;
+  answer_mode: AnswerMode;
+  requested_thinking_enabled: boolean;
+  thinking_enabled: boolean;
+  thinking_snapshot_known: boolean;
+  thinking_budget: number | null;
+  model_id: string;
+  policy_fallback_code: string;
+  /** Optional normalized aliases for component/test ergonomics. */
+  requestedAnswerMode?: AnswerMode;
+  effectiveAnswerMode?: AnswerMode;
+  requestedThinkingEnabled?: boolean;
+  thinkingEnabled?: boolean;
+  thinkingSnapshotKnown?: boolean;
+  thinkingBudget?: number | null;
+  modelId?: string;
+  policyFallbackCode?: string;
+}
+
+/** Alias used by consumers that call the object an effective snapshot. */
+export type ExecutionSnapshot = ChatExecutionSnapshot;
+
+/** Safe marker used when an older assistant row has no provable snapshot. */
+export const LEGACY_UNKNOWN_EXECUTION_SNAPSHOT: ChatExecutionSnapshot = Object.freeze({
+  requested_answer_mode: 'fast',
+  answer_mode: 'fast',
+  requested_thinking_enabled: false,
+  thinking_enabled: false,
+  thinking_snapshot_known: false,
+  thinking_budget: null,
+  model_id: '',
+  policy_fallback_code: 'legacy_thinking_unknown',
+});
+
 export interface ProcessingTimings {
   connectionMs?: number;
   firstAnswerMs?: number;
@@ -131,6 +176,10 @@ export interface SendMessageOptions {
   answerMode?: AnswerMode;
   /** Result of the current rollout flag + server capability decision. */
   canUseDeep?: boolean;
+  /** Explicit independent-thinking preference for this logical question. */
+  thinkingEnabled?: boolean;
+  /** Result of the current rollout flag + server capability decision. */
+  canUseThinking?: boolean;
   /** Explicit user retry of the current failed deep Turn; never inferred. */
   retryClientRequestId?: string;
   /** Persisted assistant message whose answer version should be regenerated. */
@@ -149,6 +198,27 @@ export interface SessionTurnState {
   safePhase?: SafeProcessingPhase | null;
   isLocked: boolean;
   answerMode?: AnswerMode;
+  /** Requested mode retained even when server policy falls back. */
+  requestedAnswerMode?: AnswerMode;
+  /** Effective mode alias for read-only processing/history consumers. */
+  effectiveAnswerMode?: AnswerMode;
+  /** Wire-name aliases retained for stream/status contract consumers. */
+  requested_answer_mode?: AnswerMode;
+  effective_answer_mode?: AnswerMode;
+  requestedThinkingEnabled?: boolean;
+  thinkingEnabled?: boolean;
+  thinkingSnapshotKnown?: boolean;
+  thinkingBudget?: number | null;
+  modelId?: string | null;
+  policyFallbackCode?: string;
+  requested_thinking_enabled?: boolean;
+  thinking_enabled?: boolean;
+  thinking_snapshot_known?: boolean;
+  thinking_budget?: number | null;
+  model_id?: string | null;
+  policy_fallback_code?: string;
+  executionSnapshot?: ChatExecutionSnapshot | null;
+  effectiveSnapshot?: ChatExecutionSnapshot | null;
   content: string;
   citations: Citation[];
   quality: QualityData | null;
@@ -255,6 +325,24 @@ function idleTurn(): SessionTurnState {
     safePhase: null,
     isLocked: false,
     answerMode: 'fast',
+    requestedAnswerMode: 'fast',
+    effectiveAnswerMode: 'fast',
+    requested_answer_mode: 'fast',
+    effective_answer_mode: 'fast',
+    requestedThinkingEnabled: false,
+    thinkingEnabled: false,
+    thinkingSnapshotKnown: true,
+    thinkingBudget: null,
+    modelId: null,
+    policyFallbackCode: '',
+    requested_thinking_enabled: false,
+    thinking_enabled: false,
+    thinking_snapshot_known: true,
+    thinking_budget: null,
+    model_id: null,
+    policy_fallback_code: '',
+    executionSnapshot: null,
+    effectiveSnapshot: null,
     content: '',
     citations: [],
     quality: null,
@@ -292,6 +380,97 @@ function elapsedMs(startedAtMs: number | null | undefined): number | undefined {
   return Math.max(0, Date.now() - startedAtMs);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isAnswerMode(value: unknown): value is AnswerMode {
+  return value === 'fast' || value === 'deep';
+}
+
+/**
+ * Narrow and normalize a snapshot received from a server event/history row.
+ * Unknown or malformed snapshots are ignored rather than allowing untrusted
+ * execution fields to become client authority.  Legacy rows are accepted when
+ * all fields are present; their `thinking_snapshot_known=false` marker is
+ * preserved for the UI to render as `legacy/unknown`.
+ */
+export function parseChatExecutionSnapshot(value: unknown): ChatExecutionSnapshot | null {
+  if (!isRecord(value)) return null;
+  const field = (snake: string, camel: string): unknown => (
+    value[snake] !== undefined ? value[snake] : value[camel]
+  );
+  const requestedMode = field('requested_answer_mode', 'requestedAnswerMode');
+  const effectiveMode = field('answer_mode', 'effectiveAnswerMode');
+  const requestedThinking = field('requested_thinking_enabled', 'requestedThinkingEnabled');
+  const effectiveThinking = field('thinking_enabled', 'thinkingEnabled');
+  const known = field('thinking_snapshot_known', 'thinkingSnapshotKnown');
+  const budget = field('thinking_budget', 'thinkingBudget');
+  const modelId = field('model_id', 'modelId');
+  const fallback = field('policy_fallback_code', 'policyFallbackCode');
+
+  if (!isAnswerMode(requestedMode) || !isAnswerMode(effectiveMode)
+    || typeof requestedThinking !== 'boolean'
+    || typeof effectiveThinking !== 'boolean'
+    || typeof known !== 'boolean'
+    || (budget !== null && (typeof budget !== 'number'
+      || !Number.isSafeInteger(budget) || budget < 1 || budget > 32768))
+    || typeof modelId !== 'string'
+    || modelId.length > 160
+    || typeof fallback !== 'string'
+    || fallback.length > 64
+    || !/^[a-z0-9_]*$/.test(fallback)
+    || (!known && budget !== null)
+    || (known && !effectiveThinking && budget !== null)
+    || (known && effectiveThinking && budget === null)) {
+    return null;
+  }
+
+  return {
+    requested_answer_mode: requestedMode,
+    answer_mode: effectiveMode,
+    requested_thinking_enabled: requestedThinking,
+    thinking_enabled: effectiveThinking,
+    thinking_snapshot_known: known,
+    thinking_budget: budget,
+    model_id: modelId,
+    policy_fallback_code: fallback,
+  };
+}
+
+export const normalizeExecutionSnapshot = parseChatExecutionSnapshot;
+
+/** Extract either the flat SSE fields or a nested history snapshot. */
+function snapshotFromPayload(value: unknown): ChatExecutionSnapshot | null {
+  if (!isRecord(value)) return null;
+  const nested = value.execution_snapshot;
+  return parseChatExecutionSnapshot(nested) ?? parseChatExecutionSnapshot(value);
+}
+
+function snapshotTurnPatch(snapshot: ChatExecutionSnapshot): Partial<SessionTurnState> {
+  return {
+    executionSnapshot: snapshot,
+    effectiveSnapshot: snapshot,
+    requestedAnswerMode: snapshot.requested_answer_mode,
+    answerMode: snapshot.answer_mode,
+    effectiveAnswerMode: snapshot.answer_mode,
+    requested_answer_mode: snapshot.requested_answer_mode,
+    effective_answer_mode: snapshot.answer_mode,
+    requestedThinkingEnabled: snapshot.requested_thinking_enabled,
+    thinkingEnabled: snapshot.thinking_enabled,
+    thinkingSnapshotKnown: snapshot.thinking_snapshot_known,
+    thinkingBudget: snapshot.thinking_budget,
+    modelId: snapshot.model_id,
+    policyFallbackCode: snapshot.policy_fallback_code,
+    requested_thinking_enabled: snapshot.requested_thinking_enabled,
+    thinking_enabled: snapshot.thinking_enabled,
+    thinking_snapshot_known: snapshot.thinking_snapshot_known,
+    thinking_budget: snapshot.thinking_budget,
+    model_id: snapshot.model_id,
+    policy_fallback_code: snapshot.policy_fallback_code,
+  };
+}
+
 function legacyMirror(turn: SessionTurnState, sessionId: string | null): Partial<ChatState> {
   return {
     streamPhase: turn.phase,
@@ -321,6 +500,10 @@ function withTurnUpdate(
 }
 
 function mapApiMessage(message: ChatMessageRecord): Message {
+  const executionSnapshot = message.role === 'assistant'
+    ? snapshotFromPayload(message.execution_snapshot ?? message.executionSnapshot)
+      ?? LEGACY_UNKNOWN_EXECUTION_SNAPSHOT
+    : null;
   return {
     id: message.id || crypto.randomUUID(),
     role: message.role,
@@ -331,6 +514,10 @@ function mapApiMessage(message: ChatMessageRecord): Message {
     needsHumanReview: message.needs_human_review,
     retrievalMode: message.retrieval_mode,
     retrievalLatencyMs: message.retrieval_latency_ms,
+    ...(executionSnapshot ? {
+      executionSnapshot,
+      execution_snapshot: executionSnapshot,
+    } : {}),
     createdAt: message.created_at || message.createdAt || new Date().toISOString(),
   };
 }
@@ -450,6 +637,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           role: 'assistant',
           content: owningTurn.content,
           citations: owningTurn.citations,
+          executionSnapshot: owningTurn.executionSnapshot ?? null,
           createdAt: new Date().toISOString(),
         };
         set((state) => ({
@@ -801,6 +989,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     const requestedMode: AnswerMode = options.answerMode === 'deep' ? 'deep' : 'fast';
+    const requestedThinkingEnabled = options.thinkingEnabled === true;
     if (requestedMode === 'deep' && options.canUseDeep !== true) {
       if (sessionId) {
         set((current) => withTurnUpdate(current, sessionId!, null, {
@@ -808,10 +997,59 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           safePhase: null,
           isLocked: false,
           answerMode: 'fast',
+          requestedAnswerMode: 'deep',
+          effectiveAnswerMode: 'fast',
+          requested_answer_mode: 'deep',
+          effective_answer_mode: 'fast',
+          requestedThinkingEnabled: false,
+          thinkingEnabled: false,
+          thinkingSnapshotKnown: true,
+          thinkingBudget: null,
+          modelId: null,
+          policyFallbackCode: '',
+          requested_thinking_enabled: false,
+          thinking_enabled: false,
+          thinking_snapshot_known: true,
+          thinking_budget: null,
+          model_id: null,
+          policy_fallback_code: '',
+          executionSnapshot: null,
+          effectiveSnapshot: null,
           error: 'error_deep_unavailable',
         }));
       } else {
         set({ streamPhase: 'error', sendError: 'error_deep_unavailable', isSendLocked: false });
+      }
+      return;
+    }
+    if (requestedThinkingEnabled && options.canUseThinking !== true) {
+      if (sessionId) {
+        set((current) => withTurnUpdate(current, sessionId!, null, {
+          phase: 'error',
+          safePhase: null,
+          isLocked: false,
+          answerMode: requestedMode,
+          requestedAnswerMode: requestedMode,
+          effectiveAnswerMode: requestedMode,
+          requested_answer_mode: requestedMode,
+          effective_answer_mode: requestedMode,
+          requestedThinkingEnabled: true,
+          thinkingEnabled: false,
+          thinkingSnapshotKnown: true,
+          thinkingBudget: null,
+          policyFallbackCode: 'thinking_not_allowed',
+          requested_thinking_enabled: true,
+          thinking_enabled: false,
+          thinking_snapshot_known: true,
+          thinking_budget: null,
+          model_id: null,
+          policy_fallback_code: 'thinking_not_allowed',
+          executionSnapshot: null,
+          effectiveSnapshot: null,
+          error: 'error_thinking_unavailable',
+        }));
+      } else {
+        set({ streamPhase: 'error', sendError: 'error_thinking_unavailable', isSendLocked: false });
       }
       return;
     }
@@ -824,7 +1062,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       retryClientRequestId
       && answerMode === 'fast'
       && retryTurn?.clientRequestId === retryClientRequestId
-      && retryTurn.answerMode === 'deep'
+      && (retryTurn.requestedAnswerMode
+        ?? retryTurn.requested_answer_mode
+        ?? retryTurn.answerMode) === 'deep'
+      && (retryTurn.requestedThinkingEnabled
+        ?? retryTurn.requested_thinking_enabled
+        ?? false) === requestedThinkingEnabled
       && retryTurn.phase === 'error'
       && retryTurn.error
       && !retryTurn.isLocked,
@@ -877,6 +1120,24 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       safePhase: 'accepted',
       isLocked: true,
       answerMode,
+      requestedAnswerMode: answerMode,
+      effectiveAnswerMode: answerMode,
+      requested_answer_mode: answerMode,
+      effective_answer_mode: answerMode,
+      requestedThinkingEnabled,
+      thinkingEnabled: requestedThinkingEnabled,
+      thinkingSnapshotKnown: undefined,
+      thinkingBudget: null,
+      modelId: null,
+      policyFallbackCode: '',
+      requested_thinking_enabled: requestedThinkingEnabled,
+      thinking_enabled: requestedThinkingEnabled,
+      thinking_snapshot_known: undefined,
+      thinking_budget: null,
+      model_id: null,
+      policy_fallback_code: '',
+      executionSnapshot: null,
+      effectiveSnapshot: null,
       content: '',
       citations: [],
       quality: null,
@@ -926,6 +1187,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         role: 'assistant',
         content: partialContent,
         citations: partialCitations,
+        executionSnapshot: get().turnsBySession[sessionId]?.executionSnapshot ?? null,
         createdAt: new Date().toISOString(),
       };
       set((current) => {
@@ -1097,6 +1359,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             content,
             client_request_id: clientRequestId,
             answer_mode: answerMode,
+            thinking_enabled: requestedThinkingEnabled,
             protocol_version: 2,
           }),
           signal: controller.signal, // V3.5: AbortController signal
@@ -1110,6 +1373,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         if (!response.ok) {
           if (answerMode === 'deep' && (response.status === 403 || response.status === 409)) {
             throw new Error('deep_unavailable');
+          }
+          if (requestedThinkingEnabled && (response.status === 403 || response.status === 409)) {
+            throw new Error('thinking_unavailable');
           }
           throw new Error(`HTTP ${response.status}`);
         }
@@ -1253,8 +1519,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                   }
                   const data = event.data;
                   switch (event.name) {
-                    case 'meta':
+                    case 'meta': {
+                      const snapshot = snapshotFromPayload(data);
+                      if (snapshot) {
+                        set((current) => withTurnUpdate(
+                          current,
+                          sessionId,
+                          generationId,
+                          snapshotTurnPatch(snapshot),
+                        ));
+                      }
                       break;
+                    }
                     case 'phase': {
                       const phase = mapServerPhaseForUi(data.phase);
                       set((current) => withTurnUpdate(current, sessionId, generationId, {
@@ -1312,6 +1588,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 return false;
               }
               if (get().turnsBySession[sessionId]?.generationId !== generationId) return false;
+              const statusSnapshot = snapshotFromPayload(statusData);
+              if (statusSnapshot) {
+                set((current) => withTurnUpdate(
+                  current,
+                  sessionId,
+                  generationId,
+                  snapshotTurnPatch(statusSnapshot),
+                ));
+              }
               const statusSequence = Number(statusData.last_event_seq);
               if (Number.isSafeInteger(statusSequence) && statusSequence > 0) {
                 set((current) => withTurnUpdate(current, sessionId, generationId, {
@@ -1324,6 +1609,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 set((current) => withTurnUpdate(current, sessionId, generationId, {
                   content: answer.content,
                   citations: answer.citations ?? [],
+                  ...(answer.executionSnapshot
+                    ? snapshotTurnPatch(answer.executionSnapshot)
+                    : {}),
                   safePhase: 'finalizing',
                   quality: {
                     confidence: answer.confidenceLabel ?? '',
@@ -1390,10 +1678,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             {
               switch (event.name) {
                 case 'meta': {
+                  const snapshot = snapshotFromPayload(data);
                   set((current) => withTurnUpdate(current, sessionId, generationId, {
                     turnId: data.turn_id,
                     protocolVersion: 2,
                     recoveryState: 'available',
+                    ...(snapshot ? snapshotTurnPatch(snapshot) : {}),
                   }));
                   break;
                 }
@@ -1491,6 +1781,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         let errorKey: string;
         if (errorMsg.includes('deep_unavailable')) {
           errorKey = 'error_deep_unavailable';
+        } else if (errorMsg.includes('thinking_unavailable')) {
+          errorKey = 'error_thinking_unavailable';
         } else if (errorMsg.includes('401') || errorMsg.includes('403')) {
           errorKey = 'error_auth';
         } else if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
@@ -1531,6 +1823,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       role: 'assistant',
       content,
       citations,
+      executionSnapshot: ownerTurn.executionSnapshot ?? LEGACY_UNKNOWN_EXECUTION_SNAPSHOT,
+      execution_snapshot: ownerTurn.executionSnapshot ?? LEGACY_UNKNOWN_EXECUTION_SNAPSHOT,
       confidenceScore: quality?.score,
       confidenceLabel: quality?.confidence,
       needsHumanReview: quality?.needs_human_review,

@@ -59,3 +59,17 @@ skills/open-design/
 
 # Superpowers execution scratch files
 .superpowers/sdd/
+
+# Agent/tooling scratch (2026-07-19)
+.zcode/
+.agents/
+.uv_cache/
+.uv_python/
+task_plan.md
+progress.md
+findings.md
+audit_reports/screenshots/
+backend/C?/
+output/
+never
+

@@ -29,8 +29,8 @@ from apps.spaces.permissions import (  # V6.0 space isolation
     DOCUMENT_DOWNLOAD,
     SpaceDocumentPermission,
     effective_space_role,
+    ensure_workspace_writable,
     has_space_permission,
-    is_platform_admin,
     resolve_request_space,
 )
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
@@ -48,14 +48,10 @@ from .batch_views import DocumentUploadRateThrottle
 def _active_doc_space(request):
     """Resolve the active space for document operations.
 
-    Uses the X-Space-Id header when present, else falls back to the default
-    'general' space so admin uploads without a header are still scoped.
+    New content always requires an explicit, authorized workspace selection;
+    legacy default-space fallback is not an authority boundary.
     """
-    space = resolve_request_space(request, required=False)
-    if space is not None:
-        return space
-    from apps.spaces.models import KnowledgeSpace
-    return KnowledgeSpace.objects.filter(code="general").first()
+    return resolve_request_space(request, required=True)
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -92,6 +88,7 @@ class DocumentListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         # V6.0: uploads land in the active space (header) or default 'general'.
         space = _active_doc_space(self.request)
+        ensure_workspace_writable(space)
         doc = serializer.save(uploaded_by=self.request.user, space=space)
         create_audit_log(
             user=self.request.user,
@@ -127,13 +124,10 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if instance.space_id is not None:
+            ensure_workspace_writable(instance.space)
         hard_delete = request.query_params.get("hard", "").lower() == "true"
         if hard_delete:
-            if not is_platform_admin(request.user):
-                return Response(
-                    {"detail": "Only a platform super administrator may hard-delete documents."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
             from apps.chat.models import Citation
 
             if Citation.objects.filter(document=instance).exists():
@@ -152,10 +146,9 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
             self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        # V6.0: a document may be deleted by a platform admin, the uploader, or a
-        # user with the space's document.delete permission (owner / knowledge
-        # admin / org / business admin). Prevents cross-user/space deletion.
-        allowed = is_platform_admin(request.user) or instance.uploaded_by == request.user
+        # Content authority is workspace-scoped. Platform metadata capability
+        # never turns into document mutation authority.
+        allowed = instance.uploaded_by == request.user
         if not allowed and instance.space_id is not None:
             allowed = has_space_permission(request.user, instance.space, DOCUMENT_DELETE)
         if not allowed:

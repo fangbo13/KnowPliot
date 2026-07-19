@@ -209,12 +209,71 @@ class OwnershipApiTests(APITestCase):
         self.assertEqual(response.data["mode"], "forced")
         self.assertEqual(self.space.owner_id, self.successor.id)
 
-    def test_member_delete_cannot_remove_canonical_owner_even_when_legacy_mirror_is_corrupt(self):
-        platform_admin = get_user_model().objects.create_superuser(
-            username="platform", email="platform@example.test", password="safe-password"
+    def test_forced_candidates_exclude_the_acting_governor(self):
+        governor = get_user_model().objects.create_user(
+            username="candidate-governor", email="candidate-governor@example.test", password="safe-password"
         )
-        SpaceMembership.objects.filter(space=self.space, user=self.owner).update(role=SpaceMembership.ROLE_MEMBER)
-        self.client.force_authenticate(platform_admin)
+        OrganizationMembership.objects.create(
+            user=governor,
+            organization=self.space.organization,
+            role=OrganizationMembership.ROLE_ORG_ADMIN,
+        )
+        create_space_with_owner(
+            organization=self.space.organization,
+            owner=governor,
+            name="Candidate governor home",
+            code="candidate-governor-home",
+        )
+        self.client.force_authenticate(governor)
+
+        response = self.client.get(
+            f"/api/v1/spaces/{self.space.id}/ownership-candidates/?purpose=forced"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn(str(governor.id), {row["id"] for row in response.data["results"]})
+
+    def test_member_and_admin_mutations_cannot_grant_owner_role(self):
+        invitee = get_user_model().objects.create_user(
+            username="owner-bypass", email="owner-bypass@example.test", password="safe-password"
+        )
+        self.client.force_authenticate(self.owner)
+
+        created = self.client.post(
+            f"/api/v1/spaces/{self.space.id}/members/",
+            {"email": invitee.email, "role": SpaceMembership.ROLE_OWNER},
+            format="json",
+        )
+        updated = self.client.patch(
+            f"/api/v1/spaces/{self.space.id}/members/{self.successor.id}/",
+            {"role": SpaceMembership.ROLE_OWNER},
+            format="json",
+        )
+
+        platform = get_user_model().objects.create_superuser(
+            username="owner-bypass-platform",
+            email="owner-bypass-platform@example.test",
+            password="safe-password",
+        )
+        self.client.force_authenticate(platform)
+        admin_created = self.client.post(
+            f"/api/v1/admin/users/{invitee.id}/assignments/",
+            {"scope": "space", "scope_id": str(self.space.id), "role": SpaceMembership.ROLE_OWNER},
+            format="json",
+        )
+
+        for response in (created, updated, admin_created):
+            with self.subTest(response=response.data):
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.data["error_code"], "ownership_workflow_required")
+        self.assertFalse(SpaceMembership.objects.filter(space=self.space, user=invitee).exists())
+        self.assertEqual(
+            SpaceMembership.objects.get(space=self.space, user=self.successor).role,
+            SpaceMembership.ROLE_MEMBER,
+        )
+
+    def test_member_delete_cannot_remove_canonical_owner(self):
+        self.client.force_authenticate(self.owner)
 
         response = self.client.delete(f"/api/v1/spaces/{self.space.id}/members/{self.owner.id}/")
 

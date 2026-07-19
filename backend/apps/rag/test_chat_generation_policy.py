@@ -287,6 +287,26 @@ class StableChatMetricsTest(SimpleTestCase):
         with self.assertRaises(ValueError):
             sanitize_turn_metrics({"idempotency_disposition": "user supplied value"})
 
+    def test_effective_mode_thinking_and_fallback_use_bounded_labels(self):
+        self.assertEqual(
+            sanitize_turn_metrics(
+                {
+                    "effective_answer_mode": "deep",
+                    "thinking_enabled": True,
+                    "policy_fallback_code": "",
+                }
+            ),
+            {
+                "effective_answer_mode": "deep",
+                "thinking_enabled": True,
+                "policy_fallback_code": "",
+            },
+        )
+        with self.assertRaises(ValueError):
+            sanitize_turn_metrics({"effective_answer_mode": "custom-profile"})
+        with self.assertRaises(ValueError):
+            sanitize_turn_metrics({"policy_fallback_code": "provider said secret details"})
+
     def test_observational_metrics_do_not_refresh_the_turn_liveness_clock(self):
         turn = SimpleNamespace(metrics={}, save=Mock())
 

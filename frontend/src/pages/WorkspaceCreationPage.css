@@ -1,0 +1,209 @@
+.kp-creation-page {
+  width: min(1040px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 56px 0 80px;
+}
+
+.kp-creation-hero {
+  max-width: 760px;
+  margin-bottom: 36px;
+}
+
+.kp-creation-hero h1 {
+  margin: 10px 0 14px !important;
+  font-family: var(--font-family-display, 'Fraunces', serif) !important;
+  font-size: clamp(36px, 6vw, 64px) !important;
+  font-weight: 500 !important;
+  line-height: 1.04 !important;
+  letter-spacing: -0.035em;
+}
+
+.kp-creation-hero p {
+  color: var(--color-text-secondary);
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.kp-creation-back {
+  color: var(--color-text-secondary);
+}
+
+.kp-creation-kicker {
+  margin-top: 40px;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+.kp-creation-toolbar,
+.kp-creation-request {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.kp-creation-toolbar {
+  margin: 36px 0 18px;
+}
+
+.kp-creation-toolbar h3,
+.kp-creation-request h4 {
+  margin: 0 !important;
+  font-family: var(--font-family-display, 'Fraunces', serif) !important;
+}
+
+.kp-creation-form-card,
+.kp-creation-request {
+  border: 1px solid var(--color-border-secondary) !important;
+  border-radius: 20px !important;
+  background: color-mix(in srgb, var(--color-bg-container) 94%, var(--accent-bg) 6%) !important;
+  box-shadow: 0 18px 55px rgba(55, 42, 30, .06);
+}
+
+.kp-creation-form-card {
+  margin-bottom: 24px;
+}
+
+.kp-creation-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+
+.kp-creation-span {
+  grid-column: 1 / -1;
+}
+
+.kp-creation-confirmation {
+  margin: 4px 0 24px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--color-fill-secondary);
+}
+
+.kp-creation-list {
+  display: grid;
+  gap: 14px;
+}
+
+.kp-creation-request p {
+  margin: 8px 0 !important;
+}
+
+@media (max-width: 700px) {
+  .kp-creation-page {
+    width: min(100% - 28px, 1040px);
+    padding-top: 28px;
+  }
+
+  .kp-creation-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kp-creation-span {
+    grid-column: auto;
+  }
+
+  .kp-creation-toolbar,
+  .kp-creation-request {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.kp-review-page {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.kp-review-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.kp-review-heading h1 {
+  margin: 8px 0 !important;
+  font-family: var(--font-family-display, 'Fraunces', serif) !important;
+  font-size: clamp(32px, 4vw, 48px) !important;
+  font-weight: 500 !important;
+}
+
+.kp-review-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.kp-review-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kp-review-queue-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 14px;
+  background: var(--color-bg-container);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kp-review-queue-item small {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+}
+
+.kp-review-queue-item.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.kp-review-detail {
+  min-height: 520px;
+  border: 1px solid var(--color-border-secondary) !important;
+  border-radius: 18px !important;
+}
+
+.kp-review-detail h3 {
+  margin: 0 !important;
+  font-family: var(--font-family-display, 'Fraunces', serif) !important;
+}
+
+.kp-review-descriptions,
+.kp-review-impact {
+  margin-top: 22px;
+}
+
+.kp-review-impact {
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--color-fill-secondary);
+}
+
+.kp-review-impact ul {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+@media (max-width: 800px) {
+  .kp-review-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .kp-review-grid {
+    grid-template-columns: 1fr;
+  }
+}

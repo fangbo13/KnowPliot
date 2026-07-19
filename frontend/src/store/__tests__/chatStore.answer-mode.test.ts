@@ -38,6 +38,7 @@ vi.mock('../../stream/StreamLifecycleManager', () => ({
   ),
 }));
 
+import { chatApi } from '../../api/chat';
 import { useChatStore } from '../chatStore';
 
 const SESSION_A = '11111111-1111-4111-8111-111111111111';
@@ -117,6 +118,131 @@ afterEach(() => {
 });
 
 describe('per-Turn answer mode', () => {
+  it('defaults new requests to fast with thinking disabled and sends no client policy fields', async () => {
+    mocks.fetch.mockResolvedValue(completedResponse(SESSION_A));
+
+    await useChatStore.getState().sendMessage('default question');
+
+    const body = JSON.parse(String((mocks.fetch.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body).toMatchObject({ answer_mode: 'fast', thinking_enabled: false });
+    expect(body).not.toHaveProperty('model_id');
+    expect(body).not.toHaveProperty('model_profile_id');
+    expect(body).not.toHaveProperty('provider');
+    expect(body).not.toHaveProperty('thinking_budget');
+  });
+
+  it.each([
+    ['fast', false], ['fast', true], ['deep', false], ['deep', true],
+  ] as const)('submits the independent mode/thinking combination %s/%s', async (mode, thinking) => {
+    mocks.fetch.mockResolvedValue(completedResponse(SESSION_A));
+
+    await (useChatStore.getState().sendMessage as any)('combination', {
+      answerMode: mode,
+      canUseDeep: mode === 'deep',
+      ...(thinking ? { thinkingEnabled: true, canUseThinking: true } : {}),
+    });
+
+    const body = JSON.parse(String((mocks.fetch.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.answer_mode).toBe(mode);
+    expect(body.thinking_enabled).toBe(thinking);
+  });
+
+  it('fails closed when thinking is requested without the exact eligibility decision', async () => {
+    await (useChatStore.getState().sendMessage as any)('forged thinking', {
+      answerMode: 'fast',
+      thinkingEnabled: true,
+    });
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sendError).toBe('error_thinking_unavailable');
+  });
+
+  it('persists requested/effective snapshot fields from live meta', async () => {
+    let read = false;
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: {
+        getReader: () => ({
+          read: vi.fn(async () => {
+            if (read) return { done: true, value: undefined };
+            read = true;
+            return {
+              done: false,
+              value: encoder.encode(
+                `id: 1\nevent: meta\ndata: {"turn_id":"${TURN_ID}","session_id":"${SESSION_A}","client_request_id":"10000000-0000-4000-8000-000000000001","protocol_version":2,"requested_answer_mode":"deep","answer_mode":"fast","requested_thinking_enabled":true,"thinking_enabled":false,"thinking_snapshot_known":true,"thinking_budget":null,"model_id":"qwen3.6-flash","policy_fallback_code":"thinking_budget_invalid"}\n\n`
+                + `id: 2\nevent: done\ndata: {"message_id":"55555555-5555-4555-8555-555555555555","session_id":"${SESSION_A}","turn_id":"${TURN_ID}","client_request_id":"10000000-0000-4000-8000-000000000001"}\n\n`,
+              ),
+            };
+          }),
+        }),
+      },
+    });
+
+    await (useChatStore.getState().sendMessage as any)('snapshot', {
+      answerMode: 'deep',
+      canUseDeep: true,
+      thinkingEnabled: true,
+      canUseThinking: true,
+    });
+
+    expect(useChatStore.getState().turnsBySession[SESSION_A]).toMatchObject({
+      requestedAnswerMode: 'deep',
+      answerMode: 'fast',
+      requestedThinkingEnabled: true,
+      thinkingEnabled: false,
+      thinkingBudget: null,
+      modelId: 'qwen3.6-flash',
+      policyFallbackCode: 'thinking_budget_invalid',
+    });
+  });
+
+  it('maps history execution snapshots and marks missing legacy evidence unknown', async () => {
+    vi.mocked(chatApi.getMessages).mockResolvedValue({
+      results: [{
+        id: 'history-known',
+        role: 'assistant',
+        content: 'known answer',
+        execution_snapshot: {
+          requested_answer_mode: 'fast',
+          answer_mode: 'fast',
+          requested_thinking_enabled: true,
+          thinking_enabled: true,
+          thinking_snapshot_known: true,
+          thinking_budget: 1024,
+          model_id: 'qwen3.6-flash',
+          policy_fallback_code: '',
+        },
+        created_at: '2026-07-18T00:00:00Z',
+      }, {
+        id: 'history-legacy',
+        role: 'assistant',
+        content: 'legacy answer',
+        created_at: '2026-07-18T00:01:00Z',
+      }],
+      next: null,
+      previous: null,
+    });
+
+    await useChatStore.getState().loadMessages(SESSION_A);
+
+    expect(useChatStore.getState().messages[0]?.executionSnapshot).toEqual({
+      requested_answer_mode: 'fast',
+      answer_mode: 'fast',
+      requested_thinking_enabled: true,
+      thinking_enabled: true,
+      thinking_snapshot_known: true,
+      thinking_budget: 1024,
+      model_id: 'qwen3.6-flash',
+      policy_fallback_code: '',
+    });
+    expect(useChatStore.getState().messages[1]?.executionSnapshot).toMatchObject({
+      thinking_snapshot_known: false,
+      policy_fallback_code: 'legacy_thinking_unknown',
+    });
+  });
+
   it('submits deep only with an explicit eligibility decision and keeps it on the owning Turn', async () => {
     mocks.fetch.mockResolvedValue(completedResponse(SESSION_A));
 

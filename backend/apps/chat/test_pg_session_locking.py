@@ -28,6 +28,7 @@ from django.test import TransactionTestCase
 from apps.chat.models import ChatSession, ChatTurn, Message
 from apps.chat.services import DjangoSessionRepository, DjangoTurnRepository
 from apps.spaces.models import KnowledgeSpace, Organization
+from apps.spaces.test_utils import create_test_space
 
 User = get_user_model()
 
@@ -42,11 +43,13 @@ class PgSessionLockingRegressionTest(TransactionTestCase):
     the real deployment database.
     """
 
+    serialized_rollback = True
+
     def setUp(self):
         self.org = Organization.objects.create(
             name="PG Lock Test Org", slug="pg-lock-test"
         )
-        self.space = KnowledgeSpace.objects.create(
+        self.space = create_test_space(
             code="pg-lock-space",
             organization=self.org,
             name="PG Lock Space",
