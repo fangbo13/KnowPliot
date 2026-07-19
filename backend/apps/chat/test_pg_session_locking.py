@@ -43,7 +43,11 @@ class PgSessionLockingRegressionTest(TransactionTestCase):
     the real deployment database.
     """
 
-    serialized_rollback = True
+    # Note: serialized_rollback is intentionally False (default). setUp creates
+    # every row fresh, so the default TransactionTestCase TRUNCATE between tests
+    # is sufficient. Enabling serialized_rollback re-inserts django_content_type
+    # rows that the contenttypes post_migrate signal already created, hitting
+    # duplicate-key (app_label, model)=(admin, logentry) on PG.
 
     def setUp(self):
         self.org = Organization.objects.create(
