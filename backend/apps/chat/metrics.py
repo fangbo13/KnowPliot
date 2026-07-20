@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Post-V3 Part 2 (measure-first gate): RAG efficiency metrics.
+# These keys are added so a week of production data can quantify ROI before
+# any routing/cache optimisation code is built.  They are observational only.
 _NUMERIC_KEYS = frozenset(
     {
         "ttfe_ms",
@@ -13,13 +16,32 @@ _NUMERIC_KEYS = frozenset(
         "total_ms",
         "disconnect_count",
         "recovery_count",
+        # Part 2 measure-first metrics
+        "retrieval_result_count",  # chunks returned by the retriever
     }
 )
 _IDEMPOTENCY_VALUES = frozenset(
     {"created", "retry", "completed", "in_progress", "terminal", "conflict"}
 )
-_BOOLEAN_KEYS = frozenset({"idempotency_rollout_enabled", "thinking_enabled"})
+_BOOLEAN_KEYS = frozenset(
+    {
+        "idempotency_rollout_enabled",
+        "thinking_enabled",
+        # Part 2 measure-first metrics
+        "query_near_dup",  # near-duplicate query detected
+        "cache_hit",  # semantic cache hit (reserved; no cache built yet)
+    }
+)
 _ANSWER_MODES = frozenset({"fast", "deep"})
+_ROUTING_DECISIONS = frozenset(
+    {
+        "retrieve",  # normal retrieval route (default)
+        "skip_retrieval",  # greeting/meta/out-of-scope → skip retrieval
+        "cache_hit",  # semantic cache hit → reuse chunks (reserved)
+        "degraded",  # fallback / degraded route
+        "none",  # undecided (before pipeline runs)
+    }
+)
 _POLICY_FALLBACK_CODES = frozenset(
     {
         "",
@@ -47,6 +69,9 @@ def sanitize_turn_metrics(values: dict) -> dict:
             sanitized[key] = value
             continue
         if key == "policy_fallback_code" and value in _POLICY_FALLBACK_CODES:
+            sanitized[key] = value
+            continue
+        if key == "routing_decision" and value in _ROUTING_DECISIONS:
             sanitized[key] = value
             continue
         if key in _BOOLEAN_KEYS and isinstance(value, bool):
@@ -81,6 +106,8 @@ class ChatStreamMetrics:
     retrieval_ms: int | None = None
     reasoning_ms: int | None = None
     first_answer_token_ms: int | None = None
+    # Part 2 measure-first metric: chunks returned by retriever
+    retrieval_result_count: int | None = None
 
     def mark_first_event(self, now: float) -> None:
         if self.ttfe_ms is None:
@@ -91,6 +118,10 @@ class ChatStreamMetrics:
 
     def mark_reasoning(self, duration_ms: int | float) -> None:
         self.reasoning_ms = (self.reasoning_ms or 0) + max(0, int(duration_ms))
+
+    def mark_retrieval_result(self, count: int) -> None:
+        """Record the number of chunks returned by the retriever."""
+        self.retrieval_result_count = max(0, int(count))
 
     def mark_first_answer(self, now: float) -> None:
         if self.first_answer_token_ms is None:
@@ -105,6 +136,7 @@ class ChatStreamMetrics:
             "reasoning_ms": self.reasoning_ms,
             "first_answer_token_ms": self.first_answer_token_ms,
             "total_ms": max(0, int(round((now - self.started_at) * 1000))),
+            "retrieval_result_count": self.retrieval_result_count,
         }
         return sanitize_turn_metrics(
             {key: value for key, value in values.items() if value is not None}

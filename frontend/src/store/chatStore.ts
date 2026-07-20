@@ -122,7 +122,7 @@ function generateSmartTitle(content: string): string {
 export type StreamPhase = 'idle' | 'connecting' | 'searching' | 'streaming' | 'completing' | 'error';
 export type StreamRecoveryState = 'idle' | 'available' | 'recovering' | 'recovered' | 'failed';
 export type AnswerMode = 'fast' | 'deep';
-export type SafeProcessingPhase = 'accepted' | 'searching' | 'generating' | 'finalizing';
+export type SafeProcessingPhase = 'accepted' | 'searching' | 'generating' | 'thinking' | 'finalizing';
 
 /**
  * The server-owned execution snapshot attached to a Turn.  The wire contract
@@ -368,6 +368,9 @@ export function mapServerPhaseForUi(phase: unknown): {
   }
   if (phase === 'retrieving' || phase === 'searching') {
     return { streamPhase: 'searching', safePhase: 'searching' };
+  }
+  if (phase === 'thinking') {
+    return { streamPhase: 'streaming', safePhase: 'thinking' };
   }
   if (phase === 'saving' || phase === 'finalizing') {
     return { streamPhase: 'completing', safePhase: 'finalizing' };

@@ -207,6 +207,115 @@ class RAGPipeline:
         logger.info(f"Ingested {len(document_chunks)} chunks from {document.title}")
         return document_chunks
 
+    # ── Part 1 (KB version化): text_content-based ingest ──────────────
+    def ingest_text_content(self, document) -> list:
+        """Chunk, embed, and store a document based on its ``text_content``.
+
+        Part 1 (SPEC §1.2 / §1.3): Version creation and rollback re-chunk +
+        re-embed the document's editable canonical markdown ``text_content``,
+        bypassing the file parser.  Called inside the version-switching
+        transaction so new chunks land atomically with version metadata.
+
+        V4.2 KB-V4.2-BATCH-006/009/012 protections are reused (text size
+        limit, chunk count limit, metadata sanitization, zero-vector
+        detection) so inline-created / edited documents are guarded by the
+        same safety net as file-based ingests.
+
+        Args:
+            document: Django ``Document`` model instance with populated
+                ``text_content``.
+
+        Returns:
+            List of created ``DocumentChunk`` instances.
+        """
+        from apps.knowledge.models import DocumentChunk
+
+        if not hasattr(self, "chunker") or not hasattr(self, "embedder"):
+            raise RuntimeError("ingestion_pipeline_required")
+
+        raw_text = document.text_content or ""
+        page_metadata: dict = {}  # Inline text has no page boundaries.
+
+        # V4.2 KB-V4.2-BATCH-006: Extracted text size limit
+        max_text_size = getattr(settings, "MAX_EXTRACTED_TEXT_SIZE", 10_000_000)
+        if len(raw_text) > max_text_size:
+            logger.warning(
+                f"[BATCH-006] text_content for '{document.title}' is "
+                f"{len(raw_text)} bytes — exceeds limit of {max_text_size} bytes. "
+                f"Truncating to limit."
+            )
+            raw_text = raw_text[:max_text_size]
+            document.processing_error = "text_content exceeds size limit — truncated."
+            document.save(update_fields=["processing_error"])
+
+        # Chunk (no parser — text_content is already canonical markdown)
+        chunks = self.chunker.split(raw_text, page_metadata)
+
+        max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
+        if len(chunks) > max_chunks:
+            logger.warning(
+                f"[BATCH-006] Document '{document.title}' produces {len(chunks)} chunks — "
+                f"exceeds limit of {max_chunks}. Truncating."
+            )
+            chunks = chunks[:max_chunks]
+            document.processing_error = (
+                f"Document produces too many chunks — truncated to {max_chunks}."
+            )
+            document.save(update_fields=["processing_error"])
+
+        # Embed in batches
+        texts = [c["text"] for c in chunks]
+        embeddings = self.embedder.embed_batch(texts)
+
+        # V4.2 KB-V4.2-BATCH-012: Zero-vector detection
+        zero_vector_count = sum(1 for emb in embeddings if is_zero_vector(emb))
+        if zero_vector_count > len(embeddings) * 0.5 and len(embeddings) > 0:
+            document.status = "failed"
+            document.processing_error = (
+                f"Embedding failure: {zero_vector_count}/{len(embeddings)} chunks "
+                f"returned zero vectors (>50%). Document may not be searchable."
+            )
+            document.save(update_fields=["status", "processing_error"])
+            logger.error(
+                f"[BATCH-012] Document '{document.title}' has {zero_vector_count} zero vectors "
+                f"out of {len(embeddings)} — marked as failed."
+            )
+            return []
+
+        # Store chunks with sanitized metadata + pgvector sync
+        document_chunks = []
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            raw_metadata = chunk.get("metadata", {})
+            clean_metadata = sanitize_metadata(raw_metadata)
+            if is_zero_vector(embedding):
+                clean_metadata["embedding_failed"] = True
+                logger.warning(
+                    f"[BATCH-012] Chunk {i} of '{document.title}' has zero vector — marked."
+                )
+            doc_chunk = DocumentChunk.objects.create(
+                document=document,
+                space_id=document.space_id,
+                content=chunk["text"],
+                chunk_index=i,
+                page_number=clean_metadata.get("page"),
+                metadata=clean_metadata,
+                embedding=embedding,
+            )
+            if embedding and not is_zero_vector(embedding):
+                from django.db import connection
+                with connection.cursor() as cursor:
+                    vector_str = '[' + ','.join(str(v) for v in embedding) + ']'
+                    cursor.execute(
+                        "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
+                        [vector_str, str(doc_chunk.id)]
+                    )
+            document_chunks.append(doc_chunk)
+
+        logger.info(
+            f"Ingested {len(document_chunks)} chunks from text_content of {document.title}"
+        )
+        return document_chunks
+
     def retrieve_and_generate(
         self,
         query: str,
@@ -353,6 +462,12 @@ class RAGPipeline:
             yield {"event": "citations", "data": citations}
             yield {"event": "done", "data": {}}
             return
+
+        # V4 Part 3: Emit "thinking" phase when thinking mode is enabled.
+        # Sends a progressive safe-label via SSE so the frontend ProcessingPanel
+        # can display "正在思考..." without exposing raw CoT or timing.
+        if getattr(self, "thinking_enabled", False):
+            yield {"event": "phase", "data": {"phase": "thinking"}}
 
         # Step 5: Stream LLM response — V4.2 SYS-V4.2-014: circuit breaker wraps the call
         # On success: record_success() closes the circuit.

@@ -66,6 +66,10 @@ class Document(models.Model):
         ("archived", "Archived"),
         ("expired", "Expired"),
         ("failed", "Failed"),
+        # Part 1 (KB version化): superseded — old version replaced by a newer one.
+        # Retrieval excludes superseded documents so stale/contradictory content
+        # never pollutes answers (SPEC §1.5 key invariant).
+        ("superseded", "Superseded"),
     ]
 
     FILE_TYPE_CHOICES = [
@@ -88,9 +92,17 @@ class Document(models.Model):
         related_name="documents",
     )
     title = models.CharField(max_length=255)
-    file = models.FileField(upload_to="documents/%Y/%m/")
+    # Part 1 (§1.14): file is nullable so documents created via the inline
+    # text editor (input box) have no binary source. file-based uploads still
+    # populate this field and retain it as a downloadable source.
+    file = models.FileField(upload_to="documents/%Y/%m/", null=True, blank=True)
+    # Part 1 (§1.2): editable canonical markdown text. For file uploads this is
+    # extracted from the file during ingestion; for inline creation it is the
+    # user-entered content. chunk+embed operate on text_content, not the file.
+    text_content = models.TextField(blank=True, default="")
     file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES)
-    file_size = models.IntegerField(help_text="File size in bytes")
+    # Part 1 (§1.14): file_size is 0 for inline-created documents (no binary).
+    file_size = models.IntegerField(help_text="File size in bytes", default=0)
     category = models.ForeignKey(
         DocumentCategory, null=True, blank=True, on_delete=models.SET_NULL
     )

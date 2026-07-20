@@ -95,6 +95,7 @@
   "processing_phase_searching": "正在检索",
   "processing_phase_generating": "正在生成",
   "processing_phase_finalizing": "正在整理",
+  "processing_phase_thinking": "正在思考",
   "processing_connection": "连接用时",
   "processing_first_answer": "首个回答",
   "processing_total": "总用时",

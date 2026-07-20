@@ -10,6 +10,7 @@ describe('safe server phase compatibility', () => {
     ['reasoning', 'streaming', 'generating'],
     ['answering', 'streaming', 'generating'],
     ['generating', 'streaming', 'generating'],
+    ['thinking', 'streaming', 'thinking'],
     ['saving', 'completing', 'finalizing'],
     ['finalizing', 'completing', 'finalizing'],
   ])('maps %s to legacy %s and public %s', (serverPhase, streamPhase, safePhase) => {

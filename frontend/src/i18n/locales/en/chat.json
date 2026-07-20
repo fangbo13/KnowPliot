@@ -95,6 +95,7 @@
   "processing_phase_searching": "Searching",
   "processing_phase_generating": "Generating",
   "processing_phase_finalizing": "Finalizing",
+  "processing_phase_thinking": "Thinking",
   "processing_connection": "Connected",
   "processing_first_answer": "First answer",
   "processing_total": "Total",

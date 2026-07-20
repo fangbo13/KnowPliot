@@ -10,12 +10,14 @@ ingest_document tasks from running simultaneously on the same document.
 V4.2 KB-V4.2-BATCH-004: Added DocumentUploadRateThrottle to all upload views.
 """
 
+import difflib
 import mimetypes
 import os
 
 from django.conf import settings
 from django.db import transaction
 from django.http import FileResponse
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -27,11 +29,21 @@ from apps.audit.views import create_audit_log
 from apps.spaces.permissions import (  # V6.0 space isolation
     DOCUMENT_DELETE,
     DOCUMENT_DOWNLOAD,
+    DOCUMENT_UPDATE,
     SpaceDocumentPermission,
     effective_space_role,
     ensure_workspace_writable,
     has_space_permission,
+    is_platform_admin,
     resolve_request_space,
+)
+from apps.spaces.governed import (  # Part 1 (§1.13): idempotency + audit
+    complete_operation_record,
+    digest_payload,
+    durable_governed_transaction,
+    operation_record,
+    replay_response,
+    require_idempotency_key,
 )
 from .models import DocumentCategory, Document, DocumentChunk, AnswerTemplate
 from .serializers import (
@@ -408,3 +420,367 @@ class AnswerTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
             request=request,
         )
         return super().destroy(request, *args, **kwargs)
+
+
+# ── Part 1 (KB version化): new API endpoints (SPEC §1.10) ──────────
+
+def _resolve_doc_for_edit(request, pk):
+    """Resolve a document for editing, enforcing space isolation + DOCUMENT_UPDATE.
+
+    Returns the Document instance.  Raises NotFound / PermissionDenied.
+    """
+    try:
+        document = Document.objects.select_related("space").get(pk=pk)
+    except Document.DoesNotExist:
+        raise NotFound("Document not found.")
+
+    active_space = resolve_request_space(request, required=False)
+    if active_space is not None and document.space_id != active_space.id:
+        raise NotFound("Document not found.")
+
+    if document.space_id is None:
+        if not is_platform_admin(request.user):
+            raise PermissionDenied("You do not have permission to edit this document.")
+    else:
+        if not has_space_permission(request.user, document.space, DOCUMENT_UPDATE):
+            raise PermissionDenied("You do not have permission to edit this document.")
+    return document
+
+
+class DocumentTextEditView(APIView):
+    """Part 1 (§1.10): Edit text_content — stage for preview, no version switch.
+
+    Updates the document's ``text_content`` field without triggering version
+    creation or re-chunking.  The change is "staged": the caller can then
+    call preview-diff and confirm to create a new version.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        document = _resolve_doc_for_edit(request, pk)
+        new_text = request.data.get("text_content")
+        if new_text is None:
+            return Response(
+                {"detail": "text_content field is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        document.text_content = new_text
+        document.save(update_fields=["text_content", "updated_at"])
+        create_audit_log(
+            user=request.user,
+            action="document_text_edit",
+            target_type="Document",
+            target_id=str(document.id),
+            details={"title": document.title, "staged": True},
+            request=request,
+        )
+        return Response(
+            {
+                "id": str(document.id),
+                "text_content": document.text_content,
+                "staged": True,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    post = patch  # Allow POST as alias
+
+
+class DocumentPreviewDiffView(APIView):
+    """Part 1 (§1.4/§1.10): Preview line-level diff — no persistence, no embed.
+
+    Accepts a proposed ``text_content`` in the request body and returns a
+    structured line-level diff against the document's current ``text_content``.
+    Does NOT write to the database or trigger embedding.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        document = _resolve_doc_for_edit(request, pk)
+        new_text = request.data.get("text_content", "")
+        old_text = document.text_content or ""
+
+        old_lines = old_text.splitlines()
+        new_lines = new_text.splitlines()
+        matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
+
+        diff_blocks = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            diff_blocks.append({
+                "tag": tag,
+                "old_start": i1,
+                "old_end": i2,
+                "new_start": j1,
+                "new_end": j2,
+                "old_lines": old_lines[i1:i2],
+                "new_lines": new_lines[j1:j2],
+            })
+
+        return Response({
+            "document_id": str(document.id),
+            "old_version": document.version,
+            "diff": diff_blocks,
+            "stats": {
+                "old_lines": len(old_lines),
+                "new_lines": len(new_lines),
+                "changed_blocks": sum(1 for b in diff_blocks if b["tag"] != "equal"),
+            },
+        })
+
+
+def _parse_effective_from(value):
+    """Parse an ISO-8601 effective_from string; default to now."""
+    if not value:
+        return timezone.now()
+    from datetime import datetime
+    dt = datetime.fromisoformat(str(value))
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt)
+    return dt
+
+
+def _create_version_atomically(
+    *,
+    current_doc,
+    new_text,
+    effective_from,
+    reason,
+    actor,
+    request,
+):
+    """Shared version-creation logic (used by version-create + rollback).
+
+    Must be called inside ``durable_governed_transaction`` +
+    ``operation_record``.  ``current_doc`` must already be locked via
+    ``select_for_update(of=("self",))``.
+    """
+    new_doc = Document.objects.create(
+        title=current_doc.title,
+        file=current_doc.file,
+        text_content=new_text,
+        file_type=current_doc.file_type,
+        file_size=current_doc.file_size,
+        category=current_doc.category,
+        tags=current_doc.tags,
+        space=current_doc.space,
+        uploaded_by=actor,
+        status="active",
+        version=current_doc.version + 1,
+        parent_document=current_doc,
+        effective_from=effective_from,
+        content_hash="",
+    )
+
+    is_immediate = effective_from <= timezone.now()
+
+    if is_immediate:
+        # Old version superseded + chunks removed from live index
+        current_doc.effective_to = effective_from
+        current_doc.status = "superseded"
+        current_doc.save(update_fields=["effective_to", "status", "updated_at"])
+        DocumentChunk.objects.filter(document=current_doc).delete()
+    else:
+        # Scheduled: old version stays active, but effective_to caps at new version
+        current_doc.effective_to = effective_from
+        current_doc.save(update_fields=["effective_to", "updated_at"])
+
+    # Re-chunk + re-embed new version's text_content
+    from apps.rag.pipeline import RAGPipeline
+    pipeline = RAGPipeline(ingestion=True)
+    chunks = pipeline.ingest_text_content(new_doc)
+
+    if chunks:
+        new_doc.chunk_count = len(chunks)
+        new_doc.status = "active"
+        new_doc.save(update_fields=["chunk_count", "status"])
+
+    create_audit_log(
+        user=actor,
+        action="document_version_created",
+        target_type="Document",
+        target_id=str(new_doc.id),
+        details={
+            "title": new_doc.title,
+            "old_version_id": str(current_doc.id),
+            "old_version_number": current_doc.version,
+            "new_version_number": new_doc.version,
+            "effective_from": effective_from.isoformat(),
+            "immediate": is_immediate,
+            "reason": reason,
+            "space_id": str(current_doc.space_id) if current_doc.space_id else None,
+        },
+        request=request,
+    )
+
+    return new_doc, {
+        "id": str(new_doc.id),
+        "version": new_doc.version,
+        "parent_document": str(current_doc.id),
+        "effective_from": effective_from.isoformat(),
+        "immediate": is_immediate,
+        "chunk_count": len(chunks) if chunks else 0,
+        "old_version_status": "superseded" if is_immediate else "active",
+    }
+
+
+class DocumentVersionCreateView(APIView):
+    """Part 1 (§1.3/§1.10): Create a new version — atomic re-chunk + re-embed.
+
+    In a single idempotent transaction:
+    - Lock current document with ``select_for_update(of=("self",))``
+    - Create new Document(parent=current, version+1, effective_from, text_content=new)
+    - If immediate (effective_from ≤ now): old version superseded + chunks deleted
+    - If scheduled (effective_from > now): old version stays active, effective_to capped
+    - Re-chunk + re-embed new text_content (pipeline.ingest_text_content)
+    - Audit event (document_version_created)
+    - Idempotency-Key + operation_record (§1.13)
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        # Pre-check: resolve document + permissions BEFORE idempotency
+        document = _resolve_doc_for_edit(request, pk)
+
+        new_text = request.data.get("text_content")
+        if new_text is None:
+            return Response(
+                {"detail": "text_content field is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        effective_from_raw = request.data.get("effective_from")
+        effective_from = _parse_effective_from(effective_from_raw)
+        reason = request.data.get("reason", "")
+
+        # Idempotency (§1.13)
+        idem_key = require_idempotency_key(request)
+        request_digest = digest_payload({
+            "document_id": pk,
+            "text_content": new_text,
+            "effective_from": effective_from_raw or "",  # stable: raw input, not now()
+            "reason": reason,
+        })
+
+        with durable_governed_transaction():
+            with operation_record(
+                actor=request.user,
+                operation_code="document_version_create",
+                key=idem_key,
+                request_digest=request_digest,
+                target_uuid=pk,
+            ) as (record, replay):
+                if replay:
+                    return replay_response(record)
+
+                # Lock current document (prevents concurrent version racing)
+                current_doc = (
+                    Document.objects
+                    .select_for_update(of=("self",))
+                    .get(id=pk)
+                )
+
+                _, response_body = _create_version_atomically(
+                    current_doc=current_doc,
+                    new_text=new_text,
+                    effective_from=effective_from,
+                    reason=reason,
+                    actor=request.user,
+                    request=request,
+                )
+
+                complete_operation_record(
+                    record,
+                    status_code=201,
+                    body=response_body,
+                    result_reference=response_body["id"],
+                )
+                return Response(response_body, status=status.HTTP_201_CREATED)
+
+
+class DocumentRollbackView(APIView):
+    """Part 1 (§1.6/§1.10): Rollback — promote an old version as new current.
+
+    Takes an old version's ``text_content`` and creates a new version (v+N+1)
+    that re-chunks + re-embeds that text, following the same atomic flow as
+    version creation.  ``target_version_id`` must be in the current document's
+    parent_document chain.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        # Pre-check: resolve current document + permissions
+        current_doc = _resolve_doc_for_edit(request, pk)
+
+        target_version_id = request.data.get("target_version_id")
+        if not target_version_id:
+            return Response(
+                {"detail": "target_version_id field is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Walk parent_document chain to find target version
+        ancestor = current_doc
+        found = None
+        while ancestor is not None:
+            if str(ancestor.id) == str(target_version_id):
+                found = ancestor
+                break
+            ancestor = ancestor.parent_document
+
+        if found is None:
+            return Response(
+                {"detail": "target_version_id is not in this document's version chain."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_text = found.text_content or ""
+        reason = request.data.get("reason", f"rollback to version {found.version}")
+        effective_from = timezone.now()  # Rollback is always immediate
+
+        # Idempotency (§1.13)
+        idem_key = require_idempotency_key(request)
+        request_digest = digest_payload({
+            "document_id": pk,
+            "target_version_id": str(target_version_id),
+            "reason": reason,
+        })
+
+        with durable_governed_transaction():
+            with operation_record(
+                actor=request.user,
+                operation_code="document_rollback",
+                key=idem_key,
+                request_digest=request_digest,
+                target_uuid=pk,
+            ) as (record, replay):
+                if replay:
+                    return replay_response(record)
+
+                # Lock current document
+                locked_doc = (
+                    Document.objects
+                    .select_for_update(of=("self",))
+                    .get(id=pk)
+                )
+
+                _, response_body = _create_version_atomically(
+                    current_doc=locked_doc,
+                    new_text=old_text,
+                    effective_from=effective_from,
+                    reason=reason,
+                    actor=request.user,
+                    request=request,
+                )
+                response_body["rollback_from_version"] = locked_doc.version
+
+                complete_operation_record(
+                    record,
+                    status_code=201,
+                    body=response_body,
+                    result_reference=response_body["id"],
+                )
+                return Response(response_body, status=status.HTTP_201_CREATED)

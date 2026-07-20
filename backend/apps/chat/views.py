@@ -1409,6 +1409,10 @@ def send_message(request, session_id=None, message_id=None):
 
                 if event_type == "citations":
                     citations_data = data
+                    # Part 2 measure-first metric: record chunks returned.
+                    stream_metrics.mark_retrieval_result(
+                        len(data) if isinstance(data, list) else 0
+                    )
                     if use_v2:
                         yield v2_event("citations", data)
                     else:
@@ -1434,6 +1438,13 @@ def send_message(request, session_id=None, message_id=None):
                         reasoning_ms, bool
                     ):
                         stream_metrics.mark_reasoning(reasoning_ms)
+
+                elif event_type == "phase":
+                    # V4 Part 3: Forward pipeline phase events (e.g. "thinking")
+                    # to the client as progressive safe-labels via SSE v2.
+                    stream_metrics.mark_first_event(time.monotonic())
+                    if use_v2:
+                        yield v2_event("phase", data)
 
                 elif event_type == "token":
                     # V4.2 SYS-V4.2-014: Check SSE timeout — abort if stream exceeds limit
@@ -1603,6 +1614,10 @@ def send_message(request, session_id=None, message_id=None):
                     model_id=pipeline.model_name,
                 )
                 safe_timings = stream_metrics.snapshot(now=time.monotonic())
+                # Part 2 measure-first metrics: routing_decision records whether
+                # the pipeline retrieved, skipped retrieval, or hit cache. Until
+                # routing/cache code is built, every turn uses the default route.
+                safe_timings["routing_decision"] = "retrieve"
                 _record_turn_metrics(turn, **safe_timings)
         except GeneratorExit:
             record_invocation("cancelled", error_code="client_disconnected")
