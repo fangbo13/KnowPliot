@@ -207,6 +207,20 @@ def remove_postgresql_taxonomy_triggers(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # atomic = False: when this migration re-runs against a database that
+    # already holds spaces_knowledgespace rows (e.g. the ownership stage_c /
+    # stage_a migration-contract tests, which seed historical rows before
+    # migrating forward to the leaf), the DEFERRABLE INITIALLY DEFERRED
+    # ownership-invariant constraint triggers installed by 0011 queue pending
+    # trigger events on spaces_knowledgespace that block the AddIndex (CREATE
+    # INDEX) operations within one atomic transaction ("cannot CREATE INDEX
+    # spaces_knowledgespace because it has pending trigger events"). Running
+    # each operation in its own transaction lets the deferred triggers fire at
+    # each commit before the next CREATE INDEX. On a fresh DB (normal
+    # `migrate`) there are no pre-existing rows, so the issue does not arise
+    # (mirrors 0015_workspace_deletion_stage_a.atomic = False).
+    atomic = False
+
     dependencies = [
         ("spaces", "0011_ownership_invariant_hardening"),
         ("scenario_templates", "0006_versioned_clone_contract"),

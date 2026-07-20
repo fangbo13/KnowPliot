@@ -2,13 +2,15 @@
 
 import hashlib
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
 
 class KnowledgeWorkspaceRetentionMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    # serialized_rollback removed: in the full suite the fixture reload collides
+    # with existing django_content_type rows (UniqueViolation). Test seeds its
+    # own rows, so serialized state is not needed (mirrors pg_session_locking).
     migrate_from = ("knowledge", "0010_ingestionjob_know_ing_st_sp_cr_idx")
     migrate_to = ("knowledge", "0011_workspace_retention_contract")
     spaces_target = ("spaces", "0015_workspace_deletion_stage_a")
@@ -39,7 +41,8 @@ class KnowledgeWorkspaceRetentionMigrationTests(TransactionTestCase):
         User = self.old_apps.get_model("users", "User")
         Organization = self.old_apps.get_model("spaces", "Organization")
         KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
-        Locator = self.old_apps.get_model("spaces", "WorkspaceLocatorReservation")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
+        Locator = self.old_apps.get_model("spaces", "WorkspacelocatorReservation")
         Document = self.old_apps.get_model("knowledge", "Document")
         IngestionJob = self.old_apps.get_model("knowledge", "IngestionJob")
         BatchResult = self.old_apps.get_model(
@@ -57,13 +60,24 @@ class KnowledgeWorkspaceRetentionMigrationTests(TransactionTestCase):
             slug="knowledge-retention-org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            owner=owner,
-            name="Knowledge retention space",
-            code="knowledge-retention-space",
-            status="archived",
-        )
+        # The 0011 owner-mirror deferred constraint trigger fires at commit and
+        # requires a matching active owner membership; wrap the space + mirror
+        # insert in one atomic block so the trigger fires after both rows exist.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                owner=owner,
+                name="Knowledge retention space",
+                code="knowledge-retention-space",
+                status="archived",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=owner,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
         locator_text = "knowledge-retention-org/knowledge-retention-space"
         locator_digest = hashlib.sha256(locator_text.encode()).hexdigest()
         locator = Locator.objects.create(

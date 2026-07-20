@@ -2,13 +2,15 @@
 
 import hashlib
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
 
 class AuditWorkspaceRetentionMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    # serialized_rollback removed: in the full suite the fixture reload collides
+    # with existing django_content_type rows (UniqueViolation). Test seeds its
+    # own rows, so serialized state is not needed (mirrors pg_session_locking).
     migrate_from = ("audit", "0014_alter_auditlog_action_and_more")
     migrate_to = ("audit", "0015_workspace_retention_contract")
     scenario_target = (
@@ -33,6 +35,7 @@ class AuditWorkspaceRetentionMigrationTests(TransactionTestCase):
         User = self.old_apps.get_model("users", "User")
         Organization = self.old_apps.get_model("spaces", "Organization")
         KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
         Locator = self.old_apps.get_model("spaces", "WorkspaceLocatorReservation")
         AuditLog = self.old_apps.get_model("audit", "AuditLog")
 
@@ -47,13 +50,24 @@ class AuditWorkspaceRetentionMigrationTests(TransactionTestCase):
             slug="audit-retention-org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            owner=owner,
-            name="Audit retention space",
-            code="audit-retention-space",
-            status="archived",
-        )
+        # The 0011 owner-mirror deferred constraint trigger fires at commit and
+        # requires a matching active owner membership; wrap the space + mirror
+        # insert in one atomic block so the trigger fires after both rows exist.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                owner=owner,
+                name="Audit retention space",
+                code="audit-retention-space",
+                status="archived",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=owner,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
         locator_text = "audit-retention-org/audit-retention-space"
         locator_digest = hashlib.sha256(locator_text.encode()).hexdigest()
         locator = Locator.objects.create(

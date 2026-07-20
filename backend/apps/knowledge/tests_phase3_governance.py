@@ -448,7 +448,11 @@ class DocumentDownloadSecurityTest(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        response.close()
+        # The audit log is created by the view before the StreamingHttpResponse
+        # is returned, so it is already present. Do NOT call response.close():
+        # on psycopg3 it closes the shared DB connection (request_finished
+        # cleanup), which would abort the TestCase transaction and break this
+        # assertion plus the next test in the class.
         log = AuditLog.objects.get(
             user=self.reviewer,
             action="document_download",

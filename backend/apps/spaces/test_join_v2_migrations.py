@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
@@ -56,38 +56,46 @@ class JoinV2MigrationContractTests(TransactionTestCase):
             slug="join-migration-org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            owner=owner,
-            name="Join migration space",
-            code="join-migration-space",
-            status="active",
-        )
-        owner_membership = SpaceMembership.objects.create(
-            space=space,
-            user=owner,
-            role="owner",
-            status="active",
-        )
-        member_membership = SpaceMembership.objects.create(
-            space=space,
-            user=member,
-            role="member",
-            status="active",
-        )
-        access_request = SpaceAccessRequest.objects.create(
-            space=space,
-            user=member,
-            role="guest",
-            reason="legacy discovery request",
-            status="pending",
-        )
-        invite = InviteCode.objects.create(
-            space=space,
-            code_hash="a" * 64,
-            role="member",
-            status="active",
-        )
+        # The 0011 owner-mirror deferred constraint trigger fires at commit and
+        # requires a consistent owner mirror; wrap the full legacy-row seed
+        # (space, memberships, access request, invite) in one atomic block so
+        # the trigger fires once at commit after all rows exist, and the
+        # subsequent forward migration's ALTER TABLE does not hit pending
+        # deferred trigger events.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                owner=owner,
+                name="Join migration space",
+                code="join-migration-space",
+                status="active",
+            )
+            owner_membership = SpaceMembership.objects.create(
+                space=space,
+                user=owner,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
+            member_membership = SpaceMembership.objects.create(
+                space=space,
+                user=member,
+                role="member",
+                status="active",
+            )
+            access_request = SpaceAccessRequest.objects.create(
+                space=space,
+                user=member,
+                role="guest",
+                reason="legacy discovery request",
+                status="pending",
+            )
+            invite = InviteCode.objects.create(
+                space=space,
+                code_hash="a" * 64,
+                role="member",
+                status="active",
+            )
 
         executor = MigrationExecutor(connection)
         executor.migrate(

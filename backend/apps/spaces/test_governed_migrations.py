@@ -1,6 +1,6 @@
 """Migration contract for the governed-request foundation and locator backfill."""
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
@@ -27,6 +27,7 @@ class GovernedRequestMigrationContractTests(TransactionTestCase):
         User = self.old_apps.get_model("users", "User")
         Organization = self.old_apps.get_model("spaces", "Organization")
         KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
         user = User.objects.create(
             username="governed-migration-owner",
             email="governed-migration-owner@example.test",
@@ -38,13 +39,24 @@ class GovernedRequestMigrationContractTests(TransactionTestCase):
             slug="Migration_Org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            name="Legacy locator space",
-            code="Legacy_Code",
-            owner=user,
-            status="active",
-        )
+        # The 0011 owner-mirror deferred constraint trigger fires at commit and
+        # requires a matching active owner membership; wrap the space + mirror
+        # insert in one atomic block so the trigger fires after both rows exist.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                name="Legacy locator space",
+                code="Legacy_Code",
+                owner=user,
+                status="active",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=user,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
 
         executor = MigrationExecutor(connection)
         executor.migrate([self.migrate_to, self.users_target])

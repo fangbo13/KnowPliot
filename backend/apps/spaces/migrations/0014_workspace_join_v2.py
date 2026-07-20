@@ -111,6 +111,19 @@ def remove_postgresql_source_trigger(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # atomic = False: when this migration re-runs against a database that
+    # already holds rows (e.g. the join_v2 migration-contract test, which
+    # seeds legacy space/membership/access-request/invite rows before
+    # migrating forward), the DEFERRABLE INITIALLY DEFERRED ownership-invariant
+    # triggers installed by 0011 can queue pending trigger events that block
+    # the AddField (ALTER TABLE) operations within one atomic transaction
+    # ("cannot ALTER TABLE spaces_spaceaccessrequest because it has pending
+    # trigger events"). Running each operation in its own transaction lets the
+    # deferred triggers fire at each commit before the next ALTER. On a fresh
+    # DB (normal `migrate`) there are no pre-existing rows, so the issue does
+    # not arise (mirrors 0012 and 0015 atomic = False).
+    atomic = False
+
     dependencies = [
         ("spaces", "0013_governed_workspace_requests"),
         ("users", "0005_test_principal_metadata"),

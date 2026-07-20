@@ -1,6 +1,6 @@
 """Migration contract proving historical taxonomy is never guessed."""
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
@@ -27,6 +27,7 @@ class TaxonomyMigrationContractTests(TransactionTestCase):
         User = self.old_apps.get_model("users", "User")
         Organization = self.old_apps.get_model("spaces", "Organization")
         KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
         user = User.objects.create(
             username="taxonomy-migration-owner",
             email="taxonomy-migration-owner@example.test",
@@ -37,14 +38,26 @@ class TaxonomyMigrationContractTests(TransactionTestCase):
             slug="migration-taxonomy-org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            name="Assurance Group 12345 (legacy label)",
-            code="taxonomy-migration-space",
-            description="free-form group tag must not be parsed",
-            owner=user,
-            status="active",
-        )
+        # The 0011 owner-mirror deferred constraint trigger requires every
+        # space to carry a matching active owner membership; wrap the space +
+        # mirror insert in one atomic block so the trigger fires at commit,
+        # after both rows exist (autocommit would fire it mid-setup and abort).
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                name="Assurance Group 12345 (legacy label)",
+                code="taxonomy-migration-space",
+                description="free-form group tag must not be parsed",
+                owner=user,
+                status="active",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=user,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
 
         executor = MigrationExecutor(connection)
         executor.migrate([self.migrate_to])

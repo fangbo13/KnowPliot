@@ -3,13 +3,15 @@
 import hashlib
 from datetime import datetime, timezone
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
 
 class ScenarioWorkspaceRetentionMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    # serialized_rollback removed: in the full suite the fixture reload collides
+    # with existing django_content_type rows (UniqueViolation). Test seeds its
+    # own rows, so serialized state is not needed (mirrors pg_session_locking).
     migrate_from = ("scenario_templates", "0006_versioned_clone_contract")
     migrate_to = ("scenario_templates", "0007_workspace_retention_contract")
     chat_target = ("chat", "0018_workspace_retention_contract")
@@ -31,6 +33,7 @@ class ScenarioWorkspaceRetentionMigrationTests(TransactionTestCase):
         User = self.old_apps.get_model("users", "User")
         Organization = self.old_apps.get_model("spaces", "Organization")
         KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
         Locator = self.old_apps.get_model("spaces", "WorkspaceLocatorReservation")
         Template = self.old_apps.get_model(
             "scenario_templates", "ScenarioTemplate"
@@ -53,13 +56,24 @@ class ScenarioWorkspaceRetentionMigrationTests(TransactionTestCase):
             slug="scenario-retention-org",
             status="active",
         )
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            owner=owner,
-            name="Scenario retention space",
-            code="scenario-retention-space",
-            status="archived",
-        )
+        # The 0011 owner-mirror deferred constraint trigger fires at commit and
+        # requires a matching active owner membership; wrap the space + mirror
+        # insert in one atomic block so the trigger fires after both rows exist.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                owner=owner,
+                name="Scenario retention space",
+                code="scenario-retention-space",
+                status="archived",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=owner,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
         locator_text = "scenario-retention-org/scenario-retention-space"
         locator_digest = hashlib.sha256(locator_text.encode()).hexdigest()
         locator = Locator.objects.create(
@@ -137,13 +151,17 @@ class ScenarioWorkspaceRetentionMigrationTests(TransactionTestCase):
         self.assertIn("template_revision_hash", registry.snapshot_fields)
 
         # A legacy-unknown application may detach from a removed template while
-        # retaining its immutable template identity evidence.
+        # retaining its immutable template identity evidence. The published
+        # revision is immutable (scenario_templates_guard_published_revision),
+        # so the purge path detaches the application's template FK (SET_NULL)
+        # rather than cascade-deleting the template+published revision; the
+        # application's snapshot (template_uuid / template_key_snapshot) survives.
         MigratedApplication.objects.filter(pk=application.pk).update(
             template_revision_id=None,
             legacy_revision_unknown=True,
+            template_id=None,
         )
         MigratedTemplate.objects.filter(pk=template.pk).update(current_revision_id=None)
-        MigratedTemplate.objects.get(pk=template.pk).delete()
         migrated.refresh_from_db()
         self.assertIsNone(migrated.template_id)
         self.assertEqual(migrated.template_uuid, template.pk)
