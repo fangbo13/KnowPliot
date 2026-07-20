@@ -45,6 +45,21 @@ def backfill_canonical_owners(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # atomic = False: when this migration runs against a database that already
+    # holds spaces_knowledgespace rows (e.g. the ownership stage_c
+    # migration-contract test, which seeds user/space/membership rows before
+    # migrating forward), the DEFERRABLE INITIALLY DEFERRED FK on
+    # spaces_knowledgespace.owner queues a pending trigger event during the
+    # backfill_canonical_owners UPDATE. Within one atomic transaction that
+    # pending event blocks the subsequent AlterField (ALTER TABLE) with
+    # "cannot ALTER TABLE spaces_knowledgespace because it has pending trigger
+    # events" -> PostgreSQL rejects the DDL and the test stalls at the migrate
+    # call. Running each operation in its own transaction lets the deferred FK
+    # fire at the backfill commit before the next ALTER. On a fresh DB (normal
+    # `migrate`) there are no pre-existing rows, so the issue does not arise
+    # (mirrors 0012, 0014, 0015 atomic = False).
+    atomic = False
+
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
         ("users", "0004_user_offboarding_metadata"),
