@@ -26,6 +26,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
 from apps.rag.errors import ProviderGenerationError
+from apps.rag.language import resolve_reply_language
 from apps.rbac.capabilities import resolve_capabilities
 from apps.spaces.generation_policy import (
     ANSWER_MODE_DEEP,
@@ -1037,7 +1038,9 @@ def send_message(request, session_id=None, message_id=None):
     protocol_version = serializer.validated_data["protocol_version"]
     use_v2 = _stream_v2_enabled(protocol_version)
     user = request.user
-    language = getattr(user, "language_preference", "en")
+    # Post-V3 Part 4: the AI reply language is resolved after the session's
+    # space is known (so the space default_language fallback can apply), via
+    # apps.rag.language.resolve_reply_language(content, user, space).
 
     # V6.0: resolve the active space from the X-Space-Id header (if any). A new
     # session is created in this space; an existing session keeps its own space
@@ -1070,6 +1073,10 @@ def send_message(request, session_id=None, message_id=None):
         )
     created = session_result.disposition == SessionResolutionDisposition.CREATED
     space = session.space
+    # Post-V3 Part 4: resolve AI reply language — query-language detection
+    # (primary) -> user.language_preference override -> space.default_language
+    # fallback. KB content language never drives the reply language.
+    language = resolve_reply_language(content, user, space)
     if space is not None and (
         effective_space_role(user, space) is None
         or not has_space_permission(user, space, CHAT_ASK)

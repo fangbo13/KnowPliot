@@ -243,6 +243,14 @@ class KnowledgeSpace(models.Model):
     description = models.TextField(blank=True, default="")
     icon = models.CharField(max_length=50, blank=True, default="")
     language = models.CharField(max_length=8, default="en")
+    # Post-V3 Part 4: AI reply-language fallback (auto/zh/en). Does NOT drive
+    # KB content language; used only when query-language detection is
+    # inconclusive and the user has no explicit language_preference.
+    default_language = models.CharField(
+        max_length=8,
+        choices=[("auto", "Auto-detect"), ("zh", "Chinese"), ("en", "English")],
+        default="auto",
+    )
     visibility = models.CharField(
         max_length=20, choices=VISIBILITY_CHOICES, default="private"
     )
