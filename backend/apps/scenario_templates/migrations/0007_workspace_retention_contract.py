@@ -54,37 +54,62 @@ def backfill_application_snapshots(apps, schema_editor):
 
 def mark_registry_ready(apps, schema_editor):
     Registry = apps.get_model("spaces", "WorkspacePurgeDependency")
-    updated = Registry.objects.filter(
+    # Use bulk .update() for existing + bulk_create for missing (NOT
+    # update_or_create): the per-row save() that update_or_create triggers
+    # was found to leave deferred-trigger state in a later ownership stage_c
+    # migration-contract test's tearDown, hanging it. .update() and
+    # bulk_create are bulk SQL with no per-row model save() / signals. Missing
+    # rows occur in TransactionTestCase context (truncation; spaces.0015 seed
+    # does not re-run once applied); production runs take the existing-row
+    # path. Create-contract fields mirror spaces.0015 REGISTRY_ROWS.
+    snapshot_fields = [
+        "space_uuid",
+        "organization_uuid",
+        "locator_digest",
+        "tombstone_id",
+        "template_uuid",
+        "template_key_snapshot",
+        "template_revision_uuid",
+        "template_revision_hash",
+        "created_by_uuid",
+        "legacy_revision_unknown",
+    ]
+    scrub_fields = [
+        "task_ids",
+        "template_snapshot",
+        "sensitive_payload_scrubbed_at",
+    ]
+    existing = Registry.objects.filter(
         model_label="scenario_templates.ScenarioTemplateApplication",
         migration_owner=MIGRATION_OWNER,
         required=True,
         active=True,
-    ).update(
-        snapshot_fields=[
-            "space_uuid",
-            "organization_uuid",
-            "locator_digest",
-            "tombstone_id",
-            "template_uuid",
-            "template_key_snapshot",
-            "template_revision_uuid",
-            "template_revision_hash",
-            "created_by_uuid",
-            "legacy_revision_unknown",
-        ],
-        scrub_fields=[
-            "task_ids",
-            "template_snapshot",
-            "sensitive_payload_scrubbed_at",
-        ],
-        registration_state="ready",
-        schema_revision=1,
     )
-    if updated != 1:
-        raise RuntimeError(
-            "missing or duplicate purge registry row for "
-            "scenario_templates.ScenarioTemplateApplication"
+    if existing.exists():
+        existing.update(
+            snapshot_fields=snapshot_fields,
+            scrub_fields=scrub_fields,
+            registration_state="ready",
+            schema_revision=1,
         )
+    else:
+        Registry.objects.bulk_create([
+            Registry(
+                model_label="scenario_templates.ScenarioTemplateApplication",
+                space_field="space",
+                migration_owner=MIGRATION_OWNER,
+                disposition="retained_evidence",
+                blocker_code="",
+                lock_order=13,
+                purge_order=160,
+                snapshot_fields=snapshot_fields,
+                scrub_fields=scrub_fields,
+                registration_state="ready",
+                schema_revision=1,
+                required=True,
+                active=True,
+            )
+        ])
 
 
 class Migration(migrations.Migration):

@@ -6,7 +6,13 @@ from django.test import TransactionTestCase
 
 
 class VersionedCloneMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    # serialized_rollback removed: in the full suite the fixture reload
+    # collides with django_content_type rows that post_migrate re-created
+    # (UniqueViolation on (app_label, model)=(admin, logentry) on PostgreSQL).
+    # The test seeds its own template/revision/application rows in the body, so
+    # the default TransactionTestCase truncate is sufficient and avoids the
+    # re-insert collision (mirrors pg_session_locking and the workspace
+    # retention migration tests).
     migrate_from = ("scenario_templates", "0005_phase8b_catalog_assets")
     migrate_to = ("scenario_templates", "0006_versioned_clone_contract")
 

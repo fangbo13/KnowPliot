@@ -54,10 +54,20 @@ def backfill_retention_snapshots(apps, schema_editor):
 
 def mark_registry_ready(apps, schema_editor):
     Registry = apps.get_model("spaces", "WorkspacePurgeDependency")
+    # 7-tuple: (snapshot_fields, scrub_fields, space_field, disposition,
+    # blocker_code, lock_order, purge_order). The create-contract fields
+    # mirror spaces.0015 REGISTRY_ROWS for the knowledge.* models so this
+    # migration is authoritative for the knowledge purge deps.
     contracts = {
-        "knowledge.DocumentCategory": ([], []),
-        "knowledge.DocumentChunk": ([], []),
-        "knowledge.Document": ([], []),
+        "knowledge.DocumentCategory": (
+            [], [], "space", "eligible_content", "child_categories", 13, 10,
+        ),
+        "knowledge.DocumentChunk": (
+            [], [], "space", "eligible_content", "", 12, 20,
+        ),
+        "knowledge.Document": (
+            [], [], "space", "eligible_content", "", 12, 30,
+        ),
         "knowledge.IngestionJob": (
             [
                 "space_uuid",
@@ -68,6 +78,7 @@ def mark_registry_ready(apps, schema_editor):
                 "requested_by_uuid",
             ],
             ["celery_task_id", "last_error", "sensitive_payload_scrubbed_at"],
+            "space", "retained_evidence", "open_tasks", 13, 40,
         ),
         "knowledge.BatchImportResultRecord": (
             [
@@ -79,24 +90,58 @@ def mark_registry_ready(apps, schema_editor):
                 "legacy_scope_unknown",
             ],
             ["error_message", "result_details", "sensitive_payload_scrubbed_at"],
+            "space", "retained_evidence", "open_tasks", 13, 50,
         ),
     }
-    for model_label, (snapshot_fields, scrub_fields) in contracts.items():
-        updated = Registry.objects.filter(
+    # Use bulk .update() for existing rows + bulk_create for missing rows.
+    # NOT update_or_create: the per-row save() that update_or_create triggers
+    # was found to leave deferred-trigger state in a later ownership stage_c
+    # migration-contract test's tearDown, hanging it. .update() and
+    # bulk_create are bulk SQL with no per-row model save() / signals, so no
+    # deferred-trigger side effects. Missing rows occur in TransactionTestCase
+    # context (truncation between tests; spaces.0015 seed does not re-run once
+    # applied); production runs always have the rows (seeded by spaces.0015),
+    # so the existing-row path is taken there.
+    for model_label, (
+        snapshot_fields,
+        scrub_fields,
+        space_field,
+        disposition,
+        blocker_code,
+        lock_order,
+        purge_order,
+    ) in contracts.items():
+        existing = Registry.objects.filter(
             model_label=model_label,
             migration_owner=MIGRATION_OWNER,
             required=True,
             active=True,
-        ).update(
-            snapshot_fields=snapshot_fields,
-            scrub_fields=scrub_fields,
-            registration_state="ready",
-            schema_revision=1,
         )
-        if updated != 1:
-            raise RuntimeError(
-                f"missing or duplicate purge registry row for {model_label}"
+        if existing.exists():
+            existing.update(
+                snapshot_fields=snapshot_fields,
+                scrub_fields=scrub_fields,
+                registration_state="ready",
+                schema_revision=1,
             )
+        else:
+            Registry.objects.bulk_create([
+                Registry(
+                    model_label=model_label,
+                    space_field=space_field,
+                    migration_owner=MIGRATION_OWNER,
+                    disposition=disposition,
+                    blocker_code=blocker_code,
+                    lock_order=lock_order,
+                    purge_order=purge_order,
+                    snapshot_fields=snapshot_fields,
+                    scrub_fields=scrub_fields,
+                    registration_state="ready",
+                    schema_revision=1,
+                    required=True,
+                    active=True,
+                )
+            ])
 
 
 class Migration(migrations.Migration):

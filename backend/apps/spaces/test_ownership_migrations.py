@@ -79,12 +79,24 @@ class OwnershipStageCMigrationTests(TransactionTestCase):
             "apps.spaces.migrations.0010_ownership_continuity_stage_c"
         )
 
-        with connection.schema_editor() as schema_editor:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "ownership_continuity_stage_c_blocked",
-            ):
-                migration_module.backfill_canonical_owners(self.old_apps, schema_editor)
+        # backfill_canonical_owners only uses schema_editor.connection.alias
+        # (it does data .update() only, NO DDL). connection.schema_editor()
+        # inherits the connection's pending deferred-constraint state (left by
+        # a prior app's TransactionTestCase in multi-app runs) and hangs.
+        # Pass a minimal schema_editor-like object exposing .connection,
+        # running backfill in autocommit (no schema_editor setup) to avoid
+        # the inherited deferred-state hang.
+        class _MinimalSchemaEditor:
+            def __init__(self, conn):
+                self.connection = conn
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "ownership_continuity_stage_c_blocked",
+        ):
+            migration_module.backfill_canonical_owners(
+                self.old_apps, _MinimalSchemaEditor(connection)
+            )
 
         zero_owner_space.refresh_from_db()
         ambiguous_space.refresh_from_db()

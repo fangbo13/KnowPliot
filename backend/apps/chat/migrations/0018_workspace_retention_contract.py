@@ -125,12 +125,25 @@ def backfill_retention_snapshots(apps, schema_editor):
 
 def mark_registry_ready(apps, schema_editor):
     Registry = apps.get_model("spaces", "WorkspacePurgeDependency")
+    # 7-tuple: (snapshot_fields, scrub_fields, space_field, disposition,
+    # blocker_code, lock_order, purge_order). Create-contract fields mirror
+    # spaces.0015 REGISTRY_ROWS for the chat.* models.
     contracts = {
-        "chat.ConversationShare": ([], []),
-        "chat.Citation": ([], []),
-        "chat.Message": ([], []),
-        "chat.ChatTurn": ([], []),
-        "chat.ChatSession": ([], []),
+        "chat.ConversationShare": (
+            [], [], "session__space", "credential", "active_shares", 13, 60,
+        ),
+        "chat.Citation": (
+            [], [], "space", "eligible_content", "", 12, 70,
+        ),
+        "chat.Message": (
+            [], [], "space", "eligible_content", "", 12, 80,
+        ),
+        "chat.ChatTurn": (
+            [], [], "space", "eligible_content", "active_chat_execution", 12, 90,
+        ),
+        "chat.ChatSession": (
+            [], [], "space", "eligible_content", "", 12, 100,
+        ),
         "chat.Feedback": (
             [
                 "space_uuid",
@@ -148,6 +161,7 @@ def mark_registry_ready(apps, schema_editor):
                 "resolution_notes",
                 "sensitive_payload_scrubbed_at",
             ],
+            "space", "retained_evidence", "open_tasks", 13, 110,
         ),
         "chat.FeedbackReviewEvent": (
             [
@@ -160,6 +174,7 @@ def mark_registry_ready(apps, schema_editor):
                 "reviewer_uuid",
             ],
             ["notes", "sensitive_payload_scrubbed_at"],
+            "space", "retained_evidence", "", 13, 120,
         ),
         "chat.KnowledgeGapTicket": (
             [
@@ -177,6 +192,7 @@ def mark_registry_ready(apps, schema_editor):
                 "resolution_notes",
                 "sensitive_payload_scrubbed_at",
             ],
+            "space", "retained_evidence", "open_tasks", 13, 130,
         ),
         "chat.ComplianceExportJob": (
             [
@@ -187,6 +203,7 @@ def mark_registry_ready(apps, schema_editor):
                 "requested_by_uuid",
             ],
             ["result_file", "safe_error_summary", "sensitive_payload_scrubbed_at"],
+            "space", "retained_evidence", "open_tasks", 13, 140,
         ),
         "chat.ModelInvocation": (
             [
@@ -199,24 +216,56 @@ def mark_registry_ready(apps, schema_editor):
                 "question_message_uuid",
             ],
             [],
+            "space", "retained_evidence", "", 13, 150,
         ),
     }
-    for model_label, (snapshot_fields, scrub_fields) in contracts.items():
-        updated = Registry.objects.filter(
+    # Use bulk .update() for existing rows + bulk_create for missing rows.
+    # NOT update_or_create: the per-row save() that update_or_create triggers
+    # was found to leave deferred-trigger state in a later ownership stage_c
+    # migration-contract test's tearDown, hanging it. .update() and
+    # bulk_create are bulk SQL with no per-row model save() / signals. Missing
+    # rows occur in TransactionTestCase context (truncation; spaces.0015 seed
+    # does not re-run once applied); production runs take the existing-row path.
+    for model_label, (
+        snapshot_fields,
+        scrub_fields,
+        space_field,
+        disposition,
+        blocker_code,
+        lock_order,
+        purge_order,
+    ) in contracts.items():
+        existing = Registry.objects.filter(
             model_label=model_label,
             migration_owner=MIGRATION_OWNER,
             required=True,
             active=True,
-        ).update(
-            snapshot_fields=snapshot_fields,
-            scrub_fields=scrub_fields,
-            registration_state="ready",
-            schema_revision=1,
         )
-        if updated != 1:
-            raise RuntimeError(
-                f"missing or duplicate purge registry row for {model_label}"
+        if existing.exists():
+            existing.update(
+                snapshot_fields=snapshot_fields,
+                scrub_fields=scrub_fields,
+                registration_state="ready",
+                schema_revision=1,
             )
+        else:
+            Registry.objects.bulk_create([
+                Registry(
+                    model_label=model_label,
+                    space_field=space_field,
+                    migration_owner=MIGRATION_OWNER,
+                    disposition=disposition,
+                    blocker_code=blocker_code,
+                    lock_order=lock_order,
+                    purge_order=purge_order,
+                    snapshot_fields=snapshot_fields,
+                    scrub_fields=scrub_fields,
+                    registration_state="ready",
+                    schema_revision=1,
+                    required=True,
+                    active=True,
+                )
+            ])
 
 
 def _uuid_field():

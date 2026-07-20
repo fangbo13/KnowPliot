@@ -26,6 +26,31 @@ class ScenarioWorkspaceRetentionMigrationTests(TransactionTestCase):
 
     def tearDown(self):
         executor = MigrationExecutor(connection)
+        # TransactionTestCase truncated the purge registry between tests, and
+        # spaces.0015's seed does not re-run once applied, so the leaf-restore
+        # migrate below would re-run spaces.0016's finalize validation against
+        # an empty registry and raise "missing or duplicate final purge
+        # registry row". Re-seed idempotently first (update_or_create,
+        # preserves per-model migration_owner) so finalize sees the full
+        # registry. Production migrate is unaffected (rows persist).
+        import importlib
+        from django.apps import apps as django_apps
+        seed_module = importlib.import_module(
+            "apps.spaces.migrations.0015_workspace_deletion_stage_a"
+        )
+        seed_module.seed_purge_registry(django_apps, None)
+        # Re-run each app's mark_registry_ready so the non-ready-owner rows
+        # (knowledge/chat/scenario_templates/audit) are set "ready" with their
+        # correct snapshot/scrub fields before finalize's all-ready check.
+        for _mod_path in (
+            "apps.knowledge.migrations.0011_workspace_retention_contract",
+            "apps.chat.migrations.0018_workspace_retention_contract",
+            "apps.scenario_templates.migrations.0007_workspace_retention_contract",
+            "apps.audit.migrations.0015_workspace_retention_contract",
+        ):
+            importlib.import_module(_mod_path).mark_registry_ready(
+                django_apps, None
+            )
         executor.migrate(executor.loader.graph.leaf_nodes())
         super().tearDown()
 

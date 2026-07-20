@@ -28,27 +28,54 @@ def backfill_audit_snapshots(apps, schema_editor):
 
 def mark_registry_ready(apps, schema_editor):
     Registry = apps.get_model("spaces", "WorkspacePurgeDependency")
-    updated = Registry.objects.filter(
+    # Use bulk .update() for existing + bulk_create for missing (NOT
+    # update_or_create): the per-row save() that update_or_create triggers
+    # was found to leave deferred-trigger state in a later ownership stage_c
+    # migration-contract test's tearDown, hanging it. .update() and
+    # bulk_create are bulk SQL with no per-row model save() / signals. Missing
+    # rows occur in TransactionTestCase context (truncation; spaces.0015 seed
+    # does not re-run once applied); production runs take the existing-row path.
+    # Create-contract fields mirror spaces.0015 REGISTRY_ROWS.
+    snapshot_fields = [
+        "space_id",
+        "organization_id",
+        "business_line_id",
+        "locator_digest",
+        "tombstone_id",
+        "actor_uuid",
+        "governed_request_uuid",
+    ]
+    existing = Registry.objects.filter(
         model_label="audit.AuditLog",
         migration_owner=MIGRATION_OWNER,
         required=True,
         active=True,
-    ).update(
-        snapshot_fields=[
-            "space_id",
-            "organization_id",
-            "business_line_id",
-            "locator_digest",
-            "tombstone_id",
-            "actor_uuid",
-            "governed_request_uuid",
-        ],
-        scrub_fields=[],
-        registration_state="ready",
-        schema_revision=1,
     )
-    if updated != 1:
-        raise RuntimeError("missing or duplicate purge registry row for audit.AuditLog")
+    if existing.exists():
+        existing.update(
+            snapshot_fields=snapshot_fields,
+            scrub_fields=[],
+            registration_state="ready",
+            schema_revision=1,
+        )
+    else:
+        Registry.objects.bulk_create([
+            Registry(
+                model_label="audit.AuditLog",
+                space_field="space_id",
+                migration_owner=MIGRATION_OWNER,
+                disposition="retained_evidence",
+                blocker_code="",
+                lock_order=15,
+                purge_order=170,
+                snapshot_fields=snapshot_fields,
+                scrub_fields=[],
+                registration_state="ready",
+                schema_revision=1,
+                required=True,
+                active=True,
+            )
+        ])
 
 
 class Migration(migrations.Migration):
