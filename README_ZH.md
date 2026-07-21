@@ -5,7 +5,7 @@
 ### 面向专业服务团队的多空间知识运营平台
 
 [![状态](https://img.shields.io/badge/状态-Beta-yellow)](README_ZH.md)
-[![版本](https://img.shields.io/badge/版本-6.1-blue)](README_ZH.md)
+[![版本](https://img.shields.io/badge/版本-7.4-blue)](README_ZH.md)
 [![许可](https://img.shields.io/badge/许可-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
 **语言**：[English](README.md) / [中文](README_ZH.md)
@@ -126,16 +126,35 @@ KnowPilot 不限行业。上传不同文档、创建不同空间——同一引�
 
 ## 核心能力
 
+### 知识与 RAG
+
 | 能力 | 场景 | 价值产出 |
 | --- | --- | --- |
-| **带来源的 RAG 问答** | 审计准则、入职培训、项目咨询 | 用可追溯答案代替手工查找 |
-| **多空间隔离** | 组织、业务线、项目团队 | 明确边界，降低数据误触与泄露风险 |
-| **访问码接入** | 新空间试运行、演示、受控接入 | 低摩擦加入，同时保留治理边界 |
-| **角色治理** | Owner / 管理员 / 审核者 / 成员 / 访客 | 让"对的人"管理"对的空间" |
+| **带来源的 RAG 问答** | 准则、入职培训、项目咨询 | 秒级返回带引用的答案，替代手工查找 |
+| **SSE 流式对话** | 实时对话、长篇答案 | 逐 token 流式回复，保留会话上下文 |
+| **网页内容爬虫** | 网页采集、竞品调研、新闻监控 | 将外部网页内容转化为可检索的知识库条目，支持近似去重 |
 | **文档生命周期** | 上传、重建索引、删除、归档 | 让知识库持续可用、可追溯 |
-| **模板化复制** | 入职、标准问答、审计、项目 | 新空间上线时间更短 |
-| **审计日志** | 敏感操作、权限失败、管理员行为 | 支撑合规与复盘 |
+| **模板化复制** | 入职、审计方法论、准则、项目 AI | 新空间上线时间更短 |
+
+### 治理与安全
+
+| 能力 | 场景 | 价值产出 |
+| --- | --- | --- |
+| **多空间隔离** | 组织、业务线、项目团队 | 明确边界，降低数据误触与泄露风险 |
+| **双轨制 RBAC** | HR + Admin 双权限轨道，基于能力（capability）的访问控制 | 让"对的人"管理"对的空间"，最小权限原则 |
+| **访问码接入** | 新空间试运行、演示、受控接入 | 低摩擦加入，同时保留治理边界 |
+| **审计日志** | 敏感操作、权限事件、管理员行为 | 全链路可追溯，支持搜索与过滤，支撑合规复盘 |
+| **2FA / OTP 双因素认证** | 管理员账号、高合规环境 | 在密码之外增加一层安全防护 |
+| **管理员入口门禁** | 控制管理员注册入口可见性 | 通过 `?admin=1` 查询参数隐藏，减少攻击面 |
+
+### 平台与体验
+
+| 能力 | 场景 | 价值产出 |
+| --- | --- | --- |
 | **会话上下文隔离** | 跨会话、跨空间持续咨询 | 复用上下文但不跨界泄露 |
+| **管理员仪表盘** | 系统健康、用户管理、平台概览 | 实时掌握后端、数据库、Redis、Celery、LLM 运行状态 |
+| **i18n 国际化** | 多语言团队、全球化运营 | 中文 ↔ 英文 全界面一键切换 |
+| **暗色 / 亮色主题** | 用户偏好、无障碍、暗光环境 | 一键切换主题，偏好持久化保存 |
 
 ---
 
@@ -210,13 +229,19 @@ KnowPilot 以空间为单位复制，不以项目重建为单位重复搭建。
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Django 5.0 + DRF + Celery + Redis |
-| 前端 | React 18 + TypeScript + Vite + Ant Design 5 + Zustand |
+| 后端 | Django 5.0 + DRF + SimpleJWT + django-allauth + Celery + Redis 7 |
+| 前端 | React 18 + TypeScript 5 + Vite 5 + Ant Design 5 + Zustand |
+| 国际化 | i18next + react-i18next（中文 / 英文） |
+| Markdown | react-markdown + remark-gfm + rehype-highlight + highlight.js |
 | 大模型 | 通义千问 via DashScope API（OpenAI 兼容协议） |
 | 向量嵌入 | Qwen text-embedding-v4（1024 维） |
 | 向量数据库 | pgvector（PostgreSQL 16） |
-| RAG 框架 | LangChain + Docling |
+| RAG 框架 | LangChain + Docling + Unstructured |
+| 安全 | pyOTP（2FA）+ Bleach（XSS）+ filetype（魔数检测）+ simhash（去重） |
+| 爬虫 | trafilatura + httpx[http2] + gevent |
+| 服务器 | Gunicorn（gthread，2 workers × 8 threads）+ Nginx |
 | 基础设施 | Docker Compose 一键部署 |
+| 测试 | Vitest + Testing Library + Puppeteer + pytest |
 
 ---
 
