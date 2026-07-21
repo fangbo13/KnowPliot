@@ -6,6 +6,7 @@
 
 import hashlib
 import re
+import unicodedata
 import uuid
 from datetime import timedelta
 
@@ -13,6 +14,24 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+
+def _capture_space_retention_evidence(instance):
+    """Populate immutable, content-free workspace evidence for retained rows."""
+
+    if not instance.space_id:
+        return
+    if not instance.space_uuid:
+        instance.space_uuid = instance.space_id
+    if not instance.organization_uuid:
+        instance.organization_uuid = instance.space.organization_id
+    if not instance.locator_digest:
+        locator = getattr(instance.space, "locator_reservation", None)
+        if locator is not None:
+            canonical = unicodedata.normalize("NFC", locator.normalized_locator)
+            instance.locator_digest = hashlib.sha256(
+                canonical.encode("utf-8")
+            ).hexdigest()
 
 
 class ChatSession(models.Model):
@@ -206,6 +225,16 @@ class ChatTurn(models.Model):
         choices=ANSWER_MODE_CHOICES,
         default=ANSWER_MODE_FAST,
     )
+    requested_answer_mode = models.CharField(
+        max_length=10,
+        choices=ANSWER_MODE_CHOICES,
+        default=ANSWER_MODE_FAST,
+    )
+    requested_thinking_enabled = models.BooleanField(default=False)
+    thinking_enabled = models.BooleanField(default=False)
+    thinking_snapshot_known = models.BooleanField(default=True)
+    thinking_budget = models.PositiveIntegerField(null=True, blank=True)
+    policy_fallback_code = models.CharField(max_length=64, blank=True, default="")
     model_id = models.CharField(max_length=160, blank=True, default="")
     metrics = models.JSONField(default=dict)
     attempt_count = models.PositiveIntegerField(default=1)
@@ -222,6 +251,29 @@ class ChatTurn(models.Model):
             models.UniqueConstraint(
                 fields=["user", "client_request_id"],
                 name="chat_turn_user_request_uniq",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        thinking_snapshot_known=False,
+                        requested_thinking_enabled=False,
+                        thinking_enabled=False,
+                        thinking_budget__isnull=True,
+                        policy_fallback_code="legacy_thinking_unknown",
+                    )
+                    | models.Q(
+                        thinking_snapshot_known=True,
+                        thinking_enabled=False,
+                        thinking_budget__isnull=True,
+                    )
+                    | models.Q(
+                        thinking_snapshot_known=True,
+                        thinking_enabled=True,
+                        thinking_budget__gte=1,
+                        thinking_budget__lte=32768,
+                    )
+                ),
+                name="chat_turn_thinking_snapshot_ck",
             ),
         ]
         indexes = [
@@ -374,19 +426,37 @@ class Feedback(models.Model):
         "spaces.KnowledgeSpace",
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        related_name="feedbacks",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="feedbacks",
     )
     message = models.ForeignKey(
         Message,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="feedbacks",
     )
+    message_uuid = models.UUIDField(null=True, blank=True, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="message_feedbacks",
     )
+    user_uuid = models.UUIDField(null=True, blank=True, editable=False)
     feedback_type = models.CharField(
         max_length=30,
         choices=FEEDBACK_TYPE_CHOICES,
@@ -412,10 +482,12 @@ class Feedback(models.Model):
         on_delete=models.SET_NULL,
         related_name="reviewed_feedbacks",
     )
+    reviewer_uuid = models.UUIDField(null=True, blank=True, editable=False)
     resolution_code = models.CharField(max_length=50, blank=True, default="")
     resolution_notes = models.TextField(blank=True, default="")
     resolved_at = models.DateTimeField(null=True, blank=True)
     review_context = models.JSONField(default=dict, blank=True)
+    sensitive_payload_scrubbed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -428,9 +500,49 @@ class Feedback(models.Model):
                 name="chat_fb_sp_st_cr_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(space__isnull=False)
+                    | models.Q(space_uuid__isnull=False)
+                ),
+                name="chat_feedback_space_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(message__isnull=False)
+                    | models.Q(message_uuid__isnull=False)
+                ),
+                name="chat_feedback_message_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(user__isnull=False)
+                    | models.Q(user_uuid__isnull=False)
+                ),
+                name="chat_feedback_user_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="chat_feedback_locator_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        _capture_space_retention_evidence(self)
+        if self.message_id and not self.message_uuid:
+            self.message_uuid = self.message_id
+        if self.user_id and not self.user_uuid:
+            self.user_uuid = self.user_id
+        if self.reviewer_id and not self.reviewer_uuid:
+            self.reviewer_uuid = self.reviewer_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Feedback {self.rating} for message {self.message.id}"
+        return f"Feedback {self.rating} for message {self.message_id or self.message_uuid}"
 
 
 class ModelInvocation(models.Model):
@@ -452,7 +564,19 @@ class ModelInvocation(models.Model):
         "spaces.KnowledgeSpace",
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        related_name="model_invocations",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="model_invocations",
     )
     session = models.ForeignKey(
@@ -462,6 +586,7 @@ class ModelInvocation(models.Model):
         on_delete=models.SET_NULL,
         related_name="model_invocations",
     )
+    session_uuid = models.UUIDField(null=True, blank=True, editable=False)
     message = models.OneToOneField(
         Message,
         null=True,
@@ -469,6 +594,7 @@ class ModelInvocation(models.Model):
         on_delete=models.SET_NULL,
         related_name="model_invocation",
     )
+    message_uuid = models.UUIDField(null=True, blank=True, editable=False)
     question_message = models.ForeignKey(
         Message,
         null=True,
@@ -476,6 +602,7 @@ class ModelInvocation(models.Model):
         on_delete=models.SET_NULL,
         related_name="model_invocations_as_question",
     )
+    question_message_uuid = models.UUIDField(null=True, blank=True, editable=False)
     model = models.CharField(max_length=160, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
     token_count = models.PositiveIntegerField(null=True, blank=True)
@@ -496,6 +623,25 @@ class ModelInvocation(models.Model):
                 name="chat_modeli_model_d5d3d4_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="chat_invocation_locator_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        _capture_space_retention_evidence(self)
+        if self.session_id and not self.session_uuid:
+            self.session_uuid = self.session_id
+        if self.message_id and not self.message_uuid:
+            self.message_uuid = self.message_id
+        if self.question_message_id and not self.question_message_uuid:
+            self.question_message_uuid = self.question_message_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.model or 'unknown'}: {self.status}"
@@ -520,12 +666,29 @@ class FeedbackReviewEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     feedback = models.ForeignKey(
         Feedback,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="review_events",
     )
+    feedback_uuid = models.UUIDField(null=True, blank=True, editable=False)
     space = models.ForeignKey(
         "spaces.KnowledgeSpace",
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="feedback_review_events",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="feedback_review_events",
     )
     actor = models.ForeignKey(
@@ -535,6 +698,7 @@ class FeedbackReviewEvent(models.Model):
         on_delete=models.SET_NULL,
         related_name="feedback_review_events",
     )
+    actor_uuid = models.UUIDField(null=True, blank=True, editable=False)
     reviewer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -542,19 +706,51 @@ class FeedbackReviewEvent(models.Model):
         on_delete=models.SET_NULL,
         related_name="assigned_feedback_review_events",
     )
+    reviewer_uuid = models.UUIDField(null=True, blank=True, editable=False)
     event_type = models.CharField(max_length=20, choices=EVENT_CHOICES)
     from_status = models.CharField(max_length=20, blank=True, default="")
     to_status = models.CharField(max_length=20, blank=True, default="")
     notes = models.TextField(blank=True, default="")
+    sensitive_payload_scrubbed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "chat_feedbackreviewevent"
         ordering = ["created_at"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(space__isnull=False)
+                    | models.Q(space_uuid__isnull=False)
+                ),
+                name="chat_review_space_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(feedback__isnull=False)
+                    | models.Q(feedback_uuid__isnull=False)
+                ),
+                name="chat_review_feedback_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="chat_review_locator_shape",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         if self.pk and FeedbackReviewEvent.objects.filter(pk=self.pk).exists():
             raise ValidationError("Feedback review events are immutable.")
+        _capture_space_retention_evidence(self)
+        if self.feedback_id and not self.feedback_uuid:
+            self.feedback_uuid = self.feedback_id
+        if self.actor_id and not self.actor_uuid:
+            self.actor_uuid = self.actor_id
+        if self.reviewer_id and not self.reviewer_uuid:
+            self.reviewer_uuid = self.reviewer_id
         super().save(*args, **kwargs)
 
 
@@ -581,7 +777,21 @@ class KnowledgeGapTicket(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     space = models.ForeignKey(
         "spaces.KnowledgeSpace",
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="knowledge_gap_tickets",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="knowledge_gap_tickets",
     )
     feedback = models.ForeignKey(
@@ -591,7 +801,8 @@ class KnowledgeGapTicket(models.Model):
         on_delete=models.SET_NULL,
         related_name="knowledge_gap_tickets",
     )
-    question_snapshot = models.TextField()
+    feedback_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    question_snapshot = models.TextField(blank=True, default="")
     normalized_question_hash = models.CharField(max_length=64, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="medium")
@@ -602,8 +813,10 @@ class KnowledgeGapTicket(models.Model):
         on_delete=models.SET_NULL,
         related_name="knowledge_gap_tickets",
     )
+    assignee_uuid = models.UUIDField(null=True, blank=True, editable=False)
     suggested_source = models.TextField(blank=True, default="")
     resolution_notes = models.TextField(blank=True, default="")
+    sensitive_payload_scrubbed_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -621,6 +834,30 @@ class KnowledgeGapTicket(models.Model):
                 name="chat_gap_sp_st_cr_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(space__isnull=False)
+                    | models.Q(space_uuid__isnull=False)
+                ),
+                name="chat_gap_space_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="chat_gap_locator_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        _capture_space_retention_evidence(self)
+        if self.feedback_id and not self.feedback_uuid:
+            self.feedback_uuid = self.feedback_id
+        if self.assignee_id and not self.assignee_uuid:
+            self.assignee_uuid = self.assignee_id
+        super().save(*args, **kwargs)
 
     @staticmethod
     def normalize_question(question: str) -> str:
@@ -672,9 +909,12 @@ class ComplianceExportJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="compliance_export_jobs",
     )
+    requested_by_uuid = models.UUIDField(null=True, blank=True, editable=False)
     retry_of = models.ForeignKey(
         "self",
         null=True,
@@ -686,7 +926,19 @@ class ComplianceExportJob(models.Model):
         "spaces.KnowledgeSpace",
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        related_name="compliance_export_jobs",
+    )
+    space_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, editable=False)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="compliance_export_jobs",
     )
     dataset = models.CharField(max_length=20, choices=DATASET_CHOICES, db_index=True)
@@ -702,6 +954,7 @@ class ComplianceExportJob(models.Model):
     row_count = models.PositiveIntegerField(default=0)
     error_code = models.CharField(max_length=80, blank=True, default="")
     safe_error_summary = models.CharField(max_length=500, blank=True, default="")
+    sensitive_payload_scrubbed_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -723,6 +976,28 @@ class ComplianceExportJob(models.Model):
                 name="chat_exp_st_user_cr_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(requested_by__isnull=False)
+                    | models.Q(requested_by_uuid__isnull=False)
+                ),
+                name="chat_export_actor_evidence",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="chat_export_locator_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        _capture_space_retention_evidence(self)
+        if self.requested_by_id and not self.requested_by_uuid:
+            self.requested_by_uuid = self.requested_by_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.dataset} export {self.id} ({self.status})"

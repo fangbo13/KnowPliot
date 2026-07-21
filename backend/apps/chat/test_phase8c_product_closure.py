@@ -15,11 +15,14 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.spaces.models import (
+    GovernancePolicy,
     KnowledgeSpace,
+    ModelProfile,
     Organization,
     OrganizationMembership,
     SpaceMembership,
 )
+from apps.spaces.test_utils import create_test_space
 
 from .coordination import CoordinationUnavailableError
 from .models import ChatSession, ChatTurn, Message
@@ -48,6 +51,7 @@ class V10ProductSmokeScriptTest(SimpleTestCase):
         self.assertIn('"status": "pass"', result.stdout)
 
 
+@override_settings(RAG_LLM_MODEL="qwen3.6-flash", QWEN_CHAT_MODEL="qwen3.6-flash")
 class SessionProductClosureTest(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -61,10 +65,29 @@ class SessionProductClosureTest(APITestCase):
             password="test",
         )
         self.org = Organization.objects.create(name="Phase 8C", slug="phase-8c")
-        self.space = KnowledgeSpace.objects.create(
+        self.space = create_test_space(
             organization=self.org,
             name="Phase 8C",
             code="phase-8c",
+        )
+        self.fast_profile = ModelProfile.objects.create(
+            name=f"phase8c-fast-{uuid.uuid4()}",
+            provider="dashscope",
+            model_id="qwen3.6-flash",
+        )
+        self.deep_profile = ModelProfile.objects.create(
+            name=f"phase8c-deep-{uuid.uuid4()}",
+            provider="dashscope",
+            model_id="qwen3.7-plus",
+        )
+        GovernancePolicy.objects.create(
+            space=self.space,
+            values={
+                "fast_model_profile_id": str(self.fast_profile.id),
+                "deep_model_profile_id": str(self.deep_profile.id),
+                "fast_thinking_budget": 1024,
+                "deep_thinking_budget": 2048,
+            },
         )
         SpaceMembership.objects.create(
             user=self.user,
@@ -238,7 +261,7 @@ class SessionProductClosureTest(APITestCase):
         self.assertEqual(response.data["status"], ChatTurn.STATUS_ACCEPTED)
 
     @override_settings(ENABLE_PUBLIC_DEMO_SPACES=True)
-    def test_public_demo_guest_without_membership_can_recover_active_turn(self):
+    def test_public_demo_guest_without_membership_cannot_recover_active_turn(self):
         SpaceMembership.objects.filter(user=self.user, space=self.space).delete()
         self.space.visibility = "public_demo"
         self.space.save(update_fields=["visibility"])
@@ -258,9 +281,9 @@ class SessionProductClosureTest(APITestCase):
         ):
             response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
 
-    def test_org_admin_without_membership_can_recover_active_turn(self):
+    def test_org_admin_without_membership_cannot_recover_active_turn(self):
         SpaceMembership.objects.filter(user=self.user, space=self.space).delete()
         OrganizationMembership.objects.create(
             organization=self.org,
@@ -283,7 +306,7 @@ class SessionProductClosureTest(APITestCase):
         ):
             response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
 
     def test_export_rejects_unknown_format(self):
         response = self.client.get(

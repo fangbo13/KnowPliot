@@ -5,14 +5,15 @@
  */
 
 // V7.0 admin console — issue / list / revoke tiered Admin Registration Codes.
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  Card, Table, Button, Tag, Modal, Select, Input, Space, Popconfirm,
+  Alert, Card, Table, Button, Tag, Modal, Select, Input, Space, Popconfirm,
   Typography, message as antdMessage,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type AdminCode, type Organization, type BusinessLine } from '../../api/admin';
+import { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 
 const { Paragraph } = Typography;
 
@@ -22,6 +23,9 @@ export default function AdminCodesPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [lines, setLines] = useState<BusinessLine[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const sequenceRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const [open, setOpen] = useState(false);
   const [grantsRole, setGrantsRole] = useState<'org_admin' | 'business_admin'>('business_admin');
@@ -32,21 +36,39 @@ export default function AdminCodesPage() {
   const [generated, setGenerated] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     try {
       const [c, o, b] = await Promise.all([
-        adminApi.codes().catch(() => []),
-        adminApi.organizations().catch(() => []),
-        adminApi.businessLines().catch(() => []),
+        withRequestSignal(controller.signal, () => adminApi.codes()),
+        withRequestSignal(controller.signal, () => adminApi.organizations()),
+        withRequestSignal(controller.signal, () => adminApi.businessLines()),
       ]);
+      if (controller.signal.aborted || sequence !== sequenceRef.current) return;
       setCodes(c); setOrgs(o); setLines(b);
       if (!orgId && o.length) setOrgId(o[0].id);
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== sequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
     } finally {
-      setLoading(false);
+      if (sequence === sequenceRef.current && !controller.signal.aborted) setLoading(false);
     }
   }, [orgId]);
 
-  useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void refresh();
+    return () => {
+      sequenceRef.current += 1;
+      controllerRef.current?.abort();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const issue = async () => {
     if (!orgId) return;
@@ -105,6 +127,17 @@ export default function AdminCodesPage() {
       </div>
 
       <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+        {loadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={loadError.code === 'rate_limited'
+              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: loadError.retryAfterSeconds })}`}`
+              : t('load_error')}
+            action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
+          />
+        )}
         <Table rowKey="id" loading={loading} dataSource={codes} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 

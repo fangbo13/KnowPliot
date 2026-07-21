@@ -8,7 +8,7 @@
 // Owner/admin view for the active space: edit settings, view members, and
 // generate / revoke access (invite) codes. All actions are re-checked server-side.
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Card,
   List,
@@ -20,26 +20,40 @@ import {
   Space,
   Modal,
   Popconfirm,
+  Alert,
   message as antdMessage,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
 import { useSpaceStore } from '../store/spaceStore';
 import {
   spacesApi,
+  type KnowledgeSpace,
   type SpaceMember,
   type InviteCode,
   type SpaceRole,
 } from '../api/spaces';
 import { useAuthorization } from '../auth/CapabilityProvider';
+import { getRateLimitDetails, isAbortError, withRequestSignal } from '../api/client';
 
 const { Text, Paragraph } = Typography;
 
 export default function SpaceManagementPage() {
   const { t } = useTranslation('common');
   const access = useAuthorization();
+  const { spaceId: routeSpaceId } = useParams<{ spaceId: string }>();
   const { activeSpaceId, getActiveSpace, loadSpaces } = useSpaceStore();
-  const active = getActiveSpace();
+  const storeActive = getActiveSpace();
+  const spaceId = routeSpaceId || activeSpaceId;
+  const [routeSpace, setRouteSpace] = useState<KnowledgeSpace | null>(null);
+  const [spaceLoading, setSpaceLoading] = useState(false);
+  const [spaceLoadFailed, setSpaceLoadFailed] = useState(false);
+  const active = storeActive?.id === spaceId
+    ? storeActive
+    : routeSpace?.id === spaceId
+      ? routeSpace
+      : null;
 
   const canManageSettings = access.has('workspace.settings.manage');
   const canManageMembers = access.has('workspace.members.manage');
@@ -49,6 +63,30 @@ export default function SpaceManagementPage() {
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invites, setInvites] = useState<InviteCode[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const requestSequence = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!spaceId || storeActive?.id === spaceId) {
+      setRouteSpace(null);
+      setSpaceLoading(false);
+      setSpaceLoadFailed(false);
+      return;
+    }
+    const controller = new AbortController();
+    setRouteSpace(null);
+    setSpaceLoading(true);
+    setSpaceLoadFailed(false);
+    spacesApi.get(spaceId, controller.signal).then((resolved) => {
+      if (!controller.signal.aborted) setRouteSpace(resolved);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted && !isAbortError(error)) setSpaceLoadFailed(true);
+    }).finally(() => {
+      if (!controller.signal.aborted) setSpaceLoading(false);
+    });
+    return () => controller.abort();
+  }, [spaceId, storeActive?.id]);
 
   // Settings form
   const [name, setName] = useState('');
@@ -59,7 +97,7 @@ export default function SpaceManagementPage() {
   // Invite creation
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteRole, setInviteRole] = useState<SpaceRole>('member');
-  const [inviteMaxUses, setInviteMaxUses] = useState<number>(0);
+  const [inviteMaxUses, setInviteMaxUses] = useState<number>(20);
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
 
@@ -69,34 +107,58 @@ export default function SpaceManagementPage() {
   const [addingMember, setAddingMember] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!activeSpaceId) return;
+    if (!spaceId) return;
+    const sequence = ++requestSequence.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     try {
       const [m, inv] = await Promise.all([
-        canReadMembers ? spacesApi.members(activeSpaceId).catch(() => []) : Promise.resolve([]),
-        canManageInvites ? spacesApi.listInvites(activeSpaceId).catch(() => []) : Promise.resolve([]),
+        canReadMembers
+          ? withRequestSignal(controller.signal, () => spacesApi.members(spaceId))
+          : Promise.resolve([]),
+        canManageInvites
+          ? withRequestSignal(controller.signal, () => spacesApi.listInvites(spaceId))
+          : Promise.resolve([]),
       ]);
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setMembers(m);
       setInvites(inv);
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== requestSequence.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current && !controller.signal.aborted) setLoading(false);
     }
-  }, [activeSpaceId, canManageInvites, canReadMembers]);
+  }, [spaceId, canManageInvites, canReadMembers]);
 
   useEffect(() => {
-    if (active) {
-      setName(active.name);
-      setDescription(active.description);
-      setVisibility(active.visibility);
-    }
+    // A direct scoped-console route resolves its workspace independently.
+    // Starting member/invite reads before that route resource is durable in
+    // component state creates an abort/coalescing race: the resource arrival
+    // tears down the first read and the replacement can inherit its aborted
+    // promise. Wait for the authoritative route workspace before reading.
+    if (!active) return;
+    setName(active.name);
+    setDescription(active.description);
+    setVisibility(active.visibility);
     refresh();
+    return () => {
+      requestSequence.current += 1;
+      controllerRef.current?.abort();
+    };
   }, [active?.id, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveSettings = async () => {
-    if (!activeSpaceId) return;
+    if (!spaceId) return;
     setSavingSettings(true);
     try {
-      await spacesApi.update(activeSpaceId, { name, description, visibility: visibility as any });
+      await spacesApi.update(spaceId, { name, description, visibility: visibility as any });
       await loadSpaces();
       antdMessage.success(t('space_settings_saved') || 'Settings saved');
     } catch {
@@ -107,10 +169,10 @@ export default function SpaceManagementPage() {
   };
 
   const createInvite = async () => {
-    if (!activeSpaceId) return;
+    if (!spaceId) return;
     setCreatingInvite(true);
     try {
-      const inv = await spacesApi.createInvite(activeSpaceId, {
+      const inv = await spacesApi.createInvite(spaceId, {
         role: inviteRole,
         max_uses: inviteMaxUses,
       });
@@ -124,10 +186,10 @@ export default function SpaceManagementPage() {
     }
   };
 
-  const revokeInvite = async (inviteId: string) => {
-    if (!activeSpaceId) return;
+  const revokeInvite = async (invite: InviteCode) => {
+    if (!spaceId) return;
     try {
-      await spacesApi.revokeInvite(activeSpaceId, inviteId);
+      await spacesApi.revokeInvite(spaceId, invite);
       await refresh();
       antdMessage.success(t('invite_revoked') || 'Invite code revoked');
     } catch {
@@ -138,17 +200,13 @@ export default function SpaceManagementPage() {
   // V7.0: add a member by email (existing account -> active member + notified;
   // unknown email -> pending invite redeemed on signup).
   const addMember = async () => {
-    if (!activeSpaceId || !memberEmail.trim()) return;
+    if (!spaceId || !memberEmail.trim()) return;
     setAddingMember(true);
     try {
-      const res = await spacesApi.addMember(activeSpaceId, { email: memberEmail.trim(), role: memberRole });
+      await spacesApi.addMember(spaceId, { email: memberEmail.trim(), role: memberRole });
       setMemberEmail('');
       await refresh();
-      antdMessage.success(
-        res.pending
-          ? (t('member_invited_pending') || 'Invitation sent — they will join after registering')
-          : (t('member_added') || 'Member added')
-      );
+      antdMessage.success(t('member_invited_pending') || 'Targeted invitation created');
     } catch {
       antdMessage.error(t('member_add_failed') || 'Failed to add member');
     } finally {
@@ -156,10 +214,10 @@ export default function SpaceManagementPage() {
     }
   };
 
-  const changeMemberRole = async (userId: string, role: SpaceRole) => {
-    if (!activeSpaceId) return;
+  const changeMemberRole = async (member: SpaceMember, role: SpaceRole) => {
+    if (!spaceId) return;
     try {
-      await spacesApi.updateMember(activeSpaceId, userId, role);
+      await spacesApi.updateMember(spaceId, member, role);
       await refresh();
       antdMessage.success(t('member_role_updated') || 'Member role updated');
     } catch {
@@ -167,10 +225,10 @@ export default function SpaceManagementPage() {
     }
   };
 
-  const removeMember = async (userId: string) => {
-    if (!activeSpaceId) return;
+  const removeMember = async (member: SpaceMember) => {
+    if (!spaceId) return;
     try {
-      await spacesApi.removeMember(activeSpaceId, userId);
+      await spacesApi.removeMember(spaceId, member);
       await refresh();
       antdMessage.success(t('member_removed') || 'Member removed');
     } catch {
@@ -179,13 +237,19 @@ export default function SpaceManagementPage() {
   };
 
   // Roles assignable to a space member from this page.
-  const MEMBER_ROLE_OPTIONS = ['knowledge_admin', 'reviewer', 'member', 'guest', 'owner'];
+  const MEMBER_ROLE_OPTIONS = ['knowledge_admin', 'reviewer', 'member', 'guest'];
 
   if (!active) {
     return (
       <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>{t('no_active_space') || 'No active space selected'}</div>
+        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>
+          {spaceLoading
+            ? (t('loading') || 'Loading workspace…')
+            : spaceLoadFailed
+              ? (t('load_error') || 'Unable to load workspace data')
+              : (t('no_active_space') || 'No active space selected')}
+        </div>
       </div>
     );
   }
@@ -199,6 +263,18 @@ export default function SpaceManagementPage() {
             {t('space_management') || 'Space Management'} — {active.name}
           </h1>
         </div>
+        {loadError && (
+          <Alert
+            type="error"
+            showIcon
+            closable={false}
+            style={{ marginBottom: 16 }}
+            message={loadError.code === 'rate_limited'
+              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — retry in ${loadError.retryAfterSeconds}s`}`
+              : (t('load_error') || 'Unable to load workspace data')}
+            action={<Button onClick={() => void refresh()}>{t('error_retry') || 'Retry'}</Button>}
+          />
+        )}
 
         <Card
           title={
@@ -299,7 +375,7 @@ export default function SpaceManagementPage() {
                 <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <Text strong style={{ fontSize: 14 }}>{rec.user_email}</Text>
+                      <Text strong style={{ fontSize: 14 }}>{rec.user.display_name || rec.user.email}</Text>
                       <Tag color={rec.status === 'active' ? 'green' : 'default'}>{rec.status}</Tag>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -309,7 +385,7 @@ export default function SpaceManagementPage() {
                           value={rec.role}
                           style={{ width: 140 }}
                           classNames={{ popup: { root: 'menu-pop-dropdown' } }}
-                          onChange={(v) => changeMemberRole(rec.user, v as SpaceRole)}
+                          onChange={(v) => changeMemberRole(rec, v as SpaceRole)}
                           options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
                         />
                       ) : (
@@ -318,7 +394,7 @@ export default function SpaceManagementPage() {
                       {canManageMembers && rec.status === 'active' && (
                         <Popconfirm
                           title={t('member_remove_confirm') || 'Remove this member?'}
-                          onConfirm={() => removeMember(rec.user)}
+                            onConfirm={() => removeMember(rec)}
                         >
                           <Button type="text" danger size="small">{t('remove') || 'Remove'}</Button>
                         </Popconfirm>
@@ -357,18 +433,18 @@ export default function SpaceManagementPage() {
                   <Card size="small" className="glass-panel hover-lift" style={{ borderRadius: 12, border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text strong code style={{ fontSize: 15 }}>{rec.code_prefix}…</Text>
+                        <Text strong code style={{ fontSize: 15 }}>{rec.display_prefix}…</Text>
                         <Tag color={rec.status === 'active' ? 'green' : 'red'}>{rec.status}</Tag>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Space>
-                          <Tag>{rec.role}</Tag>
+                          <Tag>{rec.role_ceiling}</Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>{t('invite_uses') || 'Uses'}: {rec.used_count}{rec.max_uses ? ` / ${rec.max_uses}` : ''}</Text>
                         </Space>
                         {rec.status === 'active' && (
                           <Popconfirm
                             title={t('invite_revoke_confirm') || 'Revoke this code?'}
-                            onConfirm={() => revokeInvite(rec.id)}
+                            onConfirm={() => revokeInvite(rec)}
                           >
                             <Button type="text" danger size="small">
                               {t('revoke') || 'Revoke'}

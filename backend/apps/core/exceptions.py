@@ -33,13 +33,30 @@ def custom_exception_handler(exc, context):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    raw_detail = response.data.get("detail", response.data)
+    # Governed mutations persist safe failures for exact idempotent replay.
+    # Let those domain exceptions own one canonical primitive-only envelope so
+    # the initial response and every replay have identical status/body pairs.
+    safe_response_body = getattr(exc, "safe_response_body", None)
+    if callable(safe_response_body):
+        return Response(safe_response_body(), status=response.status_code)
+
+    raw_detail = (
+        response.data.get("detail", response.data)
+        if isinstance(response.data, dict)
+        else response.data
+    )
     if hasattr(raw_detail, "code"):
         detail = str(raw_detail)
         code = raw_detail.code
     else:
         detail = str(raw_detail)
         code = getattr(exc, "default_code", "error")
+
+    headers = {}
+    if response.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+        code = "rate_limited"
+        if response.has_header("Retry-After"):
+            headers["Retry-After"] = response["Retry-After"]
 
     return Response(
         {
@@ -49,4 +66,5 @@ def custom_exception_handler(exc, context):
             "errors": response.data,
         },
         status=response.status_code,
+        headers=headers,
     )

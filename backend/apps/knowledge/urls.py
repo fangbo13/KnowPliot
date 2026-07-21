@@ -14,6 +14,10 @@ from .views import (
     CategoryListView,
     AnswerTemplateListView,
     AnswerTemplateDetailView,
+    DocumentTextEditView,
+    DocumentPreviewDiffView,
+    DocumentVersionCreateView,
+    DocumentRollbackView,
 )
 from .batch_views import BatchDocumentUploadView, BatchImportResultDetailView
 
@@ -29,4 +33,9 @@ urlpatterns = [
     # V4.2 KB-V4.2-BATCH-001~012: Batch upload endpoints
     path("batch/upload/", BatchDocumentUploadView.as_view(), name="batch-upload"),
     path("batch/result/<uuid:pk>/", BatchImportResultDetailView.as_view(), name="batch-result"),
+    # Part 1 (§1.10): KB version化 endpoints
+    path("<uuid:pk>/text/", DocumentTextEditView.as_view(), name="document-text-edit"),
+    path("<uuid:pk>/preview-diff/", DocumentPreviewDiffView.as_view(), name="document-preview-diff"),
+    path("<uuid:pk>/versions/", DocumentVersionCreateView.as_view(), name="document-versions"),
+    path("<uuid:pk>/rollback/", DocumentRollbackView.as_view(), name="document-rollback"),
 ]

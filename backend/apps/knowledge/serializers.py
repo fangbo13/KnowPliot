@@ -25,13 +25,16 @@ class DocumentCategorySerializer(serializers.ModelSerializer):
 
 
 class DocumentSerializer(serializers.ModelSerializer):
-    file = serializers.FileField(write_only=True)
+    # Part 1 (§1.14): file is optional — inline text editor creates documents without a file.
+    file = serializers.FileField(write_only=True, required=False, allow_null=True)
     title = serializers.CharField(required=False)
     file_type = serializers.ChoiceField(
         choices=Document.FILE_TYPE_CHOICES,
         required=False,
     )
     file_size = serializers.IntegerField(required=False, min_value=0)
+    # Part 1 (§1.2): text_content — editable canonical markdown.
+    text_content = serializers.CharField(required=False, allow_blank=True, default="")
     download_url = serializers.HyperlinkedIdentityField(
         view_name="document-download",
         read_only=True,
@@ -40,6 +43,8 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     def validate_file(self, value):
         """Validate upload size before cross-field content checks."""
+        if value is None:
+            return value
         validate_document_size(value.size)
         return value
 
@@ -47,6 +52,8 @@ class DocumentSerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         uploaded_file = attrs.get("file")
         if uploaded_file is None:
+            # Part 1 (§1.14): inline text creation — no file required.
+            # text_content must be provided (or empty string for draft).
             immutable_errors = {}
             if "file_type" in attrs:
                 immutable_errors["file_type"] = (
@@ -58,6 +65,9 @@ class DocumentSerializer(serializers.ModelSerializer):
                 )
             if immutable_errors:
                 raise serializers.ValidationError(immutable_errors)
+            # Ensure file_type and file_size have safe defaults for inline creation.
+            attrs.setdefault("file_type", "md")
+            attrs.setdefault("file_size", 0)
             return attrs
 
         try:
@@ -104,7 +114,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = [
-            "id", "title", "file", "download_url", "file_type", "file_size",
+            "id", "title", "file", "text_content", "download_url", "file_type", "file_size",
             "category", "category_name", "tags", "status",
             "version", "effective_from", "effective_to",
             "chunk_count", "processing_error", "content_hash", "created_at", "updated_at",

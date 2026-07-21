@@ -19,11 +19,11 @@ from apps.audit.models import AuditLog
 from apps.rbac.models import Role, UserRole
 from apps.spaces.models import (
     BusinessLine,
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
     SpaceMembership,
 )
+from apps.spaces.test_utils import create_test_space
 
 User = get_user_model()
 
@@ -39,7 +39,7 @@ class LegacyAdministratorScopeCommandTest(TestCase):
             name="Legacy command line",
             code="LEGACY-CMD",
         )
-        self.space = KnowledgeSpace.objects.create(
+        self.space = create_test_space(
             organization=self.organization,
             business_line=self.business_line,
             name="Legacy command space",
@@ -270,7 +270,7 @@ class LegacyAdministratorScopeCommandTest(TestCase):
         existing = SpaceMembership.objects.create(
             user=self.space_user,
             space=self.space,
-            role=SpaceMembership.ROLE_OWNER,
+            role=SpaceMembership.ROLE_MEMBER,
             status="active",
         )
         mapping_path = self.write_mapping(
@@ -299,7 +299,7 @@ class LegacyAdministratorScopeCommandTest(TestCase):
             )
 
         existing.refresh_from_db()
-        self.assertEqual(existing.role, SpaceMembership.ROLE_OWNER)
+        self.assertEqual(existing.role, SpaceMembership.ROLE_MEMBER)
         self.assertEqual(existing.status, "active")
         self.assertFalse(
             OrganizationMembership.objects.filter(user=self.organization_user).exists()

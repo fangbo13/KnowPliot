@@ -11,7 +11,8 @@ from rest_framework.test import APITestCase
 
 from apps.chat.models import ComplianceExportJob
 from apps.spaces.admin_operations import collect_system_health
-from apps.spaces.models import BusinessLine, KnowledgeSpace, Organization, OrganizationMembership
+from apps.spaces.models import BusinessLine, Organization, OrganizationMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -24,7 +25,7 @@ class Phase7ALongRunOpsBase(APITestCase):
         cls.line = BusinessLine.objects.create(
             organization=cls.org, name="Ops Line", code="ops-line"
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.org,
             business_line=cls.line,
             name="Ops Space",

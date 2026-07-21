@@ -5,10 +5,12 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 from uuid import UUID
 
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.db import connection
+from django.db.models import Q
 from apps.knowledge.models import DocumentChunk
 
 from .retriever import PgVectorRetriever, RetrievalFilters
@@ -22,6 +24,24 @@ ENGLISH_STOP_WORDS = {
     "with",
 }
 MIN_POSTGRES_FTS_RANK = 1e-6
+
+
+def _effective_date_filter():
+    """Part 1 (§1.5): Only retrieve chunks from currently effective documents.
+
+    A document is effective when:
+    - status != 'superseded' (handled separately as 'active')
+    - effective_from is NULL or <= today
+    - effective_to is NULL or >= today
+
+    This prevents scheduled (future) versions and expired old versions from
+    polluting retrieval results — the core "no interference" invariant.
+    """
+    today = date.today()
+    return (
+        Q(document__effective_from__isnull=True) | Q(document__effective_from__lte=today),
+        Q(document__effective_to__isnull=True) | Q(document__effective_to__gte=today),
+    )
 
 
 def _tokens(value: str) -> set[str]:
@@ -190,7 +210,7 @@ class HybridRetriever:
         qs = DocumentChunk.objects.filter(
             space_id=space_id,
             document__status="active",
-        ).select_related("document")
+        ).filter(*_effective_date_filter()).select_related("document")
         if filters.document_ids:
             qs = qs.filter(document_id__in=filters.document_ids)
         if filters.category_ids:
@@ -246,6 +266,7 @@ class HybridRetriever:
                 space_id=space_id,
                 document__status="active",
             )
+            .filter(*_effective_date_filter())
             .select_related("document")
             .annotate(lexical_rank=SearchRank(vector, search_query))
             # PostgreSQL ts_rank returns a tiny 1e-20 sentinel for no match,

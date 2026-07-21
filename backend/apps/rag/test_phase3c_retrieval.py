@@ -1,15 +1,18 @@
 """Phase 3C retrieval-safety regression tests."""
 
+from unittest import skipIf
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
 
 from apps.knowledge.models import Document, DocumentChunk
 from apps.rag.retriever import PgVectorRetriever
-from apps.spaces.models import KnowledgeSpace, Organization
+from apps.spaces.models import Organization
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -24,12 +27,12 @@ class RetrievalSafetyTest(TestCase):
             password="test",
         )
         cls.org = Organization.objects.create(name="Retrieval Org", slug="retrieval-org")
-        cls.space_a = KnowledgeSpace.objects.create(
+        cls.space_a = create_test_space(
             organization=cls.org,
             name="Retrieval A",
             code="retrieval-a",
         )
-        cls.space_b = KnowledgeSpace.objects.create(
+        cls.space_b = create_test_space(
             organization=cls.org,
             name="Retrieval B",
             code="retrieval-b",
@@ -75,6 +78,7 @@ class RetrievalSafetyTest(TestCase):
                 with self.assertRaisesRegex(ValueError, "space_id"):
                     PgVectorRetriever().search("policy", space_id=value)
 
+    @skipIf(connection.vendor == "postgresql", "SQLite fallback contract")
     def test_sqlite_returns_only_active_documents_in_requested_space(self):
         expected = self.make_chunk(space=self.space_a, title="active-a")
         self.make_chunk(space=self.space_b, title="active-b")

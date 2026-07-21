@@ -10,11 +10,11 @@ from rest_framework.test import APITestCase
 from apps.audit.models import AuditLog
 from apps.spaces.models import (
     BusinessLine,
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
     SpaceMembership,
 )
+from apps.spaces.test_utils import create_test_space
 
 User = get_user_model()
 
@@ -31,13 +31,13 @@ class WorkspaceAuditScopeTest(APITestCase):
             name="Workspace audit line",
             code="WORKSPACE-AUDIT",
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.organization,
             business_line=cls.business_line,
             name="Audited workspace",
             code="audited-workspace",
         )
-        cls.other_space = KnowledgeSpace.objects.create(
+        cls.other_space = create_test_space(
             organization=cls.organization,
             business_line=cls.business_line,
             name="Other workspace",
@@ -64,9 +64,8 @@ class WorkspaceAuditScopeTest(APITestCase):
             target_type="User",
         )
 
-        cls.users = {}
+        cls.users = {SpaceMembership.ROLE_OWNER: cls.space.owner}
         for role in (
-            SpaceMembership.ROLE_OWNER,
             SpaceMembership.ROLE_REVIEWER,
             SpaceMembership.ROLE_KNOWLEDGE_ADMIN,
             SpaceMembership.ROLE_MEMBER,
@@ -88,7 +87,7 @@ class WorkspaceAuditScopeTest(APITestCase):
         cls.expired_membership = SpaceMembership.objects.create(
             user=cls.expired_owner,
             space=cls.space,
-            role=SpaceMembership.ROLE_OWNER,
+            role=SpaceMembership.ROLE_REVIEWER,
             expires_at=timezone.now() - timedelta(seconds=1),
         )
         cls.org_admin = User.objects.create_user(

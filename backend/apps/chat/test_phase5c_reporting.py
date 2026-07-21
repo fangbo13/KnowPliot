@@ -18,6 +18,7 @@ from apps.chat.models import (
 )
 from apps.knowledge.models import Document
 from apps.spaces.models import BusinessLine, KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -30,13 +31,13 @@ class Phase5CBase(APITestCase):
         cls.line = BusinessLine.objects.create(
             organization=cls.org, name="Report Line", code="report-line"
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.space = create_test_space(
             organization=cls.org,
             business_line=cls.line,
             name="Report Space",
             code="report-space",
         )
-        cls.other_space = KnowledgeSpace.objects.create(
+        cls.other_space = create_test_space(
             organization=cls.org,
             business_line=cls.line,
             name="Other Report Space",

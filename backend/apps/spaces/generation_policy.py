@@ -1,4 +1,4 @@
-"""Server-owned generation policy resolution for one knowledge space."""
+"""Server-owned fixed-model and independent-thinking policy resolution."""
 
 from __future__ import annotations
 
@@ -11,10 +11,22 @@ from .models import ModelProfile, resolve_effective_policy
 
 ANSWER_MODE_FAST = "fast"
 ANSWER_MODE_DEEP = "deep"
-DEFAULT_FAST_MODEL = "qwen-plus"
-DEFAULT_DEEP_MODEL = "qwen3.7-plus"
+CANONICAL_FAST_MODEL = "qwen3.6-flash"
+CANONICAL_DEEP_MODEL = "qwen3.7-plus"
+DEFAULT_FAST_MODEL = CANONICAL_FAST_MODEL
+DEFAULT_DEEP_MODEL = CANONICAL_DEEP_MODEL
 DEFAULT_PROVIDER = "dashscope"
-DEFAULT_DEEP_THINKING_BUDGET = 1024
+DEFAULT_THINKING_BUDGET = 1024
+
+
+class GenerationPolicyNotReady(RuntimeError):
+    """A bounded fail-closed signal raised before a new Turn is created."""
+
+    code = "model_policy_not_ready"
+
+    def __init__(self, reason: str = "model_policy_not_ready"):
+        self.reason = reason
+        super().__init__(self.code)
 
 
 @dataclass(frozen=True)
@@ -22,7 +34,7 @@ class GenerationPolicy:
     answer_mode: str
     provider: str
     model_id: str
-    model_profile_id: UUID | None
+    model_profile_id: UUID
     thinking_enabled: bool
     thinking_budget: int | None
     fallback_code: str = ""
@@ -38,68 +50,109 @@ def _profile(profile_id: object) -> ModelProfile | None:
     return ModelProfile.objects.filter(pk=parsed, enabled=True).first()
 
 
-def _fast_policy(values: dict, *, fallback_code: str = "") -> GenerationPolicy:
-    configured_id = values.get("fast_model_profile_id") or values.get("model_profile")
+def _legacy_aliases_match() -> bool:
+    for setting_name in ("QWEN_CHAT_MODEL", "RAG_LLM_MODEL"):
+        if not hasattr(settings, setting_name):
+            continue
+        if getattr(settings, setting_name) != CANONICAL_FAST_MODEL:
+            return False
+    return True
+
+
+def _canonical_profile(values: dict, key: str, expected_model: str) -> ModelProfile:
+    configured_id = values.get(key)
     profile = _profile(configured_id)
+    if profile is None or profile.model_id != expected_model:
+        raise GenerationPolicyNotReady(f"{key}_unavailable")
+    return profile
+
+
+def _valid_budget(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 32768
+
+
+def resolve_generation_policy(
+    space,
+    requested_mode: str,
+    requested_thinking_enabled: bool = False,
+) -> GenerationPolicy:
+    """Resolve fixed server policy without accepting browser model authority.
+
+    A missing/mismatched canonical binding or legacy alias is a readiness error.
+    Flag/policy races after authorization may safely downgrade effective mode or
+    thinking while preserving the caller's requested snapshot on ``ChatTurn``.
+    """
+
+    if requested_mode not in {ANSWER_MODE_FAST, ANSWER_MODE_DEEP}:
+        raise ValueError("unsupported_answer_mode")
+    if not _legacy_aliases_match():
+        raise GenerationPolicyNotReady("legacy_alias_mismatch")
+
+    values = resolve_effective_policy(space)
+    fast_profile = _canonical_profile(
+        values,
+        "fast_model_profile_id",
+        CANONICAL_FAST_MODEL,
+    )
+    profile = fast_profile
+    effective_mode = ANSWER_MODE_FAST
+    fallback_code = ""
+
+    if requested_mode == ANSWER_MODE_DEEP:
+        if bool(getattr(settings, "DEEP_ANSWER_MODE", False)):
+            profile = _canonical_profile(
+                values,
+                "deep_model_profile_id",
+                CANONICAL_DEEP_MODEL,
+            )
+            effective_mode = ANSWER_MODE_DEEP
+        else:
+            fallback_code = "deep_mode_disabled"
+
+    thinking_enabled = False
+    thinking_budget = None
+    if requested_thinking_enabled:
+        if not bool(getattr(settings, "THINKING_MODE", False)):
+            fallback_code = fallback_code or "thinking_mode_disabled"
+        else:
+            budget_key = f"{effective_mode}_thinking_budget"
+            budget = values.get(budget_key, DEFAULT_THINKING_BUDGET)
+            if _valid_budget(budget):
+                thinking_enabled = True
+                thinking_budget = budget
+            else:
+                fallback_code = fallback_code or "thinking_budget_invalid"
+
     return GenerationPolicy(
-        answer_mode=ANSWER_MODE_FAST,
-        provider=profile.provider if profile else DEFAULT_PROVIDER,
-        model_id=(
-            profile.model_id
-            if profile
-            else getattr(settings, "RAG_LLM_MODEL", DEFAULT_FAST_MODEL)
-        ),
-        model_profile_id=profile.id if profile else None,
-        thinking_enabled=False,
-        thinking_budget=None,
+        answer_mode=effective_mode,
+        provider=profile.provider,
+        model_id=profile.model_id,
+        model_profile_id=profile.id,
+        thinking_enabled=thinking_enabled,
+        thinking_budget=thinking_budget,
         fallback_code=fallback_code,
     )
 
 
-def resolve_generation_policy(space, requested_mode: str) -> GenerationPolicy:
-    """Resolve defaults < organization < space and fail safely to fast."""
-
-    values = resolve_effective_policy(space)
-    fast = _fast_policy(values)
-    if requested_mode != ANSWER_MODE_DEEP:
-        return fast
-    if not bool(getattr(settings, "DEEP_ANSWER_MODE", False)):
-        return _fast_policy(values, fallback_code="deep_mode_disabled")
-
-    configured_id = values.get("deep_model_profile_id")
-    if configured_id:
-        profile = _profile(configured_id)
-        if profile is None:
-            return _fast_policy(values, fallback_code="deep_profile_unavailable")
-        provider = profile.provider
-        model_id = profile.model_id
-        profile_id = profile.id
-    else:
-        provider = DEFAULT_PROVIDER
-        model_id = DEFAULT_DEEP_MODEL
-        profile_id = None
-
-    budget = values.get("deep_thinking_budget", DEFAULT_DEEP_THINKING_BUDGET)
-    if (
-        isinstance(budget, bool)
-        or not isinstance(budget, int)
-        or not 1 <= budget <= 32768
-    ):
-        return _fast_policy(values, fallback_code="deep_budget_invalid")
-    return GenerationPolicy(
-        answer_mode=ANSWER_MODE_DEEP,
-        provider=provider,
-        model_id=model_id,
-        model_profile_id=profile_id,
-        thinking_enabled=True,
-        thinking_budget=budget,
-    )
-
-
 def deep_mode_available(space) -> bool:
-    """Return whether this space currently has a usable governed deep path."""
+    """Return whether the selected space has an exact governed deep path."""
 
-    return (
-        resolve_generation_policy(space, ANSWER_MODE_DEEP).answer_mode
-        == ANSWER_MODE_DEEP
-    )
+    if not bool(getattr(settings, "DEEP_ANSWER_MODE", False)):
+        return False
+    try:
+        result = resolve_generation_policy(space, ANSWER_MODE_DEEP, False)
+    except GenerationPolicyNotReady:
+        return False
+    return result.answer_mode == ANSWER_MODE_DEEP
+
+
+def thinking_mode_available(space) -> bool:
+    """Return independent thinking availability for a non-guest membership."""
+
+    if not bool(getattr(settings, "THINKING_MODE", False)):
+        return False
+    try:
+        result = resolve_generation_policy(space, ANSWER_MODE_FAST, True)
+    except GenerationPolicyNotReady:
+        return False
+    return result.thinking_enabled

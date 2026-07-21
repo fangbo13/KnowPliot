@@ -18,7 +18,11 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
 from apps.core.permissions import IsHROrAdmin  # noqa: F401 (kept for compatibility)
-from apps.spaces.permissions import SpaceDocumentPermission, is_platform_admin
+from apps.spaces.permissions import (
+    DOCUMENT_UPLOAD,
+    SpaceDocumentPermission,
+    resolve_request_space,
+)
 from apps.audit.views import create_audit_log
 from apps.knowledge.batch import (
     compute_content_hash,
@@ -129,8 +133,18 @@ class BatchDocumentUploadView(generics.CreateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Every new batch is bound to the exact authorized workspace selected
+        # by the request. ``legacy_scope_unknown`` is migration evidence only;
+        # runtime writes may never manufacture another ambiguous batch row.
+        batch_space = resolve_request_space(
+            request,
+            require_perm=DOCUMENT_UPLOAD,
+            required=True,
+        )
+
         # Create BatchImportResultRecord (BATCH-011)
         batch_record = BatchImportResultRecord.objects.create(
+            space=batch_space,
             total_files=len(valid_files),
             source_tag=source_tag,
             status="processing",
@@ -161,12 +175,6 @@ class BatchDocumentUploadView(generics.CreateAPIView):
                 pass
 
         batch_metadata = build_batch_metadata(source_tag)
-
-        # V6.0: batch uploads land in the active space (header) or default 'general'.
-        from apps.spaces.permissions import resolve_request_space
-        from apps.spaces.models import KnowledgeSpace
-        batch_space = resolve_request_space(request, required=False) or \
-            KnowledgeSpace.objects.filter(code="general").first()
 
         total_chunks_in_batch = 0  # BATCH-005: Track total chunks
 
@@ -248,8 +256,6 @@ class BatchImportResultDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # V6.0: users see their own batch results; platform admins see all.
-        qs = BatchImportResultRecord.objects.all()
-        if is_platform_admin(self.request.user):
-            return qs
-        return qs.filter(uploaded_by=self.request.user)
+        # Batch payload is workspace content evidence. Platform metadata
+        # authority never grants a global content-result bypass.
+        return BatchImportResultRecord.objects.filter(uploaded_by=self.request.user)

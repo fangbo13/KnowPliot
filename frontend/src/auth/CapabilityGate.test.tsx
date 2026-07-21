@@ -17,6 +17,15 @@ const makeAccess = (overrides: Partial<AuthorizationAdapter> = {}): Authorizatio
   enabled: true,
   status: 'ready',
   snapshot: {
+    navigation_mode: 'capability',
+    configuration_revision: 'config-v3',
+    feature_availability: {
+      deep: true,
+      thinking: false,
+      workspace_creation_approval: true,
+      workspace_join_v2: true,
+      workspace_permanent_delete: false,
+    },
     scopes: {
       platform: false,
       organization_ids: [],
@@ -48,6 +57,7 @@ describe('CapabilityGate', () => {
       errorCode: null,
       resolvedUserId: 'user-1',
       resolvedSpaceId: null,
+      expectedNavigationMode: 'capability',
       refresh: vi.fn(),
     });
   });
@@ -108,6 +118,7 @@ describe('LegacyAdminRedirect', () => {
       errorCode: null,
       resolvedUserId: 'user-1',
       resolvedSpaceId: null,
+      expectedNavigationMode: 'capability',
       refresh: vi.fn(),
     });
 

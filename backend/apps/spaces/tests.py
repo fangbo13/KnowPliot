@@ -31,14 +31,21 @@ from apps.spaces.models import (
     SpaceMembership,
 )
 from apps.spaces import permissions as sp
+from apps.spaces.ownership import create_space_with_owner
 from apps.spaces.views import _hash_code
 
 User = get_user_model()
 
 
-def make_space(org, code, name, visibility="private"):
-    return KnowledgeSpace.objects.create(
-        organization=org, name=name, code=code, visibility=visibility, status="active"
+def make_space(org, code, name, *, owner, visibility="private", **space_fields):
+    return create_space_with_owner(
+        organization=org,
+        owner=owner,
+        name=name,
+        code=code,
+        visibility=visibility,
+        status="active",
+        **space_fields,
     )
 
 
@@ -59,12 +66,11 @@ class SpaceTestBase(APITestCase):
     def setUpTestData(cls):
         cls.org = Organization.objects.create(name="Org", slug="org")
         cls.bl = BusinessLine.objects.create(organization=cls.org, name="Audit", code="audit")
-        cls.space_a = make_space(cls.org, "space-a", "Space A")
-        cls.space_b = make_space(cls.org, "space-b", "Space B")
-
         cls.alice = User.objects.create_user(username="alice", email="alice@test.com", password="x")
         cls.bob = User.objects.create_user(username="bob", email="bob@test.com", password="x")
         cls.admin = User.objects.create_superuser(username="admin", email="admin@test.com", password="x")
+        cls.space_a = make_space(cls.org, "space-a", "Space A", owner=cls.admin)
+        cls.space_b = make_space(cls.org, "space-b", "Space B", owner=cls.admin)
 
         # Alice is a member of A only; Bob is a member of B only.
         SpaceMembership.objects.create(space=cls.space_a, user=cls.alice, role="member", status="active")
@@ -173,8 +179,7 @@ class AccessCodeTest(SpaceTestBase):
 class PermissionMatrixTest(SpaceTestBase):
     def test_role_permissions(self):
         # Owner can update; member cannot; guest cannot view docs' download.
-        SpaceMembership.objects.create(space=self.space_a, user=self.bob, role="owner", status="active")
-        self.assertTrue(sp.has_space_permission(self.bob, self.space_a, sp.SPACE_UPDATE))
+        self.assertTrue(sp.has_space_permission(self.admin, self.space_a, sp.SPACE_UPDATE))
         self.assertFalse(sp.has_space_permission(self.alice, self.space_a, sp.SPACE_UPDATE))
         self.assertTrue(sp.has_space_permission(self.alice, self.space_a, sp.DOCUMENT_VIEW))
 
@@ -182,8 +187,8 @@ class PermissionMatrixTest(SpaceTestBase):
         self.assertIsNone(sp.effective_space_role(self.alice, self.space_b))
         self.assertFalse(sp.has_space_permission(self.alice, self.space_b, sp.DOCUMENT_VIEW))
 
-    def test_platform_admin_sees_everything(self):
-        self.assertEqual(sp.effective_space_role(self.admin, self.space_a), sp.ROLE_SUPER_ADMIN)
+    def test_platform_admin_uses_explicit_owner_membership(self):
+        self.assertEqual(sp.effective_space_role(self.admin, self.space_a), SpaceMembership.ROLE_OWNER)
         self.assertTrue(sp.has_space_permission(self.admin, self.space_b, sp.SPACE_UPDATE))
 
 
@@ -253,11 +258,11 @@ class OrgBusinessAdminTest(SpaceTestBase):
         cls.org2 = Organization.objects.create(name="Org2", slug="org2")
         cls.bl1 = BusinessLine.objects.create(organization=cls.org2, name="BL1", code="bl1")
         cls.bl2 = BusinessLine.objects.create(organization=cls.org2, name="BL2", code="bl2")
-        cls.s1 = KnowledgeSpace.objects.create(
-            organization=cls.org2, business_line=cls.bl1, name="S1", code="s1", status="active"
+        cls.s1 = make_space(
+            cls.org2, "s1", "S1", owner=cls.admin, business_line=cls.bl1
         )
-        cls.s2 = KnowledgeSpace.objects.create(
-            organization=cls.org2, business_line=cls.bl2, name="S2", code="s2", status="active"
+        cls.s2 = make_space(
+            cls.org2, "s2", "S2", owner=cls.admin, business_line=cls.bl2
         )
         cls.org_admin = User.objects.create_user(username="oadm", email="oadm@test.com", password="x")
         cls.biz_admin = User.objects.create_user(username="badm", email="badm@test.com", password="x")
@@ -268,22 +273,22 @@ class OrgBusinessAdminTest(SpaceTestBase):
             organization=cls.org2, business_line=cls.bl1, user=cls.biz_admin, role="business_admin"
         )
 
-    def test_org_admin_has_full_access_to_all_org_spaces(self):
-        self.assertEqual(sp.effective_space_role(self.org_admin, self.s1), sp.ROLE_ORG_ADMIN)
-        self.assertEqual(sp.effective_space_role(self.org_admin, self.s2), sp.ROLE_ORG_ADMIN)
-        self.assertTrue(sp.has_space_permission(self.org_admin, self.s1, sp.SPACE_UPDATE))
-        self.assertTrue(sp.has_space_permission(self.org_admin, self.s2, sp.DOCUMENT_UPLOAD))
+    def test_org_admin_has_no_workspace_content_access_without_membership(self):
+        self.assertIsNone(sp.effective_space_role(self.org_admin, self.s1))
+        self.assertIsNone(sp.effective_space_role(self.org_admin, self.s2))
+        self.assertFalse(sp.has_space_permission(self.org_admin, self.s1, sp.SPACE_UPDATE))
+        self.assertFalse(sp.has_space_permission(self.org_admin, self.s2, sp.DOCUMENT_UPLOAD))
         ids = set(sp.accessible_spaces(self.org_admin).values_list("id", flat=True))
-        self.assertIn(self.s1.id, ids)
-        self.assertIn(self.s2.id, ids)
+        self.assertNotIn(self.s1.id, ids)
+        self.assertNotIn(self.s2.id, ids)
 
     def test_business_admin_scoped_to_business_line(self):
-        self.assertEqual(sp.effective_space_role(self.biz_admin, self.s1), sp.ROLE_BUSINESS_ADMIN)
+        self.assertIsNone(sp.effective_space_role(self.biz_admin, self.s1))
         self.assertIsNone(sp.effective_space_role(self.biz_admin, self.s2))
-        self.assertTrue(sp.has_space_permission(self.biz_admin, self.s1, sp.SPACE_UPDATE))
+        self.assertFalse(sp.has_space_permission(self.biz_admin, self.s1, sp.SPACE_UPDATE))
         self.assertFalse(sp.has_space_permission(self.biz_admin, self.s2, sp.DOCUMENT_VIEW))
         ids = set(sp.accessible_spaces(self.biz_admin).values_list("id", flat=True))
-        self.assertIn(self.s1.id, ids)
+        self.assertNotIn(self.s1.id, ids)
         self.assertNotIn(self.s2.id, ids)
 
     def test_org_admin_can_create_space(self):

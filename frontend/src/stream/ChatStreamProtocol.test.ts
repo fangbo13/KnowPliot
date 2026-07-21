@@ -33,6 +33,74 @@ describe('chat stream protocol validation', () => {
     }, context)).toMatchObject({ name: 'meta', sequence: 1, protocolVersion: 2 });
   });
 
+  it('accepts the governed effective snapshot on v2 meta', () => {
+    const event = validateChatStreamMessage({
+      id: '1',
+      hasExplicitId: true,
+      event: 'meta',
+      data: JSON.stringify({
+        protocol_version: 2,
+        turn_id: TURN_ID,
+        session_id: SESSION_ID,
+        client_request_id: CLIENT_ID,
+        requested_answer_mode: 'deep',
+        answer_mode: 'fast',
+        requested_thinking_enabled: true,
+        thinking_enabled: false,
+        thinking_snapshot_known: true,
+        thinking_budget: null,
+        model_id: 'qwen3.6-flash',
+        policy_fallback_code: 'thinking_budget_invalid',
+      }),
+    }, context);
+    expect(event.data.answer_mode).toBe('fast');
+    expect(event.data.thinking_enabled).toBe(false);
+  });
+
+  it('accepts an exact thinking-on snapshot with an empty fallback code', () => {
+    expect(validateChatStreamMessage({
+      id: '1',
+      hasExplicitId: true,
+      event: 'meta',
+      data: JSON.stringify({
+        protocol_version: 2,
+        turn_id: TURN_ID,
+        session_id: SESSION_ID,
+        client_request_id: CLIENT_ID,
+        requested_answer_mode: 'fast',
+        answer_mode: 'fast',
+        requested_thinking_enabled: true,
+        thinking_enabled: true,
+        thinking_snapshot_known: true,
+        thinking_budget: 1024,
+        model_id: 'qwen3.6-flash',
+        policy_fallback_code: '',
+      }),
+    }, context)).toMatchObject({ name: 'meta', sequence: 1 });
+  });
+
+  it('rejects malformed or out-of-range execution snapshot fields', () => {
+    expect(() => validateChatStreamMessage({
+      id: '1',
+      hasExplicitId: true,
+      event: 'meta',
+      data: JSON.stringify({
+        protocol_version: 2,
+        turn_id: TURN_ID,
+        session_id: SESSION_ID,
+        client_request_id: CLIENT_ID,
+        requested_answer_mode: 'fast',
+        answer_mode: 'fast',
+        requested_thinking_enabled: false,
+        thinking_enabled: true,
+        thinking_snapshot_known: true,
+        thinking_budget: 0,
+        model_id: 'qwen3.6-flash',
+        policy_fallback_code: '',
+      }),
+    }, context)).toThrow(InvalidChatStreamEventError);
+  });
+
   it('requires meta before any initial id-bearing v2 event', () => {
     expect(() => validateChatStreamMessage({
       id: '1',

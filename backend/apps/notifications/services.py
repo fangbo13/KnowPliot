@@ -138,6 +138,13 @@ def user_feed(user, limit=50):
             "link": n.link,
             "version": "",
             "is_read": n.is_read,
+            "action_kind": n.action_kind or None,
+            "resource_type": n.resource_type or None,
+            "resource_id": str(n.resource_uuid) if n.resource_uuid else None,
+            "resource_version": n.resource_version,
+            "allowed_actions": list(n.allowed_actions or []),
+            "action_state": n.action_state,
+            "deep_link": n.deep_link or "",
             "created_at": n.created_at,
         })
 
@@ -154,6 +161,13 @@ def user_feed(user, limit=50):
             "link": "",
             "version": a.version,
             "is_read": a.id in dismissed,
+            "action_kind": None,
+            "resource_type": None,
+            "resource_id": None,
+            "resource_version": None,
+            "allowed_actions": [],
+            "action_state": "none",
+            "deep_link": "",
             "created_at": a.published_at or a.created_at,
         })
 

@@ -69,7 +69,10 @@
   transition: width var(--dur-slow) var(--ease-out);
   backdrop-filter: var(--header-blur);
   -webkit-backdrop-filter: var(--header-blur);
-  z-index: 40;
+  /* Bug-6: raised above the ChatPage fixed bottom bar (z-index:100) so the
+     sidebar footer's Logout button stays clickable. The bar's transparent
+     full-width wrappers otherwise intercept clicks over the sidebar footer. */
+  z-index: 200;
 }
 .sidebar.is-collapsed { width: 0; border-right: none; }
 
@@ -224,11 +227,20 @@
   display: flex; align-items: center; gap: 9px;
   padding: 8px 10px; border-radius: 8px;
   font-size: 13.5px; color: var(--color-text); cursor: pointer;
+  width: 100%; border: 0; background: transparent; text-align: left; font-family: inherit;
   transition: background var(--dur-fast) var(--ease-out);
 }
 .menu-pop-item:hover { background: var(--color-fill); }
 .menu-pop-item.danger { color: var(--color-error); }
 .menu-pop-item.danger:hover { background: rgba(var(--color-error-rgb), 0.10); }
+.menu-pop-divider { height: 1px; margin: 5px 4px; background: var(--color-border-secondary); }
+.header-menu { position: relative; }
+.header-menu > summary { list-style: none; cursor: pointer; }
+.header-menu > summary::-webkit-details-marker { display: none; }
+.header-menu-pop { position: absolute; top: calc(100% + 6px); right: 0; left: auto; }
+.sidebar-switcher-placeholder { height: 38px; border-radius: var(--radius-md); background: var(--color-fill); }
+.primary-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; background: var(--accent-active); color: var(--color-text-on-accent); font: inherit; cursor: pointer; }
+.primary-btn:hover { background: var(--accent-hover); }
 
 /* ============================================================================
    Chat view
@@ -326,6 +338,11 @@
 .processing-panel-dot { background: var(--accent); border-radius: 50%; height: 6px; width: 6px; }
 .processing-panel-mode { margin-left: auto; }
 .processing-panel-body { border-top: 1px solid var(--color-border-secondary); padding: 8px 12px 10px; }
+.processing-panel-snapshot { display: grid; gap: 4px 16px; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); margin: 0 0 8px; }
+.processing-panel-snapshot div { display: flex; gap: 5px; min-width: 0; }
+.processing-panel-snapshot dt { color: var(--color-text-tertiary); white-space: nowrap; }
+.processing-panel-snapshot dd { color: var(--color-text-secondary); margin: 0; overflow-wrap: anywhere; }
+.processing-panel-snapshot code, .message-execution-snapshot code { color: var(--color-text-tertiary); font-size: 10px; margin-left: 4px; }
 .processing-panel-timings { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; }
 .processing-panel-timings div { display: flex; gap: 5px; }
 .processing-panel-timings dt { color: var(--color-text-tertiary); }
@@ -412,6 +429,12 @@
   transform: translateY(4px);
   transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-soft-spring);
 }
+.message-execution-snapshot { color: var(--color-text-tertiary); font-size: 12px; margin-top: 8px; }
+.message-execution-snapshot summary { cursor: pointer; user-select: none; }
+.message-execution-snapshot dl { display: grid; gap: 3px 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin: 6px 0 0; }
+.message-execution-snapshot dl div { display: flex; gap: 4px; min-width: 0; }
+.message-execution-snapshot dt { white-space: nowrap; }
+.message-execution-snapshot dd { color: var(--color-text-secondary); margin: 0; overflow-wrap: anywhere; }
 .msg-row.assistant:hover .msg-actions,
 .msg-actions:focus-within { opacity: 1; transform: translateY(0); }
 .msg-action-btn {
@@ -510,7 +533,7 @@
 .composer.is-focused { border-color: var(--accent); box-shadow: var(--shadow-floating-input), 0 0 0 4px var(--accent-soft); }
 .composer.is-disabled { opacity: 0.65; }
 .composer-inner { display: flex; align-items: flex-end; gap: 10px; }
-.composer-mode { display: flex; gap: 4px; margin: 0 0 6px 10px; }
+.composer-mode { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px 10px; }
 .composer-mode-btn {
   border: 0;
   border-radius: 999px;
@@ -523,6 +546,8 @@
   transition: opacity var(--motion-fast) var(--motion-ease);
 }
 .composer-mode-btn[aria-pressed='true'] { background: var(--color-fill); color: var(--color-text); }
+.composer-mode-btn[role='switch'][aria-checked='true'] { background: var(--color-fill); color: var(--color-text); }
+.composer-thinking-state { color: var(--color-text-tertiary); font-size: 11px; margin-left: 4px; }
 .composer-mode-btn:disabled { cursor: default; opacity: 0.55; }
 .composer-textarea {
   flex: 1;

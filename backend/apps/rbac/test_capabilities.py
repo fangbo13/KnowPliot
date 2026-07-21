@@ -6,7 +6,7 @@
 
 from uuid import UUID
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
 from apps.spaces.models import OrganizationMembership
@@ -14,6 +14,7 @@ from apps.spaces.models import OrganizationMembership
 try:
     from apps.rbac.capabilities import (
         BUSINESS_ADMIN_CAPABILITIES,
+        ARCHIVED_OWNER_CAPABILITIES,
         ORGANIZATION_ADMIN_CAPABILITIES,
         PLATFORM_CAPABILITIES,
         SPACE_ROLE_CAPABILITIES,
@@ -22,6 +23,7 @@ try:
     )
 except ImportError:  # RED: the capability service does not exist yet.
     BUSINESS_ADMIN_CAPABILITIES = None
+    ARCHIVED_OWNER_CAPABILITIES = None
     ORGANIZATION_ADMIN_CAPABILITIES = None
     PLATFORM_CAPABILITIES = None
     SPACE_ROLE_CAPABILITIES = None
@@ -39,6 +41,7 @@ MEMBER = {
     "chat.export",
     "chat.history",
     "chat.share",
+    "workspace.ownership.transfer.accept",
 }
 BASE_CHAT = {"chat.ask", "chat.history"}
 OWNER_MANAGEMENT = {
@@ -55,6 +58,8 @@ OWNER_MANAGEMENT = {
     "workspace.manage",
     "workspace.members.manage",
     "workspace.settings.manage",
+    "workspace.ownership.read",
+    "workspace.ownership.transfer.request",
 }
 
 
@@ -98,11 +103,21 @@ class CapabilityMatrixTest(SimpleTestCase):
                 {
                     "platform.access",
                     "platform.audit.read",
+                    "platform.knowledge.read",
                     "platform.metrics.read",
                     "platform.models.manage",
                     "platform.organizations.manage",
                     "platform.roles.manage",
+                    "platform.taxonomy.manage",
+                    "platform.templates.manage",
                     "platform.users.manage",
+                    "platform.users.offboard",
+                    "platform.workspace_creation_policies.manage",
+                    "platform.workspace_creation_requests.manage",
+                    "workspace.ownership.read",
+                    "workspace.ownership.transfer.force",
+                    "governance.admin_succession.manage",
+                    "governance.users.suspend",
                 }
             ),
         )
@@ -117,8 +132,13 @@ class CapabilityMatrixTest(SimpleTestCase):
                     "governance.models.bind",
                     "governance.organization.settings.manage",
                     "governance.spaces.manage",
+                    "governance.taxonomy.manage",
                     "governance.templates.manage",
                     "governance.users.manage",
+                    "workspace.ownership.read",
+                    "workspace.ownership.transfer.force",
+                    "governance.admin_succession.manage",
+                    "governance.users.suspend",
                 }
             ),
         )
@@ -130,8 +150,12 @@ class CapabilityMatrixTest(SimpleTestCase):
                     "governance.audit.read",
                     "governance.metrics.read",
                     "governance.spaces.manage",
+                    "governance.taxonomy.manage",
                     "governance.templates.manage",
                     "governance.users.manage",
+                    "workspace.ownership.read",
+                    "workspace.ownership.transfer.force",
+                    "governance.users.suspend",
                 }
             ),
         )
@@ -196,6 +220,31 @@ class CapabilityMatrixTest(SimpleTestCase):
             with self.subTest(expected=expected):
                 self.assertEqual(build_capability_payload(snapshot)["default_console"], expected)
 
+    @override_settings(
+        CAPABILITY_NAV=True,
+        DEEP_ANSWER_MODE=True,
+        THINKING_MODE=False,
+        WORKSPACE_CREATION_APPROVAL=True,
+        WORKSPACE_JOIN_V2=False,
+        WORKSPACE_PERMANENT_DELETE=True,
+    )
+    def test_v2_bootstrap_shape_reports_navigation_and_non_authorizing_availability(self):
+        payload = build_capability_payload(CapabilityGrantSnapshot())
+
+        self.assertEqual(payload["navigation_mode"], "capability")
+        self.assertTrue(payload["configuration_revision"])
+        self.assertEqual(
+            payload["feature_availability"],
+            {
+                "deep": True,
+                "thinking": False,
+                "workspace_creation_approval": True,
+                "workspace_join_v2": False,
+                "workspace_permanent_delete": True,
+            },
+        )
+        self.assertEqual(payload["capabilities"], [])
+
     def test_deep_capability_is_selected_space_governed_and_guest_denied(self):
         member = build_capability_payload(
             CapabilityGrantSnapshot(
@@ -222,6 +271,85 @@ class CapabilityMatrixTest(SimpleTestCase):
         self.assertIn("chat.deep", member["capabilities"])
         self.assertNotIn("chat.deep", wrong_space["capabilities"])
         self.assertNotIn("chat.deep", guest["capabilities"])
+
+    def test_thinking_capability_is_independent_and_requires_non_guest_membership(self):
+        member = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "member"},
+                selected_space_id=SPACE_A,
+                thinking_space_ids=(SPACE_A,),
+            )
+        )
+        deep_only = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "member"},
+                selected_space_id=SPACE_A,
+                deep_space_ids=(SPACE_A,),
+            )
+        )
+        guest = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "guest"},
+                selected_space_id=SPACE_A,
+                thinking_space_ids=(SPACE_A,),
+            )
+        )
+        platform_without_membership = build_capability_payload(
+            CapabilityGrantSnapshot(
+                platform=True,
+                selected_space_id=SPACE_A,
+                thinking_space_ids=(SPACE_A,),
+            )
+        )
+
+        self.assertIn("chat.thinking", member["capabilities"])
+        self.assertNotIn("chat.deep", member["capabilities"])
+        self.assertIn("chat.deep", deep_only["capabilities"])
+        self.assertNotIn("chat.thinking", deep_only["capabilities"])
+        self.assertNotIn("chat.thinking", guest["capabilities"])
+        self.assertNotIn("chat.thinking", platform_without_membership["capabilities"])
+
+    @override_settings(WORKSPACE_PERMANENT_DELETE=True)
+    def test_permanent_delete_is_flagged_canonical_owner_only_and_archived_is_bounded(self):
+        noncanonical = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "owner"},
+                selected_space_id=SPACE_A,
+            )
+        )
+        active_owner = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "owner"},
+                selected_space_id=SPACE_A,
+                canonical_owner_space_ids=(SPACE_A,),
+            )
+        )
+        archived_owner = build_capability_payload(
+            CapabilityGrantSnapshot(
+                space_roles={SPACE_A: "owner"},
+                selected_space_id=SPACE_A,
+                canonical_owner_space_ids=(SPACE_A,),
+                archived_owner_space_ids=(SPACE_A,),
+            )
+        )
+
+        self.assertNotIn("workspace.delete.permanent", noncanonical["capabilities"])
+        self.assertIn("workspace.delete.permanent", active_owner["capabilities"])
+        self.assertEqual(
+            set(archived_owner["capabilities"]),
+            set(ARCHIVED_OWNER_CAPABILITIES) | {"workspace.delete.permanent"},
+        )
+        self.assertFalse(
+            {
+                "chat.ask",
+                "chat.history",
+                "knowledge.read",
+                "knowledge.download",
+                "workspace.invites.manage",
+                "workspace.members.manage",
+            }
+            & set(archived_owner["capabilities"])
+        )
 
 
 class OrganizationMembershipEffectivenessTest(SimpleTestCase):

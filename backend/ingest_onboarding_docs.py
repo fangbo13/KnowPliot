@@ -2,7 +2,7 @@
 # Licensed under the CC BY-NC-SA 4.0 License.
 # See LICENSE file in the project root for full license details.
 
-"""Bulk ingest knowledge documents (crawled + custom onboarding docs)."""
+"""Bulk ingest custom onboarding knowledge documents into the RAG pipeline."""
 import os, django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.docker')
 django.setup()

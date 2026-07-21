@@ -9,10 +9,10 @@ from apps.audit.models import AuditLog
 from apps.audit.views import create_audit_log
 from apps.spaces.models import (
     BusinessLine,
-    KnowledgeSpace,
     Organization,
     OrganizationMembership,
 )
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -33,13 +33,13 @@ class ScopedAuditGovernanceTest(APITestCase):
             name="Audit B",
             code="audit-b",
         )
-        cls.space_a = KnowledgeSpace.objects.create(
+        cls.space_a = create_test_space(
             organization=cls.org_a,
             business_line=cls.bl_a,
             name="Space A",
             code="audit-space-a",
         )
-        cls.space_b = KnowledgeSpace.objects.create(
+        cls.space_b = create_test_space(
             organization=cls.org_b,
             business_line=cls.bl_b,
             name="Space B",

@@ -20,6 +20,7 @@ from apps.spaces.models import (
     SpaceMembership,
 )
 from apps.spaces.permissions import CHAT_ASK, resolve_request_space
+from apps.spaces.ownership import create_space_with_owner
 
 User = get_user_model()
 
@@ -36,8 +37,14 @@ class EffectiveSpaceBoundaryTest(TestCase):
             name="Effective scope line",
             code="EFFECTIVE",
         )
-        cls.space = KnowledgeSpace.objects.create(
+        cls.owner = User.objects.create_user(
+            email="effective-owner@example.test",
+            username="effective-owner",
+            password="not-used",
+        )
+        cls.space = create_space_with_owner(
             organization=cls.organization,
+            owner=cls.owner,
             business_line=cls.business_line,
             name="Effective private space",
             code="effective-private",
@@ -109,8 +116,9 @@ class EffectiveSpaceBoundaryTest(TestCase):
 
     @override_settings(ENABLE_PUBLIC_DEMO_SPACES=False)
     def test_public_demo_flag_off_excludes_guest_from_list_and_request_resolution(self):
-        public_space = KnowledgeSpace.objects.create(
+        public_space = create_space_with_owner(
             organization=self.organization,
+            owner=self.owner,
             business_line=self.business_line,
             name="Disabled public demo",
             code="effective-public-disabled",
@@ -122,17 +130,16 @@ class EffectiveSpaceBoundaryTest(TestCase):
             self.resolve_chat_space(self.outsider, public_space.id)
 
     @override_settings(ENABLE_PUBLIC_DEMO_SPACES=True)
-    def test_active_public_demo_flag_on_grants_guest_chat_only_boundary(self):
-        public_space = KnowledgeSpace.objects.create(
+    def test_active_public_demo_flag_on_still_requires_explicit_membership(self):
+        public_space = create_space_with_owner(
             organization=self.organization,
+            owner=self.owner,
             business_line=self.business_line,
             name="Enabled public demo",
             code="effective-public-enabled",
             visibility="public_demo",
         )
 
-        self.assertIn(str(public_space.id), self.listed_space_ids(self.outsider))
-        self.assertEqual(
-            self.resolve_chat_space(self.outsider, public_space.id).id,
-            public_space.id,
-        )
+        self.assertNotIn(str(public_space.id), self.listed_space_ids(self.outsider))
+        with self.assertRaises(NotFound):
+            self.resolve_chat_space(self.outsider, public_space.id)

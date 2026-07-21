@@ -1,4 +1,7 @@
+from uuid import uuid4
+
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -13,10 +16,17 @@ from apps.spaces.models import (
     SpaceMembership,
 )
 from apps.spaces.permissions import DOCUMENT_UPLOAD, has_space_permission
+from apps.spaces.test_utils import create_test_space
 
 User = get_user_model()
 
 
+@override_settings(
+    WORKSPACE_JOIN_V2=True,
+    SPACE_CREDENTIAL_PEPPER_VERSION=1,
+    SPACE_CREDENTIAL_PEPPERS={1: "phase9b-independent-join-pepper"},
+    SPACE_INVITATION_ENCRYPTION_KEY="phase9b-independent-invitation-key",
+)
 class Phase9BScopedGovernanceTests(APITestCase):
     def setUp(self):
         self.super_admin = User.objects.create_superuser(
@@ -32,8 +42,9 @@ class Phase9BScopedGovernanceTests(APITestCase):
         self.line_a = BusinessLine.objects.create(organization=self.org, name="Audit", code="audit")
         self.line_b = BusinessLine.objects.create(organization=self.org, name="Tax", code="tax")
         self.other_org = Organization.objects.create(name="Other Org", slug="other-org")
-        self.space = KnowledgeSpace.objects.create(
+        self.space = create_test_space(
             organization=self.org,
+            owner=self.org_admin,
             business_line=self.line_a,
             name="Private space",
             code="private-space",
@@ -44,12 +55,18 @@ class Phase9BScopedGovernanceTests(APITestCase):
             organization=self.org,
             role=OrganizationMembership.ROLE_ORG_ADMIN,
         )
-        SpaceMembership.objects.create(
-            user=self.org_admin,
-            space=self.space,
-            role=SpaceMembership.ROLE_OWNER,
+        self.member_home = create_test_space(
+            organization=self.org,
+            business_line=self.line_a,
+            name="Member scope anchor",
+            code="member-scope-anchor",
+            visibility="private",
         )
-
+        SpaceMembership.objects.create(
+            user=self.member,
+            space=self.member_home,
+            role=SpaceMembership.ROLE_MEMBER,
+        )
     def test_platform_admin_can_create_archive_and_restore_organization(self):
         self.client.force_authenticate(self.super_admin)
         created = self.client.post(
@@ -98,7 +115,7 @@ class Phase9BScopedGovernanceTests(APITestCase):
             provider="openai-compatible",
             model_id="deep-1",
         )
-        other_space = KnowledgeSpace.objects.create(
+        other_space = create_test_space(
             organization=self.other_org,
             name="Other private space",
             code="other-private-space",
@@ -141,23 +158,29 @@ class Phase9BScopedGovernanceTests(APITestCase):
 
     def test_access_request_is_idempotent_and_approval_creates_membership(self):
         self.client.force_authenticate(self.member)
+        request_key = str(uuid4())
         first = self.client.post(
             f"/api/v1/spaces/{self.space.id}/access-requests/",
-            {"role": "member", "reason": "Project work"},
+            {"reason": "Project work"},
             format="json",
+            HTTP_IDEMPOTENCY_KEY=request_key,
         )
-        self.assertEqual(first.status_code, status.HTTP_201_CREATED, first.data)
+        self.assertEqual(first.status_code, status.HTTP_202_ACCEPTED, first.data)
         repeated = self.client.post(
             f"/api/v1/spaces/{self.space.id}/access-requests/",
-            {"role": "member", "reason": "Project work"},
+            {"reason": "Project work"},
             format="json",
+            HTTP_IDEMPOTENCY_KEY=request_key,
         )
-        self.assertEqual(repeated.status_code, status.HTTP_200_OK, repeated.data)
+        self.assertEqual(repeated.status_code, status.HTTP_202_ACCEPTED, repeated.data)
         self.assertEqual(first.data["id"], repeated.data["id"])
 
         self.client.force_authenticate(self.org_admin)
         approved = self.client.post(
-            f"/api/v1/admin/spaces/{self.space.id}/access-requests/{first.data['id']}/approve/"
+            f"/api/v1/spaces/{self.space.id}/access-requests/{first.data['id']}/approve/",
+            {"expected_request_version": 1, "role": "member"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
         self.assertEqual(approved.status_code, status.HTTP_200_OK, approved.data)
         self.assertTrue(
@@ -170,43 +193,56 @@ class Phase9BScopedGovernanceTests(APITestCase):
         self.client.force_authenticate(self.member)
         requested = self.client.post(
             f"/api/v1/spaces/{self.space.id}/access-requests/",
-            {"role": "member", "reason": "Temporary need"},
+            {"reason": "Temporary need"},
             format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
+        self.assertEqual(requested.status_code, status.HTTP_202_ACCEPTED, requested.data)
         self.client.force_authenticate(self.org_admin)
 
         rejected = self.client.post(
-            f"/api/v1/admin/spaces/{self.space.id}/access-requests/{requested.data['id']}/reject/",
-            {"reason": "Use the approved project workspace instead."},
+            f"/api/v1/spaces/{self.space.id}/access-requests/{requested.data['id']}/reject/",
+            {
+                "expected_request_version": 1,
+                "reason_code": "approved_workspace_exists",
+                "reason_text": "Use the approved project workspace instead.",
+            },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
 
         self.assertEqual(rejected.status_code, status.HTTP_200_OK, rejected.data)
         self.assertEqual(rejected.data["status"], "rejected")
         self.assertEqual(
-            rejected.data["rejection_reason"],
-            "Use the approved project workspace instead.",
+            rejected.data["decision_reason_code"],
+            "approved_workspace_exists",
         )
 
-    def test_owner_can_transfer_ownership_and_clone_configuration(self):
+    def test_legacy_owner_transfer_delegates_and_does_not_synthesize_clone_authority(self):
         target = User.objects.create_user(
             username="target@example.com", email="target@example.com", password="Strong-pass-123!"
         )
         SpaceMembership.objects.create(user=target, space=self.space, role="member")
-        self.client.force_authenticate(self.org_admin)
+        self.client.force_authenticate(self.super_admin)
         transferred = self.client.post(
-            f"/api/v1/spaces/{self.space.id}/transfer-owner/", {"user": str(target.id)}, format="json"
+            f"/api/v1/spaces/{self.space.id}/transfer-owner/",
+            {"user": str(target.id), "reason_code": "administrative_continuity"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
         self.assertEqual(transferred.status_code, status.HTTP_200_OK, transferred.data)
+        self.assertEqual(transferred.data["mode"], "forced")
+        self.assertEqual(transferred["Deprecation"], "true")
+        self.space.refresh_from_db()
+        self.assertEqual(self.space.owner_id, target.id)
+        self.client.force_authenticate(self.org_admin)
         cloned = self.client.post(
             f"/api/v1/spaces/{self.space.id}/clone/",
             {"name": "Cloned space", "code": "cloned-space", "copy_documents": False},
             format="json",
         )
-        self.assertEqual(cloned.status_code, status.HTTP_201_CREATED, cloned.data)
-        clone = KnowledgeSpace.objects.get(code="cloned-space")
-        self.assertEqual(clone.organization_id, self.space.organization_id)
-        self.assertTrue(SpaceMembership.objects.filter(space=clone, user=self.org_admin, role="owner").exists())
+        self.assertEqual(cloned.status_code, status.HTTP_403_FORBIDDEN, cloned.data)
+        self.assertFalse(KnowledgeSpace.objects.filter(code="cloned-space").exists())
 
     def test_archived_parent_makes_child_space_read_only(self):
         self.org.status = "archived"
@@ -214,7 +250,7 @@ class Phase9BScopedGovernanceTests(APITestCase):
         self.assertFalse(has_space_permission(self.org_admin, self.space, DOCUMENT_UPLOAD))
 
     def test_discoverable_spaces_excludes_private_and_already_joined_spaces(self):
-        home = KnowledgeSpace.objects.create(
+        home = create_test_space(
             organization=self.org,
             business_line=self.line_a,
             name="Member home",
@@ -222,14 +258,14 @@ class Phase9BScopedGovernanceTests(APITestCase):
             visibility="private",
         )
         SpaceMembership.objects.create(user=self.member, space=home, role="member")
-        discoverable = KnowledgeSpace.objects.create(
+        discoverable = create_test_space(
             organization=self.org,
             business_line=self.line_a,
             name="Discoverable space",
             code="discoverable-space",
             visibility="organization",
         )
-        private = KnowledgeSpace.objects.create(
+        private = create_test_space(
             organization=self.org,
             business_line=self.line_a,
             name="Private only",
@@ -247,28 +283,40 @@ class Phase9BScopedGovernanceTests(APITestCase):
     def test_access_request_approval_notifies_requester(self):
         self.client.force_authenticate(self.member)
         requested = self.client.post(
-            f"/api/v1/spaces/{self.space.id}/access-requests/", {"role": "member"}, format="json"
+            f"/api/v1/spaces/{self.space.id}/access-requests/",
+            {"reason": "Need project access"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
-        self.assertEqual(requested.status_code, status.HTTP_201_CREATED, requested.data)
+        self.assertEqual(requested.status_code, status.HTTP_202_ACCEPTED, requested.data)
         self.client.force_authenticate(self.org_admin)
         approved = self.client.post(
-            f"/api/v1/admin/spaces/{self.space.id}/access-requests/{requested.data['id']}/approve/"
+            f"/api/v1/spaces/{self.space.id}/access-requests/{requested.data['id']}/approve/",
+            {"expected_request_version": 1, "role": "member"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
         )
         self.assertEqual(approved.status_code, status.HTTP_200_OK, approved.data)
-        self.assertTrue(Notification.objects.filter(recipient=self.member, type="space_access_approved").exists())
+        owner_notice = Notification.objects.get(
+            recipient=self.org_admin,
+            type="space_access_request",
+            resource_uuid=requested.data["id"],
+        )
+        self.assertEqual(owner_notice.action_state, Notification.ACTION_ACTIONED)
+        self.assertEqual(owner_notice.allowed_actions, [])
 
     def test_scoped_user_directory_hides_other_organization_users(self):
         SpaceMembership.objects.create(user=self.member, space=self.space, role="member")
         outsider = User.objects.create_user(
             username="outside@example.com", email="outside@example.com", password="Strong-pass-123!"
         )
-        outside_space = KnowledgeSpace.objects.create(
+        outside_space = create_test_space(
             organization=self.other_org,
+            owner=outsider,
             name="Outside",
             code="outside-space",
             visibility="private",
         )
-        SpaceMembership.objects.create(user=outsider, space=outside_space, role="owner")
         self.client.force_authenticate(self.org_admin)
         listed = self.client.get("/api/v1/admin/users/")
         self.assertEqual(listed.status_code, status.HTTP_200_OK, listed.data)

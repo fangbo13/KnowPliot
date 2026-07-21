@@ -25,6 +25,7 @@ from apps.chat.services import (
 from apps.chat.stream_events import RedisTurnEventStore
 from apps.chat.test_stream_coordination import FakeRedis
 from apps.spaces.models import KnowledgeSpace
+from apps.spaces.generation_policy import GenerationPolicyNotReady
 
 try:
     from apps.chat.views import (
@@ -61,8 +62,14 @@ def accepted_turn(session, request_id=None):
         space=session.space,
         user=session.user,
         status=ChatTurn.STATUS_ACCEPTED,
+        requested_answer_mode=ChatTurn.ANSWER_MODE_FAST,
         answer_mode=ChatTurn.ANSWER_MODE_FAST,
-        model_id="",
+        requested_thinking_enabled=False,
+        thinking_enabled=False,
+        thinking_snapshot_known=True,
+        thinking_budget=None,
+        policy_fallback_code="",
+        model_id="qwen3.6-flash",
         error_code="",
         last_event_seq=0,
         completed_at=None,
@@ -113,7 +120,8 @@ class SendMessageCoordinationTest(SimpleTestCase):
             "apps.chat.views._request_generation_policy",
             return_value=SimpleNamespace(
                 answer_mode="fast",
-                model_id="qwen-plus",
+                model_id="qwen3.6-flash",
+                model_profile_id=uuid.uuid4(),
                 thinking_enabled=False,
                 thinking_budget=None,
                 fallback_code="",
@@ -122,7 +130,12 @@ class SendMessageCoordinationTest(SimpleTestCase):
         policy_patcher.start()
         self.addCleanup(policy_patcher.stop)
 
-    def _request(self, protocol_version=2, answer_mode="fast"):
+    def _request(
+        self,
+        protocol_version=2,
+        answer_mode="fast",
+        thinking_enabled=False,
+    ):
         request = self.factory.post(
             reverse("chat-send-message", kwargs={"session_id": self.session.id}),
             {
@@ -130,6 +143,7 @@ class SendMessageCoordinationTest(SimpleTestCase):
                 "client_request_id": str(self.turn.client_request_id),
                 "protocol_version": protocol_version,
                 "answer_mode": answer_mode,
+                "thinking_enabled": thinking_enabled,
             },
             format="json",
         )
@@ -211,7 +225,98 @@ class SendMessageCoordinationTest(SimpleTestCase):
             )
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.data["code"], "deep_mode_unavailable")
+        self.assertEqual(response.data["code"], "answer_mode_not_allowed")
+        begin.assert_not_called()
+
+    @override_settings(CHAT_STREAM_V2=True, THINKING_MODE=True)
+    def test_direct_thinking_request_without_server_capability_creates_no_turn(self):
+        patches = self._base_patches()
+        begin = Mock()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patch(
+                "apps.chat.views.resolve_capabilities",
+                return_value={"capabilities": ["chat.ask"]},
+            ),
+            patch("apps.chat.views.begin_chat_turn", begin),
+        ):
+            response = send_message(
+                self._request(thinking_enabled=True),
+                self.session.id,
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["code"], "thinking_not_allowed")
+        begin.assert_not_called()
+
+    @override_settings(CHAT_STREAM_V2=True, THINKING_MODE=True)
+    def test_requested_and_effective_snapshot_reaches_turn_and_meta(self):
+        redis = FakeRedis()
+        self.turn.requested_thinking_enabled = True
+        self.turn.thinking_enabled = True
+        self.turn.thinking_budget = 1024
+        patches = self._base_patches()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4] as begin,
+            patch(
+                "apps.chat.views.resolve_capabilities",
+                return_value={"capabilities": ["chat.ask", "chat.thinking"]},
+            ),
+            patch(
+                "apps.chat.views._request_generation_policy",
+                return_value=SimpleNamespace(
+                    answer_mode="fast",
+                    model_id="qwen3.6-flash",
+                    model_profile_id=uuid.uuid4(),
+                    thinking_enabled=True,
+                    thinking_budget=1024,
+                    fallback_code="",
+                ),
+            ),
+            patch("apps.chat.views.create_redis_client", return_value=redis),
+        ):
+            response = send_message(
+                self._request(thinking_enabled=True),
+                self.session.id,
+            )
+            first = next(iter(response.streaming_content)).decode()
+            response.close()
+
+        call = begin.call_args.kwargs
+        self.assertTrue(call["requested_thinking_enabled"])
+        self.assertTrue(call["thinking_enabled"])
+        self.assertEqual(call["thinking_budget"], 1024)
+        self.assertIn('"requested_thinking_enabled": true', first)
+        self.assertIn('"thinking_enabled": true', first)
+        self.assertIn('"thinking_budget": 1024', first)
+        self.assertIn('"model_id": "qwen3.6-flash"', first)
+
+    @override_settings(CHAT_STREAM_V2=True)
+    def test_model_policy_not_ready_returns_503_before_turn_creation(self):
+        patches = self._base_patches()
+        begin = Mock()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patch(
+                "apps.chat.views._request_generation_policy",
+                side_effect=GenerationPolicyNotReady("missing_fast_profile"),
+            ),
+            patch("apps.chat.views.begin_chat_turn", begin),
+        ):
+            response = send_message(self._request(), self.session.id)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data["code"], "model_policy_not_ready")
         begin.assert_not_called()
 
     @override_settings(CHAT_STREAM_V2=True)

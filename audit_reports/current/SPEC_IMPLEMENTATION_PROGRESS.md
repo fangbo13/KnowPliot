@@ -36,6 +36,35 @@ provider performance/privacy, or authenticated browser/visual acceptance.
 
 ## Functional surface status
 
+### Version1.74.1 ownership continuity (2026-07-18)
+
+| Area | Current state | Remaining release evidence |
+|---|---|---|
+| Canonical owner and transfer service | PostgreSQL-rehearsed | Authenticated browser/UAT evidence |
+| Offboarding impact and atomic succession | Implemented locally for platform, organization, and business scopes | Full backend suite and production-like rollback exercise |
+| UI handoff/offboarding flows | Implemented locally with server-filtered candidates | Authenticated browser/accessibility UAT |
+
+Local regression update (2026-07-18): `apps.rbac apps.spaces apps.users` passed
+167/167 in 203.910 seconds with `config.settings.local_test` and a process-only
+`QWEN_CHAT_MODEL=qwen-plus` default. The local `.env` was left unchanged. This
+does not replace PostgreSQL lock/constraint or deployment evidence.
+
+Complete local Django update (2026-07-18): **411/411 passed** in 356.509
+seconds under the same test-only model override. The Docker PostgreSQL ownership
+regressions also passed **3/3** in 86.095 seconds, covering real `FOR UPDATE`,
+the pending-transfer conditional unique constraint, and two concurrent accepts.
+
+Complete frontend update (2026-07-18): **45 test files / 271 tests passed**;
+TypeScript, i18n validation (83 source files), and the production build (4,028
+modules) passed. Authenticated browser/mobile/accessibility UAT remains pending.
+
+Stage-C audit gate: blocked by data anomalies, not by missing infrastructure.
+The authorized local Docker PostgreSQL rehearsal applied `spaces.0009` and
+`users.0004`; its no-write audit found five zero-owner and one multi-owner
+space, with no safe exactly-one-owner backfill candidates. No `--apply` or
+arbitrary repair ran. See
+`audit_reports/current/ownership_continuity_postgres_stage_a_2026-07-18.md`.
+
 | SPEC area | State | Notes |
 |---|---|---|
 | Architecture and multi-space isolation | Delivered | One deployment, organization/business-line/space scopes, single-space chat retrieval |

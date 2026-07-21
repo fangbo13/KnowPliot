@@ -8,6 +8,8 @@ V3.8: 11 ACTION_CHOICES (content domain only)
 V4.0: +9 system-level ACTION_CHOICES + role_used field for dual-role audit tracing
 """
 
+import hashlib
+import unicodedata
 import uuid
 
 from django.db import models
@@ -102,6 +104,7 @@ class AuditLog(models.Model):
         on_delete=models.SET_NULL,
         null=True,
     )
+    actor_uuid = models.UUIDField(null=True, blank=True, editable=False)
     action = models.CharField(max_length=30, choices=ACTION_CHOICES)
     target_type = models.CharField(max_length=100, help_text="Model name")
     target_id = models.UUIDField(null=True, blank=True)
@@ -114,6 +117,24 @@ class AuditLog(models.Model):
     organization_id = models.UUIDField(null=True, blank=True, db_index=True)
     business_line_id = models.UUIDField(null=True, blank=True, db_index=True)
     space_id = models.UUIDField(null=True, blank=True, db_index=True)
+    locator_digest = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
+    tombstone = models.ForeignKey(
+        "spaces.WorkspaceTombstone",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_logs",
+    )
+    governed_request = models.ForeignKey(
+        "spaces.GovernedActionRequest",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_logs",
+    )
+    governed_request_uuid = models.UUIDField(null=True, blank=True, editable=False)
     RESULT_CHOICES = [
         ("success", "Success"),
         ("denied", "Denied"),
@@ -136,6 +157,37 @@ class AuditLog(models.Model):
                 name="audit_scope_action_result_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(locator_digest="")
+                    | models.Q(locator_digest__regex=r"^[0-9a-f]{64}$")
+                ),
+                name="audit_locator_digest_shape",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.user_id and not self.actor_uuid:
+            self.actor_uuid = self.user_id
+        if self.governed_request_id and not self.governed_request_uuid:
+            self.governed_request_uuid = self.governed_request_id
+        if self.space_id and not self.locator_digest:
+            from apps.spaces.models import WorkspaceLocatorReservation
+
+            normalized_locator = (
+                WorkspaceLocatorReservation.objects.filter(
+                    live_space_id=self.space_id
+                )
+                .values_list("normalized_locator", flat=True)
+                .first()
+            )
+            if normalized_locator:
+                canonical = unicodedata.normalize("NFC", normalized_locator)
+                self.locator_digest = hashlib.sha256(
+                    canonical.encode("utf-8")
+                ).hexdigest()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.action} by {self.user} at {self.created_at}"

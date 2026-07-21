@@ -2,9 +2,14 @@
 # Licensed under the CC BY-NC-SA 4.0 License.
 # See LICENSE file in the project root for full license details.
 
+import uuid
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.utils import timezone
 from rest_framework.test import APITestCase
+from apps.scenario_templates.contract import normalize_revision_snapshot
 from apps.scenario_templates.models import (
     ScenarioTemplate,
     ScenarioTemplateApplication,
@@ -23,6 +28,28 @@ PW = "StrongPass123!"
 
 
 class ScenarioTemplateTests(APITestCase):
+    def publish_legacy_template(self, template):
+        revision = ScenarioTemplateRevision.objects.create(
+            template=template,
+            version=1,
+            snapshot=normalize_revision_snapshot(
+                {
+                    "scenario_type": template.scenario_type,
+                    "quick_questions": template.quick_questions,
+                    "prompt_policy": template.prompt_policy,
+                    "default_language": template.default_language,
+                    "default_visibility": template.default_visibility,
+                    "retrieval_policy": template.retrieval_policy,
+                }
+            ),
+            published_at=timezone.now(),
+            created_by=self.superuser,
+            change_note="published test fixture",
+        )
+        template.current_revision = revision
+        template.save(update_fields=["current_revision", "updated_at"])
+        return revision
+
     def setUp(self):
         # Setup organization
         self.org, _ = Organization.objects.get_or_create(
@@ -87,6 +114,33 @@ class ScenarioTemplateTests(APITestCase):
             description="Other org scoped template",
             is_active=True,
         )
+        self.active_revision = self.publish_legacy_template(self.active_template)
+        self.inactive_revision = self.publish_legacy_template(self.inactive_template)
+        self.other_org_revision = self.publish_legacy_template(self.other_org_template)
+
+    def submit_template_request(self, user, **overrides):
+        payload = {
+            "name": "Requested Workspace",
+            "code": f"requested-{uuid.uuid4().hex[:8]}",
+            "purpose": "Use an immutable template revision",
+            "visibility": "private",
+            "business_line_id": str(self.audit_line.id),
+            "work_group_id": str(uuid.uuid4()),
+            "office_location_ids": [str(uuid.uuid4())],
+            **overrides,
+        }
+        self.client.force_authenticate(user)
+        with patch(
+            "apps.spaces.creation_services.submit_creation_request",
+            return_value={"request_id": str(uuid.uuid4()), "status": "pending"},
+        ) as submit:
+            response = self.client.post(
+                f"/api/v1/templates/{self.active_template.id}/create-space/",
+                payload,
+                format="json",
+                HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+            )
+        return response, submit
 
     def test_authenticated_user_can_list_active_templates(self):
         """Ordinary logged in users can list active templates, but inactive templates are hidden."""
@@ -269,7 +323,10 @@ class ScenarioTemplateTests(APITestCase):
         template = ScenarioTemplate.objects.get(code="new-template")
         revision = ScenarioTemplateRevision.objects.get(template=template)
         self.assertEqual(revision.version, 1)
-        self.assertEqual(revision.snapshot["template_code"], "new-template")
+        self.assertEqual(revision.snapshot["schema_version"], 1)
+        scenario = revision.snapshot["components"]["scenario_definitions"][0]
+        self.assertEqual(scenario["scenario_type"], "tax")
+        self.assertEqual(scenario["quick_questions"], ["TQ1"])
 
     def test_employee_cannot_create_template(self):
         """Normal employee user cannot create a scenario template."""
@@ -338,8 +395,15 @@ class ScenarioTemplateTests(APITestCase):
         revisions = self.client.get(f"/api/v1/templates/{template_id}/revisions/")
         self.assertEqual(revisions.status_code, 200)
         self.assertEqual([r["version"] for r in revisions.data], [2, 1])
-        self.assertEqual(revisions.data[0]["snapshot"]["description"], "Updated description")
-        self.assertEqual(revisions.data[1]["snapshot"]["quick_questions"], ["Original question"])
+        self.assertNotIn("description", revisions.data[0]["snapshot"])
+        self.assertEqual(
+            revisions.data[0]["snapshot"]["components"]["scenario_definitions"][0]["quick_questions"],
+            ["Updated question"],
+        )
+        self.assertEqual(
+            revisions.data[1]["snapshot"]["components"]["scenario_definitions"][0]["quick_questions"],
+            ["Original question"],
+        )
 
     def test_business_admin_creates_template_scoped_to_own_business_line_by_default(self):
         """Business admins create business-line-scoped templates."""
@@ -377,25 +441,15 @@ class ScenarioTemplateTests(APITestCase):
         self.assertEqual(archive.status_code, 200, archive.data)
         self.active_template.refresh_from_db()
         self.assertFalse(self.active_template.is_active)
-        self.assertEqual(
-            ScenarioTemplateRevision.objects.filter(
-                template=self.active_template,
-                change_note="archived",
-            ).count(),
-            1,
-        )
+        self.assertEqual(self.active_template.revisions.count(), 1)
+        self.assertEqual(self.active_template.current_revision_id, self.active_revision.id)
 
         restore = self.client.post(f"/api/v1/templates/{self.active_template.id}/restore/")
         self.assertEqual(restore.status_code, 200, restore.data)
         self.active_template.refresh_from_db()
         self.assertTrue(self.active_template.is_active)
-        self.assertEqual(
-            ScenarioTemplateRevision.objects.filter(
-                template=self.active_template,
-                change_note="restored",
-            ).count(),
-            1,
-        )
+        self.assertEqual(self.active_template.revisions.count(), 1)
+        self.assertEqual(self.active_template.current_revision_id, self.active_revision.id)
 
     def test_scoped_admin_cannot_archive_global_template(self):
         """Scoped admins can use global templates but cannot archive them."""
@@ -424,13 +478,13 @@ class ScenarioTemplateTests(APITestCase):
         self.assertEqual(archive.status_code, 200, archive.data)
         template.refresh_from_db()
         self.assertFalse(template.is_active)
-        self.assertEqual(archive.data["latest_version"], 2)
+        self.assertEqual(archive.data["latest_version"], 1)
 
         restore = self.client.post(f"/api/v1/templates/{template.id}/restore/")
         self.assertEqual(restore.status_code, 200, restore.data)
         template.refresh_from_db()
         self.assertTrue(template.is_active)
-        self.assertEqual(restore.data["latest_version"], 3)
+        self.assertEqual(restore.data["latest_version"], 1)
 
     def test_business_admin_cannot_create_template_outside_own_business_line(self):
         """Business admins cannot create templates in another business line."""
@@ -467,7 +521,10 @@ class ScenarioTemplateTests(APITestCase):
         self.assertIsNone(clone.organization)
         revision = ScenarioTemplateRevision.objects.get(template=clone)
         self.assertEqual(revision.version, 1)
-        self.assertEqual(revision.change_note, "cloned from active-template")
+        self.assertEqual(
+            revision.change_note,
+            "cloned draft from active-template revision 1",
+        )
 
     def test_org_admin_clones_global_template_into_own_org(self):
         """Org admins can clone platform-global templates into their own organization."""
@@ -520,117 +577,55 @@ class ScenarioTemplateTests(APITestCase):
         self.assertFalse(ScenarioTemplate.objects.filter(code="bad-clone").exists())
 
     def test_create_space_from_template(self):
-        """Admin can instantiate a space from an active template."""
-        self.client.force_authenticate(self.org_admin)
-        r = self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {
-                "name": "New Space from Template",
-                "code": "new-space-code",
-                "organization": str(self.org.id),
-                "visibility": "private",
-            },
-            format="json",
+        """The compatibility route submits a governed request and pins current."""
+        response, submit = self.submit_template_request(
+            self.org_admin,
+            name="New Space from Template",
+            code="new-space-code",
         )
-        self.assertEqual(r.status_code, 201, r.data)
-        
-        # Verify space exists
-        space = KnowledgeSpace.objects.get(code="new-space-code")
-        self.assertEqual(space.name, "New Space from Template")
-        self.assertEqual(space.created_by, self.org_admin)
-        self.assertEqual(space.visibility, "private")
-        
-        # Verify settings contain template metadata
-        self.assertEqual(space.settings["template_id"], str(self.active_template.id))
-        self.assertEqual(space.settings["template_code"], self.active_template.code)
-        self.assertEqual(space.settings["scenario_type"], self.active_template.scenario_type)
-        self.assertEqual(space.settings["quick_questions"], self.active_template.quick_questions)
 
-        # Verify creator is owner
-        membership = SpaceMembership.objects.filter(space=space, user=self.org_admin).first()
-        self.assertIsNotNone(membership)
-        self.assertEqual(membership.role, SpaceMembership.ROLE_OWNER)
-        self.assertEqual(membership.status, "active")
-
-        application = ScenarioTemplateApplication.objects.get(space=space)
-        self.assertEqual(application.template, self.active_template)
-        self.assertEqual(application.organization, self.org)
-        self.assertEqual(application.created_by, self.org_admin)
-        self.assertEqual(application.template_snapshot["template_code"], self.active_template.code)
-        self.assertIn("latest_version", application.template_snapshot)
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertFalse(KnowledgeSpace.objects.filter(code="new-space-code").exists())
+        submitted = submit.call_args.kwargs["payload"]
+        self.assertEqual(submitted["template_version_id"], str(self.active_revision.id))
+        self.assertNotIn("documents", submitted)
+        self.assertNotIn("assets", submitted)
 
     def test_template_usage_count_is_scoped_to_admin(self):
-        """Usage stats for global templates are scoped to the requesting admin."""
-        self.client.force_authenticate(self.org_admin)
-        self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {
-                "name": "Org Space",
-                "code": "org-space",
-                "organization": str(self.org.id),
-            },
-            format="json",
-        )
-
-        self.client.force_authenticate(self.superuser)
-        self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {
-                "name": "Other Org Space",
-                "code": "other-org-space",
-                "organization": str(self.other_org.id),
-            },
-            format="json",
-        )
+        """Pending governed requests are not counted as template applications."""
+        first, _ = self.submit_template_request(self.org_admin, code="org-space")
+        second, _ = self.submit_template_request(self.superuser, code="other-org-space")
+        self.assertEqual(first.status_code, 202, first.data)
+        self.assertEqual(second.status_code, 202, second.data)
 
         self.client.force_authenticate(self.org_admin)
         detail = self.client.get(f"/api/v1/templates/{self.active_template.id}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(detail.data["usage_count"], 1)
-        self.assertIsNotNone(detail.data["last_applied_at"])
+        self.assertEqual(detail.data["usage_count"], 0)
+        self.assertIsNone(detail.data["last_applied_at"])
 
         self.client.force_authenticate(self.superuser)
         detail = self.client.get(f"/api/v1/templates/{self.active_template.id}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(detail.data["usage_count"], 2)
+        self.assertEqual(detail.data["usage_count"], 0)
 
     def test_template_applications_endpoint_is_scoped(self):
-        """Application history hides out-of-scope usage records."""
-        self.client.force_authenticate(self.org_admin)
-        self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {
-                "name": "Scoped App Space",
-                "code": "scoped-app-space",
-                "organization": str(self.org.id),
-            },
-            format="json",
-        )
-
-        self.client.force_authenticate(self.superuser)
-        self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {
-                "name": "Hidden App Space",
-                "code": "hidden-app-space",
-                "organization": str(self.other_org.id),
-            },
-            format="json",
-        )
+        """Unapproved governed requests never appear as applications."""
+        self.submit_template_request(self.org_admin, code="scoped-app-space")
+        self.submit_template_request(self.superuser, code="hidden-app-space")
 
         self.client.force_authenticate(self.org_admin)
         r = self.client.get(f"/api/v1/templates/{self.active_template.id}/applications/")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.data), 1)
-        self.assertEqual(r.data[0]["space_code"], "scoped-app-space")
+        self.assertEqual(r.data, [])
 
         self.client.force_authenticate(self.superuser)
         r = self.client.get(f"/api/v1/templates/{self.active_template.id}/applications/")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.data), 2)
+        self.assertEqual(r.data, [])
 
     def test_org_admin_cannot_create_space_outside_own_org(self):
-        """Org admins cannot instantiate template spaces in another organization."""
+        """The v3 adapter rejects legacy organization authority fields."""
         self.client.force_authenticate(self.org_admin)
         r = self.client.post(
             f"/api/v1/templates/{self.active_template.id}/create-space/",
@@ -640,12 +635,13 @@ class ScenarioTemplateTests(APITestCase):
                 "organization": str(self.other_org.id),
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         )
-        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 400)
         self.assertFalse(KnowledgeSpace.objects.filter(code="foreign-org-space").exists())
 
     def test_org_admin_cannot_attach_business_line_from_other_org(self):
-        """Business line must belong to the selected organization."""
+        """The adapter accepts only controlled taxonomy identifier fields."""
         self.client.force_authenticate(self.org_admin)
         r = self.client.post(
             f"/api/v1/templates/{self.active_template.id}/create-space/",
@@ -656,28 +652,28 @@ class ScenarioTemplateTests(APITestCase):
                 "business_line": str(self.tax_line.id),
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         )
         self.assertEqual(r.status_code, 400)
         self.assertFalse(KnowledgeSpace.objects.filter(code="mismatched-bl-space").exists())
 
     def test_business_admin_defaults_to_own_business_line_scope(self):
-        """Business admins can instantiate templates only inside their business line."""
-        self.client.force_authenticate(self.business_admin)
-        r = self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {
-                "name": "Business Admin Space",
-                "code": "business-admin-space",
-            },
-            format="json",
+        """Business admins submit the same governed request as other users."""
+        response, submit = self.submit_template_request(
+            self.business_admin,
+            name="Business Admin Space",
+            code="business-admin-space",
+            business_line_id=str(self.audit_line.id),
         )
-        self.assertEqual(r.status_code, 201, r.data)
-        space = KnowledgeSpace.objects.get(code="business-admin-space")
-        self.assertEqual(space.organization, self.org)
-        self.assertEqual(space.business_line, self.audit_line)
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertFalse(KnowledgeSpace.objects.filter(code="business-admin-space").exists())
+        self.assertEqual(
+            submit.call_args.kwargs["payload"]["business_line_id"],
+            str(self.audit_line.id),
+        )
 
     def test_business_admin_cannot_create_space_in_other_business_line(self):
-        """Business admins cannot instantiate spaces outside their assigned line."""
+        """Legacy target-scope fields cannot bypass governed taxonomy."""
         self.client.force_authenticate(self.business_admin)
         r = self.client.post(
             f"/api/v1/templates/{self.active_template.id}/create-space/",
@@ -688,8 +684,9 @@ class ScenarioTemplateTests(APITestCase):
                 "business_line": str(self.tax_line.id),
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         )
-        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 400)
         self.assertFalse(KnowledgeSpace.objects.filter(code="foreign-bl-space").exists())
 
     def test_create_space_from_inactive_template_fails_for_non_platform_admin(self):
@@ -706,35 +703,44 @@ class ScenarioTemplateTests(APITestCase):
         self.assertEqual(r.status_code, 404)
 
     def test_duplicate_space_code_returns_400(self):
-        """Creating a space with an existing code returns 400 Bad Request."""
+        """Every adapter submission requires a per-operation idempotency key."""
         self.client.force_authenticate(self.org_admin)
-        
-        # Create first space
-        self.client.post(
-            f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {"name": "Space 1", "code": "dup-code"},
-            format="json",
-        )
-        
-        # Try creating second space with same code
         r = self.client.post(
             f"/api/v1/templates/{self.active_template.id}/create-space/",
-            {"name": "Space 2", "code": "dup-code"},
+            {
+                "name": "Space 1",
+                "code": "dup-code",
+                "business_line_id": str(self.audit_line.id),
+                "work_group_id": str(uuid.uuid4()),
+                "office_location_ids": [str(uuid.uuid4())],
+            },
             format="json",
         )
         self.assertEqual(r.status_code, 400)
-        self.assertIn("code", r.data.get("detail", r.data))
+        self.assertIn("Idempotency-Key", str(r.data))
+        self.assertFalse(KnowledgeSpace.objects.filter(code="dup-code").exists())
 
     def test_seed_scenario_templates_command(self):
         """Seeding command runs idempotently and doesn't duplicate templates."""
-        # Clear existing templates to start fresh
-        ScenarioTemplate.objects.all().delete()
-        
+        seeded_codes = {
+            "new-hire-onboarding",
+            "audit-methodology-qa",
+            "tax-policy-assistant",
+            "consulting-engagement",
+            "core-services-helpdesk",
+        }
+        self.assertFalse(ScenarioTemplate.objects.filter(code__in=seeded_codes).exists())
+
         # First call
         call_command("seed_scenario_templates")
-        count = ScenarioTemplate.objects.count()
-        self.assertGreaterEqual(count, 5)
+        self.assertEqual(
+            ScenarioTemplate.objects.filter(code__in=seeded_codes).count(),
+            len(seeded_codes),
+        )
 
         # Second call
         call_command("seed_scenario_templates")
-        self.assertEqual(ScenarioTemplate.objects.count(), count)
+        self.assertEqual(
+            ScenarioTemplate.objects.filter(code__in=seeded_codes).count(),
+            len(seeded_codes),
+        )

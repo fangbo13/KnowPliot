@@ -57,10 +57,10 @@ from .serializers import (
     SpaceCloneSerializer,
     SpaceCreateSerializer,
     SpaceMembershipSerializer,
-    SpaceOwnerTransferSerializer,
     SpaceTransferSerializer,
     UpdateMemberRoleSerializer,
 )
+from .deletion_services import archive_workspace, restore_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def ensure_default_membership(user):
 
 
 class SpaceListCreateView(generics.ListCreateAPIView):
-    """GET: list accessible spaces. POST: create a space (platform admins)."""
+    """GET accessible spaces; POST is the one-window governed adapter."""
 
     permission_classes = [IsAuthenticated]
     pagination_class = None  # space lists are small; return all for the switcher
@@ -127,35 +127,28 @@ class SpaceListCreateView(generics.ListCreateAPIView):
         )
 
     def create(self, request, *args, **kwargs):
-        if not can_create_space(request.user):
-            _audit(request.user, "permission_denied",
-                   details={"action": "space.create"}, request=request)
-            raise PermissionDenied("You are not allowed to create spaces.")
+        # The compatibility route must never restore direct creation.  It
+        # delegates to the exact same typed service as
+        # POST /spaces/creation-requests/ and therefore returns 202.
+        from django.conf import settings
 
-        serializer = SpaceCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        from .creation_services import submit_creation_request
+        from .governed import GovernedWorkflowError, require_idempotency_key
 
-        organization = serializer.validated_data.get("organization")
-        if organization is None:
-            organization = (
-                Organization.objects.filter(slug="default").first()
-                or Organization.objects.first()
+        if not bool(getattr(settings, "WORKSPACE_CREATION_APPROVAL", False)):
+            raise GovernedWorkflowError(
+                "workspace_creation_disabled",
+                "Workspace creation is disabled.",
+                status_code=503,
             )
-            if organization is None:
-                organization = Organization.objects.create(name="Default Organization", slug="default")
-
-        with transaction.atomic():
-            space = serializer.save(organization=organization, created_by=request.user)
-            # Creator becomes the space owner.
-            SpaceMembership.objects.create(
-                space=space, user=request.user,
-                role=SpaceMembership.ROLE_OWNER, status="active",
-                last_accessed_at=timezone.now(),
-            )
-        _audit(request.user, "space_create", target_id=space.id,
-               details={"code": space.code, "name": space.name}, request=request)
-        out = KnowledgeSpaceSerializer(space, context={"request": request})
-        return Response(out.data, status=status.HTTP_201_CREATED)
+        body = submit_creation_request(
+            actor=request.user,
+            payload=dict(request.data),
+            idempotency_key=require_idempotency_key(request),
+        )
+        if isinstance(body, Response):
+            return body
+        return Response(body, status=status.HTTP_202_ACCEPTED)
 
 
 class SpaceDetailView(generics.RetrieveUpdateAPIView):
@@ -167,7 +160,12 @@ class SpaceDetailView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         space = get_space_or_404(self.kwargs["pk"])
-        if effective_space_role(self.request.user, space) is None:
+        archived_owner_read = (
+            self.request.method == "GET"
+            and space.status == "archived"
+            and can_restore_space(self.request.user, space)
+        )
+        if effective_space_role(self.request.user, space) is None and not archived_owner_read:
             from rest_framework.exceptions import NotFound
             raise NotFound("Space not found.")
         if self.request.method in ("PATCH", "PUT"):
@@ -186,26 +184,17 @@ class SpaceDetailView(generics.RetrieveUpdateAPIView):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def space_archive(request, pk):
-    space = get_space_or_404(pk)
-    if not has_space_permission(request.user, space, SPACE_ARCHIVE):
-        _audit(request.user, "permission_denied", target_id=space.id,
-               details={"action": SPACE_ARCHIVE}, request=request)
-        raise PermissionDenied("You cannot archive this space.")
-    space.status = "archived"
-    space.save(update_fields=["status", "updated_at"])
-    _audit(request.user, "space_archive", target_id=space.id, request=request)
+    # The compatibility route keeps its empty-body shape, while the service
+    # rechecks the canonical owner and lifecycle version under the global lock
+    # order. Platform/governance authority never substitutes for ownership.
+    space = archive_workspace(actor=request.user, space_id=pk)
     return Response(KnowledgeSpaceSerializer(space, context={"request": request}).data)
 
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def space_restore(request, pk):
-    space = get_space_or_404(pk)
-    if not can_restore_space(request.user, space):
-        raise PermissionDenied("You cannot restore this space.")
-    space.status = "active"
-    space.save(update_fields=["status", "updated_at"])
-    _audit(request.user, "space_restore", target_id=space.id, request=request)
+    space = restore_workspace(actor=request.user, space_id=pk)
     return Response(KnowledgeSpaceSerializer(space, context={"request": request}).data)
 
 
@@ -238,36 +227,18 @@ def space_transfer(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def space_transfer_owner(request, pk):
-    space = get_space_or_404(pk)
-    if effective_space_role(request.user, space) not in {"owner", "super_admin", "org_admin", "business_admin"}:
-        raise PermissionDenied("You cannot transfer ownership of this space.")
-    serializer = SpaceOwnerTransferSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    membership = SpaceMembership.objects.filter(
-        space=space, user_id=serializer.validated_data["user"], status="active"
-    ).first()
-    if membership is None:
-        raise ValidationError({"user": "The new owner must be an active space member."})
-    with transaction.atomic():
-        SpaceMembership.objects.filter(space=space, role=SpaceMembership.ROLE_OWNER, status="active").exclude(pk=membership.pk).update(role=SpaceMembership.ROLE_MEMBER)
-        membership.role = SpaceMembership.ROLE_OWNER
-        membership.save(update_fields=["role", "updated_at"])
-    _audit(request.user, "space_owner_transfer", target_id=space.id, details={"new_owner": str(membership.user_id)}, request=request)
-    return Response(SpaceMembershipSerializer(membership).data)
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
 def space_clone(request, pk):
     space = get_space_or_404(pk)
     if effective_space_role(request.user, space) not in {"owner", "super_admin", "org_admin", "business_admin"}:
         raise PermissionDenied("You cannot clone this space.")
     serializer = SpaceCloneSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    from .ownership import create_space_with_owner
+
     with transaction.atomic():
-        clone = KnowledgeSpace.objects.create(
+        clone = create_space_with_owner(
             organization=space.organization,
+            owner=request.user,
             business_line=space.business_line,
             name=serializer.validated_data["name"],
             code=serializer.validated_data["code"],
@@ -276,9 +247,7 @@ def space_clone(request, pk):
             language=space.language,
             visibility=space.visibility,
             settings=space.settings,
-            created_by=request.user,
         )
-        SpaceMembership.objects.create(space=clone, user=request.user, role=SpaceMembership.ROLE_OWNER, status="active")
     copied = []
     if serializer.validated_data["copy_documents"]:
         from apps.knowledge.ingestion import enqueue_document_ingestion
@@ -336,6 +305,26 @@ def discoverable_spaces(request):
     Membership in any space establishes tenant membership; private spaces and
     spaces already joined are never exposed as join candidates.
     """
+    if request.query_params.get("contract_version") == "2":
+        from .discovery import discover
+
+        params = {
+            key: request.query_params.get(key)
+            for key in (
+                "q",
+                "business_line_id",
+                "work_group_id",
+                "access_state",
+                "sort",
+                "cursor",
+            )
+            if request.query_params.get(key) is not None
+        }
+        office_ids = request.query_params.getlist("office_location_id")
+        if office_ids:
+            params["office_location_ids"] = office_ids
+        return Response(discover(request.user, params))
+
     memberships = SpaceMembership.objects.filter(user=request.user, status="active")
     organization_ids = memberships.values_list("space__organization_id", flat=True)
     business_line_ids = memberships.exclude(space__business_line_id=None).values_list(
@@ -352,6 +341,14 @@ def discoverable_spaces(request):
     return Response(KnowledgeSpaceSerializer(spaces, many=True, context={"request": request}).data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def discovery_highlights(request):
+    from .discovery import highlights
+
+    return Response(highlights(request.user))
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def space_switch(request, pk):
@@ -364,6 +361,9 @@ def space_switch(request, pk):
     SpaceMembership.objects.filter(space=space, user=request.user).update(
         last_accessed_at=timezone.now()
     )
+    from .discovery import record_authorized_usage
+
+    record_authorized_usage(user=request.user, space=space)
     _audit(request.user, "space_switch", target_id=space.id,
            details={"code": space.code}, request=request, role_used=role)
     return Response(KnowledgeSpaceSerializer(space, context={"request": request}).data)
@@ -430,6 +430,16 @@ class SpaceMembersView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     pagination_class = None
 
+    def list(self, request, *args, **kwargs):
+        from django.conf import settings
+
+        if bool(getattr(settings, "WORKSPACE_JOIN_V2", False)):
+            from .member_services import list_members
+
+            space = get_space_or_404(self.kwargs["pk"])
+            return Response(list_members(actor=request.user, space=space))
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self):
         space = get_space_or_404(self.kwargs["pk"])
         if not has_space_permission(self.request.user, space, SPACE_VIEW):
@@ -438,11 +448,26 @@ class SpaceMembersView(generics.ListCreateAPIView):
         return SpaceMembership.objects.filter(space=space).select_related("user")
 
     def create(self, request, *args, **kwargs):
+        from django.conf import settings
+
+        if bool(getattr(settings, "WORKSPACE_JOIN_V2", False)):
+            from rest_framework.exceptions import MethodNotAllowed
+
+            raise MethodNotAllowed(
+                "POST",
+                detail="Use the targeted invitations or access-request workflow.",
+            )
         space = get_space_or_404(self.kwargs["pk"])
         if not has_space_permission(request.user, space, SPACE_MANAGE_MEMBERS):
             _audit(request.user, "permission_denied", target_id=space.id,
                    details={"action": SPACE_MANAGE_MEMBERS}, request=request)
             raise PermissionDenied("You cannot manage members of this space.")
+
+        if request.data.get("role") == SpaceMembership.ROLE_OWNER:
+            return Response(
+                {"error_code": "ownership_workflow_required"},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         serializer = AddMemberByEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -499,6 +524,72 @@ def space_member_detail(request, pk, user_id):
     Both require space.manage_members. A space must always keep at least one
     active owner, so the last owner cannot be downgraded or removed.
     """
+    from django.conf import settings
+
+    if bool(getattr(settings, "WORKSPACE_JOIN_V2", False)):
+        from .governed import require_idempotency_key
+        from .member_services import remove_member, update_member
+
+        if not isinstance(request.data, dict):
+            raise ValidationError({"detail": "A JSON object is required."})
+        if request.method == "PATCH":
+            allowed = {
+                "expected_membership_version",
+                "role",
+                "status",
+                "expires_at",
+                "reason_code",
+                "reason_text",
+            }
+            unknown = sorted(set(request.data) - allowed)
+            if unknown:
+                raise ValidationError({"unknown_fields": unknown})
+            try:
+                expected = int(request.data.get("expected_membership_version"))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    {"expected_membership_version": "Must be an integer."}
+                ) from exc
+            fields = {
+                field: request.data[field]
+                for field in ("role", "status", "expires_at")
+                if field in request.data
+            }
+            body = update_member(
+                actor=request.user,
+                space_id=pk,
+                membership_id=user_id,
+                expected_version=expected,
+                fields=fields,
+                reason_code=request.data.get("reason_code", ""),
+                reason_text=request.data.get("reason_text", ""),
+                idempotency_key=require_idempotency_key(request),
+            )
+        else:
+            unknown = sorted(set(request.data) - {"reason_code", "reason_text"})
+            if unknown:
+                raise ValidationError({"unknown_fields": unknown})
+            etag = (request.headers.get("If-Match") or "").strip()
+            prefix = '"membership-v'
+            if not (etag.startswith(prefix) and etag.endswith('"')):
+                raise ValidationError({"If-Match": 'Expected "membership-vN".'})
+            try:
+                expected = int(etag[len(prefix) : -1])
+            except ValueError as exc:
+                raise ValidationError({"If-Match": 'Expected "membership-vN".'}) from exc
+            body = remove_member(
+                actor=request.user,
+                space_id=pk,
+                membership_id=user_id,
+                expected_version=expected,
+                reason_code=request.data.get("reason_code", ""),
+                reason_text=request.data.get("reason_text", ""),
+                idempotency_key=require_idempotency_key(request),
+            )
+        if isinstance(body, Response):
+            return body
+        return Response(body)
+
     space = get_space_or_404(pk)
     if not has_space_permission(request.user, space, SPACE_MANAGE_MEMBERS):
         _audit(request.user, "permission_denied", target_id=space.id,
@@ -511,6 +602,11 @@ def space_member_detail(request, pk, user_id):
         raise NotFound("Member not found.")
 
     def _is_last_owner() -> bool:
+        # The canonical owner FK is authoritative during and after the
+        # compatibility period. A corrupt legacy owner mirror must never make
+        # the canonical owner removable through member-management endpoints.
+        if membership.user_id == space.owner_id:
+            return True
         if membership.role != SpaceMembership.ROLE_OWNER:
             return False
         owners = SpaceMembership.objects.filter(
@@ -528,6 +624,11 @@ def space_member_detail(request, pk, user_id):
         return Response({"removed": True})
 
     # PATCH — change role
+    if request.data.get("role") == SpaceMembership.ROLE_OWNER:
+        return Response(
+            {"error_code": "ownership_workflow_required"},
+            status=status.HTTP_409_CONFLICT,
+        )
     serializer = UpdateMemberRoleSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     new_role = serializer.validated_data["role"]

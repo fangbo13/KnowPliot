@@ -16,7 +16,7 @@ RULES:
 3. Be concise and professional. Use formatting (bullet points, numbered lists) for clarity.
 4. If the question is about the employee's personal data, direct them to the HR portal.
 5. NEVER make up policies, procedures, or benefits information.
-6. Respond in English.
+6. Respond in {resolved_language}.
 
 CONTEXT DOCUMENTS:
 {context}
@@ -38,7 +38,7 @@ CONVERSATION HISTORY:
 3. 简洁专业，使用要点和编号列表。
 4. 如果问题涉及员工个人数据，引导其前往HR门户。
 5. 绝不编造政策、流程或福利信息。
-6. 使用中文回复。
+6. Respond in {resolved_language}.
 
 上下文文档：
 {context}
@@ -59,7 +59,9 @@ CONVERSATION HISTORY:
             context_chunks: List of retrieved chunk dicts.
             conversation_history: List of (role, content) tuples.
             user_profile: User model instance.
-            language: 'en' or 'zh'.
+            language: resolved reply language ('en' or 'zh') — drives the
+                dynamic "Respond in {resolved_language}" instruction so the
+                prompt never hardcodes a fixed reply language.
 
         Returns:
             System prompt string.
@@ -68,6 +70,9 @@ CONVERSATION HISTORY:
         history_str = self._format_history(conversation_history)
 
         template = self.SYSTEM_PROMPT_ZH if language == "zh" else self.SYSTEM_PROMPT_EN
+        # Map the resolved reply language to the human-readable name used in
+        # the dynamic "Respond in {resolved_language}" instruction.
+        resolved_language_name = "Chinese" if language == "zh" else "English"
 
         return template.format(
             context=context_str,
@@ -76,6 +81,7 @@ CONVERSATION HISTORY:
             role_level=getattr(user_profile, "role_level", "Not specified") or "Not specified",
             start_date=str(user_profile.start_date) if getattr(user_profile, "start_date", None) else "Not specified",
             history=history_str,
+            resolved_language=resolved_language_name,
         )
 
     def _format_context(self, chunks):

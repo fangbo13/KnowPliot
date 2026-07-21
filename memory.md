@@ -212,3 +212,125 @@ chunks but completed successfully.
 - [ ] PostgreSQL migration rehearsal and production-scale timing completed.
 - [ ] Live Redis/provider/authenticated browser smoke completed in 筼筜.
 - [ ] Rollout evidence reviewed before each flag expansion.
+
+## 9. Acceptance fixes (2026-07-18)
+
+Local Docker acceptance of Version1.74.1 surfaced and fixed the following on
+branch `fix/v1.74.1-acceptance-bugs` (off Version1.74.1; committed locally, not
+yet pushed). The fixes are additive and do not weaken v1/legacy compatibility
+(SPEC §11) or the §10.1 duplicate-suppression invariant.
+
+- **Bug-1 (P0, chat send 500 on PostgreSQL)**: `select_for_update()` combined
+  with `select_related(...)` on nullable FKs (`ChatSession.space`,
+  `ChatTurn.assistant_message`, `Feedback.space`) produced LEFT OUTER JOINs that
+  PostgreSQL rejects `FOR UPDATE` on. SQLite ignores this, so the prior
+  SQLite-only suite missed it. Fixed by scoping `select_for_update(of=("self",))`
+  at `apps/chat/services.py` (`find_session`, `lock_session`, `find_turn`) and
+  `apps/chat/quality_views.py` (`FeedbackReviewDetailView.get_object`). Added a
+  real-PostgreSQL regression test `apps/chat/test_pg_session_locking.py`
+  (TransactionTestCase; 5/5 OK on PG). The DB row-lock is distinct from the SPEC
+  §4.4 Redis lease (`RedisSessionLease`), so §10.1 duplicate suppression holds.
+- **Bug-2 (P1, stale host dist)**: `frontend/Dockerfile` `final` stage now
+  builds from source in-container (`COPY --from=builder`), removing the
+  host-prebuilt `dist/` dependency; `frontend/.dockerignore` excludes `dist`.
+- **Bug-3 (P2, blank capability routes)**: resolved by Bug-2 — the blank page
+  was a stale-dist symptom; current source already redirects flag-off
+  `/platform-admin`/`/governance`/`/workspace/:id/manage` (guarded by
+  `App.test.tsx`), so no route change was made.
+- **Bug-4 (P2, no governed models)**: new
+  `apps/spaces/management/commands/seed_models.py` seeds `qwen-plus` and
+  `qwen3.7-plus` ModelProfiles plus an org GovernancePolicy binding (fast=
+  qwen-plus, deep=qwen3.7-plus, budget 1024, top_k 8). Deep execution still
+  requires `DEEP_ANSWER_MODE=true` env + backend restart.
+- **Bug-5 (P3, large frontend chunks)**: deferred per SPEC §15.1 (post-rollout
+  route-level lazy loading) — not changed this branch.
+- **Bug-6 (P3, Logout hit-area)**: raised `.sidebar` z-index 40→200 in
+  `frontend/src/styles/chat.css` so the sidebar footer sits above the ChatPage
+  fixed bottom bar (z-index 100); Logout is now clickable.
+
+Verification: PG regression 5/5 OK; live chat send streams through DashScope
+with no FOR UPDATE error; in-container frontend build OK + HTTP 200; flag-off
+`/platform-admin` redirects to `/chat`; Logout logs out to `/login`; frontend
+`tsc --noEmit` and `vite build` pass. The in-container SQLite subset run
+(`apps.chat apps.spaces`, `local_test`) shows 8 pre-existing/environmental
+failures (repo-root `SPEC.MD`/frontend smoke scripts absent from the backend
+container; `.env` `QWEN_CHAT_MODEL=qwen3.6-flash` overrides the `qwen-plus`
+default in `generation_policy` — proven: with `QWEN_CHAT_MODEL=qwen-plus` the
+`test_generation_policy` suite passes 6/6); none are regressions from these
+fixes (the changed locking paths have no existing real-ORM tests).
+
+## 10. Crawler dead-code removal (2026-07-18)
+
+The V6.0-retired web crawler had been retained "inert" (app code + tools + data
+kept for historical/migration safety, with no routes/tasks/UI). On
+`fix/v1.74.1-acceptance-bugs` the dead crawler code was fully removed:
+
+- Deleted `backend/apps/crawler/` (app: models `CrawledDocument`/`CrawlTaskLog`,
+  views/urls/services/tasks/serializers/validators/cleaners/admin + migration
+  `0001_initial`), `backend/tools/ey_data_collector/` (standalone crawler CLI),
+  `backend/crawled_knowledge/` (crawler output data), `backend/ingest_knowledge.py`
+  (ingested crawled data), and root garbage `--selector`/`--viewport` PNGs.
+- Removed `"apps.crawler"` from `LOCAL_APPS` and stale V6.0 "crawler retained /
+  removed" comments in `config/settings/base.py`, `config/urls.py`,
+  `config/celery.py`; fixed `ingest_onboarding_docs.py` docstring (it only reads
+  `knowledge_docs/`, not crawled data).
+- Finalized the user's pre-existing working-tree deletions (root `crawl_knowledge.py`,
+  root `crawled_knowledge/`, `knowpilot-demo-video/`, `.playwright-cli/`,
+  `generate_ppt.py`, `v42_audit_screenshot.js`, `verify_fixes.mjs`).
+- Intentionally kept (harmless historical, no migration churn): the orphaned DB
+  tables `crawler_crawleddocument`/`crawler_crawltasklog` (SPEC M5 "may remain for
+  data retention"); `audit` action choices `document_crawl`/`document_crawl_withdraw`
+  (locked in migrations 0004/0005); the `IngestionJob.trigger` `'crawler'` value in
+  `frontend/src/api/admin.ts` (mirrors backend historical trigger); the
+  `CrawlerRemovedTest` guard (asserts `/api/v1/crawl/` → 404); the `tests/` root
+  v4.2 suite (left untouched per scope).
+
+Verified: `manage.py check` 0 issues; `showmigrations` no longer lists crawler;
+`makemigrations --check --dry-run` "No changes detected"; `CrawlerRemovedTest`
+passes; live login works; gunicorn reloaded with no errors. No other app imported
+crawler (confirmed zero external references), so removal is safe.
+
+## 11. Ownership continuity handoff (2026-07-18)
+
+Work is in progress on `codex/ownership-continuity` in the Onborading-AI
+workspace. The implementation adds canonical `KnowledgeSpace.owner`, staged
+ownership migrations/auditing, transactionally versioned voluntary and forced
+transfers, and an atomic offboarding service. The latter preflights impact,
+requires successor mappings, transfers owned spaces, succeeds final platform /
+organization / business administrators, revokes sessions/shares/invites and
+authority, requeues open review work, and deactivates the account.
+
+Focused local evidence includes 14 offboarding tests, focused ownership
+regressions, TypeScript, i18n, Django checks, and no migration drift. Do not
+call this production-complete: browser UAT and a production rollback rehearsal
+remain pending. No production system or credentials were used.
+
+Latest local evidence: the full affected Django surface (`apps.rbac`,
+`apps.spaces`, `apps.users`) passed **167/167** in 203.910 seconds on
+2026-07-18 under `config.settings.local_test`. The command used a process-only
+`QWEN_CHAT_MODEL=qwen-plus` override because the local `.env` selects
+`qwen3.6-flash`, which contradicts the governed-default assertions; the `.env`
+file was not modified. This remains SQLite evidence, not PostgreSQL acceptance.
+
+Complete local Django evidence (2026-07-18): **411/411 passed** in 356.509
+seconds with `config.settings.local_test` and the same process-only
+`QWEN_CHAT_MODEL=qwen-plus` override. This run also fixed a lease-observation
+race: `RedisSessionLease.ensure_owned()` synchronously compares its Redis token,
+so a replaced lease fails closed before another renewal-thread timeslice.
+
+Complete frontend evidence (2026-07-18): **45 test files / 271 tests passed**;
+`tsc --noEmit`, i18n key validation (83 source files), and the production Vite
+build (4,028 modules) passed. This is local unit/build evidence only; it does
+not establish authenticated browser UAT or mobile/accessibility acceptance.
+
+PostgreSQL Stage-A rehearsal (2026-07-18): the approved local Docker Compose
+database applied `spaces.0009_ownership_continuity_stage_a` and
+`users.0004_user_offboarding_metadata` successfully. The no-write audit found
+five zero-owner spaces and one multi-owner space, with no exactly-one legacy
+owner candidates; it did not run `--apply`. Stage C is therefore deliberately
+blocked pending explicit remediation, never an arbitrary owner selection. The
+secret-free identifiers and migration record are in
+`audit_reports/current/ownership_continuity_postgres_stage_a_2026-07-18.md`.
+The PostgreSQL-only ownership regression suite passed **3/3** in 86.095 seconds:
+it observed real `FOR UPDATE`, proved the pending-transfer conditional unique
+constraint, and verified two concurrent accepts yield exactly one completion.

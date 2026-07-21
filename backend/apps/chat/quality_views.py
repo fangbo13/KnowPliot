@@ -130,7 +130,7 @@ class FeedbackReviewDetailView(APIView):
     def get_object(self, request, pk, for_update=False):
         qs = Feedback.objects.select_related("space", "reviewer", "user", "message")
         if for_update:
-            qs = qs.select_for_update()
+            qs = qs.select_for_update(of=("self",))
         feedback = qs.get(id=pk)
         if not _can_review(request.user, feedback.space):
             return None
@@ -289,7 +289,11 @@ class KnowledgeGapActionView(APIView):
 
     def post(self, request, pk):
         with transaction.atomic():
-            ticket = KnowledgeGapTicket.objects.select_for_update().select_related("space").get(id=pk)
+            ticket = (
+                KnowledgeGapTicket.objects.select_for_update(of=("self",))
+                .select_related("space")
+                .get(id=pk)
+            )
             if not _can_review(request.user, ticket.space):
                 return _forbidden()
             if self.action == "assign":

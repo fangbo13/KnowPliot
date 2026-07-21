@@ -5,11 +5,12 @@
  */
 
 // V7.0 admin console — publish version-update announcements (broadcast).
-import { useEffect, useState, useCallback } from 'react';
-import { Card, Table, Button, Tag, Modal, Select, Input, Space, message as antdMessage } from 'antd';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Alert, Card, Table, Button, Tag, Modal, Select, Input, Space, message as antdMessage } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type Announcement, type BusinessLine, type Organization } from '../../api/admin';
+import { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 
 export default function AdminAnnouncementsPage() {
   const { t } = useTranslation('common');
@@ -17,6 +18,9 @@ export default function AdminAnnouncementsPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [lines, setLines] = useState<BusinessLine[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+  const sequenceRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -27,20 +31,40 @@ export default function AdminAnnouncementsPage() {
   const [audienceRef, setAudienceRef] = useState('');
 
   const refresh = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     try {
       const [announcements, organizations, businessLines] = await Promise.all([
-        adminApi.announcements(),
-        adminApi.organizations().catch(() => []),
-        adminApi.businessLines().catch(() => []),
+        withRequestSignal(controller.signal, () => adminApi.announcements()),
+        withRequestSignal(controller.signal, () => adminApi.organizations()),
+        withRequestSignal(controller.signal, () => adminApi.businessLines()),
       ]);
+      if (controller.signal.aborted || sequence !== sequenceRef.current) return;
       setItems(announcements);
       setOrgs(organizations);
       setLines(businessLines);
-    } catch { /* ignore */ } finally { setLoading(false); }
+    } catch (error: unknown) {
+      if (isAbortError(error) || controller.signal.aborted || sequence !== sequenceRef.current) return;
+      const rateLimit = getRateLimitDetails(error);
+      setLoadError(rateLimit
+        ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+        : { code: 'load', retryAfterSeconds: null });
+    } finally {
+      if (sequence === sequenceRef.current && !controller.signal.aborted) setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      sequenceRef.current += 1;
+      controllerRef.current?.abort();
+    };
+  }, [refresh]);
 
   const publish = async () => {
     if (!title.trim()) return;
@@ -101,6 +125,17 @@ export default function AdminAnnouncementsPage() {
       </div>
 
       <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
+        {loadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={loadError.code === 'rate_limited'
+              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: loadError.retryAfterSeconds })}`}`
+              : t('load_error')}
+            action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
+          />
+        )}
         <Table rowKey="id" loading={loading} dataSource={items} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 

@@ -31,6 +31,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.docker
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
     # V4.6: gunicorn with threaded workers replaces runserver so concurrent SSE chat
     # streams don't block each other (each reply holds a worker thread for its whole
     # duration). 2 workers x 8 threads = 16 concurrent streams. --reload keeps dev
@@ -38,7 +39,7 @@ services:
     command:
       - sh
       - -c
-      - "python manage.py migrate --no-input && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 8 --worker-class gthread --timeout 120 --graceful-timeout 30 --reload"
+      - "python manage.py migrate --no-input && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers $${GUNICORN_WORKERS} --threads 8 --worker-class gthread --timeout 120 --graceful-timeout 30 --reload"
     volumes:
       - ./backend:/app
       - media_volume:/app/media

@@ -5,20 +5,38 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { message as antMessage } from 'antd';
 import { CheckOutlined, CloseOutlined, ArrowDownOutlined, EditOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useChatStore, type AnswerMode, type Message } from '../store/chatStore';
 import { useSpaceStore } from '../store/spaceStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
-import VirtualizedMessageList from '../components/chat/VirtualizedMessageList';
 import ChatComposer from '../components/chat/ChatComposer';
-import ProcessingPanel from '../components/chat/ProcessingPanel';
 import { chatApi } from '../api/chat';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { DEEP_ANSWER_MODE_ENABLED } from '../auth/authorization';
+import * as authorizationFlags from '../auth/authorization';
+import { notify } from '../utils/notifications';
+
+const VirtualizedMessageList = lazy(() => import('../components/chat/VirtualizedMessageList'));
+const ProcessingPanel = lazy(() => import('../components/chat/ProcessingPanel'));
+
+function isThinkingBuildEnabled(): boolean {
+  const envFlag = (import.meta as ImportMeta & {
+    env?: Record<string, string | undefined>;
+  }).env?.VITE_THINKING_MODE === 'true';
+  if (envFlag) return true;
+  // Prefer the shared build-time constant when available.  The guarded access
+  // keeps older compatibility mocks (which predate Thinking) fail-closed.
+  try {
+    const configured = (authorizationFlags as { THINKING_MODE_ENABLED?: unknown }).THINKING_MODE_ENABLED;
+    if (typeof configured === 'boolean') return configured;
+  } catch {
+    // A partial module adapter may throw for an unknown named export.
+  }
+  return false;
+}
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -50,6 +68,10 @@ export default function ChatPageContainer() {
   const canUseDeep = DEEP_ANSWER_MODE_ENABLED
     && authorization.enabled
     && authorization.has('chat.deep');
+  const thinkingBuildEnabled = isThinkingBuildEnabled();
+  const canUseThinking = thinkingBuildEnabled
+    && authorization.snapshot?.feature_availability?.thinking === true
+    && authorization.has('chat.thinking');
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
@@ -73,6 +95,7 @@ export default function ChatPageContainer() {
 
   const [inputValue, setInputValue] = useState('');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('fast');
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
@@ -83,6 +106,7 @@ export default function ChatPageContainer() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const loadedSessionRef = useRef<string | null>(null);
+  const previousSessionRef = useRef<string | null>(activeSessionId);
   const isSendingRef = useRef(false);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
@@ -102,6 +126,23 @@ export default function ChatPageContainer() {
     setAnswerMode('fast');
     setModeNotice('error_deep_unavailable');
   }, [answerMode, canUseDeep]);
+
+  useEffect(() => {
+    if (thinkingEnabled && !canUseThinking) {
+      setThinkingEnabled(false);
+      setModeNotice('error_thinking_unavailable');
+    }
+  }, [thinkingEnabled, canUseThinking]);
+
+  // A new logical conversation starts from the safe defaults.  Mode changes
+  // within the same conversation deliberately do not touch this preference.
+  useEffect(() => {
+    if (previousSessionRef.current !== activeSessionId) {
+      previousSessionRef.current = activeSessionId;
+      setAnswerMode('fast');
+      setThinkingEnabled(false);
+    }
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (activeSessionId && activeSessionId !== loadedSessionRef.current) {
@@ -125,11 +166,18 @@ export default function ChatPageContainer() {
       return;
     }
     if (!navigator.onLine) {
-      antMessage.warning(t('offline_send_warning') || 'You are offline. Please check your network.');
+      void notify('warning', t('offline_send_warning') || 'You are offline. Please check your network.');
       return;
     }
     isSendingRef.current = true;
-    sendMessage(inputValue.trim(), { answerMode, canUseDeep });
+    const options = thinkingEnabled
+      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true }
+      : { answerMode, canUseDeep };
+    sendMessage(inputValue.trim(), options);
+    // Each newly submitted logical question starts from the safe defaults;
+    // the captured options above remain attached to its owning Turn.
+    setAnswerMode('fast');
+    setThinkingEnabled(false);
     setModeNotice(null);
     setInputValue('');
     inputRef.current?.focus();
@@ -138,13 +186,15 @@ export default function ChatPageContainer() {
 
   const handleQuickAction = (question: string) => {
     sendMessage(question, { answerMode: 'fast' });
+    setAnswerMode('fast');
+    setThinkingEnabled(false);
     inputRef.current?.focus();
   };
 
   const handleRetry = (targetAssistant?: Message) => {
     if (isStreaming || isSendLocked || isSendingRef.current) return;
     if (!navigator.onLine) {
-      antMessage.warning(t('offline_send_warning') || 'You are offline. Please check your network.');
+      void notify('warning', t('offline_send_warning') || 'You are offline. Please check your network.');
       return;
     }
     const targetIndex = targetAssistant
@@ -158,27 +208,31 @@ export default function ChatPageContainer() {
         sendMessage(lastUserMsg.content, {
           answerMode: answerMode === 'deep' && canUseDeep ? 'deep' : 'fast',
           canUseDeep,
+          ...(thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}),
           regenerateMessageId: targetAssistant.id,
         });
         requestAnimationFrame(() => { isSendingRef.current = false; });
         return;
       }
-      const reusesFailedDeepTurn = activeTurn?.answerMode === 'deep'
-        && activeTurn.phase === 'error'
-        && !activeTurn.isLocked
-        && Boolean(activeTurn.clientRequestId);
+      const retryClientRequestId = activeTurn?.clientRequestId;
+      const reusesFailedDeepTurn = (activeTurn?.requestedAnswerMode ?? activeTurn?.answerMode) === 'deep'
+        && activeTurn?.phase === 'error'
+        && !activeTurn?.isLocked
+        && Boolean(retryClientRequestId);
       if (reusesFailedDeepTurn) {
         setAnswerMode('fast');
         setModeNotice(null);
         sendMessage(lastUserMsg.content, {
           answerMode: 'fast',
-          retryClientRequestId: activeTurn.clientRequestId!,
+          ...(thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}),
+          retryClientRequestId: retryClientRequestId!,
         });
       } else {
         setSendError(null);
         sendMessage(lastUserMsg.content, {
           answerMode: answerMode === 'deep' && canUseDeep ? 'deep' : 'fast',
           canUseDeep,
+          ...(thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}),
         });
       }
       requestAnimationFrame(() => { isSendingRef.current = false; });
@@ -191,9 +245,9 @@ export default function ChatPageContainer() {
       const branch = await chatApi.branchMessage(targetAssistant.id);
       await loadSessions();
       setActiveSession(branch.id);
-      antMessage.success(t('branch_created'));
+      void notify('success', t('branch_created'));
     } catch {
-      antMessage.error(t('branch_failed'));
+      void notify('error', t('branch_failed'));
     }
   };
 
@@ -204,9 +258,9 @@ export default function ChatPageContainer() {
       const url = `${window.location.origin}/shared/${share.token}`;
       if (navigator.share) await navigator.share({ title: activeSessionTitle, url });
       else await navigator.clipboard.writeText(url);
-      antMessage.success(t('share_created'));
+      void notify('success', t('share_created'));
     } catch {
-      antMessage.error(t('share_failed'));
+      void notify('error', t('share_failed'));
     }
   };
 
@@ -221,17 +275,17 @@ export default function ChatPageContainer() {
     if (!activeSessionId) return;
     const trimmed = nextTitle.trim();
     if (!trimmed) {
-      antMessage.warning(t('rename_empty_warning', { defaultValue: 'Please enter a title' }));
+      void notify('warning', t('rename_empty_warning', { defaultValue: 'Please enter a title' }));
       return;
     }
     try {
       await chatApi.renameSession(activeSessionId, trimmed);
       await loadSessions();
       setIsRenamingTitle(false);
-      antMessage.success(t('session_renamed_success', { defaultValue: 'Conversation renamed' }));
+      void notify('success', t('session_renamed_success', { defaultValue: 'Conversation renamed' }));
     } catch (error) {
       console.error('Failed to rename session:', error);
-      antMessage.error(t('session_renamed_failed', { defaultValue: 'Rename failed. Please try again' }));
+      void notify('error', t('session_renamed_failed', { defaultValue: 'Rename failed. Please try again' }));
     }
   };
 
@@ -316,12 +370,15 @@ export default function ChatPageContainer() {
         </div>
 
         {isStreaming && activeTurn?.safePhase ? (
-          <ProcessingPanel
-            answerMode={activeTurn.answerMode ?? 'fast'}
-            phase={activeTurn.safePhase}
-            timings={activeTurn.timings}
-            citations={activeTurn.citations}
-          />
+          <Suspense fallback={null}>
+            <ProcessingPanel
+              answerMode={activeTurn.answerMode ?? 'fast'}
+              phase={activeTurn.safePhase}
+              timings={activeTurn.timings}
+              citations={activeTurn.citations}
+              executionSnapshot={activeTurn.executionSnapshot}
+            />
+          </Suspense>
         ) : null}
 
         {isLoadingMessages && messages.length === 0 && (
@@ -361,21 +418,23 @@ export default function ChatPageContainer() {
         ) : null}
 
         <div style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity var(--dur) var(--ease-out)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <VirtualizedMessageList
-            virtuosoRef={virtuosoRef}
-            messages={messages}
-            hasOlderMessages={hasOlderMessages}
-            onLoadOlder={handleLoadOlder}
-            isStreaming={isStreaming}
-            streamContent={visibleStreamContent}
-            citations={visibleCitations}
-            streamPhase={visibleStreamPhase}
-            onRegenerate={handleRetry}
-            onBranch={handleBranch}
-            onShare={handleShare}
-            canShare={canShare}
-            onScrollToBottomChange={setShowScrollFab}
-          />
+          <Suspense fallback={<div className="chat-route-loading" role="status">{t('loading_messages')}</div>}>
+            <VirtualizedMessageList
+              virtuosoRef={virtuosoRef}
+              messages={messages}
+              hasOlderMessages={hasOlderMessages}
+              onLoadOlder={handleLoadOlder}
+              isStreaming={isStreaming}
+              streamContent={visibleStreamContent}
+              citations={visibleCitations}
+              streamPhase={visibleStreamPhase}
+              onRegenerate={handleRetry}
+              onBranch={handleBranch}
+              onShare={handleShare}
+              canShare={canShare}
+              onScrollToBottomChange={setShowScrollFab}
+            />
+          </Suspense>
 
           {showScrollFab && (
             <button className="scroll-fab section-enter" onClick={scrollToBottom} aria-label={t('new_messages') || 'Scroll to latest'} style={{ background: 'var(--color-bg-elevated)' }}>
@@ -417,6 +476,8 @@ export default function ChatPageContainer() {
             showHint
             answerMode={answerMode}
             canUseDeep={canUseDeep}
+            thinkingEnabled={thinkingEnabled}
+            canUseThinking={canUseThinking}
             onAnswerModeChange={(mode) => {
               if (mode === 'deep' && !canUseDeep) {
                 setAnswerMode('fast');
@@ -424,6 +485,15 @@ export default function ChatPageContainer() {
                 return;
               }
               setAnswerMode(mode);
+              setModeNotice(null);
+            }}
+            onThinkingChange={(enabled) => {
+              if (enabled && !canUseThinking) {
+                setThinkingEnabled(false);
+                setModeNotice('error_thinking_unavailable');
+                return;
+              }
+              setThinkingEnabled(enabled);
               setModeNotice(null);
             }}
           />

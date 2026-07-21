@@ -13,9 +13,11 @@ import time
 import math
 import logging
 from dataclasses import dataclass
+from datetime import date
 from uuid import UUID
 
 from django.db import connection
+from django.db.models import Q
 from django.conf import settings
 
 from apps.knowledge.models import DocumentChunk
@@ -146,10 +148,15 @@ class PgVectorRetriever:
         query_embedding = self._embed(query)
 
         normalized_filters = (filters or RetrievalFilters()).normalized()
+        # Part 1 (§1.5): Only retrieve from currently effective documents.
+        today = date.today()
         qs = DocumentChunk.objects.filter(
             embedding__isnull=False,
             space_id=space_id,
             document__status="active",
+        ).filter(
+            Q(document__effective_from__isnull=True) | Q(document__effective_from__lte=today),
+            Q(document__effective_to__isnull=True) | Q(document__effective_to__gte=today),
         )
         if normalized_filters.document_ids:
             qs = qs.filter(document_id__in=normalized_filters.document_ids)
@@ -203,8 +210,15 @@ class PgVectorRetriever:
             # V4.1 KB-V4.1-004: Whitelist allowed filter keys to prevent SQL column name injection.
             # Only allow known column names that are safe to interpolate into raw SQL.
             normalized_filters = (filters or RetrievalFilters()).normalized()
-            filter_parts = ["dc.space_id = %s", "d.status = %s"]
-            filter_params: list = [space_id, "active"]
+            # Part 1 (§1.5): Only retrieve from currently effective documents —
+            # excludes superseded (status != 'active') and future/expired versions.
+            today = date.today()
+            filter_parts = [
+                "dc.space_id = %s", "d.status = %s",
+                "(d.effective_from IS NULL OR d.effective_from <= %s)",
+                "(d.effective_to IS NULL OR d.effective_to >= %s)",
+            ]
+            filter_params: list = [space_id, "active", today, today]
             if normalized_filters.document_ids:
                 placeholders = ", ".join(["%s"] * len(normalized_filters.document_ids))
                 filter_parts.append(f"dc.document_id IN ({placeholders})")

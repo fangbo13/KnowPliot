@@ -13,6 +13,7 @@ from rest_framework.permissions import BasePermission
 from apps.spaces.permissions import (
     AUDIT_VIEW,
     admin_scope,
+    get_space_or_404,
     is_platform_admin,
     resolve_space_id,
 )
@@ -25,15 +26,29 @@ class CanViewScopedAuditLogs(BasePermission):
     """Authorize global governance or one exact workspace audit scope."""
 
     def has_permission(self, request, view):
+        # Platform audit is already a metadata-wide capability. A space query
+        # narrows that authorized inventory; it must not require synthetic
+        # workspace membership or content authority.
+        if is_platform_admin(request.user):
+            return True
         space_id = request.query_params.get("space")
         if space_id:
+            space = get_space_or_404(space_id)
+            org_ids, business_line_ids = admin_scope(request.user)
+            if (
+                space.organization_id in org_ids
+                or (
+                    space.business_line_id is not None
+                    and space.business_line_id in business_line_ids
+                )
+            ):
+                view.audit_space = space
+                return True
             view.audit_space = resolve_space_id(
                 request.user,
                 space_id,
                 require_perm=AUDIT_VIEW,
             )
-            return True
-        if is_platform_admin(request.user):
             return True
         org_ids, business_line_ids = admin_scope(request.user)
         return bool(org_ids or business_line_ids)

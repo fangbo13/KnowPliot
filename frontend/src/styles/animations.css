@@ -52,6 +52,29 @@
 }
 .btn-press:active { transform: translateY(1px); opacity: 0.86; }
 
+/* §26 IB-06 repair: ship the "fade" motion with a finite deadline so rc-motion's
+   transitionend listener fires and the modal's afterClose runs (no Portal /
+   focus / scroll-lock leak) for business Modals that pass transitionName=
+   "fade". Without these classes rc-dialog supplies no motion deadline and
+   afterClose never runs. Reduced motion disables the transition (mirrors
+   SpaceSwitcher's getModalTransitionName returning ""). */
+.fade-enter,
+.fade-appear {
+  opacity: 0;
+}
+.fade-enter-active,
+.fade-appear-active {
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.fade-leave {
+  opacity: 1;
+}
+.fade-leave-active {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hover-lift,
   .btn-press,
@@ -59,7 +82,10 @@
   .stagger-fade-in,
   .stagger-fade-in > *,
   .section-enter,
-  .success-check {
+  .success-check,
+  .fade-enter-active,
+  .fade-appear-active,
+  .fade-leave-active {
     animation: none !important;
     transition-duration: 0.01ms !important;
     transform: none !important;

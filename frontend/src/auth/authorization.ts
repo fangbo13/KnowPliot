@@ -4,7 +4,7 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import type { Capability, CapabilitySnapshot } from '../api/capabilities';
+import type { Capability, CapabilitySnapshot, NavigationMode } from '../api/capabilities';
 import type { SpaceRole } from '../api/spaces';
 
 /** Build-time rollout switch. It is deliberately off unless set to literal `true`. */
@@ -22,7 +22,21 @@ export function isDeepAnswerModeEnabled(
 /** Deep rollout is deliberately independent and default-off. */
 export const DEEP_ANSWER_MODE_ENABLED = isDeepAnswerModeEnabled();
 
-export type CapabilityStateStatus = 'loading' | 'ready' | 'denied' | 'error';
+/**
+ * Thinking is a separate build-time rollout from the deep answer tier.  The
+ * flag only controls whether the browser may render the preference; the
+ * server capability and policy remain authoritative for execution.
+ */
+export function isThinkingModeEnabled(
+  env: Record<string, string | undefined> =
+    (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {},
+): boolean {
+  return env.VITE_THINKING_MODE === 'true';
+}
+
+export const THINKING_MODE_ENABLED = isThinkingModeEnabled();
+
+export type CapabilityStateStatus = 'loading' | 'ready' | 'denied' | 'error' | 'mismatch';
 
 /**
  * Legacy identity fields live only at this compatibility boundary. Active UI
@@ -57,35 +71,6 @@ interface AuthorizationAdapterInput {
   activeSpaceId?: string | null;
 }
 
-const PLATFORM_CAPABILITIES = new Set<Capability>([
-  'platform.access',
-  'platform.organizations.manage',
-  'platform.users.manage',
-  'platform.roles.manage',
-  'platform.models.manage',
-  'platform.metrics.read',
-  'platform.audit.read',
-]);
-
-const GOVERNANCE_CAPABILITIES = new Set<Capability>([
-  'governance.access',
-  'governance.organization.settings.manage',
-  'governance.business_lines.manage',
-  'governance.spaces.manage',
-  'governance.users.manage',
-  'governance.templates.manage',
-  'governance.metrics.read',
-  'governance.audit.read',
-  'governance.models.bind',
-]);
-
-const WORKSPACE_MANAGE_ROLES = new Set<SpaceRole>([
-  'owner',
-  'super_admin',
-  'org_admin',
-  'business_admin',
-]);
-
 function isWorkspaceBoundCapability(capability: Capability): boolean {
   return capability.startsWith('chat.') ||
     capability.startsWith('workspace.') ||
@@ -94,90 +79,38 @@ function isWorkspaceBoundCapability(capability: Capability): boolean {
     capability === 'audit.read';
 }
 
-export function safeConsolePath(path: string): string {
-  if (path === '/chat' || path === '/platform-admin' || path === '/governance') return path;
+export function safeConsolePath(
+  path: string,
+  navigationMode: NavigationMode = 'capability',
+): string {
+  if (path === '/chat') return path;
+  if (navigationMode === 'legacy') {
+    if (path === '/admin' || path === '/spaces/manage') return path;
+    return '/chat';
+  }
+  if (path === '/platform-admin' || path === '/governance') return path;
   if (/^\/workspace\/[^/]+\/manage$/.test(path)) return path;
   return '/chat';
-}
-
-function legacyAdmin(user?: LegacyAuthorizationUser | null): boolean {
-  return Boolean(
-    user?.is_superuser ||
-      user?.is_super_admin ||
-      user?.is_org_admin ||
-      user?.is_business_admin ||
-      user?.roles?.includes('admin'),
-  );
-}
-
-function legacyPlatformAdmin(user?: LegacyAuthorizationUser | null): boolean {
-  return Boolean(
-    user?.is_superuser ||
-      user?.is_super_admin ||
-      user?.roles?.includes('admin'),
-  );
-}
-
-function legacyHas(
-  capability: Capability,
-  user?: LegacyAuthorizationUser | null,
-  activeSpaceRole?: SpaceRole | null,
-): boolean {
-  if (capability.startsWith('chat.')) return true;
-  if (PLATFORM_CAPABILITIES.has(capability)) return legacyPlatformAdmin(user);
-  if (GOVERNANCE_CAPABILITIES.has(capability)) return legacyAdmin(user);
-
-  const managesWorkspace = Boolean(
-    activeSpaceRole && WORKSPACE_MANAGE_ROLES.has(activeSpaceRole),
-  );
-  if (capability.startsWith('workspace.')) return managesWorkspace;
-
-  const legacyKnowledgeAdmin = Boolean(
-    managesWorkspace ||
-      activeSpaceRole === 'knowledge_admin' ||
-      user?.is_hr_admin ||
-      user?.roles?.includes('hr'),
-  );
-  if (capability.startsWith('knowledge.')) return legacyKnowledgeAdmin;
-  if (capability.startsWith('quality.')) {
-    return legacyKnowledgeAdmin || activeSpaceRole === 'reviewer';
-  }
-  if (capability === 'audit.read') {
-    return managesWorkspace || activeSpaceRole === 'reviewer';
-  }
-  return false;
 }
 
 export function createAuthorizationAdapter({
   capabilityNavigationEnabled = CAPABILITY_NAV_ENABLED,
   status,
   snapshot,
-  legacyUser,
-  activeSpaceRole,
   activeSpaceId,
 }: AuthorizationAdapterInput): AuthorizationAdapter {
   const capabilitySet = new Set(snapshot?.capabilities ?? []);
   const has = (capability: Capability): boolean => {
-    if (capabilityNavigationEnabled) {
-      if (status !== 'ready' || !capabilitySet.has(capability)) return false;
-      const activeWorkspaceIsScoped = Boolean(
-        activeSpaceId && snapshot?.scopes.space_ids.includes(activeSpaceId),
-      );
-      return !isWorkspaceBoundCapability(capability) || activeWorkspaceIsScoped;
-    }
-    return legacyHas(capability, legacyUser, activeSpaceRole);
+    if (status !== 'ready' || !snapshot || !capabilitySet.has(capability)) return false;
+    const activeWorkspaceIsScoped = Boolean(
+      activeSpaceId && snapshot.scopes.space_ids.includes(activeSpaceId),
+    );
+    return !isWorkspaceBoundCapability(capability) || activeWorkspaceIsScoped;
   };
 
-  let defaultConsole = '/chat';
-  if (capabilityNavigationEnabled) {
-    if (status === 'ready' && snapshot) {
-      defaultConsole = safeConsolePath(snapshot.default_console);
-    }
-  } else if (legacyAdmin(legacyUser)) {
-    defaultConsole = '/admin';
-  } else if (activeSpaceId && activeSpaceRole && WORKSPACE_MANAGE_ROLES.has(activeSpaceRole)) {
-    defaultConsole = '/spaces/manage';
-  }
+  const defaultConsole = status === 'ready' && snapshot
+    ? safeConsolePath(snapshot.default_console, snapshot.navigation_mode)
+    : '/chat';
 
   return {
     enabled: capabilityNavigationEnabled,

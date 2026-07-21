@@ -3,7 +3,11 @@
 # See LICENSE file in the project root for full license details.
 
 from django.core.management.base import BaseCommand
-from apps.scenario_templates.models import ScenarioTemplate
+from django.db import transaction
+from django.utils import timezone
+
+from apps.scenario_templates.contract import legacy_template_components, revision_snapshot
+from apps.scenario_templates.models import ScenarioTemplate, ScenarioTemplateRevision
 
 
 TEMPLATES_TO_SEED = [
@@ -92,21 +96,41 @@ class Command(BaseCommand):
         self.stdout.write("Seeding Scenario Templates...")
         
         for t_data in TEMPLATES_TO_SEED:
-            template, created = ScenarioTemplate.objects.get_or_create(
-                code=t_data["code"],
-                defaults={
-                    "name": t_data["name"],
-                    "scenario_type": t_data["scenario_type"],
-                    "description": t_data["description"],
-                    "icon": t_data["icon"],
-                    "default_language": t_data["default_language"],
-                    "default_visibility": t_data["default_visibility"],
-                    "quick_questions": t_data["quick_questions"],
-                    "prompt_policy": {},
-                    "retrieval_policy": {},
-                    "is_active": True,
-                }
-            )
+            with transaction.atomic():
+                template, created = ScenarioTemplate.objects.get_or_create(
+                    code=t_data["code"],
+                    defaults={
+                        "name": t_data["name"],
+                        "scenario_type": t_data["scenario_type"],
+                        "description": t_data["description"],
+                        "icon": t_data["icon"],
+                        "default_language": t_data["default_language"],
+                        "default_visibility": t_data["default_visibility"],
+                        "quick_questions": t_data["quick_questions"],
+                        "prompt_policy": {},
+                        "retrieval_policy": {},
+                        "is_active": True,
+                    },
+                )
+                if created:
+                    source = {
+                        **t_data,
+                        "prompt_policy": {},
+                        "retrieval_policy": {},
+                        "tags": [],
+                        "category": None,
+                    }
+                    revision = ScenarioTemplateRevision.objects.create(
+                        template=template,
+                        version=1,
+                        snapshot=revision_snapshot(
+                            legacy_template_components(source)
+                        ),
+                        published_at=timezone.now(),
+                        change_note="seeded v3 revision",
+                    )
+                    template.current_revision = revision
+                    template.save(update_fields=["current_revision", "updated_at"])
             
             status_str = "Created" if created else "Skipped (exists)"
             self.stdout.write(f"  - {template.name} ({template.code}): {status_str}")

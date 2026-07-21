@@ -17,7 +17,7 @@ import logging
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Avg, Count, Max
+from django.db.models import Avg, Count, Max, Q
 from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view, permission_classes
@@ -796,6 +796,26 @@ def scoped_user_assignment(request, user_id):
                 user=target, organization=organization, business_line=None, role=role
             )
         else:
+            effective_assignments = OrganizationMembership.objects.filter(
+                organization=organization,
+                business_line=None,
+                role=role,
+                is_active=True,
+                user__is_active=True,
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gte=timezone.now()))
+            if effective_assignments.filter(user=target).exists() and not effective_assignments.exclude(user=target).exists():
+                error_code = (
+                    "last_organization_admin"
+                    if role == OrganizationMembership.ROLE_ORG_ADMIN
+                    else "last_business_admin"
+                )
+                return Response(
+                    {
+                        "error_code": error_code,
+                        "detail": "Assign another active administrator before removing this assignment.",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
             OrganizationMembership.objects.filter(
                 user=target,
                 organization=organization,
@@ -812,6 +832,11 @@ def scoped_user_assignment(request, user_id):
             raise PermissionDenied("You cannot manage this space.")
         if role not in dict(SpaceMembership.ROLE_CHOICES):
             raise ValidationError({"role": "Invalid space role."})
+        if role == SpaceMembership.ROLE_OWNER:
+            return Response(
+                {"error_code": "ownership_workflow_required"},
+                status=status.HTTP_409_CONFLICT,
+            )
         if request.method == "POST":
             assignment, _ = SpaceMembership.objects.update_or_create(
                 user=target,

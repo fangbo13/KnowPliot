@@ -37,6 +37,13 @@ def forwards(apps, schema_editor):
     app_label, model_name = settings.AUTH_USER_MODEL.split(".")
     User = apps.get_model(app_label, model_name)
 
+    # A clean installation has neither principals nor legacy scoped data. Do
+    # not create an ownerless bootstrap workspace that a later canonical-owner
+    # migration would have to guess how to repair.
+    legacy_models = (Document, DocumentChunk, ChatSession, Message, Citation, Feedback)
+    if not User.objects.exists() and not any(model.objects.exists() for model in legacy_models):
+        return
+
     org, _ = Organization.objects.get_or_create(
         slug="default",
         defaults={"name": "Default Organization", "status": "active"},

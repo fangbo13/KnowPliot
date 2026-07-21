@@ -28,6 +28,10 @@ type Props = {
   answerMode?: AnswerMode;
   canUseDeep?: boolean;
   onAnswerModeChange?: (mode: AnswerMode) => void;
+  /** Independent server-governed thinking preference. */
+  thinkingEnabled?: boolean;
+  canUseThinking?: boolean;
+  onThinkingChange?: (enabled: boolean) => void;
 };
 
 const MAX_LEN = 4000;
@@ -52,6 +56,9 @@ export default function ChatComposer({
   answerMode = 'fast',
   canUseDeep = false,
   onAnswerModeChange,
+  thinkingEnabled = false,
+  canUseThinking = false,
+  onThinkingChange,
 }: Props) {
   const { t } = useTranslation('chat');
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -109,6 +116,22 @@ export default function ChatComposer({
             onClick={() => onAnswerModeChange?.('deep')}
           >
             {t('answer_mode_deep')}
+          </button>
+        ) : null}
+        {canUseThinking ? (
+          <button
+            type="button"
+            className={`composer-mode-btn composer-thinking-btn${thinkingEnabled ? ' is-enabled' : ''}`}
+            role="switch"
+            aria-label={t('thinking_mode_label')}
+            aria-checked={thinkingEnabled}
+            disabled={disabled || isStreaming}
+            onClick={() => onThinkingChange?.(!thinkingEnabled)}
+          >
+            {t('thinking_mode_label')}
+            <span className="composer-thinking-state" aria-hidden="true">
+              {thinkingEnabled ? t('thinking_mode_on') : t('thinking_mode_off')}
+            </span>
           </button>
         ) : null}
       </div>

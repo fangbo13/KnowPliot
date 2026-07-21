@@ -29,6 +29,7 @@ from apps.spaces.models import (
     KnowledgeSpace,
     Organization,
 )
+from apps.spaces.ownership import create_space_with_owner
 from apps.spaces.services import generate_admin_code, hash_code
 
 User = get_user_model()
@@ -64,34 +65,7 @@ class Command(BaseCommand):
             bls[code] = bl
             out.write(f"    {'+' if created else '='} BusinessLine: {name}")
 
-        # 3. Spaces — general + per Service Line onboarding
-        general, created = KnowledgeSpace.objects.get_or_create(
-            code="general",
-            defaults={
-                "organization": org, "name": "General Knowledge",
-                "visibility": "organization", "description": "Default shared space.",
-            },
-        )
-        out.write(f"  {'+' if created else '='} Space: general")
-
-        space_map = getattr(settings, "SERVICE_LINE_DEFAULT_SPACE", {}) or {}
-        for sl_code, space_code in space_map.items():
-            if space_code == "general":
-                continue
-            bl = bls.get(sl_code)
-            _, created = KnowledgeSpace.objects.get_or_create(
-                code=space_code,
-                defaults={
-                    "organization": org,
-                    "business_line": bl,
-                    "name": f"{bl.name if bl else sl_code.title()} Onboarding",
-                    "visibility": "business_line",
-                    "description": f"Onboarding space for {bl.name if bl else sl_code}.",
-                },
-            )
-            out.write(f"    {'+' if created else '='} Space: {space_code}")
-
-        # 4. Super Admin
+        # 3. Canonical owner for every seeded workspace.
         if not User.objects.filter(is_superuser=True).exists():
             email = os.environ.get("SEED_SUPERUSER_EMAIL", "admin@knowpilot.local")
             password = os.environ.get("SEED_SUPERUSER_PASSWORD") or secrets.token_urlsafe(12)
@@ -105,7 +79,43 @@ class Command(BaseCommand):
         else:
             out.write("  = Super Admin already exists (skipped)")
 
-        super_user = User.objects.filter(is_superuser=True).first()
+        super_user = User.objects.filter(is_superuser=True).order_by("pk").first()
+
+        def get_or_create_owned_space(*, code, **fields):
+            existing = KnowledgeSpace.objects.filter(code=code).first()
+            if existing is not None:
+                return existing, False
+            return create_space_with_owner(
+                organization=fields.pop("organization"),
+                owner=super_user,
+                code=code,
+                **fields,
+            ), True
+
+        # 4. Spaces — general + per Service Line onboarding
+        general, created = get_or_create_owned_space(
+            code="general",
+            organization=org,
+            name="General Knowledge",
+            visibility="organization",
+            description="Default shared space.",
+        )
+        out.write(f"  {'+' if created else '='} Space: general")
+
+        space_map = getattr(settings, "SERVICE_LINE_DEFAULT_SPACE", {}) or {}
+        for sl_code, space_code in space_map.items():
+            if space_code == "general":
+                continue
+            bl = bls.get(sl_code)
+            _, created = get_or_create_owned_space(
+                code=space_code,
+                organization=org,
+                business_line=bl,
+                name=f"{bl.name if bl else sl_code.title()} Onboarding",
+                visibility="business_line",
+                description=f"Onboarding space for {bl.name if bl else sl_code}.",
+            )
+            out.write(f"    {'+' if created else '='} Space: {space_code}")
 
         # 5. First batch of admin registration codes (printed once)
         if not AdminRegistrationCode.objects.exists():

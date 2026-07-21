@@ -6,6 +6,7 @@
 
 import re
 import uuid
+from collections.abc import Mapping
 
 from django.utils.html import strip_tags
 from rest_framework import serializers
@@ -65,6 +66,7 @@ class ChatSessionSerializer(serializers.ModelSerializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     citations = serializers.SerializerMethodField()
+    execution_snapshot = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -75,6 +77,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "retrieval_mode", "retrieval_latency_ms",
             "version_group_id", "version_number", "is_current_version",
             "supersedes_message", "created_at", "citations",
+            "execution_snapshot",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -103,9 +106,29 @@ class MessageSerializer(serializers.ModelSerializer):
             for c in citations
         ]
 
+    def get_execution_snapshot(self, obj):
+        turn = getattr(obj, "assistant_turn", None)
+        if turn is None:
+            return None
+        return {
+            "requested_answer_mode": turn.requested_answer_mode,
+            "answer_mode": turn.answer_mode,
+            "requested_thinking_enabled": turn.requested_thinking_enabled,
+            "thinking_enabled": turn.thinking_enabled,
+            "thinking_snapshot_known": turn.thinking_snapshot_known,
+            "thinking_budget": turn.thinking_budget,
+            "model_id": turn.model_id,
+            "policy_fallback_code": turn.policy_fallback_code,
+        }
+
 
 class ChatMessageRequestSerializer(serializers.Serializer):
     """Serializer for sending a chat message."""
+
+    _FORBIDDEN_POLICY_FIELDS = frozenset(
+        {"model_id", "model_profile_id", "provider", "thinking_budget"}
+    )
+
     content = serializers.CharField(max_length=4000, min_length=1)
     client_request_id = serializers.UUIDField(default=uuid.uuid4, required=False)
     answer_mode = serializers.ChoiceField(
@@ -113,11 +136,24 @@ class ChatMessageRequestSerializer(serializers.Serializer):
         default=ChatTurn.ANSWER_MODE_FAST,
         required=False,
     )
+    thinking_enabled = serializers.BooleanField(default=False, required=False)
     protocol_version = serializers.ChoiceField(
         choices=[1, 2],
         default=1,
         required=False,
     )
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping):
+            supplied = set(data)
+            if supplied & self._FORBIDDEN_POLICY_FIELDS:
+                raise serializers.ValidationError(
+                    {"code": "client_policy_authority_forbidden"}
+                )
+            unknown = supplied - set(self.fields)
+            if unknown:
+                raise serializers.ValidationError({"code": "invalid_request_shape"})
+        return super().to_internal_value(data)
 
     def validate_content(self, value):
         """Strip whitespace and reject empty/whitespace-only messages."""
@@ -158,8 +194,14 @@ class ChatTurnStatusSerializer(serializers.ModelSerializer):
             "client_request_id",
             "session",
             "status",
+            "requested_answer_mode",
             "answer_mode",
+            "requested_thinking_enabled",
+            "thinking_enabled",
+            "thinking_snapshot_known",
+            "thinking_budget",
             "model_id",
+            "policy_fallback_code",
             "attempt_count",
             "last_event_seq",
             "error_code",

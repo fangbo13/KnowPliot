@@ -13,6 +13,7 @@ from .models import (
     TemplateTag,
 )
 from apps.spaces.models import KnowledgeSpace, Organization, BusinessLine
+from .contract import normalize_components
 
 
 class ScenarioTemplateSerializer(serializers.ModelSerializer):
@@ -22,6 +23,9 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
     usage_count = serializers.SerializerMethodField()
     last_applied_at = serializers.SerializerMethodField()
     latest_version = serializers.SerializerMethodField()
+    current_revision_id = serializers.UUIDField(read_only=True, allow_null=True)
+    current_revision_version = serializers.SerializerMethodField()
+    current_revision_hash = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     tags = serializers.SerializerMethodField()
     category_id = serializers.PrimaryKeyRelatedField(
@@ -49,7 +53,8 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
             "is_active", "organization", "organization_name",
             "business_line", "business_line_name",
             "can_manage", "usage_count", "last_applied_at",
-            "latest_version",
+            "latest_version", "current_revision_id", "current_revision_version",
+            "current_revision_hash",
             "created_by", "created_at", "updated_at"
         ]
         read_only_fields = ["id", "created_by", "created_at", "updated_at"]
@@ -81,8 +86,20 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
         return latest.created_at if latest else None
 
     def get_latest_version(self, obj):
+        request = self.context.get("request")
+        if request:
+            from .views import _can_manage_template
+
+            if not _can_manage_template(request.user, obj):
+                return obj.current_revision.version if obj.current_revision_id else 0
         latest = obj.revisions.order_by("-version").first()
         return latest.version if latest else 0
+
+    def get_current_revision_version(self, obj):
+        return obj.current_revision.version if obj.current_revision_id else None
+
+    def get_current_revision_hash(self, obj):
+        return obj.current_revision.snapshot_hash if obj.current_revision_id else None
 
     def get_category(self, obj):
         if not obj.category_id:
@@ -94,6 +111,14 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
             {"id": str(tag.id), "name": tag.name, "slug": tag.slug}
             for tag in obj.tags.all()
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.current_revision_id:
+            from .contract import legacy_template_projection
+
+            data.update(legacy_template_projection(instance.current_revision.snapshot))
+        return data
 
     def validate_code(self, value):
         # Ensure code is unique
@@ -113,6 +138,32 @@ class ScenarioTemplateSerializer(serializers.ModelSerializer):
             })
         if business_line and organization is None:
             attrs["organization"] = business_line.organization
+        if self.instance is not None:
+            immutable_changes = {}
+            if "code" in attrs and attrs["code"] != self.instance.code:
+                immutable_changes["code"] = "Template keys are immutable; clone to a new key."
+            if (
+                "organization" in attrs
+                and getattr(attrs["organization"], "pk", None)
+                != self.instance.organization_id
+            ):
+                immutable_changes["organization"] = (
+                    "Template scope is immutable; clone into the target scope."
+                )
+            if (
+                "business_line" in attrs
+                and getattr(attrs["business_line"], "pk", None)
+                != self.instance.business_line_id
+            ):
+                immutable_changes["business_line"] = (
+                    "Template scope is immutable; clone into the target scope."
+                )
+            if "is_active" in attrs and attrs["is_active"] != self.instance.is_active:
+                immutable_changes["is_active"] = (
+                    "Use the archive or restore transition endpoint."
+                )
+            if immutable_changes:
+                raise serializers.ValidationError(immutable_changes)
         return attrs
 
 
@@ -133,6 +184,7 @@ class ScenarioTemplateApplicationSerializer(serializers.ModelSerializer):
             "organization", "organization_name",
             "business_line", "business_line_name",
             "created_by", "created_by_email",
+            "template_revision", "legacy_revision_unknown",
             "template_snapshot", "provisioning_status", "asset_total",
             "task_ids", "created_at",
         ]
@@ -145,10 +197,39 @@ class ScenarioTemplateRevisionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ScenarioTemplateRevision
         fields = [
-            "id", "template", "version", "snapshot", "change_note",
+            "id", "template", "version", "snapshot", "snapshot_hash",
+            "published_at", "change_note",
             "created_by", "created_by_email", "created_at",
         ]
         read_only_fields = fields
+
+
+class ScenarioTemplateRevisionCreateSerializer(serializers.Serializer):
+    expected_template_version = serializers.IntegerField(min_value=0)
+    components = serializers.JSONField()
+
+    def validate_components(self, value):
+        return normalize_components(value)
+
+    def validate(self, attrs):
+        unknown = sorted(set(self.initial_data) - {"expected_template_version", "components"})
+        if unknown:
+            raise serializers.ValidationError({"unknown_fields": unknown})
+        return attrs
+
+
+class ScenarioTemplateRevisionActivateSerializer(serializers.Serializer):
+    expected_template_version = serializers.IntegerField(min_value=1)
+    expected_revision_hash = serializers.RegexField(r"^[0-9a-f]{64}$")
+
+    def validate(self, attrs):
+        unknown = sorted(
+            set(self.initial_data)
+            - {"expected_template_version", "expected_revision_hash"}
+        )
+        if unknown:
+            raise serializers.ValidationError({"unknown_fields": unknown})
+        return attrs
 
 
 class ScenarioTemplateAssetSerializer(serializers.ModelSerializer):

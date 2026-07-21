@@ -24,6 +24,15 @@ function deferred<T>() {
 }
 
 const workspace = (spaceId: string): CapabilitySnapshot => ({
+  navigation_mode: 'capability',
+  configuration_revision: 'config-v3',
+  feature_availability: {
+    deep: true,
+    thinking: false,
+    workspace_creation_approval: true,
+    workspace_join_v2: true,
+    workspace_permanent_delete: false,
+  },
   scopes: {
     platform: false,
     organization_ids: [],

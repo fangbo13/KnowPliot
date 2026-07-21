@@ -1,6 +1,7 @@
 """Task 7 citation-source and durable conversation-share contracts."""
 
 from datetime import timedelta
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -8,6 +9,8 @@ from rest_framework.test import APITestCase
 
 from apps.knowledge.models import Document
 from apps.spaces.models import KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.ownership_services import OwnershipTransferService
+from apps.spaces.test_utils import create_test_space
 
 from .models import ChatSession, Citation, ConversationShare, Message
 
@@ -26,17 +29,17 @@ class SharingAndCitationSourceTest(APITestCase):
         )
         self.org = Organization.objects.create(name="Share Org", slug="share-org")
         self.other_org = Organization.objects.create(name="Other Org", slug="other-share-org")
-        self.space = KnowledgeSpace.objects.create(organization=self.org, name="Share Space", code="share-space")
-        self.other_space = KnowledgeSpace.objects.create(
-            organization=self.other_org, name="Other Space", code="other-share-space"
+        self.space = create_test_space(
+            organization=self.org, owner=self.owner, name="Share Space", code="share-space"
+        )
+        self.other_space = create_test_space(
+            organization=self.other_org, owner=self.outsider, name="Other Space", code="other-share-space"
         )
         for user, role in [
-            (self.owner, SpaceMembership.ROLE_OWNER),
             (self.viewer, SpaceMembership.ROLE_REVIEWER),
             (self.guest, SpaceMembership.ROLE_GUEST),
         ]:
             SpaceMembership.objects.create(user=user, space=self.space, role=role)
-        SpaceMembership.objects.create(user=self.outsider, space=self.other_space, role=SpaceMembership.ROLE_OWNER)
         self.session = ChatSession.objects.create(user=self.owner, space=self.space, title="Shareable decision")
         Message.objects.create(session=self.session, space=self.space, role="user", content="What changed?")
         self.answer = Message.objects.create(
@@ -148,6 +151,15 @@ class SharingAndCitationSourceTest(APITestCase):
 
     def test_owner_can_revoke_after_losing_workspace_membership(self):
         share = self.create_share()
+        transfer = OwnershipTransferService.request(
+            actor=self.owner,
+            space_id=self.space.id,
+            to_owner_id=self.viewer.id,
+            expected_ownership_version=self.space.ownership_version,
+            idempotency_key=uuid.uuid4(),
+            reason_code="test_owner_departure",
+        )
+        OwnershipTransferService.accept(actor=self.viewer, transfer_id=transfer.id)
         SpaceMembership.objects.filter(user=self.owner, space=self.space).delete()
         self.client.force_authenticate(self.owner)
 

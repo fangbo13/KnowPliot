@@ -7,6 +7,7 @@
 import uuid
 
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import PermissionDenied
 from django.db import models
 
 
@@ -37,6 +38,13 @@ class User(AbstractUser):
     LANGUAGE_CHOICES = [
         ("en", "English"),
         ("zh", "Chinese"),
+    ]
+
+    ACCOUNT_PURPOSE_TEST = "test"
+    ACCOUNT_PURPOSE_SERVICE = "service"
+    ACCOUNT_PURPOSE_CHOICES = [
+        (ACCOUNT_PURPOSE_TEST, "Automated test principal"),
+        (ACCOUNT_PURPOSE_SERVICE, "Service principal"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -76,6 +84,23 @@ class User(AbstractUser):
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="buddy_assignees"
     )
     is_hr_admin = models.BooleanField(default=False)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    deactivated_by = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deactivated_users",
+    )
+    deactivation_reason_code = models.CharField(max_length=64, blank=True, default="")
+    account_purpose = models.CharField(
+        max_length=16,
+        choices=ACCOUNT_PURPOSE_CHOICES,
+        null=True,
+        blank=True,
+    )
+    test_principal_expires_at = models.DateTimeField(null=True, blank=True)
+    test_run_id = models.CharField(max_length=128, blank=True, default="")
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
@@ -85,6 +110,11 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.email} ({self.employee_id or 'no-id'})"
+
+    def delete(self, *args, **kwargs):
+        """Phase 1 retention policy: accounts are offboarded, never hard-deleted."""
+
+        raise PermissionDenied("User hard deletion is disabled; use the offboarding workflow.")
 
     # ── V4.0 RBAC methods ──────────────────────────────────────────────
 

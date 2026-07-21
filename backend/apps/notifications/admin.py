@@ -4,7 +4,12 @@
 
 from django.contrib import admin
 
-from .models import Announcement, AnnouncementDismissal, Notification
+from .models import (
+    ActionOutboxEvent,
+    Announcement,
+    AnnouncementDismissal,
+    Notification,
+)
 
 
 @admin.register(Notification)
@@ -24,3 +29,28 @@ class AnnouncementAdmin(admin.ModelAdmin):
 @admin.register(AnnouncementDismissal)
 class AnnouncementDismissalAdmin(admin.ModelAdmin):
     list_display = ("user", "announcement", "dismissed_at")
+
+
+@admin.register(ActionOutboxEvent)
+class ActionOutboxEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "aggregate_type",
+        "transition",
+        "transition_version",
+        "state",
+        "attempt_count",
+        "created_at",
+    )
+    list_filter = ("aggregate_type", "transition", "state")
+    readonly_fields = (
+        "aggregate_type",
+        "aggregate_uuid",
+        "transition",
+        "transition_version",
+        "recipient_key",
+        "payload",
+        "payload_digest",
+        "attempt_count",
+        "created_at",
+        "updated_at",
+    )

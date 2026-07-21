@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.spaces.models import KnowledgeSpace, Organization, SpaceMembership
+from apps.spaces.test_utils import create_test_space
 
 
 User = get_user_model()
@@ -31,12 +32,12 @@ class Phase9AAccountSecurityTests(APITestCase):
             password=PASSWORD,
         )
         self.org = Organization.objects.create(name="Org", slug="org")
-        self.allowed_space = KnowledgeSpace.objects.create(
+        self.allowed_space = create_test_space(
             organization=self.org,
             name="Allowed",
             code="allowed",
         )
-        self.other_space = KnowledgeSpace.objects.create(
+        self.other_space = create_test_space(
             organization=self.org,
             name="Other",
             code="other",

@@ -52,8 +52,33 @@ from apps.chat.report_views import (
     KnowledgeQualityReportView,
 )
 from apps.rag.evaluation_views import RAGEvaluationRunListView
+from apps.knowledge.platform_views import platform_document_metadata
+from apps.rbac.offboarding import offboard_user, offboarding_admin_successor_candidates, offboarding_impact
+from apps.rbac.views import expired_test_principals
+from .governed_views import (
+    admin_governed_request_approve,
+    admin_governed_request_impact,
+    admin_governed_request_reject,
+    admin_governed_requests,
+)
+from .taxonomy_views import (
+    admin_taxonomy_collection,
+    admin_taxonomy_detail,
+    workspace_creation_policies,
+    workspace_creation_policy_transition,
+)
 
 urlpatterns = [
+    path("test-principals/", expired_test_principals, name="admin-test-principals"),
+    path("governed-requests/", admin_governed_requests, name="admin-governed-request-list"),
+    path("documents/", platform_document_metadata, name="admin-platform-document-metadata"),
+    path("governed-requests/<uuid:request_id>/impact/", admin_governed_request_impact, name="admin-governed-request-impact"),
+    path("governed-requests/<uuid:request_id>/approve/", admin_governed_request_approve, name="admin-governed-request-approve"),
+    path("governed-requests/<uuid:request_id>/reject/", admin_governed_request_reject, name="admin-governed-request-reject"),
+    path("taxonomy/<str:kind>/", admin_taxonomy_collection, name="admin-taxonomy-collection"),
+    path("taxonomy/<str:kind>/<uuid:item_id>/", admin_taxonomy_detail, name="admin-taxonomy-detail"),
+    path("workspace-creation-policies/", workspace_creation_policies, name="admin-workspace-creation-policy-list"),
+    path("workspace-creation-policies/<uuid:policy_id>/<str:action>/", workspace_creation_policy_transition, name="admin-workspace-creation-policy-transition"),
     path("registration-codes/", AdminRegistrationCodeListCreateView.as_view(),
          name="admin-code-list"),
     path("registration-codes/<uuid:pk>/revoke/", admin_code_revoke,
@@ -71,6 +96,9 @@ urlpatterns = [
     path("spaces/<uuid:pk>/access-requests/<uuid:request_id>/reject/", space_access_request_reject, name="admin-space-access-request-reject"),
     path("users/", ScopedAdminUserListView.as_view(), name="admin-scoped-user-list"),
     path("users/<uuid:user_id>/assignments/", scoped_user_assignment, name="admin-scoped-user-assignment"),
+    path("users/<uuid:user_id>/offboarding-impact/", offboarding_impact, name="admin-user-offboarding-impact"),
+    path("users/<uuid:user_id>/offboarding-admin-candidates/", offboarding_admin_successor_candidates, name="admin-user-offboarding-admin-candidates"),
+    path("users/<uuid:user_id>/offboard/", offboard_user, name="admin-user-offboard"),
     path("model-profiles/", ModelProfileListCreateView.as_view(), name="admin-model-profiles"),
     path("governance/policies/", governance_policies, name="admin-governance-policies"),
     path("health/", SystemHealthView.as_view(), name="admin-health"),

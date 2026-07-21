@@ -35,6 +35,6 @@ describe('scoped console data sources', () => {
 
     await scopedConsoleApi.accessRequests('space-1');
 
-    expect(get).toHaveBeenCalledWith('/admin/spaces/space-1/access-requests/');
+    expect(get).toHaveBeenCalledWith('/spaces/space-1/access-requests/');
   });
 });

@@ -1,0 +1,191 @@
+"""Migration contract for workspace-scoped Knowledge retention evidence."""
+
+import hashlib
+
+from django.db import connection, transaction
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TransactionTestCase
+
+
+class KnowledgeWorkspaceRetentionMigrationTests(TransactionTestCase):
+    # serialized_rollback removed: in the full suite the fixture reload collides
+    # with existing django_content_type rows (UniqueViolation). Test seeds its
+    # own rows, so serialized state is not needed (mirrors pg_session_locking).
+    migrate_from = ("knowledge", "0010_ingestionjob_know_ing_st_sp_cr_idx")
+    migrate_to = ("knowledge", "0011_workspace_retention_contract")
+    spaces_target = ("spaces", "0015_workspace_deletion_stage_a")
+    users_target = ("users", "0005_test_principal_metadata")
+    notifications_target = (
+        "notifications",
+        "0003_actionable_notification_contract",
+    )
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        targets = [
+            self.migrate_from,
+            self.spaces_target,
+            self.users_target,
+            self.notifications_target,
+        ]
+        executor.migrate(targets)
+        self.old_apps = executor.loader.project_state(targets).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        # TransactionTestCase truncated the purge registry between tests, and
+        # spaces.0015's seed does not re-run once applied, so the leaf-restore
+        # migrate below would re-run spaces.0016's finalize validation against
+        # an empty registry and raise "missing or duplicate final purge
+        # registry row". Re-seed idempotently first (update_or_create,
+        # preserves per-model migration_owner) so finalize sees the full
+        # registry. Production migrate is unaffected (rows persist).
+        import importlib
+        from django.apps import apps as django_apps
+        seed_module = importlib.import_module(
+            "apps.spaces.migrations.0015_workspace_deletion_stage_a"
+        )
+        seed_module.seed_purge_registry(django_apps, None)
+        # Re-run each app's mark_registry_ready so the non-ready-owner rows
+        # (knowledge/chat/scenario_templates/audit) are set "ready" with their
+        # correct snapshot/scrub fields before finalize's all-ready check.
+        for _mod_path in (
+            "apps.knowledge.migrations.0011_workspace_retention_contract",
+            "apps.chat.migrations.0018_workspace_retention_contract",
+            "apps.scenario_templates.migrations.0007_workspace_retention_contract",
+            "apps.audit.migrations.0015_workspace_retention_contract",
+        ):
+            importlib.import_module(_mod_path).mark_registry_ready(
+                django_apps, None
+            )
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def test_snapshots_detach_and_legacy_scope_remains_explicit(self):
+        User = self.old_apps.get_model("users", "User")
+        Organization = self.old_apps.get_model("spaces", "Organization")
+        KnowledgeSpace = self.old_apps.get_model("spaces", "KnowledgeSpace")
+        SpaceMembership = self.old_apps.get_model("spaces", "SpaceMembership")
+        Locator = self.old_apps.get_model("spaces", "WorkspacelocatorReservation")
+        Document = self.old_apps.get_model("knowledge", "Document")
+        IngestionJob = self.old_apps.get_model("knowledge", "IngestionJob")
+        BatchResult = self.old_apps.get_model(
+            "knowledge", "BatchImportResultRecord"
+        )
+
+        owner = User.objects.create(
+            username="knowledge-retention-owner",
+            email="knowledge-retention-owner@example.test",
+            is_active=True,
+            test_run_id="",
+        )
+        organization = Organization.objects.create(
+            name="Knowledge retention org",
+            slug="knowledge-retention-org",
+            status="active",
+        )
+        # The 0011 owner-mirror deferred constraint trigger fires at commit and
+        # requires a matching active owner membership; wrap the space + mirror
+        # insert in one atomic block so the trigger fires after both rows exist.
+        with transaction.atomic():
+            space = KnowledgeSpace.objects.create(
+                organization=organization,
+                owner=owner,
+                name="Knowledge retention space",
+                code="knowledge-retention-space",
+                status="archived",
+            )
+            SpaceMembership.objects.create(
+                space=space,
+                user=owner,
+                role="owner",
+                status="active",
+                expires_at=None,
+            )
+        locator_text = "knowledge-retention-org/knowledge-retention-space"
+        locator_digest = hashlib.sha256(locator_text.encode()).hexdigest()
+        locator = Locator.objects.create(
+            organization=organization,
+            normalized_code="knowledge-retention-space",
+            normalized_locator=locator_text,
+            state="live",
+            live_space=space,
+        )
+        document = Document.objects.create(
+            space=space,
+            title="Migration evidence",
+            file="documents/migration-evidence.txt",
+            file_type="txt",
+            file_size=10,
+            uploaded_by=owner,
+            status="active",
+        )
+        ingestion = IngestionJob.objects.create(
+            document=document,
+            space=space,
+            requested_by=owner,
+            status="succeeded",
+            celery_task_id="must-be-scrubbable",
+            last_error="must-be-scrubbable",
+        )
+        batch = BatchResult.objects.create(
+            uploaded_by=owner,
+            status="completed",
+            error_message="legacy raw error",
+            result_details=[{"filename": "private-name.txt"}],
+        )
+
+        executor = MigrationExecutor(connection)
+        targets = [
+            self.migrate_to,
+            self.spaces_target,
+            self.users_target,
+            self.notifications_target,
+        ]
+        executor.migrate(targets)
+        migrated_apps = executor.loader.project_state(targets).apps
+        MigratedDocument = migrated_apps.get_model("knowledge", "Document")
+        MigratedIngestion = migrated_apps.get_model("knowledge", "IngestionJob")
+        MigratedBatch = migrated_apps.get_model(
+            "knowledge", "BatchImportResultRecord"
+        )
+        MigratedLocator = migrated_apps.get_model(
+            "spaces", "WorkspaceLocatorReservation"
+        )
+        MigratedSpace = migrated_apps.get_model("spaces", "KnowledgeSpace")
+        Registry = migrated_apps.get_model("spaces", "WorkspacePurgeDependency")
+
+        migrated_ingestion = MigratedIngestion.objects.get(pk=ingestion.pk)
+        self.assertEqual(migrated_ingestion.document_uuid, document.pk)
+        self.assertEqual(migrated_ingestion.space_uuid, space.pk)
+        self.assertEqual(migrated_ingestion.organization_uuid, organization.pk)
+        self.assertEqual(migrated_ingestion.locator_digest, locator_digest)
+        self.assertEqual(migrated_ingestion.requested_by_uuid, owner.pk)
+
+        migrated_batch = MigratedBatch.objects.get(pk=batch.pk)
+        self.assertTrue(migrated_batch.legacy_scope_unknown)
+        self.assertIsNone(migrated_batch.space_uuid)
+        self.assertEqual(migrated_batch.uploaded_by_uuid, owner.pk)
+
+        knowledge_rows = Registry.objects.filter(migration_owner=self.migrate_to[0] + ".0011_workspace_retention_contract")
+        self.assertEqual(knowledge_rows.count(), 5)
+        self.assertFalse(knowledge_rows.exclude(registration_state="ready").exists())
+        ingestion_registry = knowledge_rows.get(model_label="knowledge.IngestionJob")
+        self.assertEqual(
+            ingestion_registry.scrub_fields,
+            ["celery_task_id", "last_error", "sensitive_payload_scrubbed_at"],
+        )
+        self.assertIn("document_uuid", ingestion_registry.snapshot_fields)
+
+        MigratedDocument.objects.get(pk=document.pk).delete()
+        migrated_ingestion.refresh_from_db()
+        self.assertIsNone(migrated_ingestion.document_id)
+        self.assertEqual(migrated_ingestion.document_uuid, document.pk)
+
+        MigratedLocator.objects.get(pk=locator.pk).delete()
+        MigratedSpace.objects.get(pk=space.pk).delete()
+        migrated_ingestion.refresh_from_db()
+        self.assertIsNone(migrated_ingestion.space_id)
+        self.assertEqual(migrated_ingestion.space_uuid, space.pk)
+        self.assertEqual(migrated_ingestion.locator_digest, locator_digest)
