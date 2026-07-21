@@ -49,6 +49,10 @@ export default function LoginPage() {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
 
+  // Admin registration entry is hidden by default; shown only via ?admin=1 query param
+  // to keep the public login page clean for regular users.
+  const showAdminTab = new URLSearchParams(window.location.search).get('admin') === '1';
+
   const toggleLanguage = () => {
     const nextLang = i18n.language.startsWith('zh') ? 'en' : 'zh';
     i18n.changeLanguage(nextLang);
@@ -275,7 +279,7 @@ export default function LoginPage() {
         </div>
       ),
     },
-    {
+    ...(showAdminTab ? [{
       key: 'admin',
       label: <span><SafetyCertificateOutlined /> {t('auth_tab_admin')}</span>,
       children: (
@@ -302,13 +306,15 @@ export default function LoginPage() {
           </Form>
         </div>
       ),
-    },
+    }] : []),
   ];
 
   const headerTitle = activeTab === 'signin' ? t('login_title')
-    : activeTab === 'register' ? t('register_title') : t('admin_register_title');
+    : activeTab === 'register' ? t('register_title')
+    : showAdminTab ? t('admin_register_title') : t('login_title');
   const headerSubtitle = activeTab === 'signin' ? t('login_subtitle')
-    : activeTab === 'register' ? t('register_subtitle') : t('admin_register_subtitle');
+    : activeTab === 'register' ? t('register_subtitle')
+    : showAdminTab ? t('admin_register_subtitle') : t('login_subtitle');
 
   return (
     <div className="kp-login">
