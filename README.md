@@ -5,7 +5,7 @@
 ### Multi-space knowledge operations platform for professional teams
 
 [![Status](https://img.shields.io/badge/Status-Phase%202B%20Discovery-blue)](README.md)
-[![Version](https://img.shields.io/badge/Version-7.2-blue)](README.md)
+[![Version](https://img.shields.io/badge/Version-7.4-blue)](README.md)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
 **Languages**: [English](README.md) / [中文](README_ZH.md)
@@ -126,16 +126,35 @@ These work in **any** organization:
 
 ## Core Capabilities
 
+### Knowledge & RAG
+
 | Capability | Business scenario | Value produced |
 | --- | --- | --- |
 | **Source-backed RAG Q&A** | Standards, onboarding, project questions | Seconds-level answers with citations instead of manual search |
-| **Multi-space isolation** | Org / business line / project team separation | Clear data boundaries, reduced leakage risk |
-| **Access-code joining** | Pilot spaces, controlled onboarding, demos | Low-friction entry without weakening governance |
-| **Role-based governance** | Owner, admin, reviewer, member, guest | Right people manage the right space with least privilege |
+| **SSE streaming chat** | Real-time conversations, long-form answers | Token-by-token streaming replies with session context |
+| **Web content crawler** | Ingesting web pages, competitor research, news monitoring | Turn external web content into searchable knowledge base entries with near-duplicate detection |
 | **Document lifecycle** | Upload, re-index, delete, archive | Knowledge base stays current and actionable |
 | **Template-driven replication** | Onboarding, audit methodology, standards, project AI | Cuts setup time for new spaces and teams |
-| **Audit logging** | Sensitive operations, permission events, admin actions | Full traceability for compliance and review |
+
+### Governance & Security
+
+| Capability | Business scenario | Value produced |
+| --- | --- | --- |
+| **Multi-space isolation** | Org / business line / project team separation | Clear data boundaries, reduced leakage risk |
+| **Dual-Track RBAC** | HR + Admin permission tracks, capability-based access control | Right people manage the right space with least privilege |
+| **Access-code joining** | Pilot spaces, controlled onboarding, demos | Low-friction entry without weakening governance |
+| **Audit logging** | Sensitive operations, permission events, admin actions | Full traceability with search and filtering for compliance review |
+| **2FA / OTP authentication** | Admin accounts, high-compliance environments | Extra layer of security beyond passwords |
+| **Admin entry gate** | Controlling admin registration visibility | Hidden behind `?admin=1` query parameter to reduce attack surface |
+
+### Platform & UX
+
+| Capability | Business scenario | Value produced |
+| --- | --- | --- |
 | **Session-scoped chat** | Cross-session, cross-space continued work | Preserves context without leaking across boundaries |
+| **Admin dashboard** | System health, user management, platform oversight | Real-time visibility into backend, DB, Redis, Celery, and LLM status |
+| **i18n internationalization** | Multilingual teams, global operations | Full Chinese ↔ English UI toggle |
+| **Dark / Light theme** | User preference, accessibility, low-light environments | One-click theme switching with persisted preference |
 
 ---
 
@@ -210,13 +229,19 @@ Teams can adopt individual modules without pulling in the entire product:
 
 | Layer | Technology |
 | --- | --- |
-| Backend | Django 5.0 + DRF + Celery + Redis |
-| Frontend | React 18 + TypeScript + Vite + Ant Design 5 + Zustand |
+| Backend | Django 5.0 + DRF + SimpleJWT + django-allauth + Celery + Redis 7 |
+| Frontend | React 18 + TypeScript 5 + Vite 5 + Ant Design 5 + Zustand |
+| i18n | i18next + react-i18next (Chinese / English) |
+| Markdown | react-markdown + remark-gfm + rehype-highlight + highlight.js |
 | LLM | Qwen via DashScope API (OpenAI-compatible) |
 | Embeddings | Qwen text-embedding-v4 (1024-dim) |
 | Vector DB | pgvector (PostgreSQL 16) |
-| RAG | LangChain + Docling |
+| RAG | LangChain + Docling + Unstructured |
+| Security | pyOTP (2FA) + Bleach (XSS) + filetype (magic number) + simhash (dedup) |
+| Crawler | trafilatura + httpx[http2] + gevent |
+| Server | Gunicorn (gthread, 2 workers × 8 threads) + Nginx |
 | Infra | Docker Compose one-click deployment |
+| Testing | Vitest + Testing Library + Puppeteer + pytest |
 
 ---
 
