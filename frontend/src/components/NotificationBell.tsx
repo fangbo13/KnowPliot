@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge, Popover, Spin, Button, message } from 'antd';
-import { BellOutlined, CheckOutlined } from '@ant-design/icons';
+import { BellOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -27,18 +27,18 @@ const LEVEL_COLOR: Record<string, string> = {
   error: 'var(--color-error, #c0392b)',
 };
 
-function timeAgo(iso: string | null, zh: boolean): string {
+function timeAgo(iso: string | null, _zh: boolean, t: (key: string, options?: Record<string, unknown>) => string): string {
   if (!iso) return '';
   const d = new Date(iso).getTime();
   if (Number.isNaN(d)) return '';
   const s = Math.floor((Date.now() - d) / 1000);
-  if (s < 60) return zh ? '刚刚' : 'just now';
+  if (s < 60) return t('time_just_now');
   const m = Math.floor(s / 60);
-  if (m < 60) return zh ? `${m} 分钟前` : `${m}m ago`;
+  if (m < 60) return t('time_minutes_ago', { count: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return zh ? `${h} 小时前` : `${h}h ago`;
+  if (h < 24) return t('time_hours_ago', { count: h });
   const days = Math.floor(h / 24);
-  return zh ? `${days} 天前` : `${days}d ago`;
+  return t('time_days_ago', { count: days });
 }
 
 /**
@@ -140,7 +140,7 @@ export default function NotificationBell() {
         allowed_actions: [],
       } : candidate));
       setCount((current) => Math.max(0, current - (item.is_read ? 0 : 1)));
-      message.success(action === 'accept' ? '邀请已接受。' : '邀请已拒绝。');
+      message.success(action === 'accept' ? t('notification_accepted') : t('notification_declined'));
       const path = action === 'accept' ? safeNotificationPath(item.deep_link) : null;
       if (path) {
         setOpen(false);
@@ -149,8 +149,8 @@ export default function NotificationBell() {
     } catch (reason: unknown) {
       const rateLimit = getRateLimitDetails(reason);
       message.error(rateLimit
-        ? `请求过于频繁${rateLimit.retryAfterSeconds == null ? '' : `，请在 ${rateLimit.retryAfterSeconds} 秒后重试`}`
-        : '该邀请已变化或无法处理，请刷新通知。');
+        ? `${t('notification_rate_limited')}${rateLimit.retryAfterSeconds == null ? '' : ` — ${t('notification_retry_after', { seconds: rateLimit.retryAfterSeconds })}`}`
+        : t('notification_action_failed'));
       await loadFeed();
     } finally {
       setActionBusy(null);
@@ -164,18 +164,22 @@ export default function NotificationBell() {
   };
 
   const panel = (
-    <div style={{ width: 340, maxWidth: '90vw' }}>
+    <div className="glass-panel section-enter" style={{ width: 340, maxWidth: '90vw', background: 'var(--color-bg-elevated)' }} role="dialog" aria-label={t('notifications_title')}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '12px 14px', borderBottom: '1px solid var(--color-border-secondary)',
       }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{t('notifications_title')}</span>
-        {count > 0 && (
-          <Button type="text" size="small" icon={<CheckOutlined />} onClick={handleMarkAll}
-            style={{ color: 'var(--accent-text)', fontWeight: 600 }}>
-            {t('notifications_mark_all_read')}
-          </Button>
-        )}
+        <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-text)' }}>{t('notifications_title')}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {count > 0 && (
+            <Button type="text" size="small" icon={<CheckOutlined />} onClick={handleMarkAll}
+              style={{ color: 'var(--accent-text)', fontWeight: 600 }}>
+              {t('notifications_mark_all_read')}
+            </Button>
+          )}
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setOpen(false)}
+            aria-label={t('close') || 'Close'} style={{ color: 'var(--color-text-secondary)' }} />
+        </div>
       </div>
 
       <div style={{ maxHeight: 380, overflowY: 'auto' }}>
@@ -193,7 +197,7 @@ export default function NotificationBell() {
         ) : items.length === 0 ? (
           <div style={{ padding: '28px 12px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-placeholder)' }}>
-              <div style={{ fontFamily: 'var(--font-family-serif)', fontSize: 32, opacity: 0.5, marginBottom: 12 }}>K</div>
+              <BellOutlined style={{ fontSize: 32, opacity: 0.4, marginBottom: 12, color: 'var(--color-text-secondary)' }} />
               <span>{t('notifications_empty')}</span>
             </div>
           </div>
@@ -241,7 +245,7 @@ export default function NotificationBell() {
                       </span>
                     )}
                     <span style={{ display: 'block', fontSize: 11.5, color: 'var(--color-text-tertiary, var(--color-text-secondary))', marginTop: 4 }}>
-                      {timeAgo(it.created_at, !!zh)}
+                      {timeAgo(it.created_at, !!zh, t)}
                     </span>
                   </span>
                 </button>
@@ -255,7 +259,7 @@ export default function NotificationBell() {
                         disabled={Boolean(actionBusy)}
                         onClick={() => void handleAction(it, 'accept')}
                       >
-                        接受
+                        {t('notification_accept') || 'Accept'}
                       </Button>
                     )}
                     {it.allowed_actions.includes('decline') && (
@@ -265,7 +269,7 @@ export default function NotificationBell() {
                         disabled={Boolean(actionBusy)}
                         onClick={() => void handleAction(it, 'decline')}
                       >
-                        拒绝
+                        {t('notification_decline') || 'Decline'}
                       </Button>
                     )}
                   </div>

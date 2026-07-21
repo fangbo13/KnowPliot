@@ -5,13 +5,13 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { useEffect, useState } from 'react';
-import { Card, Form, Select, Button, message, Typography, Avatar, Row, Col, Input, List, Modal, Switch } from 'antd';
-import { UserOutlined, SafetyCertificateOutlined, LockOutlined, CheckOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { Card, Form, Select, Button, message, Typography, Avatar, Row, Col, Input, Modal, Switch, Tag } from 'antd';
+import { UserOutlined, SafetyCertificateOutlined, LockOutlined, CheckOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthProvider';
 import apiClient from '../api/client';
 import i18n from '../i18n';
-import { accountApi, type AuthSession } from '../api/account';
+import { accountApi } from '../api/account';
 import { useSpaceStore } from '../store/spaceStore';
 import { useTheme } from '../hooks/useTheme';
 
@@ -22,16 +22,10 @@ export default function ProfilePage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const spaces = useSpaceStore((state) => state.spaces);
   const { setThemeMode } = useTheme();
-  const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [mfaOpen, setMfaOpen] = useState(false);
   const [mfaSecret, setMfaSecret] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
-
-  const loadSessions = async () => {
-    try { setSessions(await accountApi.sessions()); } catch { setSessions([]); }
-  };
-  useEffect(() => { loadSessions(); }, []);
 
   const handleFinish = async (values: {
     language_preference: string;
@@ -80,8 +74,8 @@ export default function ProfilePage() {
 
   return (
     <div className="page" style={{ background: 'transparent' }}>
-      <div className="page-inner" style={{ maxWidth: 680 }}>
-        <div className="page-head" style={{ marginBottom: 32 }}>
+      <div className="page-inner" style={{ maxWidth: 820 }}>
+        <div className="page-head" style={{ marginBottom: 20 }}>
           <h1 className="page-title">{t('account_info')}</h1>
           <p className="page-subtitle" style={{ marginTop: 8 }}>{t('account_info_desc', 'Manage your personal information and preferences.')}</p>
         </div>
@@ -92,12 +86,12 @@ export default function ProfilePage() {
               {t('account_info')}
             </span>
           }
-          styles={{ body: { padding: '32px 32px 36px' } }}
+          styles={{ body: { padding: '24px 28px 28px' } }}
           className="glass-panel hover-lift section-enter"
-          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
+          style={{ marginBottom: 16, borderRadius: 'var(--radius-lg)' }}
         >
           {/* Avatar + Username header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
             <Avatar
               size={72}
               icon={<UserOutlined />}
@@ -121,7 +115,7 @@ export default function ProfilePage() {
           </div>
 
           {/* Detail fields in a responsive grid */}
-          <Row gutter={[24, 24]}>
+          <Row gutter={[20, 16]}>
             <Col xs={24} sm={12}>
               <div>
                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -138,16 +132,12 @@ export default function ProfilePage() {
             </Col>
             <Col xs={24} sm={12}>
               <div>
-                <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {t('office_location')}
+                <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <EnvironmentOutlined /> {t('office_location')} <span style={{ color: 'var(--color-error, #c0392b)' }}>*</span>
                 </Typography.Text>
-                <div style={{ fontWeight: 500, fontSize: 14.5, marginTop: 6, color: 'var(--color-text)' }}>
-                  {user?.office_location || (
-                    <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontSize: 13 }}>
-                      {t('field_not_set')}
-                    </span>
-                  )}
-                </div>
+                <Form.Item name="office_location" rules={[{ required: true, message: t('validation_office_required', '请选择办公地点') }]} style={{ marginTop: 6, marginBottom: 0 }}>
+                  <Input size="middle" placeholder={t('office_location_placeholder', '请输入办公地点')} style={{ borderRadius: 8 }} />
+                </Form.Item>
               </div>
             </Col>
             <Col xs={24} sm={12}>
@@ -184,7 +174,7 @@ export default function ProfilePage() {
               {t('preferences')}
             </span>
           }
-          styles={{ body: { padding: '32px 32px 28px' } }}
+          styles={{ body: { padding: '24px 28px 20px' } }}
           className="glass-panel hover-lift section-enter"
           style={{ borderRadius: 'var(--radius-lg)' }}
         >
@@ -196,27 +186,42 @@ export default function ProfilePage() {
               default_space: user?.default_space || undefined,
               announcements: user?.notification_preferences?.announcements ?? true,
               quality: user?.notification_preferences?.quality ?? true,
+              office_location: user?.office_location || '',
             }}
             onFinish={handleFinish}
           >
-            <Form.Item label={t('language_pref')} name="language_preference" style={{ marginBottom: 24 }}>
-              <Select size="large" popupClassName="menu-pop-dropdown" style={{ borderRadius: 10 }}>
-                <Select.Option value="en">English</Select.Option>
-                <Select.Option value="zh">中文</Select.Option>
-              </Select>
-            </Form.Item>
-            <Form.Item label={t('theme')} name="theme_preference">
-              <Select options={['system', 'light', 'dark'].map((value) => ({ value, label: value }))} />
-            </Form.Item>
-            <Form.Item label={t('default_space')} name="default_space">
-              <Select allowClear options={spaces.map((space) => ({ value: space.id, label: space.name }))} />
-            </Form.Item>
-            <Form.Item label={t('notification_announcements')} name="announcements" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item label={t('notification_quality')} name="quality" valuePropName="checked">
-              <Switch />
-            </Form.Item>
+            <Row gutter={[16, 12]}>
+              <Col xs={24} sm={12} lg={6}>
+                <Form.Item label={t('language_pref')} name="language_preference" style={{ marginBottom: 12 }}>
+                  <Select size="middle" popupClassName="menu-pop-dropdown" style={{ borderRadius: 10 }}>
+                    <Select.Option value="en">English</Select.Option>
+                    <Select.Option value="zh">中文</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} lg={6}>
+                <Form.Item label={t('theme')} name="theme_preference" style={{ marginBottom: 12 }}>
+                  <Select size="middle" options={[
+                    { value: 'system', label: t('system') },
+                    { value: 'light', label: t('light') },
+                    { value: 'dark', label: t('dark') },
+                  ]} style={{ borderRadius: 10 }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} lg={6}>
+                <Form.Item label={t('default_space')} name="default_space" style={{ marginBottom: 12 }}>
+                  <Select size="middle" allowClear options={spaces.map((space) => ({ value: space.id, label: space.name }))} style={{ borderRadius: 10 }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} lg={6} style={{ display: 'flex', alignItems: 'center', gap: 20, paddingTop: 28 }}>
+                <Form.Item label={t('notification_announcements')} name="announcements" valuePropName="checked" style={{ marginBottom: 0 }}>
+                  <Switch size="small" />
+                </Form.Item>
+                <Form.Item label={t('notification_quality')} name="quality" valuePropName="checked" style={{ marginBottom: 0 }}>
+                  <Switch size="small" />
+                </Form.Item>
+              </Col>
+            </Row>
 
             <Form.Item style={{ marginBottom: 0 }}>
               <Button type="primary" htmlType="submit" loading={loading} size="large" className="btn-press" 
@@ -231,27 +236,20 @@ export default function ProfilePage() {
         <Card 
           title={<><SafetyCertificateOutlined style={{ marginRight: 8, color: 'var(--accent)' }}/>{t('account_security')}</>} 
           className="glass-panel hover-lift section-enter" 
-          style={{ marginTop: 24, borderRadius: 'var(--radius-lg)' }}
+          style={{ marginTop: 16, borderRadius: 'var(--radius-lg)' }}
         >
-          <Button icon={<LockOutlined />} className="btn-press" onClick={() => setPasswordOpen(true)}>{t('change_password')}</Button>
-          <Button icon={<SafetyCertificateOutlined />} className="btn-press" style={{ marginLeft: 8 }} onClick={() => setMfaOpen(true)}>
-            {user?.mfa_enabled ? t('mfa_manage') : t('mfa_enable')}
-          </Button>
-          <List
-            style={{ marginTop: 20 }}
-            dataSource={sessions}
-            renderItem={(session) => (
-              <List.Item actions={[
-                <Button danger type="link" key="revoke" onClick={async () => {
-                  await accountApi.revokeSession(session.id);
-                  await loadSessions();
-                }}>{t('revoke')}</Button>,
-              ]}>
-                <List.Item.Meta title={session.current ? t('current_session') : session.user_agent || t('unknown_device')}
-                  description={`${session.ip_address || '-'} · ${new Date(session.last_seen_at).toLocaleString()}`} />
-              </List.Item>
-            )}
-          />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+            <Button icon={<LockOutlined />} className="btn-press" onClick={() => setPasswordOpen(true)}>{t('change_password')}</Button>
+            <Button icon={<SafetyCertificateOutlined />} className="btn-press" style={{ marginLeft: 0 }} disabled title={t('mfa_comingsoon_desc', 'MFA功能即将上线')}>
+              {t('mfa_enable')} <Tag color="orange" style={{ marginLeft: 4, fontSize: 11 }}>{t('coming_soon', '暂未上线')}</Tag>
+            </Button>
+          </div>
+          <div style={{ padding: '12px 16px', background: 'var(--accent-soft)', borderRadius: 10, border: '1px solid var(--color-border-secondary)' }}>
+            <Typography.Text style={{ color: 'var(--color-text)', fontSize: 13.5, lineHeight: 1.6 }}>
+              <SafetyCertificateOutlined style={{ color: 'var(--accent)', marginRight: 6 }} />
+              {t('security_assurance_msg', 'KnowPilot 将持续保障您的账户安全。我们采用企业级加密和多重防护机制，确保您的数据和隐私得到充分保护。')}
+            </Typography.Text>
+          </div>
         </Card>
         <Modal 
           open={passwordOpen} title={t('change_password')} footer={null} onCancel={() => setPasswordOpen(false)}

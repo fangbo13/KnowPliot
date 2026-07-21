@@ -287,9 +287,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
         )}
       </div>
 
-      {!isStreaming && executionSnapshot ? (
-        <SnapshotDetails snapshot={executionSnapshot} t={t} />
-      ) : null}
+      {/* Bug #10: Effective answer settings (technical snapshot details) should not be displayed to end users */}
 
       {!isStreaming && (
         <div className="msg-actions">

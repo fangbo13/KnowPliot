@@ -402,6 +402,24 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+@media (max-width: 1024px) {
+  .kp-app-shell { padding: 28px 20px 56px; }
+  .kp-console-sidebar { width: 200px; padding: 16px 14px; }
+  .kp-console-content { padding: 24px 20px 48px; }
+  .kp-lifecycle-section { padding: 24px; }
+  .kp-quality-review { padding: 16px; }
+  .kp-console-overview-surface { padding: 24px; }
+  .kp-history-surface { padding: 16px; }
+}
+
+@media (max-width: 768px) {
+  .kp-app-shell { padding: 24px 16px 48px; }
+  .kp-console-sidebar { width: 180px; padding: 14px 12px; }
+  .kp-console-content { padding: 20px 16px 40px; }
+  .kp-page-header { flex-wrap: wrap; }
+  .kp-action-bar { flex-wrap: wrap; gap: 12px; }
+}
+
 @media (max-width: 900px) {
   .kp-lifecycle-grid { grid-template-columns: 1fr; }
   .kp-danger-zone__stores { grid-template-columns: repeat(3, minmax(0, 1fr)); }

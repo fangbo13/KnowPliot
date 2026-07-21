@@ -722,6 +722,22 @@
 .page-sub { color: var(--color-text-secondary); margin: 0; font-size: 14px; }
 
 /* ============================================================================
+   Tablet (768–1024px) — narrower sidebar, tighter padding
+   ============================================================================ */
+@media (max-width: 1024px) {
+  .sidebar { width: 240px; }
+  .chat-titlebar { padding: 12px 20px 4px; max-width: 100%; }
+  .msg-col { padding: 0 20px; }
+  .chat-error { width: calc(100% - 40px); }
+  .chat-mode-notice { margin: 0 20px 8px; width: calc(100% - 40px); }
+  .processing-panel { margin: 4px 20px 8px; width: calc(100% - 40px); }
+  .composer { padding-left: 16px; }
+  .welcome-greeting { font-size: 27px; }
+  .page { padding: 24px 20px 56px; }
+  .page-inner { max-width: 100%; }
+}
+
+/* ============================================================================
    Mobile
    ============================================================================ */
 @media (max-width: 768px) {

@@ -469,6 +469,40 @@ h1, h2, h3, h4, h5 {
 }
 
 /* ============================================================================
+   Responsive breakpoints
+   ============================================================================ */
+@media (max-width: 1024px) {
+  .ant-card .ant-card-body { padding: 20px 20px 24px; }
+  .ant-modal { max-width: calc(100vw - 32px); }
+  .ant-form-item { margin-bottom: 14px; }
+  .page-inner { max-width: 100% !important; }
+  .stat-card { padding: 16px; }
+  :root { --sidebar-width-expanded: 240px; }
+}
+
+@media (max-width: 768px) {
+  .ant-card .ant-card-body { padding: 16px 16px 20px; }
+  .ant-modal { max-width: calc(100vw - 24px); }
+  .ant-form-item { margin-bottom: 12px; }
+  .ant-btn-lg { height: 40px; padding: 0 16px; }
+  .page-inner { max-width: 100% !important; padding: 0 12px; }
+  .page-title { font-size: 20px; }
+  .page-subtitle { font-size: 13px; }
+  .composer { padding: 8px 12px; }
+  .stat-card { padding: 12px; }
+  :root { --sidebar-width-expanded: 0px; --sidebar-width-collapsed: 0px; }
+}
+
+@media (max-width: 480px) {
+  .ant-card .ant-card-body { padding: 14px 14px 18px; }
+  .ant-modal-content { padding: 16px; }
+  .ant-form-item-label > label { font-size: 13px; }
+  .page-inner { padding: 0 8px; }
+  .page-head { margin-bottom: 12px !important; }
+  .ant-card { border-radius: 12px !important; }
+}
+
+/* ============================================================================
    Reduced motion
    ============================================================================ */
 @media (prefers-reduced-motion: reduce) {

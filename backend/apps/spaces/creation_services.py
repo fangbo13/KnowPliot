@@ -41,6 +41,10 @@ from .models import (
     WorkspaceCreationPolicy,
     WorkspaceLocatorReservation,
 )
+from .join_services import (
+    _generate_unique_join_code,
+    validate_custom_join_code,
+)
 
 
 CREATE_ALLOWED_FIELDS = {
@@ -48,6 +52,8 @@ CREATE_ALLOWED_FIELDS = {
     "code",
     "purpose",
     "visibility",
+    "join_policy",
+    "join_code",
     "business_line_id",
     "work_group_id",
     "office_location_ids",
@@ -120,6 +126,23 @@ def _normalize_creation_payload(payload: dict, *, actor):
     visibility = payload.get("visibility", "private")
     if visibility not in {choice[0] for choice in KnowledgeSpace.VISIBILITY_CHOICES}:
         raise ValidationError({"visibility": "Unsupported visibility."})
+    # Join policy validation (spec §2.1): two-choice model.
+    join_policy = payload.get("join_policy", KnowledgeSpace.JOIN_POLICY_ACCESS_CODE)
+    if join_policy not in {choice[0] for choice in KnowledgeSpace.JOIN_POLICY_CHOICES}:
+        raise ValidationError({"join_policy": "Unsupported join policy."})
+    # Resolve join_code based on policy.
+    if join_policy == KnowledgeSpace.JOIN_POLICY_ACCESS_CODE:
+        raw_code = payload.get("join_code")
+        if raw_code:
+            join_code = validate_custom_join_code(raw_code)
+            # Uniqueness pre-check (DB constraint is the final guard).
+            if KnowledgeSpace.objects.filter(join_code__iexact=join_code).exists():
+                raise ValidationError({"join_code": "This join code is already in use."})
+        else:
+            join_code = _generate_unique_join_code()
+    else:
+        # global policy: no join_code needed.
+        join_code = None
     business_line_id = _uuid(payload.get("business_line_id"), "business_line_id")
     work_group_id = _uuid(payload.get("work_group_id"), "work_group_id")
     office_values = payload.get("office_location_ids", [])
@@ -179,6 +202,8 @@ def _normalize_creation_payload(payload: dict, *, actor):
         "code": code,
         "purpose": purpose,
         "visibility": visibility,
+        "join_policy": join_policy,
+        "join_code": join_code,
         "business_line_id": business_line.id,
         "work_group_id": work_group.id,
         "office_location_ids": [location.id for location in locations],
@@ -237,6 +262,8 @@ def _request_body(request: GovernedActionRequest):
             "code": detail.normalized_code,
             "purpose": detail.purpose,
             "visibility": detail.requested_visibility,
+            "join_policy": detail.requested_join_policy,
+            "join_code": detail.requested_join_code,
             "business_line_id": str(detail.business_line_id),
             "work_group_id": str(detail.work_group_id),
             "office_location_ids": [str(value) for value in detail.office_location_ids],
@@ -341,6 +368,8 @@ def submit_creation_request(*, actor, payload: dict, idempotency_key: uuid.UUID)
                 normalized_code=normalized["code"],
                 purpose=normalized["purpose"],
                 requested_visibility=normalized["visibility"],
+                requested_join_policy=normalized["join_policy"],
+                requested_join_code=normalized["join_code"],
                 business_line=business_line,
                 work_group_id=work_group.id,
                 office_location_ids=[str(location.id) for location in locations],
@@ -470,6 +499,8 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                     "code": detail.normalized_code,
                     "purpose": detail.purpose,
                     "visibility": detail.requested_visibility,
+                    "join_policy": detail.requested_join_policy,
+                    "join_code": detail.requested_join_code,
                     "business_line_id": str(detail.business_line_id),
                     "work_group_id": str(detail.work_group_id),
                     "office_location_ids": detail.office_location_ids,
@@ -500,6 +531,8 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                     code=detail.normalized_code,
                     description=detail.purpose,
                     visibility=detail.requested_visibility,
+                    join_policy=normalized["join_policy"],
+                    join_code=normalized["join_code"],
                 )
                 space.office_locations.set(locations)
             except IntegrityError as exc:

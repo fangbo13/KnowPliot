@@ -3,6 +3,8 @@
   "welcome_message": "你好！我是 EY 入职助手，请问有什么可以帮你的？",
   "placeholder": "在此输入你的问题...",
   "send": "发送",
+  "hint_send": "发送",
+  "hint_newline": "换行",
   "thinking": "正在思考...",
   "thinking_connecting": "正在思考...",
   "thinking_searching": "正在检索知识库...",

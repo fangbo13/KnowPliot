@@ -21,6 +21,7 @@ import {
   DownOutlined,
   LoginOutlined,
   PlusOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
@@ -54,10 +55,13 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
   const [joinOpen, setJoinOpen] = useState(false);
   const [code, setCode] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const mountedRef = useRef(true);
   const joinGenerationRef = useRef(0);
   const joinPendingRef = useRef(false);
   const joinControllerRef = useRef<AbortController | null>(null);
+  const switchGenerationRef = useRef(0);
+  const switchPendingRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -89,11 +93,20 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
   }, [closeJoin, joinOpen]);
 
   const handleSwitch = async (id: string) => {
-    if (id === activeSpaceId) return;
+    if (id === activeSpaceId || switchPendingRef.current) return;
+    const generation = ++switchGenerationRef.current;
+    switchPendingRef.current = true;
     try {
       await setActiveSpace(id);
+      if (switchGenerationRef.current !== generation) return; // superseded by a newer switch
+      antdMessage.success(t('space_switched_success') || 'Space switched successfully');
     } catch {
+      if (switchGenerationRef.current !== generation) return;
       antdMessage.error(t('space_switch_failed') || 'Failed to switch space');
+    } finally {
+      if (switchGenerationRef.current === generation) {
+        switchPendingRef.current = false;
+      }
     }
   };
 
@@ -109,9 +122,7 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
       const accessRequest = await joinByCode(normalizedCode, controller.signal);
       if (!mountedRef.current || controller.signal.aborted || joinGenerationRef.current !== generation) return;
       antdMessage.success(
-        accessRequest.status === 'pending'
-          ? (t('space_access_requested') || 'Access request submitted for owner review')
-          : (t('space_access_request_exists') || 'Your access request already exists'),
+        t('space_joined_success', { name: accessRequest.space_name }) || `Joined ${accessRequest.space_name}`,
       );
       closeJoin();
     } catch (error: unknown) {
@@ -131,9 +142,31 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
     }
   };
 
+  const showSearch = spaces.length > 10;
+  const filteredSpaces = searchQuery
+    ? spaces.filter((s) => s.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : spaces;
+
   const items: MenuProps['items'] = [
     { key: 'header', type: 'group', label: t('switch_space') || 'Switch space' },
-    ...spaces.map((space) => ({
+    ...(showSearch ? [{
+      key: 'space-search',
+      type: 'group' as const,
+      label: (
+        <Input
+          prefix={<SearchOutlined />}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          placeholder={t('search_spaces') || 'Search spaces'}
+          allowClear
+          size="small"
+          style={{ margin: '4px 0', borderRadius: 8 }}
+        />
+      ),
+    }] : []),
+    ...filteredSpaces.map((space) => ({
       key: space.id,
       icon: space.id === activeSpaceId ? <CheckOutlined /> : <AppstoreOutlined />,
       label: (
@@ -161,7 +194,7 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
 
   return (
     <>
-      <Dropdown overlayClassName="ambient-glow" menu={{ items }} trigger={['click']} placement="bottomLeft">
+      <Dropdown overlayClassName="ambient-glow" menu={{ items, style: { maxHeight: '60vh', overflowY: 'auto' } }} trigger={['click']} placement="bottomLeft">
         <Button
           className="hover-lift btn-press"
           type="text"

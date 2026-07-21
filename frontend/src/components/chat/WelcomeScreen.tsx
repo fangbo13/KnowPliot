@@ -15,13 +15,15 @@ import ChatComposer from './ChatComposer';
 
 interface WelcomeScreenProps {
   onQuickAction: (q: string) => void;
-  onSendMessage?: (msg: string) => void;
+  onSendMessage?: (msg: string, options?: { answerMode?: string; thinkingEnabled?: boolean }) => void;
   templateQuickQuestions?: string[];
 }
 
 export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQuickQuestions }: WelcomeScreenProps) {
   const { t, i18n } = useTranslation('chat');
   const [inputValue, setInputValue] = useState('');
+  const [answerMode, setAnswerMode] = useState<'fast' | 'deep'>('fast');
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isChinese = i18n.language?.startsWith('zh');
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -65,7 +67,11 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
 
   const handleSend = () => {
     if (!inputValue.trim() || isSendLocked || isStreaming) return;
-    (onSendMessage ?? onQuickAction)(inputValue.trim());
+    if (onSendMessage) {
+      onSendMessage(inputValue.trim(), { answerMode, thinkingEnabled });
+    } else {
+      onQuickAction(inputValue.trim());
+    }
     setInputValue('');
   };
 
@@ -91,6 +97,12 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
         maxRows={5}
         showHint
         hintText={t('welcome_suggest_hint', { defaultValue: 'Ask anything, or pick a topic below' }) as string}
+        answerMode={answerMode}
+        canUseDeep
+        thinkingEnabled={thinkingEnabled}
+        canUseThinking
+        onAnswerModeChange={setAnswerMode}
+        onThinkingChange={setThinkingEnabled}
       />
 
       <div className="welcome-suggest-grid">

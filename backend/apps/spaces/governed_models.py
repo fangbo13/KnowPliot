@@ -337,6 +337,8 @@ class WorkspaceCreateRequestDetail(models.Model):
     normalized_code = models.CharField(max_length=120)
     purpose = models.TextField(max_length=1000)
     requested_visibility = models.CharField(max_length=20, default="private")
+    requested_join_policy = models.CharField(max_length=20, default="access_code")
+    requested_join_code = models.CharField(max_length=24, null=True, blank=True)
     business_line = models.ForeignKey(
         "spaces.BusinessLine", on_delete=models.PROTECT, related_name="create_request_details"
     )

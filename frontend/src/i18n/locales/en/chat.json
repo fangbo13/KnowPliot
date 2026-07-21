@@ -3,6 +3,8 @@
   "welcome_message": "Hi! I'm your KnowPilot assistant. How can I help you today?",
   "placeholder": "Type your question here...",
   "send": "Send",
+  "hint_send": "send",
+  "hint_newline": "newline",
   "thinking": "Thinking...",
   "thinking_connecting": "Thinking...",
   "thinking_searching": "Searching knowledge base...",

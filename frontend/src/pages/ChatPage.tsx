@@ -15,28 +15,10 @@ import WelcomeScreen from '../components/chat/WelcomeScreen';
 import ChatComposer from '../components/chat/ChatComposer';
 import { chatApi } from '../api/chat';
 import { useAuthorization } from '../auth/CapabilityProvider';
-import { DEEP_ANSWER_MODE_ENABLED } from '../auth/authorization';
-import * as authorizationFlags from '../auth/authorization';
 import { notify } from '../utils/notifications';
 
 const VirtualizedMessageList = lazy(() => import('../components/chat/VirtualizedMessageList'));
 const ProcessingPanel = lazy(() => import('../components/chat/ProcessingPanel'));
-
-function isThinkingBuildEnabled(): boolean {
-  const envFlag = (import.meta as ImportMeta & {
-    env?: Record<string, string | undefined>;
-  }).env?.VITE_THINKING_MODE === 'true';
-  if (envFlag) return true;
-  // Prefer the shared build-time constant when available.  The guarded access
-  // keeps older compatibility mocks (which predate Thinking) fail-closed.
-  try {
-    const configured = (authorizationFlags as { THINKING_MODE_ENABLED?: unknown }).THINKING_MODE_ENABLED;
-    if (typeof configured === 'boolean') return configured;
-  } catch {
-    // A partial module adapter may throw for an unknown named export.
-  }
-  return false;
-}
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -65,13 +47,10 @@ export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
   const authorization = useAuthorization();
   const canShare = authorization.has('chat.share');
-  const canUseDeep = DEEP_ANSWER_MODE_ENABLED
-    && authorization.enabled
-    && authorization.has('chat.deep');
-  const thinkingBuildEnabled = isThinkingBuildEnabled();
-  const canUseThinking = thinkingBuildEnabled
-    && authorization.snapshot?.feature_availability?.thinking === true
-    && authorization.has('chat.thinking');
+  // Always show DEEP and Thinking buttons — the server gracefully falls back
+  // to a safe policy if a mode is unavailable, so users can always try.
+  const canUseDeep = true;
+  const canUseThinking = true;
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
@@ -297,7 +276,7 @@ export default function ChatPageContainer() {
       <div className="chat-view">
         <WelcomeScreen
           onQuickAction={handleQuickAction}
-          onSendMessage={(m) => sendMessage(m)}
+          onSendMessage={(m, opts) => sendMessage(m, { answerMode: opts?.answerMode ?? 'fast', ...(opts?.thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}), canUseDeep: true })}
           templateQuickQuestions={templateQuickQuestions}
         />
         <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>

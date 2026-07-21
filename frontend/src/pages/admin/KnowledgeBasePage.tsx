@@ -5,12 +5,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Upload, message, Modal } from 'antd';
+import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag } from 'antd';
 import {
   InboxOutlined,
   DownloadOutlined,
   ReloadOutlined,
   UploadOutlined,
+  EditOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -31,15 +33,16 @@ interface Document {
   created_at: string;
 }
 
+// Bug#6/#21: theme-aware tag colours via CSS variables (auto dark-mode adaptation)
 const tagStyleMap: Record<string, { bg: string; text: string; border: string }> = {
-  active: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-  processing: { bg: '#EAF2FD', text: '#1A56DB', border: '#D0E1FD' },
-  failed: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
-  draft: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
-  uploading: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
-  expired: { bg: '#F3F4F6', text: '#9CA3AF', border: '#E5E7EB' },
-  stale: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
-  archived: { bg: '#F3F4F6', text: '#6B7280', border: '#E5E7EB' },
+  active: { bg: 'rgba(var(--color-success-rgb), 0.12)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.3)' },
+  processing: { bg: 'rgba(var(--color-accent-rgb), 0.12)', text: 'var(--color-accent)', border: 'rgba(var(--color-accent-rgb), 0.3)' },
+  failed: { bg: 'rgba(var(--color-error-rgb), 0.12)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.3)' },
+  draft: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border)' },
+  uploading: { bg: 'rgba(var(--color-warning-rgb), 0.12)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.3)' },
+  expired: { bg: 'var(--color-fill)', text: 'var(--color-text-tertiary)', border: 'var(--color-border-secondary)' },
+  stale: { bg: 'rgba(var(--color-warning-rgb), 0.12)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.3)' },
+  archived: { bg: 'var(--color-fill)', text: 'var(--color-text-tertiary)', border: 'var(--color-border)' },
 };
 
 export default function KnowledgeBasePage() {
@@ -51,6 +54,12 @@ export default function KnowledgeBasePage() {
   const canDownload = access.has('knowledge.download');
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
+  // Bug#21: tutorial banner + edit modal state
+  const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem('ey-kb-tutorial-dismissed'));
+  const [editTarget, setEditTarget] = useState<{ id: string; title: string; category?: string } | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   const loadDocuments = useCallback(async () => {
     if (!canRead) return;
@@ -113,6 +122,33 @@ export default function KnowledgeBasePage() {
     } catch {
       message.error(t('download_error'));
     }
+  };
+
+  // Bug#21: edit document metadata
+  const handleEditOpen = (record: Document) => {
+    setEditTarget({ id: record.id, title: record.title, category: record.category_name });
+    setEditTitle(record.title);
+    setEditCategory(record.category_name || '');
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setEditSaving(true);
+    try {
+      await documentApi.updateDocument(editTarget.id, { title: editTitle, category_name: editCategory });
+      message.success(t('kb_update_success'));
+      setEditTarget(null);
+      loadDocuments();
+    } catch {
+      message.error(t('kb_update_failed'));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const dismissTutorial = () => {
+    localStorage.setItem('ey-kb-tutorial-dismissed', 'true');
+    setShowTutorial(false);
   };
 
   const confirmArchive = (id: string, title: string) => {
@@ -221,6 +257,17 @@ export default function KnowledgeBasePage() {
           {canManage && (
             <Button
               size="small"
+              icon={<EditOutlined />}
+              onClick={() => handleEditOpen(record)}
+              disabled={record.status === 'archived'}
+              aria-label={t('kb_edit')}
+              title={t('kb_edit')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canManage && (
+            <Button
+              size="small"
               icon={<InboxOutlined />}
               onClick={() => confirmArchive(record.id, record.title)}
               disabled={record.status === 'archived'}
@@ -281,11 +328,34 @@ export default function KnowledgeBasePage() {
                   </Button>
                 </Upload>
               )}
+              {canManage && (
+                <Tag icon={<FileTextOutlined />} style={{ borderRadius: 6, border: '1px solid rgba(var(--color-accent-rgb), 0.3)', background: 'rgba(var(--color-accent-rgb), 0.08)', color: 'var(--color-accent)' }}>
+                  {t('kb_md_recommended')}
+                </Tag>
+              )}
               <Button icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={loadDocuments} style={{ borderRadius: 8 }} className="btn-press">
                 {t('refresh')}
               </Button>
             </Space>
           </div>
+
+          {showTutorial && canManage && (
+            <Alert
+              type="info"
+              showIcon
+              icon={<FileTextOutlined />}
+              message={t('kb_upload_tutorial_title')}
+              description={t('kb_upload_tutorial_desc')}
+              closable
+              onClose={dismissTutorial}
+              action={
+                <button className="msg-action-btn" onClick={dismissTutorial} style={{ whiteSpace: 'nowrap' }}>
+                  {t('kb_upload_tutorial_dismiss')}
+                </button>
+              }
+              style={{ marginBottom: 16 }}
+            />
+          )}
 
           <Table
             columns={columns}
@@ -304,6 +374,27 @@ export default function KnowledgeBasePage() {
             }}
           />
         </Card>
+
+        {editTarget && (
+          <Modal
+            open
+            title={t('kb_edit_title')}
+            okText={t('kb_save')}
+            cancelText={t('kb_cancel')}
+            confirmLoading={editSaving}
+            onOk={handleEditSave}
+            onCancel={() => setEditTarget(null)}
+          >
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>{t('kb_document_title')}</label>
+              <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('kb_document_title')} />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>{t('kb_document_category')}</label>
+              <Input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} placeholder={t('kb_document_category')} />
+            </div>
+          </Modal>
+        )}
       </div>
     </div>
   );

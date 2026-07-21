@@ -204,6 +204,13 @@ class KnowledgeSpace(models.Model):
         ("organization", "Organization Shared"),
         ("public_demo", "Public Demo"),
     ]
+    # Simplified join policy — two-choice model (spec §2).
+    JOIN_POLICY_ACCESS_CODE = "access_code"
+    JOIN_POLICY_GLOBAL = "global"
+    JOIN_POLICY_CHOICES = [
+        (JOIN_POLICY_ACCESS_CODE, "Access Code"),
+        (JOIN_POLICY_GLOBAL, "Global Visible"),
+    ]
     STATUS_CHOICES = [("active", "Active"), ("archived", "Archived")]
     PROVISIONING_STATUS_CHOICES = [
         ("provisioning", "Provisioning"),
@@ -254,6 +261,27 @@ class KnowledgeSpace(models.Model):
     visibility = models.CharField(
         max_length=20, choices=VISIBILITY_CHOICES, default="private"
     )
+    # Simplified join policy (spec §3.1): two-choice model replaces the
+    # four-level visibility for creation/join decisions.  visibility is
+    # retained for backward-compatible authorization logic.
+    join_policy = models.CharField(
+        max_length=20,
+        choices=JOIN_POLICY_CHOICES,
+        default=JOIN_POLICY_ACCESS_CODE,
+        help_text="Determines how new users discover and join this workspace.",
+    )
+    join_code = models.CharField(
+        max_length=24,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Human-readable unique join code. Required when join_policy=access_code.",
+    )
+    allow_member_invite = models.BooleanField(
+        default=True,
+        help_text="Whether non-owner members can invite new users.",
+    )
+    join_code_updated_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     provisioning_status = models.CharField(
         max_length=20,
@@ -329,6 +357,14 @@ class KnowledgeSpace(models.Model):
                 ),
                 name="spaces_storage_manifest_shape",
             ),
+            # Spec §3.1: join_code required when join_policy=access_code.
+            models.CheckConstraint(
+                check=(
+                    ~Q(join_policy="access_code")
+                    | Q(join_code__isnull=False)
+                ),
+                name="spaces_join_code_required_for_access_code",
+            ),
         ]
         indexes = [
             models.Index(
@@ -340,6 +376,11 @@ class KnowledgeSpace(models.Model):
                 name="spaces_bl_class_state",
             ),
             models.Index(fields=["work_group"], name="spaces_work_group_idx"),
+            # Spec §3.1: index for discoverable-space filtering.
+            models.Index(
+                fields=["join_policy", "status"],
+                name="spaces_join_policy_status",
+            ),
         ]
 
     def __str__(self):
@@ -484,12 +525,16 @@ class SpaceMembership(models.Model):
     SOURCE_ACCESS_REQUEST = "access_request"
     SOURCE_INVITATION = "invitation"
     SOURCE_OWNERSHIP = "ownership"
+    SOURCE_JOIN_CODE = "join_code"
+    SOURCE_DISCOVERY = "discovery"
     SOURCE_CHOICES = [
         (SOURCE_LEGACY, "Legacy"),
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_ACCESS_REQUEST, "Access Request"),
         (SOURCE_INVITATION, "Invitation"),
         (SOURCE_OWNERSHIP, "Ownership"),
+        (SOURCE_JOIN_CODE, "Join Code"),
+        (SOURCE_DISCOVERY, "Discovery"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

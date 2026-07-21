@@ -31,6 +31,8 @@ export interface WorkspaceCreationSubmission {
   code: string;
   purpose: string;
   visibility: 'private' | 'business_line' | 'organization' | 'public_demo';
+  join_policy: 'access_code' | 'global';
+  join_code?: string;
   business_line_id: string;
   work_group_id: string;
   office_location_ids: string[];

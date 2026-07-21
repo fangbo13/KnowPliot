@@ -13,6 +13,7 @@ import {
   Empty,
   Form,
   Input,
+  Radio,
   Select,
   Skeleton,
   Space,
@@ -169,6 +170,8 @@ export default function WorkspaceCreationPage() {
         name: values.name.trim(),
         code: values.code.trim().toLowerCase(),
         purpose: values.purpose.trim(),
+        visibility: values.join_policy === 'global' ? 'organization' : 'private',
+        join_code: values.join_code?.trim() || undefined,
         template_version_id: values.template_version_id || null,
       }, controller.signal);
       if (controller.signal.aborted) return;
@@ -245,7 +248,7 @@ export default function WorkspaceCreationPage() {
           <Form<WorkspaceCreationSubmission>
             form={form}
             layout="vertical"
-            initialValues={{ visibility: 'private', office_location_ids: [], template_version_id: null }}
+            initialValues={{ visibility: 'private', join_policy: 'access_code', office_location_ids: [], template_version_id: null }}
             onFinish={(values) => void submit(values)}
             requiredMark="optional"
           >
@@ -271,13 +274,24 @@ export default function WorkspaceCreationPage() {
               <Form.Item name="office_location_ids" label="办公地点" rules={[{ required: true, type: 'array', min: 1, message: '至少选择一个办公地点' }]}>
                 <Select mode="multiple" loading={dependentLoading} disabled={!offices.length} placeholder="至少选择一个地点" options={offices.map((item) => ({ value: item.id, label: item.display_name }))} />
               </Form.Item>
-              <Form.Item name="visibility" label="可见范围" rules={[{ required: true }]}>
-                <Select options={[
-                  { value: 'private', label: '私有' },
-                  { value: 'business_line', label: '业务线可见' },
-                  { value: 'organization', label: '组织可见' },
-                  { value: 'public_demo', label: '公开演示' },
-                ]} />
+              <Form.Item className="kp-creation-span" name="join_policy" label="加入策略" rules={[{ required: true }]} tooltip="选择空间的加入方式。邀请码模式下空间不可被发现，成员需凭码加入；全局可见模式下空间在发现页展示，用户可直接加入。">
+                <Radio.Group>
+                  <Space direction="vertical">
+                    <Radio value="access_code">邀请码加入 — 空间隐藏，凭加入码加入</Radio>
+                    <Radio value="global">全局可见 — 在发现页展示，用户可直接加入</Radio>
+                  </Space>
+                </Radio.Group>
+              </Form.Item>
+              <Form.Item className="kp-creation-span" shouldUpdate={(prev, curr) => prev.join_policy !== curr.join_policy}>
+                {({ getFieldValue }) => (
+                  getFieldValue('join_policy') === 'access_code' ? (
+                    <Form.Item name="join_code" label="加入码" extra="留空则系统自动生成。可自定义 4-20 位字母、数字和连字符的加入码。" rules={[{ max: 24 }]}>
+                      <Input placeholder="留空自动生成，如 KP-AB12CD" autoComplete="off" />
+                    </Form.Item>
+                  ) : (
+                    <Alert type="info" showIcon message="全局可见空间将出现在发现页，任何已认证用户均可直接加入。" style={{ marginBottom: 24 }} />
+                  )
+                )}
               </Form.Item>
               <Form.Item className="kp-creation-span" name="purpose" label="用途说明" rules={[{ required: true }, { min: 8 }, { max: 2000 }]}>
                 <Input.TextArea rows={4} showCount maxLength={2000} placeholder="说明知识边界、目标使用者和预期价值。" />

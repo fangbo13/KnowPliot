@@ -22,5 +22,27 @@ DATABASES = {  # noqa: F405
     }
 }
 
+# Override Redis-backed cache with local memory cache for local dev
+# (avoids requiring a Redis server when running outside Docker)
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "knowpilot-dev",
+    }
+}
+
+# Disable Celery broker Redis URL for local dev (tasks run synchronously)
+CELERY_BROKER_URL = "memory://"
+CELERY_RESULT_BACKEND = "cache+memcached://"
+
+# Override chat coordination Redis URL — use a no-op/empty string so any direct
+# Redis import falls back to synchronous mode instead of connecting to docker hostname
+CHAT_COORDINATION_REDIS_URL = ""
+
+# Clear Redis env vars to prevent any code reading os.environ directly
+import os as _os
+_os.environ["REDIS_URL"] = ""
+_os.environ["RATE_LIMIT_REDIS_URL"] = ""
+
 # Disable pgvector for SQLite dev mode
 # The pgvector field will be stored as JSON in SQLite

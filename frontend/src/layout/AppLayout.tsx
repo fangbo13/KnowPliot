@@ -13,7 +13,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
   PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
-  CompassOutlined,
+  CompassOutlined, ArrowLeftOutlined,
 } from '@ant-design/icons';
 import { lazy, Suspense, useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../auth/AuthProvider';
@@ -51,15 +51,15 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const access = useAuthorization();
   const navigate = useNavigate();
+  const { t } = useTranslation('common');
   const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
   const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
-  const managementEntries = buildManagementEntries(access, activeSpaceId);
+  const managementEntries = buildManagementEntries(access, activeSpaceId, t);
   const canAsk = access.has('chat.ask');
   const canUseHistory = access.has('chat.history');
   const canExport = access.has('chat.export');
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
-  const { t } = useTranslation('common');
   const [shellEnhancementsReady, setShellEnhancementsReady] = useState(false);
 
   // The route and composer are interactive after the first commit. Secondary
@@ -81,10 +81,17 @@ export default function AppLayout() {
   const debouncedSidebarSearch = useDebounce(sidebarSearch, 300);
   const bp = useBreakpoint();
   const isMobile = bp.sm;
+  const isTablet = bp.md && !bp.sm; // 768–1024px
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('ey-sidebar-collapsed') === 'true');
   useEffect(() => { localStorage.setItem('ey-sidebar-collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
+  // Auto-collapse sidebar when entering tablet range to maximise content area.
+  // The user can still expand it via the toggle button; this only fires on the
+  // desktop→tablet transition (isTablet changes), not on every re-render.
+  useEffect(() => {
+    if (isTablet) setSidebarCollapsed(true);
+  }, [isTablet]);
   const toggleSidebarCollapsed = useCallback(() => setSidebarCollapsed((p) => !p), []);
 
   const [onboardingVisible, setOnboardingVisible] = useState(() => !localStorage.getItem('ey-onboarding-seen'));
@@ -451,6 +458,7 @@ export default function AppLayout() {
             <button className="icon-btn" title={t('expand_sidebar') || 'Expand sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('expand_sidebar') || 'Expand sidebar'}><MenuUnfoldOutlined /></button>
           )}
           {isMobile && <button className="icon-btn" onClick={() => setMobileDrawerOpen(true)} aria-label={t('mobile_menu') || 'Open menu'}><MenuOutlined /></button>}
+          <button className="icon-btn" title={t('go_back') || 'Go back'} onClick={() => navigate(-1)} aria-label={t('go_back') || 'Go back'}><ArrowLeftOutlined /></button>
           <button className="icon-btn" title="⌘K" onClick={() => setCmdkOpen(true)} aria-label={t('cmdk_placeholder', { defaultValue: 'Search' })}><SearchOutlined /></button>
 
           <span className="spacer" />
@@ -466,7 +474,7 @@ export default function AppLayout() {
           <details className="header-menu">
             <summary className="icon-btn" aria-label={t('user_menu') || 'User menu'} style={{ width: 'auto', gap: 8, padding: '0 8px' }}>
               <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>
-              {!isMobile && <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>}
+              {!isMobile && !isTablet && <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>}
             </summary>
             <div className="menu-pop header-menu-pop">{renderMenuItems(userMenu.items)}</div>
           </details>

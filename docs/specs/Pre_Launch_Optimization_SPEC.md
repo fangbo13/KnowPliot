@@ -1,52 +1,71 @@
 # KnowPilot 上线前优化 SPEC（功能 + UI + 并发）
 
-> **版本**: v1.0  
+> **版本**: v2.0  
 > **日期**: 2026-07-22  
 > **分支**: `test/pre-launch-audit-2026-07-22`  
 > **状态**: 设计稿（待实施）  
-> **测试方法**: 真人视角浏览器操作 + DOM 验证 + 多分辨率响应式测试 + 深色模式对比度审计
+> **测试方法**: 真人视角浏览器操作 + DOM 验证 + 多分辨率响应式测试 + 深色模式对比度审计 + API 级联测试 + 后端配置审计  
+> **测试角色**: 上线前测试专家 / 人机交互 UI 专家 / 高并发架构专家  
 
 ---
 
 ## 一、测试结果总览
 
-### 已验证通过的功能（✅）
+### 1.1 已验证通过的功能（✅）
 
-| Bug # | 功能 | 验证结果 |
-|-------|------|----------|
-| #1 | 通知面板关闭按钮 | ✅ 存在"关闭"按钮 |
-| #3 | Profile 安全页面 | ✅ MFA disabled + "暂未上线" + 安全保证消息 + Office Location 必填 |
-| #4 | Fast/Deep/Thinking 按钮 | ✅ 三个按钮均可见且可切换 |
-| #5 | Profile 布局压缩 | ✅ 4列紧凑布局 |
-| #8 | i18n 中文翻译 | ✅ 手动切换后所有文本均为中文 |
-| #9 | 所有权转让 | ✅ 单个转让 + 批量转让均已实现 |
-| #10 | 移除 effective answer | ✅ 无 legacy 文本显示 |
-| #11 | 管理入口权限控制 | ✅ 管理控制台入口仅管理员可见 |
-| #13 | 成员角色默认 member | ✅ 无 guest 选项 |
-| #14 | 空间管理页面加载 | ✅ 正常加载，无 Failed to load data |
-| #16 | 返回按钮 | ✅ 页面顶部存在"返回"按钮 |
-| #18 | 响应式布局 | ✅ 768px/375px 自适应 |
-| #20 | 空间切换成功提示 | ✅ 显示"Space switched successfully" |
-| #21 | 知识库上传功能 | ✅ 上传按钮 + MD推荐 + 上传指南 + "不再提示"按钮 |
+| Bug # | 功能 | 验证结果 | 验证方式 |
+|-------|------|----------|----------|
+| #1 | 通知面板关闭按钮 | ✅ 存在"关闭"按钮 | 浏览器点击通知铃铛 → 面板展开 → Close 按钮可见 |
+| #2 | 通知实时性双账号测试 | ✅ Admin 创建公告 → 新注册用户未读数 3，feed 包含公告 | API POST /api/v1/notifications/announcements/ → 新用户 GET /api/v1/notifications/feed/ |
+| #3 | Profile 安全页面 | ✅ MFA disabled + "暂未上线" + 安全保证消息 + Office Location 必填(*) | 浏览器导航 Profile → 截图验证 |
+| #4 | Fast/Deep/Thinking 按钮 | ✅ 三个按钮均可见且可切换 | Chat 页面 DOM 验证：Fast(pressed), Deep, Thinking(switch) |
+| #5 | Profile 布局压缩 | ✅ 4列紧凑布局（Account Info + Preferences + Security） | 截图 23/24 验证 |
+| #8 | i18n 中文翻译 | ✅ 手动切换后所有文本均为中文 | 浏览器语言切换测试 |
+| #9 | 所有权转让 | ✅ 单个转让 + 批量转让均已实现 | Space Management 页面验证 |
+| #10 | 移除 effective answer | ✅ 无 legacy 文本显示 | Chat 页面 DOM 检查 |
+| #11 | 管理入口权限控制 | ✅ 管理控制台入口仅管理员可见（8个管理入口） | Admin vs 普通用户对比验证 |
+| #13 | 成员角色默认 member | ✅ 无 guest 选项 | Space Management 验证 |
+| #14 | 空间管理页面加载 | ✅ 正常加载，无 Failed to load data | 浏览器操作验证 |
+| #16 | 返回按钮 | ✅ 页面顶部存在"返回"按钮 | 浏览器导航验证 |
+| #18 | 响应式布局 | ✅ 768px/375px 自适应（侧边栏折叠为汉堡按钮） | resize_page 375px → 截图 25 验证 |
+| #20 | 空间切换成功提示 | ✅ 显示"Space switched successfully" toast | 浏览器操作验证 |
+| #21 | 知识库上传 UI | ✅ 上传按钮 + MD推荐 + 上传指南 + "不再提示"按钮 + 文档操作(Download/Reindex/Edit/Archive) | Knowledge Base 页面截图 26/27 验证 |
 
-### 发现的新问题（⚠️ 需优化）
+### 1.2 发现的新问题（⚠️ 需优化）
 
-| 编号 | 问题描述 | 严重度 |
-|------|----------|--------|
-| F-01 | i18n 语言不持久化：页面导航后语言重置为英文 | 高 |
-| F-02 | AuthProvider 不同步 user.language_preference 到 i18n | 高 |
-| F-03 | SpaceSwitcher 无搜索框，超过10个空间时无滚动条 | 中 |
-| F-04 | 知识库文档列表为空时缺少引导教程 | 中 |
-| F-05 | 登录页演示账户显示 admin@test.ey.com 但实际应为 admin@ey.com | 低 |
-| UI-01 | 深色模式下 Ant Design Badge 组件文字为黑色 rgba(0,0,0,0.88)，对比度不足 | 高 |
-| UI-02 | 通知面板风格与前端设计系统不完全统一 | 中 |
-| UI-03 | Profile 页面偏好设置区域布局可进一步优化 | 低 |
-| UI-04 | 移动端 SpaceSwitcher 在抽屉中的交互体验待优化 | 中 |
-| C-01 | 后端 API 无速率限制，存在并发安全风险 | 高 |
-| C-02 | 通知系统无 WebSocket/SSE 实时推送，依赖轮询 | 高 |
-| C-03 | SQLite 数据库无法支撑高并发写入 | 高 |
-| C-04 | 缺少 Redis 缓存层用于热点数据 | 中 |
-| C-05 | 无连接池配置，数据库连接开销大 | 中 |
+#### 功能问题
+
+| 编号 | 问题描述 | 严重度 | 根因 |
+|------|----------|--------|------|
+| F-01 | i18n 语言不持久化：页面导航后语言重置为英文 | 高 | AuthProvider 未同步 user.language_preference 到 i18n |
+| F-02 | AuthProvider 不同步 user.language_preference 到 i18n | 高 | 缺少 useEffect 监听 |
+| F-03 | SpaceSwitcher 无搜索框，超过10个空间时无滚动条 | 中 | 下拉菜单未设 maxHeight |
+| F-04 | 知识库文档列表为空时缺少引导教程 | 中 | 无空状态组件 |
+| F-05 | 登录页演示账户显示 admin@test.ey.com 但实际应为 admin@ey.com | 低 | 硬编码文本错误 |
+| **F-06** | **axios 客户端默认 Content-Type: application/json，导致 FormData 上传失败** | **高** | `client.ts` 第164-165行硬编码 `'Content-Type': 'application/json'`，请求拦截器未检查 data 是否为 FormData |
+| **F-07** | **知识库文档上传后后端返回 500 错误，文档状态为 Failed，chunks=0** | **高** | 后端文档解析管线在开发环境(SQLite + 无 pgvector)下异常 |
+
+#### UI 问题
+
+| 编号 | 问题描述 | 严重度 | 根因 |
+|------|----------|--------|------|
+| UI-01 | 深色模式下 Ant Design Badge 组件文字为黑色 rgba(0,0,0,0.88)，对比度不足 | 高 | Badge 组件内部硬编码颜色，未响应 CSS 变量主题切换 |
+| UI-02 | 通知面板风格与前端设计系统不完全统一 | 中 | 未完全使用 design tokens |
+| UI-03 | Profile 页面偏好设置区域布局可进一步优化 | 低 | 整行排版信息密度低 |
+| UI-04 | 移动端 SpaceSwitcher 在抽屉中的交互体验待优化 | 中 | 触摸目标偏小 |
+
+#### 并发问题（经后端配置审计修正）
+
+| 编号 | 问题描述 | 严重度 | 修正说明 |
+|------|----------|--------|----------|
+| ~~C-01~~ | ~~后端 API 无速率限制~~ | ~~高~~ | **修正：base.py 已配置7种限流策略** — AuthenticatedReadSustained(240/min), AuthenticatedReadBurst(60/10s), AuthenticatedMutation(30/min), Anon(100/min), document_upload(10/min), batch_upload(3/min), signup(5/min)。但需优化限流粒度和告警机制 |
+| C-02 | 通知系统无 WebSocket/SSE 实时推送，依赖轮询 | 高 | 仍有效：通知系统仍依赖轮询获取未读数 |
+| ~~C-03~~ | ~~SQLite 数据库无法支撑高并发写入~~ | ~~高~~ | **修正：base.py 生产环境已配置 PostgreSQL**（CONN_MAX_AGE=60, CONN_HEALTH_CHECKS=True）。dev.py 覆盖为 SQLite 用于本地开发。问题是 Docker 部署需验证 PostgreSQL 实际生效 |
+| ~~C-04~~ | ~~缺少 Redis 缓存层~~ | ~~中~~ | **修正：base.py 已配置 RedisCache**（LOCATION=RATE_LIMIT_REDIS_URL）。dev.py 覆盖为 LocMemCache。但缓存策略（哪些数据缓存、TTL、失效策略）仍需完善 |
+| ~~C-05~~ | ~~无连接池配置~~ | ~~中~~ | **修正：已有 CONN_MAX_AGE=60 + CONN_HEALTH_CHECKS=True**。但未使用 PgBouncer 等中间件连接池，CONN_MAX_AGE 仅是 Django 级别的连接复用 |
+| **C-06** | **开发环境与生产环境配置差异大，需确保 Docker 部署时使用 production settings** | **高** | dev.py 覆盖了 PostgreSQL→SQLite、RedisCache→LocMemCache、Celery→memory://，生产部署需确认 DJANGO_SETTINGS_MODULE 指向 production |
+| **C-07** | **Celery Beat 已配置 notification-action-outbox-sweep 定时任务，但开发环境为同步执行** | **中** | dev.py 设 CELERY_BROKER_URL="memory://"，开发环境 Celery 任务同步执行，可能掩盖异步任务中的竞态条件 |
+| **C-08** | **CHAT_TURN_IDEMPOTENCY 默认 False，高并发下可能产生重复消息** | **中** | base.py 第263行 `CHAT_TURN_IDEMPOTENCY = env_bool("CHAT_TURN_IDEMPOTENCY", default=False)` |
 
 ---
 
@@ -128,9 +147,9 @@
 - 教程弹窗可正常打开和关闭
 - "不再提示"设置在页面刷新后保持
 
-### 2.4 通知系统实时性增强（C-02, Bug #2）
+### 2.4 通知系统实时性增强（C-02, Bug #2 补充）
 
-**问题**: 通知系统依赖轮询，无实时推送机制。
+**问题**: 通知系统依赖轮询，无实时推送机制。测试中已验证通知数据可达（API 创建公告后新用户可查到），但客户端无实时推送。
 
 **方案**:
 
@@ -174,6 +193,78 @@
 
 **涉及文件**: `frontend/src/auth/LoginPage.tsx`
 
+### 2.6 axios 客户端 FormData 修复（F-06, Bug #21 根因）⚠️ 关键
+
+**问题**: `frontend/src/api/client.ts` 第162-167行创建 axios 实例时硬编码 `headers: { 'Content-Type': 'application/json' }`。请求拦截器（第170-189行）添加 auth token 和 X-Space-Id 但未检查请求 data 是否为 FormData。
+
+**影响**: 当上传文件时，axios 会将 FormData 序列化为 JSON 而非 multipart/form-data，导致后端无法正确解析文件内容，返回 400 或 500 错误。
+
+**方案**:
+
+```typescript
+// client.ts 请求拦截器修改：
+apiClient.interceptors.request.use((config) => {
+  // ... existing auth token + space ID logic ...
+
+  // 关键修复：当 data 为 FormData 时，移除默认 Content-Type
+  // 让浏览器自动设置 multipart/form-data + boundary
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+    delete config.headers.common?.['Content-Type'];
+  }
+
+  return config;
+});
+```
+
+**涉及文件**:
+- `frontend/src/api/client.ts` — 请求拦截器增加 FormData 检测
+
+**验收标准**:
+- 上传 MD 文件时请求 Content-Type 为 `multipart/form-data; boundary=...`
+- 后端正确解析文件并创建文档记录
+- 非 FormData 请求仍保持 `application/json`
+
+### 2.7 知识库文档解析管线修复（F-07, Bug #21 后端）⚠️ 关键
+
+**问题**: 知识库文档上传后（即使 Content-Type 问题修复后），后端文档解析返回 500 错误，文档状态为 "Failed"，chunks=0。
+
+**根因分析**:
+- 生产环境依赖 pgvector（PostgreSQL 向量扩展）进行语义检索
+- 开发环境（dev.py）使用 SQLite，pgvector 字段存储为 JSON
+- 文档解析管线可能在 SQLite + 无 pgvector 环境下异常
+- 需排查 `apps/knowledge/` 下的文档分块 + 向量索引逻辑
+
+**方案**:
+
+```
+1. 在开发环境增加 pgvector 兼容降级：
+   a. 检测数据库引擎，SQLite 时跳过向量索引步骤
+   b. 仅存储文本分块，不执行向量嵌入
+   c. 文档状态标记为 "Indexed (text only)" 而非 "Failed"
+
+2. 增加文档解析错误处理：
+   a. 解析失败时记录详细错误日志（当前可能静默失败）
+   b. 文档状态从 "Processing" → "Failed" 时附带错误原因
+   c. 前端展示错误原因（而非仅 "Failed" 标签）
+
+3. 验证 Docker 部署时：
+   a. 确认 PostgreSQL 启动并启用 pgvector 扩展
+   b. 确认 Celery worker 正常消费 knowledge 队列
+   c. 确认 Redis 用于 Celery broker 和缓存
+```
+
+**涉及文件**:
+- `backend/apps/knowledge/tasks.py` — 文档解析异步任务
+- `backend/apps/knowledge/models.py` — 文档状态字段增加 error_reason
+- `backend/apps/knowledge/views.py` — 上传错误处理
+- `frontend/src/pages/admin/KnowledgeBasePage.tsx` — 展示错误原因
+
+**验收标准**:
+- 开发环境上传 MD 文件后文档状态为 "Indexed" 或 "Indexed (text only)"
+- 解析失败时前端显示具体错误原因
+- Docker 部署时完整解析管线正常工作
+
 ---
 
 ## 三、UI 优化 SPEC
@@ -205,7 +296,7 @@
 
 3. 为每个组件增加 [data-theme="dark"] 覆盖样式，使用 design tokens 中的颜色变量
 
-4. 验证 WCAG 2.1 AA 对比度标准（≥ 4.5:1 对正文文本，≥ 3:1 对大文本）
+4. 验证 WCAG 2.1 AA 对比度标准（≥ 4.5:1 对正文文本，≥ 3:0 对大文本）
 ```
 
 **涉及文件**:
@@ -258,7 +349,7 @@
 
 ### 3.3 Profile 页面布局优化（UI-03, Bug #5 补充）
 
-**问题**: Profile 页面偏好设置区域布局仍有优化空间。
+**问题**: Profile 页面偏好设置区域布局仍有优化空间，整行排版信息密度低。
 
 **方案**:
 
@@ -335,104 +426,112 @@
 
 ## 四、并发优化 SPEC
 
-### 4.1 API 速率限制（C-01）
+### 4.1 限流策略优化（C-01 修正）
 
-**问题**: 后端 API 无速率限制，存在并发安全和滥用风险。
+**现状**: base.py 已配置7种限流策略，覆盖导航读取、变更操作、匿名访问、文档上传、批量上传、注册。
 
-**方案**:
+**仍需优化**:
 
 ```
-1. 使用 django-ratelimit 库实现 API 速率限制
-2. 限制策略：
-   - 认证端点: 5 次/分钟（登录、注册、密码重置）
-   - 聊天端点: 20 次/分钟（发送消息）
-   - 知识库上传: 10 次/分钟
-   - 空间操作: 30 次/分钟
-   - 通用读取: 60 次/分钟
-3. 基于 IP + User ID 双维度限流
-4. 超出限制返回 429 Too Many Requests + Retry-After 头
-5. Redis 作为限流计数器存储（如 Redis 不可用，降级为内存计数）
+1. 限流粒度优化：
+   a. 当前 navigation_read_burst 为 60/10s，高并发场景下可能误伤正常用户
+   b. 建议增加 user-tier 限流：管理员 500/min，普通用户 240/min
+   c. 增加基于 API 端点的精细化限流（如 chat 端点单独限流）
+
+2. 限流告警：
+   a. 当用户触发限流时记录到审计日志
+   b. 连续触发限流3次以上的用户自动标记为可疑
+   c. 管理员 Dashboard 展示限流统计
+
+3. 限流降级策略：
+   a. Redis 不可用时降级为内存限流（已有 LocMemCache）
+   b. 降级时日志告警 "Rate limiting degraded to in-memory"
 ```
 
 **涉及文件**:
-- `backend/config/settings/base.py` — 安装 django-ratelimit
-- `backend/apps/core/middleware.py` — 全局限流中间件
-- `backend/apps/auth/views.py` — 认证端点限流
-- `backend/apps/chat/views.py` — 聊天端点限流
+- `backend/apps/core/throttling.py` — 增加 tier-based 限流
+- `backend/apps/audit/views.py` — 限流审计日志
 
 **验收标准**:
-- 超出限制返回 429
-- 限流计数准确（并发请求不漏计）
-- 正常使用不受影响
+- 限流不影响正常用户操作
+- 限流触发有审计记录
+- Redis 降级时限流仍生效
 
 ### 4.2 SSE 实时通知推送（C-02）
 
 详见 2.4 节功能优化 SPEC。
 
-### 4.3 数据库并发优化（C-03）
+### 4.3 生产环境数据库验证与优化（C-03 修正）
 
-**问题**: SQLite 数据库在并发写入时存在锁竞争，无法支撑高并发场景。
+**现状**: base.py 已配置 PostgreSQL（CONN_MAX_AGE=60, CONN_HEALTH_CHECKS=True），dev.py 覆盖为 SQLite。
 
-**方案**:
+**仍需优化**:
 
 ```
-阶段 A（当前 — SQLite 优化）:
-1. 启用 WAL 模式: PRAGMA journal_mode=WAL
-2. 设置 busy_timeout: 5000ms
-3. 优化连接配置: settings/database.py 中 CONN_MAX_AGE=60
-4. 对只读查询使用 @database_readonly 装饰器路由到只读连接
+1. 创建 production.py settings 确保生产环境使用 PostgreSQL：
+   a. 不继承 dev.py 的 SQLite 覆盖
+   b. 启用 pgvector 扩展
+   c. 增加 PostgreSQL 连接池优化参数
 
-阶段 B（上线前 — PostgreSQL 迁移）:
-1. 使用 PostgreSQL 15+ 作为生产数据库
-2. 配置连接池:
-   - DATABASES 配置使用 django-db-connection-pool
-   - 最大连接数: 20
-   - 最小空闲连接: 5
-   - 连接超时: 30s
-3. 创建以下索引（如不存在）:
+2. Docker 部署验证清单：
+   a. docker-compose.yml 中 PostgreSQL 服务正常启动
+   b. pgvector 扩展已安装（CREATE EXTENSION vector）
+   c. DJANGO_SETTINGS_MODULE 指向 production settings
+   d. 数据库迁移正常执行
+   e. CONN_MAX_AGE=60 生效（验证连接复用）
+
+3. 数据库索引优化（验证或创建）：
    - spaces_membership (user_id, space_id) 复合索引
    - notifications (user_id, read, created_at) 复合索引
    - chat_session (space_id, user_id, updated_at) 复合索引
-4. 配置 PostgreSQL pgBouncer 作为连接池中间件
+   - knowledge_document (space_id, status, created_at) 复合索引
 ```
 
 **涉及文件**:
-- `backend/config/settings/base.py` — 数据库配置
-- `backend/config/settings/production.py` — 生产环境配置（新建）
+- `backend/config/settings/production.py` — 生产环境配置
+- `backend/docker-compose.yml` — PostgreSQL + Redis 服务配置
 
 **验收标准**:
+- Docker 部署使用 PostgreSQL + pgvector
 - 100 并发用户下无数据库锁错误
 - API 响应时间 P95 < 500ms
-- 数据库连接数稳定在配置范围内
 
-### 4.4 Redis 缓存层（C-04）
+### 4.4 Redis 缓存策略完善（C-04 修正）
 
-**问题**: 缺少缓存层，热点数据每次都从数据库读取。
+**现状**: base.py 已配置 RedisCache（LOCATION=RATE_LIMIT_REDIS_URL, KEY_PREFIX="knowpilot"），dev.py 覆盖为 LocMemCache。
 
-**方案**:
+**仍需完善**:
 
 ```
-1. Redis 缓存架构:
-   - 会话缓存: django-session-engine 使用 Redis
-   - API 响应缓存: 对 GET 请求结果缓存（TTL 60s）
-   - 知识库检索缓存: 向量检索结果缓存（TTL 300s）
-   - 用户权限缓存: AuthorizationAdapter 结果缓存（TTL 60s）
-   - 空间列表缓存: 用户空间列表缓存（TTL 120s）
+1. 业务缓存策略（当前仅限流使用 Redis）：
+   a. 用户权限缓存: AuthorizationAdapter 结果缓存（TTL 60s）
+      - key: kp:user:{id}:permissions
+      - 失效: 用户角色变更时清除
+   
+   b. 空间列表缓存: 用户空间列表缓存（TTL 120s）
+      - key: kp:user:{id}:spaces
+      - 失效: 加入/离开空间时清除
+   
+   c. 知识库检索缓存: 向量检索结果缓存（TTL 300s）
+      - key: kp:space:{id}:search:{query_hash}
+      - 失效: 文档上传/删除时清除
+   
+   d. API 响应缓存: GET 请求结果缓存（TTL 60s）
+      - 仅缓存幂等 GET 请求
+      - 不缓存包含用户特定数据的响应
 
-2. 缓存失效策略:
-   - 写操作自动失效相关缓存键
-   - 使用 cache key 前缀区分: "kp:user:{id}:*", "kp:space:{id}:*"
-   - 支持手动清除: management command `python manage.py clear_cache`
+2. 缓存失效策略：
+   a. 写操作（POST/PUT/PATCH/DELETE）自动清除相关缓存键
+   b. 使用 cache key pattern: "kp:user:{id}:*", "kp:space:{id}:*"
+   c. 支持 management command: python manage.py clear_cache --pattern="kp:user:*"
 
-3. Redis 配置:
-   - 使用 django-redis 库
-   - 连接池最大连接: 50
-   - 序列化: django.core.serializers.json.JSONSerializer
-   - 压缩: 启用 COMPRESS=1
+3. Redis 健康检查：
+   a. 增加健康检查端点 /api/v1/health/redis/
+   b. Redis 不可用时自动降级到 LocMemCache
+   c. 告警通知管理员
 ```
 
 **涉及文件**:
-- `backend/config/settings/base.py` — CACHES 配置
 - `backend/apps/core/cache.py` — 缓存工具类（新建）
 - `backend/apps/spaces/discovery.py` — 空间列表缓存
 - `backend/apps/auth/authorization.py` — 权限缓存
@@ -442,42 +541,120 @@
 - API 平均响应时间降低 50%
 - Redis 不可用时自动降级到直接查询
 
-### 4.5 异步任务队列（C-05 扩展）
+### 4.5 Celery 异步任务完善（C-07 新增）
 
-**问题**: 知识库文档解析、向量索引等耗时操作同步执行，阻塞 API 响应。
+**现状**: base.py 已配置 Celery + Redis broker，已有 notification-action-outbox-sweep 定时任务（60s 间隔）。dev.py 设 CELERY_BROKER_URL="memory://"，开发环境同步执行。
 
-**方案**:
+**仍需完善**:
 
 ```
-1. 使用 Celery + Redis 作为消息代理
-2. 异步任务清单:
-   - 知识库文档解析与分块（queue: "knowledge"）
-   - 向量索引构建（queue: "knowledge"）
-   - 通知批量发送（queue: "notification"）
-   - 用户邀请邮件发送（queue: "email"）
-   - 定时清理过期会话（queue: "maintenance"）
+1. 知识库异步任务（当前可能同步执行）：
+   a. 文档解析与分块 → queue: "knowledge"
+   b. 向量索引构建 → queue: "knowledge"
+   c. 上传完成后通过 SSE 通知前端
 
-3. 任务监控:
-   - Celery Flower 监控面板（仅管理员可访问）
-   - 任务失败自动重试（max_retries=3, retry_backoff=True）
-   - 长时间运行任务进度上报到 Redis（前端可查询进度）
+2. 通知批量发送异步化：
+   a. 广播通知到大量用户时使用 Celery 批量任务
+   b. 分批处理（每批 100 用户）
+   c. 失败自动重试（max_retries=3, retry_backoff=True）
 
-4. 前端轮询任务状态:
-   - 知识库上传后显示进度条
-   - 上传完成通知（通过 SSE 推送）
+3. 定时任务扩展：
+   a. 已有: notification-action-outbox-sweep (60s)
+   b. 新增: 过期会话清理 (每日)
+   c. 新增: 文档索引状态检查 (5min)
+   d. 新增: 缓存命中率统计上报 (5min)
+
+4. 开发环境异步测试：
+   a. 增加 Celery worker 本地启动脚本
+   b. 使用 Redis 作为本地 broker（而非 memory://）
+   c. 避免开发时掩盖竞态条件
+
+5. Celery Flower 监控：
+   a. 仅管理员可访问 /admin/celery-flower/
+   b. 展示任务队列、成功率、平均执行时间
 ```
 
 **涉及文件**:
-- `backend/config/celery.py` — Celery 配置（新建）
-- `backend/apps/knowledge/tasks.py` — 知识库异步任务（新建）
-- `backend/apps/notifications/tasks.py` — 通知异步任务（新建）
+- `backend/config/celery.py` — Celery 配置完善
+- `backend/apps/knowledge/tasks.py` — 知识库异步任务
+- `backend/apps/notifications/tasks.py` — 通知异步任务完善
 
 **验收标准**:
 - 知识库上传 API 响应时间 < 2s（解析异步进行）
 - 异步任务失败后自动重试
 - 任务进度可查询
+- 开发环境可模拟异步执行
 
-### 4.6 前端性能优化
+### 4.6 聊天幂等性保护（C-08 新增）
+
+**问题**: `CHAT_TURN_IDEMPOTENCY` 默认 False，高并发下用户快速连续发送消息可能产生重复消息。
+
+**方案**:
+
+```
+1. 生产环境启用 CHAT_TURN_IDEMPOTENCY=true
+2. 前端 ChatComposer 在发送消息时生成唯一 turn_id
+3. 后端检查 turn_id 是否已处理：
+   a. 已处理 → 返回之前的响应（幂等）
+   b. 未处理 → 正常处理并记录 turn_id
+4. Redis 作为 turn_id 存储缓存（TTL 5min）
+5. 降级策略：Redis 不可用时跳过幂等检查 + 日志告警
+```
+
+**涉及文件**:
+- `backend/config/settings/production.py` — CHAT_TURN_IDEMPOTENCY=True
+- `backend/apps/chat/views.py` — turn_id 幂等检查
+- `frontend/src/components/ChatComposer.tsx` — 生成 turn_id
+
+**验收标准**:
+- 快速连续发送相同消息不产生重复
+- turn_id 相同的请求返回相同响应
+- Redis 不可用时降级不影响正常使用
+
+### 4.7 生产环境配置确认（C-06 新增）⚠️ 关键
+
+**问题**: dev.py 大量覆盖了 base.py 的生产配置，需确保 Docker 部署时使用正确的 settings module。
+
+**配置差异对照**:
+
+| 配置项 | base.py (生产) | dev.py (开发) | 风险 |
+|--------|---------------|-------------|------|
+| DATABASES | PostgreSQL + pgvector | SQLite | 生产必须用 PG |
+| CACHES | RedisCache | LocMemCache | 生产必须用 Redis |
+| CELERY_BROKER_URL | redis://... | memory:// | 生产必须用 Redis broker |
+| CHAT_COORDINATION_REDIS_URL | redis://... | "" (空) | 生产必须配 Redis |
+| DEBUG | False | True | 生产必须 False |
+| ALLOWED_HOSTS | 环境变量 | ["*"] | 生产需限制 |
+| CORS_ALLOW_ALL_ORIGINS | False | True | 生产需限制 |
+
+**方案**:
+
+```
+1. 创建 backend/config/settings/production.py：
+   a. 继承 base.py（from .base import *）
+   b. DEBUG = False
+   c. ALLOWED_HOSTS 从环境变量读取
+   d. 确认 PostgreSQL/Redis/Celery 配置不被覆盖
+   e. 启用 CHAT_TURN_IDEMPOTENCY=True
+   f. 启用 CHAT_STREAM_V2=true（如已就绪）
+
+2. Docker 部署验证：
+   a. Dockerfile 中设置 ENV DJANGO_SETTINGS_MODULE=config.settings.production
+   b. docker-compose.yml 确认 PostgreSQL + Redis 服务
+   c. entrypoint 脚本验证数据库连接
+   d. 健康检查端点 /api/v1/health/ 检查 DB + Redis + Celery
+```
+
+**涉及文件**:
+- `backend/config/settings/production.py` — 新建生产配置
+- `backend/Dockerfile` — DJANGO_SETTINGS_MODULE 环境变量
+
+**验收标准**:
+- Docker 部署使用 production settings
+- PostgreSQL + Redis + Celery 全部正常工作
+- DEBUG=False 在生产环境
+
+### 4.8 前端性能优化
 
 **方案**:
 
@@ -516,3 +693,39 @@
 - 首屏加载时间 < 2s（LCP）
 - 交互响应时间 < 100ms (FID/INP)
 - Bundle 总大小 < 500KB (gzip)
+
+---
+
+## 五、优先级排序
+
+| 优先级 | 编号 | 问题 | 影响 |
+|--------|------|------|------|
+| P0（阻断上线） | F-06 | axios FormData 修复 | 知识库上传完全不可用 |
+| P0（阻断上线） | F-07 | 知识库文档解析修复 | 上传后文档状态 Failed |
+| P0（阻断上线） | C-06 | 生产环境配置确认 | Docker 部署配置差异风险 |
+| P1（高优先） | C-02 | SSE 实时通知 | 用户体验核心 |
+| P1（高优先） | F-01/F-02 | i18n 语言持久化 | 多语言用户体验 |
+| P1（高优先） | UI-01 | 深色模式对比度 | 可访问性 |
+| P2（中优先） | C-03 | PostgreSQL 部署验证 | 并发支撑 |
+| P2（中优先） | C-04 | Redis 缓存策略 | 性能优化 |
+| P2（中优先） | C-08 | 聊天幂等性 | 并发安全 |
+| P2（中优先） | F-03 | SpaceSwitcher 搜索 | UX 优化 |
+| P3（低优先） | F-05 | 登录页演示账户 | 细节修正 |
+| P3（低优先） | UI-03 | Profile 布局 | UI 美化 |
+
+---
+
+## 六、截图引用
+
+| 截图编号 | 文件名 | 验证内容 |
+|----------|--------|----------|
+| 22 | `pre_launch_audit/22-bug2-notification-panel.png` | Bug #2 通知面板展示 |
+| 23 | `pre_launch_audit/23-profile-dark-mode.png` | Bug #3/5 Profile 深色模式 |
+| 24 | `pre_launch_audit/24-profile-light-mode.png` | Bug #3/5 Profile 浅色模式 |
+| 25 | `pre_launch_audit/25-profile-mobile-375px.png` | Bug #18 移动端响应式 |
+| 26 | `pre_launch_audit/26-knowledge-base-light.png` | Bug #21 知识库浅色模式 |
+| 27 | `pre_launch_audit/27-knowledge-base-dark.png` | Bug #21 知识库深色模式 |
+
+---
+
+> **备注**: 本 SPEC 为设计稿，不包含实施代码。所有涉及文件路径仅为修改指引，实际实施时需逐文件验证当前代码状态后再修改。

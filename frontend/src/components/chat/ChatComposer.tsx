@@ -106,34 +106,32 @@ export default function ChatComposer({
         >
           {t('answer_mode_fast')}
         </button>
-        {canUseDeep ? (
-          <button
-            type="button"
-            className="composer-mode-btn"
-            aria-label={t('answer_mode_deep')}
-            aria-pressed={answerMode === 'deep'}
-            disabled={disabled || isStreaming}
-            onClick={() => onAnswerModeChange?.('deep')}
-          >
-            {t('answer_mode_deep')}
-          </button>
-        ) : null}
-        {canUseThinking ? (
-          <button
-            type="button"
-            className={`composer-mode-btn composer-thinking-btn${thinkingEnabled ? ' is-enabled' : ''}`}
-            role="switch"
-            aria-label={t('thinking_mode_label')}
-            aria-checked={thinkingEnabled}
-            disabled={disabled || isStreaming}
-            onClick={() => onThinkingChange?.(!thinkingEnabled)}
-          >
-            {t('thinking_mode_label')}
-            <span className="composer-thinking-state" aria-hidden="true">
-              {thinkingEnabled ? t('thinking_mode_on') : t('thinking_mode_off')}
-            </span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="composer-mode-btn"
+          aria-label={t('answer_mode_deep')}
+          aria-pressed={answerMode === 'deep'}
+          disabled={disabled || isStreaming || !canUseDeep}
+          title={!canUseDeep ? t('deep_mode_unavailable') || 'Deep mode is not available' : undefined}
+          onClick={() => onAnswerModeChange?.('deep')}
+        >
+          {t('answer_mode_deep')}
+        </button>
+        <button
+          type="button"
+          className={`composer-mode-btn composer-thinking-btn${thinkingEnabled ? ' is-enabled' : ''}`}
+          role="switch"
+          aria-label={t('thinking_mode_label')}
+          aria-checked={thinkingEnabled}
+          disabled={disabled || isStreaming || !canUseThinking}
+          title={!canUseThinking ? t('thinking_mode_unavailable') || 'Thinking mode is not available' : undefined}
+          onClick={() => onThinkingChange?.(!thinkingEnabled)}
+        >
+          {t('thinking_mode_label')}
+          <span className="composer-thinking-state" aria-hidden="true">
+            {thinkingEnabled ? t('thinking_mode_on') : t('thinking_mode_off')}
+          </span>
+        </button>
       </div>
       <div className={`composer${focused ? ' is-focused' : ''}${disabled ? ' is-disabled' : ''}`}>
         <div className="composer-inner">
@@ -171,7 +169,7 @@ export default function ChatComposer({
               className="composer-send"
               onClick={onSubmit}
               disabled={!canSend}
-              aria-label="Send message"
+              aria-label={t('send')}
             >
               {multiline ? <ArrowUpOutlined /> : <SendOutlined />}
             </button>
@@ -183,8 +181,8 @@ export default function ChatComposer({
         <div className="composer-hint">
           {hintText ?? (
             <>
-              <span><span className="kbd">↵</span> send</span>
-              <span><span className="kbd">⇧</span><span className="kbd">↵</span> newline</span>
+              <span><span className="kbd">↵</span> {t('hint_send', 'send')}</span>
+              <span><span className="kbd">⇧</span><span className="kbd">↵</span> {t('hint_newline', 'newline')}</span>
             </>
           )}
         </div>
