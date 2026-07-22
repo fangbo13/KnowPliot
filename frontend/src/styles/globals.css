@@ -73,7 +73,7 @@ h1, h2, h3, h4, h5 {
   background: var(--accent-soft-strong);
   color: var(--accent-text);
 }
-[data-theme="dark"] ::selection { color: var(--color-text); }
+[data-theme="dark"] ::selection { color: var(--accent-text); }
 
 /* ============================================================================
    Keyframes (names kept stable — referenced across components)

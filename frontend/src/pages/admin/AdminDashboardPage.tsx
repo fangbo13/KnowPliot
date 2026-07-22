@@ -143,25 +143,25 @@ export default function AdminDashboardPage() {
   }, []);
 
   const roleStyleMap: Record<string, { bg: string; text: string; border: string }> = {
-    admin: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
-    hr: { bg: '#EAF2FD', text: '#1A56DB', border: '#D0E1FD' },
-    employee: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
+    admin: { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' },
+    hr: { bg: 'rgba(var(--color-warning-rgb), 0.10)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.20)' },
+    employee: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' },
   };
 
   const healthStyleMap: Record<string, { bg: string; text: string; border: string }> = {
-    running: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    connected: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    up: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    configured: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    not_configured: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
-    degraded: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
-    unknown: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
-    down: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
-    disconnected: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
+    running: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    connected: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    up: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    configured: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    not_configured: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' },
+    degraded: { bg: 'rgba(var(--color-warning-rgb), 0.10)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.20)' },
+    unknown: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' },
+    down: { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' },
+    disconnected: { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' },
   };
 
   const renderHealthTag = (status: string) => {
-    const style = healthStyleMap[status] || { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' };
+    const style = healthStyleMap[status] || { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' };
     const isGood = ['running', 'connected', 'up', 'configured'].includes(status);
     return (
       <span style={{
@@ -293,7 +293,7 @@ export default function AdminDashboardPage() {
       key: 'is_active',
       width: 100,
       render: (isActive: boolean) => {
-        const style = isActive ? { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' } : { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' };
+        const style = isActive ? { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' } : { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' };
         return (
           <span style={{
             display: 'inline-flex',
