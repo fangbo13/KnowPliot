@@ -162,7 +162,7 @@ export const documentApi = {
 
   async rollbackVersion(
     id: string,
-    body: { target_version?: number; effective_from?: string; reason?: string },
+    body: { target_version_id?: string; effective_from?: string; reason?: string },
   ): Promise<any> {
     const { data } = await apiClient.post(`/documents/${id}/rollback/`, body, {
       headers: { 'Idempotency-Key': crypto.randomUUID() },

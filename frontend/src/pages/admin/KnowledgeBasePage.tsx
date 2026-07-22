@@ -230,7 +230,7 @@ export default function KnowledgeBasePage() {
     setVersionsLoading(true);
     try {
       const data = await documentApi.getVersions(id);
-      setVersions(data.results || data || []);
+      setVersions(data.versions || data.results || data || []);
     } catch {
       setVersions([]);
     } finally {
@@ -283,7 +283,7 @@ export default function KnowledgeBasePage() {
         setRollbackSaving(true);
         try {
           await documentApi.rollbackVersion(versionDrawer.id, {
-            target_version: record.version,
+            target_version_id: record.id,
           });
           message.success(t('kb_rollback_success'));
           void loadVersions(versionDrawer.id);
