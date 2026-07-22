@@ -31,6 +31,12 @@ interface Document {
   chunk_count: number;
   category_name?: string;
   created_at: string;
+  // KB-12-Features §4: version metadata fields returned by DocumentSerializer
+  text_content?: string;
+  version?: number;
+  parent_document?: string | null;
+  effective_from?: string;
+  effective_to?: string | null;
 }
 
 // Bug#6/#21: theme-aware tag colours via CSS variables (auto dark-mode adaptation)
