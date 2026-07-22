@@ -82,6 +82,7 @@ from .stream_events import (
     RedisTurnEventStore,
     converge_stale_turn,
 )
+from .v3_views import accept_chat_turn_v3
 
 logger = logging.getLogger(__name__)
 
@@ -1035,6 +1036,11 @@ def send_message(request, session_id=None, message_id=None):
     requested_answer_mode = serializer.validated_data["answer_mode"]
     requested_thinking_enabled = serializer.validated_data["thinking_enabled"]
     protocol_version = serializer.validated_data["protocol_version"]
+    if protocol_version == 3 and not settings.CHAT_STREAM_V3:
+        return Response(
+            {"code": "stream_protocol_unavailable"},
+            status=status.HTTP_409_CONFLICT,
+        )
     use_v2 = _stream_v2_enabled(protocol_version)
     user = request.user
     # Post-V3 Part 4: the AI reply language is resolved after the session's
@@ -1130,6 +1136,7 @@ def send_message(request, session_id=None, message_id=None):
             thinking_budget=generation_policy.thinking_budget,
             policy_fallback_code=generation_policy.fallback_code,
             model_id=generation_policy.model_id,
+            protocol_version=protocol_version,
             question_message=question_message_override,
         )
     except ChatTurnScopeError:
@@ -1155,6 +1162,16 @@ def send_message(request, session_id=None, message_id=None):
             },
             response_status=status.HTTP_409_CONFLICT,
             turn=turn,
+        )
+    if protocol_version == 3 and begin_result.disposition in {
+        BeginTurnDisposition.CREATED,
+        BeginTurnDisposition.RETRY,
+        BeginTurnDisposition.IN_PROGRESS,
+        BeginTurnDisposition.COMPLETED,
+    }:
+        return accept_chat_turn_v3(
+            turn,
+            disposition=begin_result.disposition,
         )
     if begin_result.disposition == BeginTurnDisposition.IN_PROGRESS:
         return _turn_response(
@@ -1357,6 +1374,13 @@ def send_message(request, session_id=None, message_id=None):
             for domain_event in shared_events:
                 if domain_event.name == "error":
                     code = domain_event.data.get("code", "stream_error")
+                    if code in {"stream_error", "answer_save_error"}:
+                        logger.error(
+                            "chat_stream_failed session_id=%s turn_id=%s code=%s",
+                            session_id,
+                            turn.id,
+                            code,
+                        )
                     if use_v2:
                         yield v2_event(
                             "error",

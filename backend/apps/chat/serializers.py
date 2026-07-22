@@ -194,6 +194,7 @@ class ChatTurnStatusSerializer(serializers.ModelSerializer):
             "client_request_id",
             "session",
             "status",
+            "protocol_version",
             "requested_answer_mode",
             "answer_mode",
             "requested_thinking_enabled",

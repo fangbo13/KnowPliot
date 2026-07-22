@@ -30,6 +30,7 @@ RETRYABLE_ERROR_CODES = frozenset(
         "client_disconnected",
         "connection_error",
         "coordination_unavailable",
+        "capacity_reached",
         "lease_lost",
         "provider_timeout",
         "provider_unavailable",
@@ -234,6 +235,7 @@ class DjangoTurnRepository:
                 "model_id",
                 "assistant_message",
                 "completed_at",
+                "protocol_version",
                 "updated_at",
             ]
         )
@@ -340,6 +342,7 @@ def _same_request_scope_and_content(
     content,
     requested_answer_mode,
     requested_thinking_enabled,
+    protocol_version,
 ) -> bool:
     return (
         turn.session_id == session.id
@@ -350,6 +353,7 @@ def _same_request_scope_and_content(
         == requested_answer_mode
         and bool(getattr(turn, "requested_thinking_enabled", False))
         == requested_thinking_enabled
+        and int(getattr(turn, "protocol_version", 1)) == protocol_version
     )
 
 
@@ -365,6 +369,7 @@ def begin_chat_turn(
     thinking_budget: int | None = None,
     policy_fallback_code: str = "",
     model_id: str = "",
+    protocol_version: int = 1,
     question_message=None,
     repository: Any | None = None,
     atomic_factory=None,
@@ -426,6 +431,7 @@ def begin_chat_turn(
                 thinking_budget=thinking_budget,
                 policy_fallback_code=policy_fallback_code,
                 model_id=model_id,
+                protocol_version=protocol_version,
             )
             repository.touch_session(session)
             return BeginTurnResult(turn, BeginTurnDisposition.CREATED)
@@ -438,6 +444,7 @@ def begin_chat_turn(
             content=content,
             requested_answer_mode=requested_answer_mode,
             requested_thinking_enabled=requested_thinking_enabled,
+            protocol_version=protocol_version,
         ):
             return BeginTurnResult(turn, BeginTurnDisposition.CONFLICT)
 
@@ -457,6 +464,7 @@ def begin_chat_turn(
             turn.attempt_count += 1
             turn.error_code = ""
             turn.model_id = model_id
+            turn.protocol_version = protocol_version
             turn.assistant_message = None
             turn.completed_at = None
             repository.save_retry(turn)
