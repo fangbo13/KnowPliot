@@ -20,7 +20,14 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='knowledgespace',
             name='join_code',
-            field=models.CharField(blank=True, help_text='Human-readable unique join code. Required when join_policy=access_code.', max_length=24, null=True, unique=True),
+            field=models.CharField(
+                blank=True,
+                help_text='Human-readable unique join code. '
+                          'Required when join_policy=access_code.',
+                max_length=24,
+                null=True,
+                unique=True,
+            ),
         ),
         migrations.AddField(
             model_name='knowledgespace',
@@ -30,7 +37,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='knowledgespace',
             name='join_policy',
-            field=models.CharField(choices=[('access_code', 'Access Code'), ('global', 'Global Visible')], default='access_code', help_text='Determines how new users discover and join this workspace.', max_length=20),
+            field=models.CharField(
+                choices=[('access_code', 'Access Code'), ('global', 'Global Visible')],
+                default='access_code',
+                help_text='Determines how new users discover and join this workspace.',
+                max_length=20,
+            ),
         ),
         migrations.AddField(
             model_name='workspacecreaterequestdetail',
@@ -45,7 +57,19 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='spacemembership',
             name='source_kind',
-            field=models.CharField(choices=[('legacy', 'Legacy'), ('manual', 'Manual'), ('access_request', 'Access Request'), ('invitation', 'Invitation'), ('ownership', 'Ownership'), ('join_code', 'Join Code'), ('discovery', 'Discovery')], default='legacy', max_length=20),
+            field=models.CharField(
+                choices=[
+                    ('legacy', 'Legacy'),
+                    ('manual', 'Manual'),
+                    ('access_request', 'Access Request'),
+                    ('invitation', 'Invitation'),
+                    ('ownership', 'Ownership'),
+                    ('join_code', 'Join Code'),
+                    ('discovery', 'Discovery'),
+                ],
+                default='legacy',
+                max_length=20,
+            ),
         ),
         migrations.AddIndex(
             model_name='knowledgespace',
@@ -53,6 +77,13 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='knowledgespace',
-            constraint=models.CheckConstraint(check=models.Q(models.Q(('join_policy', 'access_code'), _negated=True), ('join_code__isnull', False), _connector='OR'), name='spaces_join_code_required_for_access_code'),
+            constraint=models.CheckConstraint(
+                check=models.Q(
+                    models.Q(('join_policy', 'access_code'), _negated=True),
+                    ('join_code__isnull', False),
+                    _connector='OR',
+                ),
+                name='spaces_join_code_required_for_access_code',
+            ),
         ),
     ]
