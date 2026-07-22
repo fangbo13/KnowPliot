@@ -73,7 +73,7 @@ h1, h2, h3, h4, h5 {
   background: var(--accent-soft-strong);
   color: var(--accent-text);
 }
-[data-theme="dark"] ::selection { color: var(--accent-text); }
+/* G2: [data-theme="dark"] ::selection removed — same var as baseline, redundant */
 
 /* ============================================================================
    Keyframes (names kept stable — referenced across components)
@@ -148,11 +148,7 @@ h1, h2, h3, h4, h5 {
   border: 1px solid var(--color-border-secondary);
   box-shadow: var(--shadow-sm);
 }
-
-[data-theme="dark"] .glass-panel {
-  background: var(--color-bg-container);
-  border-color: var(--color-border-secondary);
-}
+/* G2: [data-theme="dark"] .glass-panel removed — same CSS vars as baseline, redundant */
 
 /* ============================================================================
    Markdown content (assistant messages render as a clean typeset document)
@@ -197,7 +193,7 @@ h1, h2, h3, h4, h5 {
   border-radius: 6px;
   word-break: break-word;
 }
-[data-theme="dark"] .markdown-content code { color: var(--accent-text); }
+/* G2: [data-theme="dark"] .markdown-content code removed — same var as baseline, redundant */
 .markdown-content pre {
   position: relative;
   overflow-x: auto;
@@ -324,35 +320,38 @@ h1, h2, h3, h4, h5 {
   box-shadow: none;
   transition: opacity var(--motion-fast) var(--motion-ease);
 }
-.ant-table {
-  background: transparent !important;
+/* G1: Use #root prefix for specificity instead of !important */
+#root .ant-table {
+  background: transparent;
 }
-.ant-table-thead > tr > th {
-  background: var(--color-bg-sunken) !important;
-  color: var(--color-text-secondary) !important;
+#root .ant-table-thead > tr > th {
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
   font-weight: 600;
-  border-bottom: 1px solid var(--color-border) !important;
+  border-bottom: 1px solid var(--color-border);
 }
-.ant-table-thead > tr > th:first-child { border-top-left-radius: var(--radius-md) !important; }
-.ant-table-thead > tr > th:last-child { border-top-right-radius: var(--radius-md) !important; }
-.ant-table-tbody > tr > td {
-  border-bottom: 1px solid var(--color-border) !important;
+#root .ant-table-thead > tr > th:first-child { border-top-left-radius: var(--radius-md); }
+#root .ant-table-thead > tr > th:last-child { border-top-right-radius: var(--radius-md); }
+#root .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--color-border);
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.ant-table-tbody > tr:hover > td {
-  background: var(--color-bg-section) !important;
+#root .ant-table-tbody > tr:hover > td {
+  background: var(--color-bg-section);
 }
-.ant-modal-content {
-  border-radius: var(--radius-xl) !important;
-  padding: 24px !important;
-  box-shadow: var(--shadow-md) !important;
+/* G1: Modal renders in portal — use doubled class for specificity instead of !important */
+.ant-modal-content.ant-modal-content {
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  box-shadow: var(--shadow-md);
 }
-.ant-tag {
-  border-radius: 999px !important;
+/* G1: Use #root prefix for specificity instead of !important */
+#root .ant-tag {
+  border-radius: 999px;
   padding: 0 10px;
 }
 
-/* Popconfirm / popover above in-app floating menus */
+/* Popconfirm / popover above in-app floating menus (portal z-index needs !important) */
 .ant-popover, .ant-popconfirm { z-index: 10500 !important; }
 
 /* AntD message/notification spacing nicety */
@@ -390,32 +389,33 @@ h1, h2, h3, h4, h5 {
   animation: featureSlideIn var(--dur-slow) var(--ease-out) forwards;
 }
 
-.login-input-wrapper .ant-input-affix-wrapper {
-  transition: opacity var(--motion-fast) var(--motion-ease) !important;
-  border-radius: var(--radius-md) !important;
-  padding: 10px 14px !important;
+/* G1: Use #root prefix for specificity instead of !important */
+#root .login-input-wrapper .ant-input-affix-wrapper {
+  transition: opacity var(--motion-fast) var(--motion-ease);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
 }
 
-.login-input-wrapper .ant-input-affix-wrapper-focused {
-  box-shadow: 0 0 0 3.5px var(--accent-soft-strong), var(--shadow-sm) !important;
-  border-color: var(--accent) !important;
+#root .login-input-wrapper .ant-input-affix-wrapper-focused {
+  box-shadow: 0 0 0 3.5px var(--accent-soft-strong), var(--shadow-sm);
+  border-color: var(--accent);
 }
-.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: var(--accent-text) !important;
-}
-
-.login-btn-premium {
-  background: var(--accent-active) !important;
-  border-color: var(--accent-active) !important;
-  transition: opacity var(--motion-fast) var(--motion-ease) !important;
-  box-shadow: var(--shadow-sm) !important;
+#root .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--accent-text);
 }
 
-.login-btn-premium:hover:not(:disabled) {
-  background: var(--accent-hover) !important;
-  border-color: var(--accent-hover) !important;
+#root .login-btn-premium {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+  box-shadow: var(--shadow-sm);
+}
+
+#root .login-btn-premium:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
   opacity: 0.94;
-  box-shadow: var(--shadow-sm) !important;
+  box-shadow: var(--shadow-sm);
 }
 
 .login-btn-premium:active:not(:disabled) {
