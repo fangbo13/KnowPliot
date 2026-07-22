@@ -317,7 +317,7 @@ export default function KnowledgeBasePage() {
     if (!versionDrawer) return;
     setVersionSaving(true);
     try {
-      await documentApi.createVersion(versionDrawer.id, {
+      const resp = await documentApi.createVersion(versionDrawer.id, {
         text_content: editText,
         reason: versionReason || undefined,
       });
@@ -325,7 +325,17 @@ export default function KnowledgeBasePage() {
       setVersionReason('');
       setDiffData(null);
       setOriginalText(editText);
-      void loadVersions(versionDrawer.id);
+      // Update drawer to point to the new current version so that
+      // subsequent rollback / version-list calls target the right document.
+      if (resp && resp.id) {
+        setVersionDrawer(prev => prev
+          ? { ...prev, id: resp.id, version: resp.version ?? prev.version, status: 'active' }
+          : prev,
+        );
+        void loadVersions(resp.id);
+      } else {
+        void loadVersions(versionDrawer.id);
+      }
       loadDocuments();
     } catch {
       message.error(t('kb_version_failed'));
@@ -343,14 +353,22 @@ export default function KnowledgeBasePage() {
       onOk: async () => {
         setRollbackSaving(true);
         try {
-          await documentApi.rollbackVersion(versionDrawer.id, {
+          const resp = await documentApi.rollbackVersion(versionDrawer.id, {
             target_version_id: record.id,
           });
           message.success(t('kb_rollback_success'));
-          void loadVersions(versionDrawer.id);
+          // Update drawer to point to the new current version so that
+          // subsequent version-list / edit calls target the right document.
+          const newId = resp?.id ?? versionDrawer.id;
+          const newVersion = resp?.version ?? versionDrawer.version;
+          setVersionDrawer(prev => prev
+            ? { ...prev, id: newId, version: newVersion, status: 'active' }
+            : prev,
+          );
+          void loadVersions(newId);
           loadDocuments();
           try {
-            const doc = await documentApi.getDocument(versionDrawer.id);
+            const doc = await documentApi.getDocument(newId);
             setEditText(doc.text_content || '');
             setOriginalText(doc.text_content || '');
           } catch {
