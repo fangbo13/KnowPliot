@@ -127,4 +127,80 @@ export const documentApi = {
     const { data } = await apiClient.post('/documents/categories/', body);
     return data;
   },
+
+  // KB-12-Features §1: Version endpoint methods
+
+  async editTextContent(id: string, text: string): Promise<any> {
+    const { data } = await apiClient.patch(`/documents/${id}/text/`, {
+      text_content: text,
+    });
+    return data;
+  },
+
+  async previewDiff(id: string, text: string): Promise<any> {
+    const { data } = await apiClient.post(`/documents/${id}/preview-diff/`, {
+      text_content: text,
+    });
+    return data;
+  },
+
+  async createVersion(
+    id: string,
+    body: { text_content: string; effective_from?: string; reason?: string },
+  ): Promise<any> {
+    const { data } = await apiClient.post(`/documents/${id}/versions/`, body, {
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    return data;
+  },
+
+  async rollbackVersion(
+    id: string,
+    body: { target_version?: number; effective_from?: string; reason?: string },
+  ): Promise<any> {
+    const { data } = await apiClient.post(`/documents/${id}/rollback/`, body, {
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    return data;
+  },
+
+  async getVersions(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/${id}/versions/`);
+    return data;
+  },
+
+  // KB-12-Features §8: Document template methods
+
+  async getDocumentTemplates(): Promise<any> {
+    const { data } = await apiClient.get('/documents/document-templates/');
+    return data;
+  },
+
+  async getDocumentTemplate(slug: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/document-templates/${slug}/`);
+    return data;
+  },
+
+  // KB-12-Features §9: Word/PDF→Markdown conversion
+
+  async convertToMarkdown(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await apiClient.post('/documents/convert/', formData);
+    return data;
+  },
+
+  // KB-12-Features §11: Batch upload methods
+
+  async batchUpload(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await apiClient.post('/documents/batch/upload/', formData);
+    return data;
+  },
+
+  async getBatchResult(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/batch/result/${id}/`);
+    return data;
+  },
 };
