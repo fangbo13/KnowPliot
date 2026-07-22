@@ -221,6 +221,13 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--header-blur': 'none',
     '--shadow-subtle-glow': 'none',
     '--gemini-gradient': 'none',
+    // hljs syntax highlighting token colors (managed centrally for both themes)
+    '--hljs-keyword': theme === 'dark' ? '#E0A07C' : '#d73a49',
+    '--hljs-string': theme === 'dark' ? '#9ECE8E' : '#032f62',
+    '--hljs-comment': theme === 'dark' ? '#847D6E' : '#6a737d',
+    '--hljs-number': theme === 'dark' ? '#E5B567' : '#005cc5',
+    '--hljs-title': theme === 'dark' ? '#7FB0D8' : '#6f42c1',
+    '--hljs-variable': theme === 'dark' ? '#E08B7C' : '#005cc5',
   };
 }
 
