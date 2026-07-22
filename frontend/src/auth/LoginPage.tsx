@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Form, Input, Button, Alert, Tabs, Select, Modal } from 'antd';
 import {
   MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined,
@@ -35,6 +36,7 @@ function firstError(data: any): string {
 export default function LoginPage() {
   const { t, i18n } = useTranslation('common');
   const { login } = useAuth();
+  const navigate = useNavigate();
   const bp = useBreakpoint();
   const isNarrow = bp.sm;
   const { effective, setThemeMode } = useTheme();
@@ -150,6 +152,10 @@ export default function LoginPage() {
       }
       login({ token: data.access, user: data.user });
       syncLanguage(data.user?.language_preference);
+      // A1: redirect spaceless users to space discovery instead of landing on a 403.
+      if (!data.user?.default_space) {
+        navigate('/spaces/discover', { replace: true });
+      }
     } catch {
       setError(t('register_failed'));
     } finally {

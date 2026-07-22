@@ -5,21 +5,27 @@
  */
 
 import type { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import type { Capability } from '../api/capabilities';
 import { safeConsolePath } from './authorization';
 import { useAuthorization, useCapabilities } from './CapabilityProvider';
 
 export function ForbiddenPage() {
+  const { t } = useTranslation('common');
   return (
     <main className="page" style={{ display: 'grid', minHeight: '100dvh', placeItems: 'center' }}>
       <section style={{ maxWidth: 480, padding: 32, textAlign: 'center' }}>
         <div aria-hidden="true" style={{ fontSize: 42, color: 'var(--accent)' }}>403</div>
-        <h1 className="page-title">Access denied</h1>
+        <h1 className="page-title">{t('forbidden_title')}</h1>
         <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-          You do not have the capability required for this workspace.
+          {t('forbidden_description')}
         </p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 24 }}>
+          <Link className="new-chat-btn" to="/chat">{t('forbidden_go_chat')}</Link>
+          <Link className="new-chat-btn" to="/spaces/discover">{t('space_discovery')}</Link>
+        </div>
       </section>
     </main>
   );
