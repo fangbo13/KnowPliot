@@ -136,8 +136,10 @@ def get_shared_httpx_client() -> httpx.Client:
                 verify=settings.SSL_VERIFY,
                 timeout=120,
                 limits=httpx.Limits(
-                    max_connections=20,
-                    max_keepalive_connections=10,
+                    max_connections=settings.PROVIDER_HTTP_MAX_CONNECTIONS,
+                    max_keepalive_connections=(
+                        settings.PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS
+                    ),
                     keepalive_expiry=60,
                 ),
             )
@@ -157,8 +159,10 @@ def recreate_shared_httpx_client() -> httpx.Client:
             verify=settings.SSL_VERIFY,
             timeout=120,
             limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
+                max_connections=settings.PROVIDER_HTTP_MAX_CONNECTIONS,
+                max_keepalive_connections=(
+                    settings.PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS
+                ),
                 keepalive_expiry=60,
             ),
         )

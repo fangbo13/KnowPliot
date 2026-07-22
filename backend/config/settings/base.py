@@ -347,9 +347,14 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TIME_LIMIT = 1800  # 30 min hard timeout (was 300/5min) — batch docs need more time
 CELERY_TASK_SOFT_TIME_LIMIT = 1500  # 25 min soft timeout (was 240/4min)
 CELERY_TASK_MAX_RETRIES = 3
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": 180,
+}
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # V4.2 SYS-V4.2-013: Queue routing — critical tasks get dedicated slots
 # Previous: all tasks in single default queue, competing for 4 slots equally.
 CELERY_TASK_ROUTES = {
+    "apps.chat.tasks.generate_chat_turn_v3": {"queue": "chat_generation"},
     "apps.knowledge.tasks.*": {"queue": "default"},
     "apps.rag.tasks.*": {"queue": "default"},
 }

@@ -16,6 +16,9 @@ _NUMERIC_KEYS = frozenset(
         "total_ms",
         "disconnect_count",
         "recovery_count",
+        "queue_wait_ms",
+        "task_attempt",
+        "delta_batch_count",
         # Part 2 measure-first metrics
         "retrieval_result_count",  # chunks returned by the retriever
     }
@@ -30,6 +33,7 @@ _BOOLEAN_KEYS = frozenset(
         # Part 2 measure-first metrics
         "query_near_dup",  # near-duplicate query detected
         "cache_hit",  # semantic cache hit (reserved; no cache built yet)
+        "worker_recovered",
     }
 )
 _ANSWER_MODES = frozenset({"fast", "deep"})
