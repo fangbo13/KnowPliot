@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag } from 'antd';
+import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip } from 'antd';
 import {
   InboxOutlined,
   DownloadOutlined,
@@ -13,6 +13,9 @@ import {
   UploadOutlined,
   EditOutlined,
   FileTextOutlined,
+  HistoryOutlined,
+  SaveOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -22,6 +25,9 @@ import {
   isSupportedDocumentFile,
 } from '../../api/documents';
 import { useAuthorization } from '../../auth/CapabilityProvider';
+import { MarkdownEditor } from '../../components/knowledge/MarkdownEditor';
+import { DiffPreview } from '../../components/knowledge/DiffPreview';
+import type { DiffPreviewData } from '../../components/knowledge/DiffPreview';
 
 interface Document {
   id: string;
@@ -37,6 +43,17 @@ interface Document {
   parent_document?: string | null;
   effective_from?: string;
   effective_to?: string | null;
+}
+
+/** KB-12-Features §2: Version info returned by GET /documents/{id}/versions/ */
+interface VersionInfo {
+  id: string;
+  version: number;
+  status: string;
+  effective_from: string;
+  effective_to: string | null;
+  created_at: string;
+  title?: string;
 }
 
 // Bug#6/#21: theme-aware tag colours via CSS variables (auto dark-mode adaptation)
@@ -66,6 +83,19 @@ export default function KnowledgeBasePage() {
   const [editTitle, setEditTitle] = useState('');
   const [editCategory, setEditCategory] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  // KB-12-Features §2: Version management drawer state
+  const [versionDrawer, setVersionDrawer] = useState<Document | null>(null);
+  const [editText, setEditText] = useState('');
+  const [originalText, setOriginalText] = useState('');
+  const [diffData, setDiffData] = useState<DiffPreviewData | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [versions, setVersions] = useState<VersionInfo[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionSaving, setVersionSaving] = useState(false);
+  const [versionReason, setVersionReason] = useState('');
+  const [rollbackSaving, setRollbackSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('content');
 
   const loadDocuments = useCallback(async () => {
     if (!canRead) return;
@@ -168,6 +198,103 @@ export default function KnowledgeBasePage() {
     });
   };
 
+  // KB-12-Features §2: Version management handlers
+  const openVersionDrawer = (record: Document) => {
+    setVersionDrawer(record);
+    setEditText(record.text_content || '');
+    setOriginalText(record.text_content || '');
+    setDiffData(null);
+    setDiffError(null);
+    setVersionReason('');
+    setActiveTab('content');
+    void loadVersions(record.id);
+  };
+
+  const closeVersionDrawer = () => {
+    setVersionDrawer(null);
+    setDiffData(null);
+    setDiffError(null);
+    setVersionReason('');
+  };
+
+  const loadVersions = async (id: string) => {
+    setVersionsLoading(true);
+    try {
+      const data = await documentApi.getVersions(id);
+      setVersions(data.results || data || []);
+    } catch {
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const handlePreviewDiff = async () => {
+    if (!versionDrawer) return;
+    setDiffLoading(true);
+    setDiffError(null);
+    try {
+      const data = await documentApi.previewDiff(versionDrawer.id, editText);
+      setDiffData(data);
+    } catch (err) {
+      setDiffError(err instanceof Error ? err.message : t('kb_version_failed'));
+    } finally {
+      setDiffLoading(false);
+    }
+  };
+
+  const handleCreateVersion = async () => {
+    if (!versionDrawer) return;
+    setVersionSaving(true);
+    try {
+      await documentApi.createVersion(versionDrawer.id, {
+        text_content: editText,
+        reason: versionReason || undefined,
+      });
+      message.success(t('kb_version_created'));
+      setVersionReason('');
+      setDiffData(null);
+      setOriginalText(editText);
+      void loadVersions(versionDrawer.id);
+      loadDocuments();
+    } catch {
+      message.error(t('kb_version_failed'));
+    } finally {
+      setVersionSaving(false);
+    }
+  };
+
+  const handleRollback = (record: VersionInfo) => {
+    if (!versionDrawer || !canManage) return;
+    Modal.confirm({
+      title: t('kb_rollback_confirm', { number: record.version }),
+      okText: t('kb_rollback'),
+      cancelText: t('cancel'),
+      onOk: async () => {
+        setRollbackSaving(true);
+        try {
+          await documentApi.rollbackVersion(versionDrawer.id, {
+            target_version: record.version,
+          });
+          message.success(t('kb_rollback_success'));
+          void loadVersions(versionDrawer.id);
+          loadDocuments();
+          try {
+            const doc = await documentApi.getDocument(versionDrawer.id);
+            setEditText(doc.text_content || '');
+            setOriginalText(doc.text_content || '');
+          } catch {
+            // keep current text if fetch fails
+          }
+        } catch {
+          message.error(t('kb_rollback_failed'));
+        } finally {
+          setRollbackSaving(false);
+        }
+      },
+    });
+  };
+
   const MAX_FILE_SIZE_MB = 50;
 
   const beforeUpload = (file: File) => {
@@ -236,7 +363,7 @@ export default function KnowledgeBasePage() {
     columns.push({
       title: t('kb_actions'),
       key: 'actions',
-      width: 190,
+      width: 250,
       render: (_: unknown, record: Document) => (
         <Space size="middle">
           {canDownload && (
@@ -270,6 +397,17 @@ export default function KnowledgeBasePage() {
               title={t('kb_edit')}
               style={{ borderRadius: 6 }}
             />
+          )}
+          {canManage && (
+            <Tooltip title={t('kb_versions')}>
+              <Button
+                size="small"
+                icon={<HistoryOutlined />}
+                onClick={() => openVersionDrawer(record)}
+                aria-label={t('kb_versions')}
+                style={{ borderRadius: 6 }}
+              />
+            </Tooltip>
           )}
           {canManage && (
             <Button
@@ -400,6 +538,125 @@ export default function KnowledgeBasePage() {
               <Input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} placeholder={t('kb_document_category')} />
             </div>
           </Modal>
+        )}
+
+        {versionDrawer && (
+          <Drawer
+            title={`${versionDrawer.title} — ${t('kb_versions')}`}
+            open
+            width={720}
+            onClose={closeVersionDrawer}
+            destroyOnClose
+          >
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              items={[
+                {
+                  key: 'content',
+                  label: t('kb_edit_content'),
+                  children: (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      <MarkdownEditor
+                        value={editText}
+                        onChange={setEditText}
+                        readOnly={!canManage}
+                        placeholder={t('kb_editor_placeholder')}
+                        minHeight={280}
+                      />
+                      {canManage && (
+                        <>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <Button
+                              icon={<FileTextOutlined />}
+                              onClick={handlePreviewDiff}
+                              loading={diffLoading}
+                              disabled={editText === originalText}
+                            >
+                              {t('kb_diff_preview')}
+                            </Button>
+                            <Button
+                              type="primary"
+                              icon={<SaveOutlined />}
+                              onClick={handleCreateVersion}
+                              loading={versionSaving}
+                              disabled={editText === originalText}
+                            >
+                              {t('kb_editor_save_version')}
+                            </Button>
+                          </div>
+                          <Input.TextArea
+                            value={versionReason}
+                            onChange={(e) => setVersionReason(e.target.value)}
+                            placeholder={t('kb_diff_reason_placeholder')}
+                            autoSize={{ minRows: 2, maxRows: 4 }}
+                          />
+                          {(diffData || diffLoading || diffError) && (
+                            <DiffPreview
+                              data={diffData}
+                              loading={diffLoading}
+                              error={diffError}
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  key: 'versions',
+                  label: t('kb_versions'),
+                  children: (
+                    <Spin spinning={versionsLoading}>
+                      {versions.length === 0 ? (
+                        <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
+                          {t('no_documents') || 'No versions'}
+                        </div>
+                      ) : (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {versions.map((v) => (
+                            <Card
+                              key={v.id}
+                              size="small"
+                              style={{
+                                borderColor: 'var(--color-border)',
+                                background: 'var(--color-bg-container)',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                  <Space size="small">
+                                    <Tag color="blue">{t('kb_version')} {v.version}</Tag>
+                                    <Tag>{v.status}</Tag>
+                                  </Space>
+                                  <div style={{ marginTop: 8, fontSize: 13, color: 'var(--color-text-secondary)' }}>
+                                    <div>{t('kb_effective_from')}: {v.effective_from ? new Date(v.effective_from).toLocaleString() : '—'}</div>
+                                    <div>{t('kb_effective_to')}: {v.effective_to ? new Date(v.effective_to).toLocaleString() : '—'}</div>
+                                    <div>{t('kb_created')}: {new Date(v.created_at).toLocaleString()}</div>
+                                  </div>
+                                </div>
+                                {canManage && (
+                                  <Button
+                                    size="small"
+                                    icon={<RollbackOutlined />}
+                                    onClick={() => handleRollback(v)}
+                                    loading={rollbackSaving}
+                                    disabled={v.version === versionDrawer.version}
+                                  >
+                                    {t('kb_rollback')}
+                                  </Button>
+                                )}
+                              </div>
+                            </Card>
+                          ))}
+                        </Space>
+                      )}
+                    </Spin>
+                  ),
+                },
+              ]}
+            />
+          </Drawer>
         )}
       </div>
     </div>
