@@ -640,6 +640,79 @@ class DocumentVersionCreateView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    def get(self, request, pk):
+        """KB-12-Features §3: List the version chain for a document.
+
+        Walks up the ``parent_document`` chain to find all ancestors, then
+        recursively finds all descendants from the root to capture rollback
+        branches. Returns versions sorted by version number descending
+        (newest first).
+        """
+        document = _resolve_doc_for_edit(request, pk)
+
+        # Collect all versions connected via the parent_document chain.
+        versions_by_id: dict = {}
+
+        # Walk up the parent chain to collect ancestors (including the doc itself).
+        current = document
+        while current is not None:
+            versions_by_id[current.id] = current
+            current = current.parent_document
+
+        # Find the root (oldest version) — follow already-loaded parent chain.
+        root = document
+        while root.parent_document_id is not None:
+            root = root.parent_document
+
+        # Recursively find ALL descendants from root to capture rollback branches.
+        processed: set = set()
+        to_process = [root]
+        while to_process:
+            doc = to_process.pop()
+            if doc.id in processed:
+                continue
+            processed.add(doc.id)
+            if doc.id not in versions_by_id:
+                versions_by_id[doc.id] = doc
+            children = Document.objects.filter(parent_document=doc)
+            for child in children:
+                to_process.append(child)
+
+        # Sort by version number descending (newest first).
+        all_versions = sorted(
+            versions_by_id.values(), key=lambda d: d.version, reverse=True
+        )
+
+        versions_data = [
+            {
+                "id": str(v.id),
+                "version": v.version,
+                "status": v.status,
+                "title": v.title,
+                "effective_from": v.effective_from.isoformat()
+                if v.effective_from
+                else None,
+                "effective_to": v.effective_to.isoformat()
+                if v.effective_to
+                else None,
+                "created_at": v.created_at.isoformat(),
+                "updated_at": v.updated_at.isoformat(),
+                "parent_document": str(v.parent_document_id)
+                if v.parent_document_id
+                else None,
+                "chunk_count": v.chunk_count,
+            }
+            for v in all_versions
+        ]
+
+        return Response(
+            {
+                "document_id": str(document.id),
+                "versions": versions_data,
+                "count": len(versions_data),
+            }
+        )
+
     def post(self, request, pk):
         # Pre-check: resolve document + permissions BEFORE idempotency
         document = _resolve_doc_for_edit(request, pk)
