@@ -857,3 +857,159 @@ class DocumentRollbackView(APIView):
                     result_reference=response_body["id"],
                 )
                 return Response(response_body, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# KB-12-Features §8: Markdown document templates
+# ---------------------------------------------------------------------------
+
+DOCUMENT_TEMPLATES: list[dict] = [
+    {
+        "slug": "policy",
+        "name": "Policy Document",
+        "description": "For company policies, regulations, and rules.",
+        "content": (
+            "# Policy Title\n\n"
+            "## 1. Purpose\n\n"
+            "Briefly describe the purpose of this policy.\n\n"
+            "## 2. Scope\n\n"
+            "Who and what this policy applies to.\n\n"
+            "## 3. Policy\n\n"
+            "### 3.1 General Provisions\n\n"
+            "### 3.2 Specific Requirements\n\n"
+            "### 3.3 Exceptions\n\n"
+            "## 4. Roles and Responsibilities\n\n"
+            "| Role | Responsibility |\n"
+            "|------|---------------|\n"
+            "|      |               |\n\n"
+            "## 5. Enforcement\n\n"
+            "Describe enforcement and consequences of non-compliance.\n\n"
+            "## 6. Effective Date and Review\n\n"
+            "- **Effective Date:**\n"
+            "- **Next Review Date:**\n"
+            "- **Approved By:**\n\n"
+            "---\n"
+            "*Version: v1.0*\n"
+        ),
+    },
+    {
+        "slug": "faq",
+        "name": "FAQ Document",
+        "description": "For frequently asked questions and answers.",
+        "content": (
+            "# FAQ: Topic Name\n\n"
+            "## General Questions\n\n"
+            "### Q1: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "### Q2: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "## Technical Questions\n\n"
+            "### Q3: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "### Q4: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "---\n\n"
+            "> If your question is not listed here, "
+            "please contact support.\n"
+        ),
+    },
+    {
+        "slug": "technical-doc",
+        "name": "Technical Document",
+        "description": "For technical specifications and design documents.",
+        "content": (
+            "# Technical Document Title\n\n"
+            "## Overview\n\n"
+            "Brief description of the system or feature.\n\n"
+            "## Architecture\n\n"
+            "### Components\n\n"
+            "1. **Component A** - description\n"
+            "2. **Component B** - description\n\n"
+            "### Data Flow\n\n"
+            "```\n"
+            "Input -> Processing -> Output\n"
+            "```\n\n"
+            "## API Specification\n\n"
+            "### Endpoint: GET /api/v1/resource/\n\n"
+            "| Parameter | Type | Required | Description |\n"
+            "|-----------|------|----------|-------------|\n"
+            "|           |      |          |             |\n\n"
+            "## Configuration\n\n"
+            "| Key | Default | Description |\n"
+            "|-----|---------|-------------|\n"
+            "|     |         |             |\n\n"
+            "## Testing\n\n"
+            "### Unit Tests\n\n"
+            "### Integration Tests\n\n"
+            "## Changelog\n\n"
+            "| Version | Date | Changes |\n"
+            "|---------|------|---------|\n"
+            "| v1.0    |      | Initial |\n"
+        ),
+    },
+    {
+        "slug": "meeting-minutes",
+        "name": "Meeting Minutes",
+        "description": "For meeting records and action items.",
+        "content": (
+            "# Meeting Minutes: Meeting Title\n\n"
+            "- **Date:**\n"
+            "- **Time:**\n"
+            "- **Location / Link:**\n"
+            "- **Attendees:**\n"
+            "- **Recorder:**\n\n"
+            "## Agenda\n\n"
+            "1. Item 1\n"
+            "2. Item 2\n"
+            "3. Item 3\n\n"
+            "## Discussion\n\n"
+            "### Item 1\n\n"
+            "### Item 2\n\n"
+            "## Action Items\n\n"
+            "| # | Action | Owner | Due Date | Status |\n"
+            "|---|--------|-------|----------|--------|\n"
+            "| 1 |        |       |          | Open   |\n"
+            "| 2 |        |       |          | Open   |\n\n"
+            "## Next Meeting\n\n"
+            "- **Date:**\n"
+            "- **Agenda:**\n"
+        ),
+    },
+    {
+        "slug": "blank",
+        "name": "Blank Document",
+        "description": "Start from scratch with an empty Markdown document.",
+        "content": "# Untitled Document\n\n",
+    },
+]
+
+
+class DocumentTemplateView(APIView):
+    """KB-12-Features Section 8: Return predefined Markdown document templates.
+
+    GET /documents/document-templates/         - list all templates
+    GET /documents/document-templates/<slug>/  - get a single template by slug
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, slug=None):
+        if slug is not None:
+            for template in DOCUMENT_TEMPLATES:
+                if template["slug"] == slug:
+                    return Response(template)
+            raise NotFound("Document template not found.")
+
+        return Response(
+            {
+                "templates": [
+                    {
+                        "slug": t["slug"],
+                        "name": t["name"],
+                        "description": t["description"],
+                    }
+                    for t in DOCUMENT_TEMPLATES
+                ],
+                "count": len(DOCUMENT_TEMPLATES),
+            }
+        )
