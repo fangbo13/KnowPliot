@@ -50,7 +50,7 @@
   z-index: 50;
 }
 [data-theme="dark"] .app-header {
-  background: rgba(17, 25, 40, 0.4);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 .app-header .spacer { margin-left: auto; }
 
@@ -623,7 +623,7 @@
   padding: 12vh 16px 16px;
   animation: overlayIn var(--dur-fast) var(--ease-out);
 }
-[data-theme="dark"] .cmdk-overlay { background: rgba(0, 0, 0, 0.50); }
+[data-theme="dark"] .cmdk-overlay { background: var(--color-overlay); }
 .cmdk-panel {
   width: 100%; max-width: 580px;
   background: var(--color-bg-elevated);

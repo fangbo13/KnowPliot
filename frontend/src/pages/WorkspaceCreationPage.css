@@ -59,7 +59,7 @@
   border: 1px solid var(--color-border-secondary) !important;
   border-radius: 20px !important;
   background: color-mix(in srgb, var(--color-bg-container) 94%, var(--accent-bg) 6%) !important;
-  box-shadow: 0 18px 55px rgba(55, 42, 30, .06);
+  box-shadow: var(--shadow-md);
 }
 
 .kp-creation-form-card {
