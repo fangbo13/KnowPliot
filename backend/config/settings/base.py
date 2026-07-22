@@ -85,6 +85,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.core.prometheus.PrometheusRequestMiddleware",
     "apps.core.middleware.SafeErrorResponseMiddleware",  # V4.1 SYS-V4.1-002: intercept ALL 500 errors
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -136,6 +137,10 @@ DATABASES = {
         # CONN_HEALTH_CHECKS=True → Django validates stale connections before use
         "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "60")),
         "CONN_HEALTH_CHECKS": True,
+        "DISABLE_SERVER_SIDE_CURSORS": env_bool(
+            "DISABLE_SERVER_SIDE_CURSORS",
+            default=False,
+        ),
     }
 }
 
@@ -240,8 +245,11 @@ PASSWORD_RESET_TIMEOUT = 30 * 60
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
 # Celery — V4.1 SYS-V4.1-010: Redis now requires password
-CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
-CELERY_RESULT_BACKEND = "django-db"
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0"),
+)
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "django-db")
 CELERY_BEAT_SCHEDULE = {
     "notification-action-outbox-sweep": {
         "task": "apps.notifications.tasks.sweep_action_outbox",
@@ -275,6 +283,9 @@ CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "yes",
     "on",
 }
+
+PROMETHEUS_METRICS_TOKEN = os.environ.get("PROMETHEUS_METRICS_TOKEN", "")
+CAPACITY_SEED_ALLOWED = env_bool("CAPACITY_SEED_ALLOWED", default=False)
 CHAT_STREAM_V3 = env_bool("CHAT_STREAM_V3", default=False)
 CHAT_GENERATION_TARGET_ACTIVE = int(
     os.environ.get("CHAT_GENERATION_TARGET_ACTIVE", "500")
@@ -300,6 +311,9 @@ PROVIDER_HTTP_MAX_CONNECTIONS = int(
 )
 PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS = int(
     os.environ.get("PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS", "16")
+)
+PROVIDER_MAX_OUTPUT_TOKENS = int(
+    os.environ.get("PROVIDER_MAX_OUTPUT_TOKENS", "2000")
 )
 validate_capacity_settings(
     target_active=CHAT_GENERATION_TARGET_ACTIVE,
@@ -394,7 +408,10 @@ RAG_EMBEDDING_DIM = 1024
 # DashScope / LiteLLM
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 LITELLM_API_KEY = DASHSCOPE_API_KEY
-LITELLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LITELLM_BASE_URL = os.environ.get(
+    "LITELLM_BASE_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+).rstrip("/")
 TEST_PRINCIPAL_LEGACY_ALLOWLIST = tuple(
     value.strip()
     for value in os.environ.get("TEST_PRINCIPAL_LEGACY_ALLOWLIST", "").split(",")

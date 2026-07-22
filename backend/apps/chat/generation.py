@@ -283,7 +283,6 @@ def _persist_completed_turn(
         if hasattr(turn, "_state"):
             locked_turn = (
                 ChatTurn.objects.select_for_update()
-                .select_related("assistant_message")
                 .get(pk=turn.pk)
             )
         else:
@@ -573,6 +572,11 @@ def iter_chat_turn(
             "answer_save_error"
             if turn.status == ChatTurn.STATUS_SAVING
             else "stream_error"
+        )
+        logger.exception(
+            "chat_generation_failed turn_id=%s code=%s",
+            turn.id,
+            code,
         )
         if pipeline is not None:
             _record_invocation(

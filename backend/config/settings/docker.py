@@ -19,6 +19,8 @@ V4.2 SYS-V4.2-010: Set DEBUG=False — prevents middleware-layer stack trace lea
   A custom 500.html template is added for any remaining Django error pages.
 """
 
+import os
+
 from .base import *  # noqa: F401,F403
 
 # V4.2 SYS-V4.2-010: DEBUG=False — prevents middleware-layer stack trace leaks
@@ -32,7 +34,14 @@ from .base import *  # noqa: F401,F403
 # custom 500.html template (no stack traces, no settings, no SQL).
 DEBUG = False
 # V4.1 SYS-V4.1-002: Restrict ALLOWED_HOSTS (was ["*"] — Host header injection risk)
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "backend", "0.0.0.0"]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        "DJANGO_ALLOWED_HOSTS",
+        "localhost,127.0.0.1,backend,0.0.0.0",
+    ).split(",")
+    if host.strip()
+]
 
 # V4.1 SYS-V4.1-001: CORS whitelist (was CORS_ALLOW_ALL_ORIGINS = True)
 # Explicit whitelist replaces the dangerous allow-all setting.

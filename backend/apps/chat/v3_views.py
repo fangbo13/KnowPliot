@@ -16,6 +16,14 @@ from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from apps.core.prometheus import (
+    CANCELLATIONS,
+    GENERATION_OUTSTANDING,
+    GENERATION_QUEUED,
+    GENERATION_REJECTIONS,
+    SSE_CONNECTIONS,
+    SSE_RECONNECTS,
+)
 from apps.spaces.permissions import CHAT_ASK, CHAT_VIEW_HISTORY, has_space_permission
 
 from .capacity import GenerationCapacityUnavailable
@@ -128,6 +136,8 @@ def accept_chat_turn_v3(
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
     if not reservation.accepted:
+        GENERATION_OUTSTANDING.set(reservation.outstanding)
+        GENERATION_REJECTIONS.inc()
         _fail_active_turn(turn, "capacity_reached")
         response = Response(
             {
@@ -139,6 +149,9 @@ def accept_chat_turn_v3(
         )
         response["Retry-After"] = str(reservation.retry_after_seconds)
         return response
+
+    GENERATION_OUTSTANDING.set(reservation.outstanding)
+    GENERATION_QUEUED.inc()
 
     cleanup_done = False
     enqueue_failed = False
@@ -220,6 +233,7 @@ def cancel_chat_turn_v3(request, turn_id):
             {"code": "coordination_unavailable", "retryable": True},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+    CANCELLATIONS.inc()
     return Response({"status": "cancelling"}, status=status.HTTP_202_ACCEPTED)
 
 
@@ -280,7 +294,7 @@ def _async_redis_from_url(url):
         url,
         decode_responses=False,
         socket_connect_timeout=2,
-        socket_timeout=20,
+        socket_timeout=60,
         health_check_interval=30,
     )
 
@@ -301,6 +315,9 @@ def _event_cursor(request):
 
 async def _v3_event_iterator(request, turn, client):
     cursor = _event_cursor(request)
+    if cursor > 0:
+        SSE_RECONNECTS.inc()
+    SSE_CONNECTIONS.inc()
     events_key = f"chat:v3:turn:{turn.id}:events"
     last_authorization_check = time.monotonic()
     try:
@@ -338,11 +355,13 @@ async def _v3_event_iterator(request, turn, client):
                 if event.name in {"done", "error"}:
                     return
     except Exception:
-        logger.warning(
+        logger.exception(
             "v3_event_stream_failed turn_id=%s code=coordination_unavailable",
             turn.id,
         )
         return
+    finally:
+        SSE_CONNECTIONS.dec()
 
 
 async def chat_turn_events_dispatch(request, turn_id):

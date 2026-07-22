@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import logging
+import time
 from functools import lru_cache
 
 from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
+from apps.core.prometheus import (
+    GENERATION_ACTIVE,
+    GENERATION_DURATION,
+    GENERATION_OUTSTANDING,
+    GENERATION_QUEUED,
+    LEASE_LOSSES,
+    QUEUE_WAIT,
+    TASK_RETRIES,
+)
 from .capacity import (
     GenerationCapacityController,
     GenerationCapacityUnavailable,
@@ -135,9 +145,16 @@ def generate_chat_turn_v3(self, turn_id: str):
     batch = AnswerDeltaBatcher(max_delay_seconds=0.05, max_chars=256)
     delta_batch_count = 0
     attempt = _task_attempt(self)
+    task_started = time.monotonic()
+    if attempt == 1:
+        GENERATION_QUEUED.dec()
+    GENERATION_ACTIVE.inc()
+    if attempt > 1:
+        TASK_RETRIES.inc()
 
     try:
         if not capacity.renew(turn_id):
+            LEASE_LOSSES.inc()
             _mark_task_failed(turn_id, "worker_lost")
             raise GenerationReservationLost(turn_id)
 
@@ -155,6 +172,7 @@ def generate_chat_turn_v3(self, turn_id: str):
             task_attempt=attempt,
             worker_recovered=attempt > 1,
         )
+        QUEUE_WAIT.observe(queue_wait_ms / 1000)
 
         existing = stream.replay()
         has_queued = any(
@@ -205,8 +223,13 @@ def generate_chat_turn_v3(self, turn_id: str):
             "generation_capacity_unavailable"
         ) from exc
     finally:
+        GENERATION_ACTIVE.dec()
+        GENERATION_DURATION.observe(time.monotonic() - task_started)
         try:
             capacity.release(turn_id)
+            read_outstanding = getattr(capacity, "outstanding", None)
+            if callable(read_outstanding):
+                GENERATION_OUTSTANDING.set(read_outstanding())
         except GenerationCapacityUnavailable:
             logger.warning(
                 "generation_capacity_release_failed turn_id=%s code=coordination_unavailable",
