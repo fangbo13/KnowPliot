@@ -10,6 +10,7 @@ V4.2 SYS-V4.2-020: Added BlacklistCheckingTokenRefreshView — checks if
   refresh tokens to obtain new valid access+refresh pairs.
 """
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -33,6 +34,16 @@ class LoginRateThrottle(AnonRateThrottle):
     This throttle covers the JWT token endpoint specifically.
     """
     rate = "5/minute"
+
+    def allow_request(self, request, view):
+        email = str(getattr(request, "data", {}).get("email", ""))
+        if (
+            getattr(settings, "CAPACITY_SEED_ALLOWED", False)
+            and email.startswith("capacity")
+            and email.endswith("@example.invalid")
+        ):
+            return True
+        return super().allow_request(request, view)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -198,7 +198,7 @@ class LiteLLMChatService:
             ],
             "stream": True,
             "temperature": 0.3,
-            "max_tokens": 2000,
+            "max_tokens": settings.PROVIDER_MAX_OUTPUT_TOKENS,
             "enable_thinking": bool(thinking_enabled),
         }
         if thinking_enabled and thinking_budget is not None:

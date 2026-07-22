@@ -48,6 +48,7 @@ celerybeat-schedule
 # Test
 .coverage
 htmlcov/
+artifacts/capacity/
 .pytest_cache/
 
 # Temporary
