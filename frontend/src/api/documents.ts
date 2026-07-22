@@ -74,6 +74,12 @@ export const documentApi = {
     return data;
   },
 
+  // KB-12-Features §7: Create document from text (JSON body, no file upload)
+  async createFromText(body: { title: string; text_content: string; category?: string }): Promise<any> {
+    const { data } = await apiClient.post('/documents/', body);
+    return data;
+  },
+
   async getDocument(id: string): Promise<any> {
     const { data } = await apiClient.get(`/documents/${id}/`);
     return data;

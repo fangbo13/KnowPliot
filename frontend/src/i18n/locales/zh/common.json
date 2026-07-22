@@ -763,6 +763,11 @@
   "kb_delete_success": "文档已删除",
   "kb_delete_failed": "删除失败",
   "kb_delete_conflict": "无法删除：该文档被其他版本引用",
+  "kb_create_from_text": "从文本创建",
+  "kb_create_from_text_template": "从模板开始（可选）",
+  "kb_create_from_text_empty": "请输入标题和内容",
+  "kb_create_from_text_success": "文档创建成功",
+  "kb_create_from_text_failed": "文档创建失败",
   "batch_transfer": "批量转让",
   "batch_transfer_select": "选择多个空间进行所有权批量转让",
   "batch_transfer_confirm": "确认将所选空间的所有权批量转让？",
@@ -772,5 +777,10 @@
   "selected_count": "已选 {{count}} 个",
   "no_spaces_selected": "请至少选择一个空间",
   "responsive_sidebar_toggle": "切换侧栏",
-  "mobile_view": "移动端视图"
+  "mobile_view": "移动端视图",
+  "forbidden_title": "访问被拒绝",
+  "forbidden_description": "你没有访问该工作空间所需的权限。",
+  "forbidden_go_chat": "返回对话",
+  "no_space_guidance_title": "加入工作空间",
+  "no_space_guidance_description": "你尚未加入任何工作空间。发现可用空间或使用访问码加入以开始使用。"
 }

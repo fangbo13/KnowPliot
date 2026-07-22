@@ -765,6 +765,11 @@
   "kb_delete_success": "Document deleted",
   "kb_delete_failed": "Delete failed",
   "kb_delete_conflict": "Cannot delete: document is referenced by other versions",
+  "kb_create_from_text": "Create from Text",
+  "kb_create_from_text_template": "Start from template (optional)",
+  "kb_create_from_text_empty": "Please enter a title and content",
+  "kb_create_from_text_success": "Document created successfully",
+  "kb_create_from_text_failed": "Failed to create document",
   "batch_transfer": "Batch Transfer",
   "batch_transfer_select": "Select multiple spaces for batch ownership transfer",
   "batch_transfer_confirm": "Confirm batch ownership transfer for selected spaces?",
@@ -774,5 +779,10 @@
   "selected_count": "{{count}} selected",
   "no_spaces_selected": "Please select at least one space",
   "responsive_sidebar_toggle": "Toggle sidebar",
-  "mobile_view": "Mobile view"
+  "mobile_view": "Mobile view",
+  "forbidden_title": "Access denied",
+  "forbidden_description": "You do not have the capability required for this workspace.",
+  "forbidden_go_chat": "Back to chat",
+  "no_space_guidance_title": "Join a workspace",
+  "no_space_guidance_description": "You haven't joined a workspace yet. Discover available spaces or join with an access code to get started."
 }

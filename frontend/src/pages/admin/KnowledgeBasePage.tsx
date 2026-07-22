@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip } from 'antd';
+import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip, Select } from 'antd';
 import {
   InboxOutlined,
   DownloadOutlined,
@@ -16,6 +16,7 @@ import {
   HistoryOutlined,
   SaveOutlined,
   RollbackOutlined,
+  FileAddOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -96,6 +97,14 @@ export default function KnowledgeBasePage() {
   const [versionReason, setVersionReason] = useState('');
   const [rollbackSaving, setRollbackSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('content');
+  // KB-12-Features §7: Create from text state
+  const [createTextOpen, setCreateTextOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createText, setCreateText] = useState('');
+  const [createFromTextSaving, setCreateFromTextSaving] = useState(false);
+  const [templates, setTemplates] = useState<{ slug: string; name: string; description: string }[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateContentLoading, setTemplateContentLoading] = useState(false);
 
   const loadDocuments = useCallback(async () => {
     if (!canRead) return;
@@ -295,6 +304,79 @@ export default function KnowledgeBasePage() {
     });
   };
 
+  // KB-12-Features §7: Create from text handlers
+  const openCreateText = () => {
+    setCreateTextOpen(true);
+    setCreateTitle('');
+    setCreateText('# Untitled Document\n\n');
+    void loadTemplatesForCreate();
+  };
+
+  const loadTemplatesForCreate = async () => {
+    setTemplatesLoading(true);
+    try {
+      const data = await documentApi.getDocumentTemplates();
+      setTemplates(data.templates || []);
+    } catch {
+      setTemplates([]);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  const handleTemplateSelect = async (slug: string | undefined) => {
+    if (!slug) {
+      setCreateText('# Untitled Document\n\n');
+      return;
+    }
+    setTemplateContentLoading(true);
+    try {
+      const data = await documentApi.getDocumentTemplate(slug);
+      setCreateText(data.content || '');
+    } catch {
+      // keep current content on error
+    } finally {
+      setTemplateContentLoading(false);
+    }
+  };
+
+  const handleCreateFromText = async () => {
+    if (!createTitle.trim() && !createText.trim()) {
+      message.warning(t('kb_create_from_text_empty'));
+      return;
+    }
+    setCreateFromTextSaving(true);
+    try {
+      const result = await documentApi.createFromText({
+        title: createTitle.trim() || 'Untitled',
+        text_content: createText,
+      });
+      message.success(t('kb_create_from_text_success'));
+      setCreateTextOpen(false);
+      setCreateTitle('');
+      setCreateText('');
+      loadDocuments();
+      // Auto-open version drawer to continue the versioning flow (edit → preview diff → create version)
+      if (result && result.id) {
+        const newDoc: Document = {
+          id: result.id,
+          title: result.title || createTitle.trim() || 'Untitled',
+          file_type: result.file_type || 'md',
+          status: result.status || 'processing',
+          chunk_count: result.chunk_count || 0,
+          created_at: result.created_at || new Date().toISOString(),
+          text_content: result.text_content || createText,
+          version: result.version || 1,
+        };
+        openVersionDrawer(newDoc);
+      }
+    } catch {
+      message.error(t('kb_create_from_text_failed'));
+    } finally {
+      setCreateFromTextSaving(false);
+    }
+  };
+
   const MAX_FILE_SIZE_MB = 50;
 
   const beforeUpload = (file: File) => {
@@ -471,6 +553,17 @@ export default function KnowledgeBasePage() {
                     {t('upload')}
                   </Button>
                 </Upload>
+              )}
+              {canManage && (
+                <Button
+                  icon={<FileAddOutlined />}
+                  onClick={openCreateText}
+                  aria-label={t('kb_create_from_text')}
+                  style={{ borderRadius: 8 }}
+                  className="btn-press"
+                >
+                  {t('kb_create_from_text')}
+                </Button>
               )}
               {canManage && (
                 <Tag icon={<FileTextOutlined />} style={{ borderRadius: 6, border: '1px solid rgba(var(--color-accent-rgb), 0.3)', background: 'rgba(var(--color-accent-rgb), 0.08)', color: 'var(--color-accent)' }}>
@@ -657,6 +750,51 @@ export default function KnowledgeBasePage() {
               ]}
             />
           </Drawer>
+        )}
+
+        {createTextOpen && (
+          <Modal
+            open
+            title={t('kb_create_from_text')}
+            okText={t('kb_create_from_text')}
+            cancelText={t('cancel')}
+            confirmLoading={createFromTextSaving}
+            onOk={handleCreateFromText}
+            onCancel={() => setCreateTextOpen(false)}
+            width={800}
+            maskClosable={false}
+          >
+            <Spin spinning={templateContentLoading}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>{t('kb_create_from_text_template')}</label>
+                <Select
+                  style={{ width: '100%' }}
+                  allowClear
+                  placeholder={t('kb_create_from_text_template')}
+                  loading={templatesLoading}
+                  options={templates.map((tpl) => ({ value: tpl.slug, label: tpl.name }))}
+                  onChange={handleTemplateSelect}
+                />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>{t('kb_document_title')}</label>
+                <Input
+                  value={createTitle}
+                  onChange={(e) => setCreateTitle(e.target.value)}
+                  placeholder={t('kb_document_title')}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>{t('kb_edit_content')}</label>
+                <MarkdownEditor
+                  value={createText}
+                  onChange={setCreateText}
+                  placeholder={t('kb_editor_placeholder')}
+                  minHeight={300}
+                />
+              </div>
+            </Spin>
+          </Modal>
         )}
       </div>
     </div>
