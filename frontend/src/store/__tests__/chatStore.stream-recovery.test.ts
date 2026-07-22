@@ -109,11 +109,98 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('chat stream v2 and recovery', () => {
+  it('detaches v3 on route change and resumes from the stored cursor on return', async () => {
+    vi.stubEnv('VITE_CHAT_STREAM_V3', 'true');
+    const accepted = {
+      turn_id: TURN_ID,
+      session_id: SESSION_ID,
+      client_request_id: CLIENT_ID,
+      status: 'accepted',
+      events_url: `/api/v1/chat/turns/${TURN_ID}/events/`,
+      status_url: `/api/v1/chat/turns/${TURN_ID}/`,
+      cancel_url: `/api/v1/chat/turns/${TURN_ID}/cancel/`,
+    };
+    let firstGetStarted!: () => void;
+    const didStartFirstGet = new Promise<void>((resolve) => { firstGetStarted = resolve; });
+    const pendingBody = new ReadableStream<Uint8Array>({ start() {} });
+    mocks.fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(accepted), { status: 202 }))
+      .mockImplementationOnce(() => {
+        firstGetStarted();
+        return Promise.resolve(new Response(pendingBody, { headers: {
+          'X-Chat-Turn-Id': TURN_ID,
+          'X-Chat-Client-Request-Id': CLIENT_ID,
+        } }));
+      })
+      .mockResolvedValueOnce(new Response(
+        `id: 1\nevent: meta\ndata: ${JSON.stringify({ protocol_version: 3, turn_id: TURN_ID, session_id: SESSION_ID, client_request_id: CLIENT_ID })}\n\n`
+          + `id: 2\nevent: answer_delta\ndata: {"text":"resumed answer"}\n\n`
+          + `id: 3\nevent: done\ndata: ${JSON.stringify({ message_id: ASSISTANT_ID, session_id: SESSION_ID, turn_id: TURN_ID, client_request_id: CLIENT_ID })}\n\n`,
+        { headers: { 'X-Chat-Turn-Id': TURN_ID, 'X-Chat-Client-Request-Id': CLIENT_ID } },
+      ));
+
+    const send = useChatStore.getState().sendMessage('resume me');
+    await didStartFirstGet;
+    useChatStore.getState().setActiveSession(SESSION_B);
+    await send;
+
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      protocolVersion: 3, isLocked: true, lastEventSeq: 0,
+    });
+    useChatStore.getState().setActiveSession(SESSION_ID);
+    await vi.waitFor(() => expect(
+      useChatStore.getState().messages[useChatStore.getState().messages.length - 1],
+    ).toMatchObject({
+      id: ASSISTANT_ID, content: 'resumed answer',
+    }));
+    expect(String(mocks.fetch.mock.calls[2][0])).toContain('after=0');
+  });
+
+  it('posts v3 cancellation only when the user explicitly stops', async () => {
+    vi.stubEnv('VITE_CHAT_STREAM_V3', 'true');
+    const accepted = {
+      turn_id: TURN_ID,
+      session_id: SESSION_ID,
+      client_request_id: CLIENT_ID,
+      status: 'accepted',
+      events_url: `/api/v1/chat/turns/${TURN_ID}/events/`,
+      status_url: `/api/v1/chat/turns/${TURN_ID}/`,
+      cancel_url: `/api/v1/chat/turns/${TURN_ID}/cancel/`,
+    };
+    let getStarted!: () => void;
+    const didStartGet = new Promise<void>((resolve) => { getStarted = resolve; });
+    mocks.fetch.mockImplementation((url, init?: RequestInit) => {
+      if (String(url) === accepted.cancel_url) {
+        return Promise.resolve(new Response(null, { status: 202 }));
+      }
+      if (init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify(accepted), { status: 202 }));
+      }
+      getStarted();
+      return Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+        headers: { 'X-Chat-Turn-Id': TURN_ID, 'X-Chat-Client-Request-Id': CLIENT_ID },
+      }));
+    });
+
+    const send = useChatStore.getState().sendMessage('stop me');
+    await didStartGet;
+    useChatStore.getState().abortSessionStream(SESSION_ID);
+    await send;
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledWith(
+      accepted.cancel_url,
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'idle', isLocked: false,
+    });
+  });
+
   it('keeps legacy v1 token and done events compatible', async () => {
     mocks.fetch.mockResolvedValue(streamResponse([
       `event: token\ndata: {"token":"legacy answer"}\nevent: done\ndata: {"message_id":"${ASSISTANT_ID}","session_id":"${SESSION_ID}"}\n`,

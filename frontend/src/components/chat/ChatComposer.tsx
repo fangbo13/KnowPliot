@@ -25,6 +25,7 @@ type Props = {
   showCharacterCount?: boolean;
   showHint?: boolean;
   hintText?: string;
+  retryAfterSeconds?: number;
   answerMode?: AnswerMode;
   canUseDeep?: boolean;
   onAnswerModeChange?: (mode: AnswerMode) => void;
@@ -53,6 +54,7 @@ export default function ChatComposer({
   showCharacterCount = true,
   showHint = false,
   hintText,
+  retryAfterSeconds = 0,
   answerMode = 'fast',
   canUseDeep = false,
   onAnswerModeChange,
@@ -179,7 +181,7 @@ export default function ChatComposer({
 
       {showHint && (
         <div className="composer-hint">
-          {hintText ?? (
+          {retryAfterSeconds > 0 ? t('capacity_retry_countdown', { seconds: retryAfterSeconds }) : hintText ?? (
             <>
               <span><span className="kbd">↵</span> {t('hint_send', 'send')}</span>
               <span><span className="kbd">⇧</span><span className="kbd">↵</span> {t('hint_newline', 'newline')}</span>

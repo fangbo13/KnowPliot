@@ -48,11 +48,16 @@ def _turn_urls(turn):
 
 def _accepted_response(turn):
     urls = _turn_urls(turn)
+    public_status = (
+        "completed"
+        if turn.status == ChatTurn.STATUS_COMPLETED
+        else "accepted"
+    )
     payload = {
         "turn_id": str(turn.id),
         "session_id": str(turn.session_id),
         "client_request_id": str(turn.client_request_id),
-        "status": turn.status,
+        "status": public_status,
         **urls,
     }
     return Response(
@@ -372,4 +377,5 @@ async def chat_turn_events_dispatch(request, turn_id):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     response["X-Chat-Turn-Id"] = str(turn.id)
+    response["X-Chat-Client-Request-Id"] = str(turn.client_request_id)
     return response

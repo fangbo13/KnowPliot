@@ -51,6 +51,8 @@
   "error_generic": "Request failed. Please try again later.",
   "error_session": "Failed to start conversation. Please retry.",
   "error_timeout": "Response timed out. Please try again later.",
+  "error_capacity": "The service is at generation capacity. You can send again in {{seconds}} seconds.",
+  "capacity_retry_countdown": "Try again in {{seconds}}s",
   "code_copied": "Code copied",
   "copy_code": "Copy code",
   "stop_generation": "Stop generation",

@@ -18,7 +18,13 @@ import { StoreSSEDecoder } from '../stream/SSEParser';
 import {
   validateChatStreamMessage,
   validateRecoveryResponseIdentity,
+  type ValidatedChatStreamEvent,
 } from '../stream/ChatStreamProtocol';
+import {
+  ChatStreamV3HttpError,
+  ChatStreamV3Transport,
+  type AcceptedChatTurnV3,
+} from '../stream/ChatStreamV3Transport';
 // V4.0 DEFECT-008: BroadcastChannel cross-tab sync
 import { broadcastSessionSwitch } from '../sync/crossTabSync';
 
@@ -228,7 +234,10 @@ export interface SessionTurnState {
   clientRequestId?: string | null;
   turnId?: string | null;
   lastEventSeq?: number;
-  protocolVersion?: 1 | 2 | null;
+  protocolVersion?: 1 | 2 | 3 | null;
+  v3Turn?: AcceptedChatTurnV3 | null;
+  capacityRetryAfterSeconds?: number | null;
+  capacityRetryAtMs?: number | null;
   recoveryState?: StreamRecoveryState;
   timings?: ProcessingTimings;
   startedAtMs?: number | null;
@@ -353,6 +362,9 @@ function idleTurn(): SessionTurnState {
     turnId: null,
     lastEventSeq: 0,
     protocolVersion: null,
+    v3Turn: null,
+    capacityRetryAfterSeconds: null,
+    capacityRetryAtMs: null,
     recoveryState: 'idle',
     timings: {},
     startedAtMs: null,
@@ -363,7 +375,7 @@ export function mapServerPhaseForUi(phase: unknown): {
   streamPhase: StreamPhase;
   safePhase: SafeProcessingPhase;
 } {
-  if (phase === 'accepted') {
+  if (phase === 'accepted' || phase === 'queued') {
     return { streamPhase: 'connecting', safePhase: 'accepted' };
   }
   if (phase === 'retrieving' || phase === 'searching') {
@@ -560,6 +572,13 @@ function isReconciledLocalPartial(partial: Message, serverMessage: Message): boo
 }
 
 const DEFAULT_VISIBLE_ROUNDS = 10;
+const chatStreamV3Transport = new ChatStreamV3Transport();
+const v3ResumeCallbacks = new Map<string, { generationId: string; resume: () => Promise<void> }>();
+const capacityCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function chatStreamV3Enabled(): boolean {
+  return String(import.meta.env.VITE_CHAT_STREAM_V3 ?? 'false').toLowerCase() === 'true';
+}
 // V3.6 MED-001 / V3.7 P1.3: Hard cap on allMessages to prevent unbounded memory growth
 // V3.7: Reduced from 500 to 100 — 100 messages ≈ 50 rounds of conversation,
 // sufficient for most use cases while keeping JS Heap stable.
@@ -598,6 +617,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   setActiveSession: (id) => {
     if (get().activeSessionId === id) return;
 
+    const previousSessionId = get().activeSessionId;
+    const previousTurn = previousSessionId
+      ? get().turnsBySession[previousSessionId]
+      : undefined;
+    if (previousSessionId && previousTurn?.protocolVersion === 3 && previousTurn.isLocked) {
+      chatStreamV3Transport.detach(previousSessionId);
+    }
+
     messageLoadSequence += 1;
     messageLoadController?.abort();
     messageLoadController = null;
@@ -618,6 +645,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       _pendingSessionRefresh: false,
       ...legacyMirror(turn, id),
     });
+    const resumable = v3ResumeCallbacks.get(id);
+    if (turn.protocolVersion === 3 && turn.isLocked && resumable?.generationId === turn.generationId) {
+      void resumable.resume();
+    }
   },
 
   // Starting a new chat explicitly aborts and clears only the active session's turn.
@@ -659,6 +690,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             ).slice(-MAX_ALL_MESSAGES),
           },
         }));
+      }
+      if (owningTurn?.protocolVersion === 3 && owningTurn.v3Turn) {
+        void chatStreamV3Transport.cancel(owningTurn.v3Turn).catch(() => undefined);
+        chatStreamV3Transport.detach(owningSessionId);
+        v3ResumeCallbacks.delete(owningSessionId);
       }
       abortActiveStream(owningSessionId, owningGeneration ?? undefined);
       resetTokenBatcher(owningSessionId, owningGeneration ?? undefined);
@@ -775,9 +811,24 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set((state) => withTurnUpdate(state, sessionId, null, { isLocked: false }));
   },
 
-  abortSessionStream: (sessionId) => { abortActiveStream(sessionId); },
+  abortSessionStream: (sessionId) => {
+    const turn = get().turnsBySession[sessionId];
+    if (turn?.protocolVersion === 3 && turn.v3Turn) {
+      void chatStreamV3Transport.cancel(turn.v3Turn).catch((error) => {
+        console.error('Failed to cancel v3 chat turn:', error);
+      });
+      chatStreamV3Transport.detach(sessionId);
+    }
+    abortActiveStream(sessionId);
+  },
 
   removeSessionState: (sessionId) => {
+    const turn = get().turnsBySession[sessionId];
+    if (turn?.protocolVersion === 3 && turn.v3Turn) {
+      void chatStreamV3Transport.cancel(turn.v3Turn).catch(() => undefined);
+      chatStreamV3Transport.detach(sessionId);
+      v3ResumeCallbacks.delete(sessionId);
+    }
     if (hasActiveStream(sessionId)) abortActiveStream(sessionId);
     resetTokenBatcher(sessionId);
     if (get().activeSessionId === sessionId) {
@@ -1259,6 +1310,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         quality: null,
         error,
         aiStatusText: null,
+        v3Turn: error ? turn.v3Turn ?? null : null,
         recoveryState: error ? (turn.turnId ? turn.recoveryState : 'failed') : 'idle',
       }));
       if (get()._pendingSessionRefresh) {
@@ -1333,6 +1385,179 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         });
       };
       let recoverInterruptedStream: (() => Promise<boolean | null>) | null = null;
+
+      if (chatStreamV3Enabled()) {
+        let v3ConsumerRunning = false;
+        let v3ResumeRequested = false;
+        const applyV3Event = (event: ValidatedChatStreamEvent) => {
+          if (!isCurrentGeneration()) return;
+          const data = event.data;
+          const sequence = event.sequence!;
+          switch (event.name) {
+            case 'meta': {
+              const snapshot = snapshotFromPayload(data);
+              set((current) => withTurnUpdate(current, sessionId, generationId, {
+                turnId: data.turn_id,
+                protocolVersion: 3,
+                recoveryState: 'available',
+                ...(snapshot ? snapshotTurnPatch(snapshot) : {}),
+              }));
+              break;
+            }
+            case 'phase': {
+              const phase = mapServerPhaseForUi(data.phase);
+              set((current) => withTurnUpdate(current, sessionId, generationId, {
+                phase: phase.streamPhase,
+                safePhase: phase.safePhase,
+              }));
+              break;
+            }
+            case 'answer_delta':
+              markAnswerStarted();
+              assistantContent += data.text || '';
+              appendToken(sessionId, generationId, data.text || '');
+              break;
+            case 'citations':
+              set((current) => withTurnUpdate(current, sessionId, generationId, { citations: data }));
+              break;
+            case 'quality':
+              set((current) => withTurnUpdate(current, sessionId, generationId, { quality: data }));
+              break;
+            case 'usage':
+              applyUsageTimings(data);
+              break;
+            case 'done':
+              set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+              flushImmediate(sessionId, generationId);
+              commitRegeneratedVersion();
+              v3ResumeCallbacks.delete(sessionId);
+              get().finishStreamingMessage(data.message_id, data.session_id, generationId);
+              return;
+            case 'error':
+              set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+              v3ResumeCallbacks.delete(sessionId);
+              finishRecoverable('error_generic');
+              return;
+            case 'token':
+              // Protocol 3 never emits legacy token events; validation rejects them.
+              return;
+          }
+          set((current) => withTurnUpdate(current, sessionId, generationId, { lastEventSeq: sequence }));
+        };
+
+        const resumeV3 = async () => {
+          if (v3ConsumerRunning) {
+            v3ResumeRequested = true;
+            return;
+          }
+          if (!isCurrentGeneration()) return;
+          if (get().activeSessionId !== sessionId) return;
+          const accepted = get().turnsBySession[sessionId]?.v3Turn;
+          if (!accepted) return;
+          v3ConsumerRunning = true;
+          set((current) => withTurnUpdate(current, sessionId, generationId, {
+            phase: 'connecting',
+            safePhase: 'accepted',
+            recoveryState: 'recovering',
+          }));
+          try {
+            const terminal = await chatStreamV3Transport.consume(accepted, {
+              after: get().turnsBySession[sessionId]?.lastEventSeq ?? 0,
+              onEvent: applyV3Event,
+              signal: controller.signal,
+            });
+            if (terminal.kind === 'detached' && controller.signal.aborted && isCurrentGeneration()) {
+              v3ResumeCallbacks.delete(sessionId);
+              finishRecoverable(null, 'idle');
+            }
+          } catch (error) {
+            if (!isCurrentGeneration()) return;
+            v3ResumeCallbacks.delete(sessionId);
+            const errorKey = error instanceof ChatStreamV3HttpError
+              && (error.status === 401 || error.status === 403)
+              ? 'error_auth'
+              : 'error_network';
+            finishRecoverable(errorKey);
+          } finally {
+            v3ConsumerRunning = false;
+            if (v3ResumeRequested) {
+              v3ResumeRequested = false;
+              const current = get().turnsBySession[sessionId];
+              if (current?.generationId === generationId
+                && current.isLocked
+                && get().activeSessionId === sessionId
+                && v3ResumeCallbacks.has(sessionId)) {
+                queueMicrotask(() => { void resumeV3(); });
+              }
+            }
+          }
+        };
+
+        try {
+          const accepted = await chatStreamV3Transport.accept({
+            sessionId,
+            content,
+            clientRequestId,
+            answerMode,
+            thinkingEnabled: requestedThinkingEnabled,
+            ...(regenerateMessageId ? { regenerateMessageId } : {}),
+          }, controller.signal);
+          set((current) => withTurnUpdate(current, sessionId, generationId, {
+            phase: 'connecting',
+            safePhase: 'accepted',
+            protocolVersion: 3,
+            turnId: accepted.turn_id,
+            v3Turn: accepted,
+            recoveryState: 'available',
+            capacityRetryAfterSeconds: null,
+            capacityRetryAtMs: null,
+            timings: {
+              ...(current.turnsBySession[sessionId]?.timings ?? {}),
+              connectionMs: elapsedMs(current.turnsBySession[sessionId]?.startedAtMs),
+            },
+          }));
+          v3ResumeCallbacks.set(sessionId, { generationId, resume: resumeV3 });
+          await resumeV3();
+          return true;
+        } catch (error) {
+          if (error instanceof ChatStreamV3HttpError
+            && error.code === 'generation_capacity_reached') {
+            const retrySeconds = Math.max(1, error.retryAfterSeconds ?? 5);
+            resetTokenBatcher(sessionId, generationId);
+            clearStreamOnComplete(sessionId, generationId);
+            set((current) => withTurnUpdate(current, sessionId, generationId, {
+              phase: 'error',
+              safePhase: 'accepted',
+              isLocked: true,
+              error: 'error_capacity',
+              capacityRetryAfterSeconds: retrySeconds,
+              capacityRetryAtMs: Date.now() + retrySeconds * 1_000,
+            }));
+            const priorTimer = capacityCooldownTimers.get(sessionId);
+            if (priorTimer) clearTimeout(priorTimer);
+            capacityCooldownTimers.set(sessionId, setTimeout(() => {
+              capacityCooldownTimers.delete(sessionId);
+              set((current) => withTurnUpdate(current, sessionId, generationId, {
+                isLocked: false,
+                capacityRetryAtMs: null,
+              }));
+            }, retrySeconds * 1_000));
+            return false;
+          }
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            finishRecoverable(null, 'idle');
+            return false;
+          }
+          const errorKey = error instanceof ChatStreamV3HttpError
+            && (error.status === 401 || error.status === 403)
+            ? 'error_auth'
+            : error instanceof ChatStreamV3HttpError && error.status >= 500
+              ? 'error_server'
+              : 'error_generic';
+          finishRecoverable(errorKey);
+          return false;
+        }
+      }
 
       try {
         connectionWatchdog = setTimeout(
@@ -1873,6 +2098,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           error: null,
           aiStatusText: null,
           generationId: null,
+          v3Turn: null,
           recoveryState: 'idle',
           timings: {
             ...(ownerTurn.timings ?? {}),

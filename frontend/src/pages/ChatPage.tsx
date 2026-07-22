@@ -80,6 +80,7 @@ export default function ChatPageContainer() {
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [showScrollFab, setShowScrollFab] = useState(false);
+  const [capacityClockMs, setCapacityClockMs] = useState(Date.now());
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +91,16 @@ export default function ChatPageContainer() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
   const activeSessionTitle = activeSession?.title || t('session_title_new');
+  const capacityRetrySeconds = activeTurn?.capacityRetryAtMs
+    ? Math.max(0, Math.ceil((activeTurn.capacityRetryAtMs - capacityClockMs) / 1000))
+    : 0;
+
+  useEffect(() => {
+    if (!activeTurn?.capacityRetryAtMs || activeTurn.capacityRetryAtMs <= Date.now()) return;
+    setCapacityClockMs(Date.now());
+    const timer = window.setInterval(() => setCapacityClockMs(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [activeTurn?.capacityRetryAtMs]);
 
   useEffect(() => {
     if (!isRenamingTitle) return;
@@ -300,6 +311,9 @@ export default function ChatPageContainer() {
   }
 
   const getErrorDescription = (error: string) => {
+    if (error === 'error_capacity') {
+      return t('error_capacity', { seconds: capacityRetrySeconds });
+    }
     const map: Record<string, string> = {
       error_auth: 'error_auth', error_server: 'error_server', error_network: 'error_network',
       error_generic: 'error_generic', error_session: 'error_session', error_timeout: 'error_timeout',
@@ -381,7 +395,12 @@ export default function ChatPageContainer() {
               <div className="chat-error-title">{t('error_title') || 'Error'}</div>
               <div className="chat-error-desc">{getErrorDescription(sendError)}</div>
               <div className="chat-error-actions">
-                <button className="msg-action-btn" onClick={() => handleRetry()}><ReloadOutlined />{t('error_retry')}</button>
+                <button className="msg-action-btn" disabled={capacityRetrySeconds > 0} onClick={() => handleRetry()}>
+                  <ReloadOutlined />
+                  {capacityRetrySeconds > 0
+                    ? t('capacity_retry_countdown', { seconds: capacityRetrySeconds })
+                    : t('error_retry')}
+                </button>
                 <button className="msg-action-btn" onClick={() => setSendError(null)}>{t('cancel') || 'Dismiss'}</button>
               </div>
             </div>
@@ -453,6 +472,7 @@ export default function ChatPageContainer() {
             multiline
             maxRows={6}
             showHint
+            retryAfterSeconds={capacityRetrySeconds}
             answerMode={answerMode}
             canUseDeep={canUseDeep}
             thinkingEnabled={thinkingEnabled}

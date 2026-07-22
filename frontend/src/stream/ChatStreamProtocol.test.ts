@@ -12,13 +12,29 @@ const CLIENT_ID = '22222222-2222-4222-8222-222222222221';
 const MESSAGE_ID = '55555555-5555-4555-8555-555555555555';
 
 const context = {
-  protocolVersion: null as 1 | 2 | null,
+  protocolVersion: null as 1 | 2 | 3 | null,
   expectedSessionId: SESSION_ID,
   expectedTurnId: TURN_ID,
   expectedClientRequestId: CLIENT_ID,
 };
 
 describe('chat stream protocol validation', () => {
+  it('accepts a complete v3 meta with an integer replay cursor', () => {
+    expect(validateChatStreamMessage({
+      id: '7',
+      hasExplicitId: true,
+      event: 'meta',
+      data: JSON.stringify({
+        protocol_version: 3,
+        turn_id: TURN_ID,
+        session_id: SESSION_ID,
+        client_request_id: CLIENT_ID,
+      }),
+    }, { ...context, protocolVersion: 3 })).toMatchObject({
+      name: 'meta', sequence: 7, protocolVersion: 3,
+    });
+  });
+
   it('accepts a complete v2 meta and returns its safe sequence', () => {
     expect(validateChatStreamMessage({
       id: '1',

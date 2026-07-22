@@ -198,7 +198,12 @@ class V3AcceptanceTest(SimpleTestCase):
                 )
                 self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
                 self.assertEqual(response.data["turn_id"], str(turn.id))
-                self.assertEqual(response.data["status"], turn_status)
+                self.assertEqual(
+                    response.data["status"],
+                    "completed"
+                    if turn_status == ChatTurn.STATUS_COMPLETED
+                    else "accepted",
+                )
                 self.assertEqual(capacity.reserved, [])
                 enqueue.assert_not_called()
 
@@ -290,7 +295,11 @@ class V3AsyncEventsTest(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
         self.user = SimpleNamespace(id=7, pk=7, is_authenticated=True)
-        self.turn = SimpleNamespace(id=uuid.uuid4(), protocol_version=3)
+        self.turn = SimpleNamespace(
+            id=uuid.uuid4(),
+            protocol_version=3,
+            client_request_id=uuid.uuid4(),
+        )
 
     def test_async_endpoint_replays_integer_cursor_through_terminal_event(self):
         request = self.factory.get("/events/?after=0")
@@ -310,6 +319,11 @@ class V3AsyncEventsTest(SimpleTestCase):
 
         body = async_to_sync(consume)().decode()
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Chat-Turn-Id"], str(self.turn.id))
+        self.assertEqual(
+            response["X-Chat-Client-Request-Id"],
+            str(self.turn.client_request_id),
+        )
         self.assertIn("id: 1\nevent: phase", body)
         self.assertIn("id: 2\nevent: done", body)
 
