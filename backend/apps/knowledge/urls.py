@@ -19,6 +19,7 @@ from .views import (
     DocumentVersionCreateView,
     DocumentRollbackView,
     DocumentTemplateView,
+    DocumentConvertView,
 )
 from .batch_views import BatchDocumentUploadView, BatchImportResultDetailView
 
@@ -42,4 +43,6 @@ urlpatterns = [
     # KB-12-Features §8: Markdown document templates (list + detail by slug)
     path("document-templates/", DocumentTemplateView.as_view(), name="document-template-list"),
     path("document-templates/<slug:slug>/", DocumentTemplateView.as_view(), name="document-template-detail"),
+    # KB-12-Features §9: Synchronous Word/PDF→Markdown conversion
+    path("convert/", DocumentConvertView.as_view(), name="document-convert"),
 ]

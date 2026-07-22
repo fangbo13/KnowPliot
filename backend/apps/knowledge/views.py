@@ -1013,3 +1013,108 @@ class DocumentTemplateView(APIView):
                 "count": len(DOCUMENT_TEMPLATES),
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# KB-12-Features §9: Synchronous Word/PDF→Markdown conversion
+# ---------------------------------------------------------------------------
+
+MAX_INLINE_CONVERT_SIZE_MB = 10
+
+
+class DocumentConvertView(APIView):
+    """KB-12-Features Section 9: Synchronous Word/PDF to Markdown conversion.
+
+    Accepts a file upload, converts to Markdown text using DocumentParser,
+    and returns the text. No database writes, no side effects.
+    Temp files are always cleaned up.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        import tempfile
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from .file_policy import derive_document_type, validate_document_size
+
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"error": "No file provided. Use 'file' field in multipart form data."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 1. Conservative size limit for inline conversion
+        max_size = MAX_INLINE_CONVERT_SIZE_MB * 1024 * 1024
+        if file_obj.size > max_size:
+            return Response(
+                {
+                    "error": (
+                        f"File too large for inline conversion "
+                        f"({file_obj.size} bytes). "
+                        f"Maximum is {MAX_INLINE_CONVERT_SIZE_MB}MB."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 2. Basic size validation (min 1KB)
+        try:
+            validate_document_size(file_obj.size)
+        except DjangoValidationError as exc:
+            return Response(
+                {"error": "; ".join(exc.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3. Derive file type from filename
+        try:
+            file_type = derive_document_type(file_obj.name)
+        except DjangoValidationError as exc:
+            return Response(
+                {"error": "; ".join(exc.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4. Only PDF and DOCX need conversion to Markdown
+        if file_type not in ("pdf", "docx"):
+            return Response(
+                {
+                    "error": (
+                        f"Unsupported file type '{file_type}' for conversion. "
+                        f"Only PDF and DOCX files are supported."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 5. Save to temp file, parse, clean up
+        fd, temp_path = tempfile.mkstemp(suffix=f".{file_type}")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                for chunk in file_obj.chunks():
+                    f.write(chunk)
+
+            from apps.rag.pipeline import DocumentParser
+
+            parser = DocumentParser()
+            markdown_text, _page_metadata = parser.parse(temp_path, file_type)
+
+            return Response(
+                {
+                    "filename": file_obj.name,
+                    "file_type": file_type,
+                    "markdown": markdown_text,
+                    "char_count": len(markdown_text),
+                }
+            )
+        except Exception as exc:
+            return Response(
+                {"error": f"Conversion failed: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
