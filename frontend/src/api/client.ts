@@ -185,6 +185,11 @@ apiClient.interceptors.request.use((config) => {
   if (spaceId) {
     config.headers['X-Space-Id'] = spaceId;
   }
+  // When sending FormData, switch Content-Type to multipart/form-data so the
+  // browser attaches the correct boundary (axios 1.7+ adds it automatically).
+  if (config.data instanceof FormData) {
+    config.headers['Content-Type'] = 'multipart/form-data';
+  }
   return config;
 });
 
