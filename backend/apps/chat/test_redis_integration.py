@@ -23,6 +23,10 @@ from django.core.cache import caches
 from django.test import SimpleTestCase
 from rest_framework.test import APIRequestFactory
 
+from apps.chat.capacity import (
+    GENERATION_CAPACITY_KEY,
+    GenerationCapacityController,
+)
 from apps.chat.coordination import RedisSessionLease, create_redis_client
 from apps.chat.stream_events import EVENT_TTL_SECONDS, RedisTurnEventStore
 from apps.core.throttling import AuthenticatedReadBurstThrottle
@@ -170,4 +174,64 @@ class RedisMultiWorkerIntegrationTests(SimpleTestCase):
         fresh_worker.cache = caches["default"]
         fresh_worker.timer = lambda: 1_000.0
         self.assertFalse(fresh_worker.allow_request(request, None))
+
+
+@unittest.skipUnless(
+    os.environ.get("KNOWPILOT_REDIS_INTEGRATION") == "1",
+    "requires explicit real Redis integration profile",
+)
+class GenerationCapacityRedisTest(SimpleTestCase):
+    def setUp(self):
+        self.clients = [create_redis_client() for _ in range(32)]
+        for client in self.clients:
+            self.assertTrue(client.ping())
+        self.clients[0].delete(GENERATION_CAPACITY_KEY)
+
+    def tearDown(self):
+        self.clients[0].delete(GENERATION_CAPACITY_KEY)
+        for client in self.clients:
+            close = getattr(client, "close", None)
+            if close:
+                close()
+
+    def test_32_clients_atomically_contend_for_eight_generation_slots(self):
+        barrier = threading.Barrier(len(self.clients))
+        outcomes: queue.Queue[tuple[str, bool]] = queue.Queue()
+        turn_ids = [str(uuid.uuid4()) for _ in self.clients]
+        gates = [
+            GenerationCapacityController(
+                client,
+                max_outstanding=8,
+                ttl_seconds=180,
+            )
+            for client in self.clients
+        ]
+
+        def reserve(index):
+            barrier.wait(timeout=10)
+            reservation = gates[index].reserve(turn_ids[index])
+            outcomes.put((turn_ids[index], reservation.accepted))
+
+        threads = [
+            threading.Thread(target=reserve, args=(index,))
+            for index in range(len(self.clients))
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+            self.assertFalse(thread.is_alive(), "capacity contention did not finish")
+
+        results = [outcomes.get_nowait() for _ in self.clients]
+        accepted_ids = [turn_id for turn_id, accepted in results if accepted]
+        self.assertEqual(len(accepted_ids), 8)
+        self.assertEqual(gates[0].outstanding(), 8)
+
+        for turn_id in accepted_ids:
+            self.assertTrue(gates[0].renew(turn_id))
+        self.assertEqual(gates[0].outstanding(), 8)
+
+        for turn_id in accepted_ids:
+            self.assertTrue(gates[0].release(turn_id))
+        self.assertEqual(gates[0].outstanding(), 0)
 
