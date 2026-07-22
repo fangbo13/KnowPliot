@@ -200,7 +200,7 @@ export const documentApi = {
 
   async batchUpload(file: File): Promise<any> {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('zip_file', file);
     const { data } = await apiClient.post('/documents/batch/upload/', formData);
     return data;
   },
