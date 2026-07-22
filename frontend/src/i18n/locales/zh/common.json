@@ -776,7 +776,7 @@
   "kb_batch_status_duplicate": "重复",
   "kb_batch_status_failure": "失败",
   "kb_archive": "归档",
-  "kb_archive_success": "文档已归档",
+  "kb_archive_success": "文档归档成功",
   "kb_archive_confirm": "归档此文档？之后可恢复。",
   "kb_delete": "删除",
   "kb_delete_confirm": "永久删除此文档？此操作不可撤销。",

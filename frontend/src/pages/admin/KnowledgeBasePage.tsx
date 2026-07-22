@@ -149,7 +149,7 @@ export default function KnowledgeBasePage() {
     if (!canManage) return;
     try {
       await documentApi.archiveDocument(id);
-      message.success(t('archive_success'));
+      message.success(t('kb_archive_success'));
       loadDocuments();
     } catch {
       message.error(t('upload_error'));
