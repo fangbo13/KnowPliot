@@ -17,6 +17,7 @@ import {
   SaveOutlined,
   RollbackOutlined,
   FileAddOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -105,6 +106,15 @@ export default function KnowledgeBasePage() {
   const [templates, setTemplates] = useState<{ slug: string; name: string; description: string }[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateContentLoading, setTemplateContentLoading] = useState(false);
+  // KB-12-Features §11: Batch upload state
+  const [batchUploading, setBatchUploading] = useState(false);
+  const [batchResult, setBatchResult] = useState<{
+    total_files: number;
+    success_count: number;
+    duplicate_skipped_count: number;
+    failed_count: number;
+    results: Array<{ status: string; title: string; document_id?: string; existing_document_id?: string; error?: string }>;
+  } | null>(null);
 
   const loadDocuments = useCallback(async () => {
     if (!canRead) return;
@@ -194,6 +204,26 @@ export default function KnowledgeBasePage() {
   const dismissTutorial = () => {
     localStorage.setItem('ey-kb-tutorial-dismissed', 'true');
     setShowTutorial(false);
+  };
+
+  // KB-12-Features §11: Batch ZIP upload handler
+  const handleBatchUpload = async (file: File) => {
+    if (!canManage) return;
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      message.error(t('kb_batch_upload_zip_only'));
+      return;
+    }
+    setBatchUploading(true);
+    try {
+      const result = await documentApi.batchUpload(file);
+      setBatchResult(result);
+      message.success(t('kb_batch_upload_success'));
+      loadDocuments();
+    } catch {
+      message.error(t('kb_batch_upload_failed'));
+    } finally {
+      setBatchUploading(false);
+    }
   };
 
   const confirmArchive = (id: string, title: string) => {
@@ -566,6 +596,27 @@ export default function KnowledgeBasePage() {
                 </Button>
               )}
               {canManage && (
+                <Upload
+                  accept=".zip"
+                  showUploadList={false}
+                  beforeUpload={(file) => {
+                    void handleBatchUpload(file as File);
+                    return false;
+                  }}
+                >
+                  <Button
+                    icon={<CloudUploadOutlined />}
+                    loading={batchUploading}
+                    aria-label={t('kb_batch_upload')}
+                    title={t('kb_batch_upload_desc')}
+                    style={{ borderRadius: 8 }}
+                    className="btn-press"
+                  >
+                    {t('kb_batch_upload')}
+                  </Button>
+                </Upload>
+              )}
+              {canManage && (
                 <Tag icon={<FileTextOutlined />} style={{ borderRadius: 6, border: '1px solid rgba(var(--color-accent-rgb), 0.3)', background: 'rgba(var(--color-accent-rgb), 0.08)', color: 'var(--color-accent)' }}>
                   {t('kb_md_recommended')}
                 </Tag>
@@ -794,6 +845,56 @@ export default function KnowledgeBasePage() {
                 />
               </div>
             </Spin>
+          </Modal>
+        )}
+
+        {batchResult && (
+          <Modal
+            open
+            title={t('kb_batch_result')}
+            okText={t('close')}
+            cancelButtonProps={{ style: { display: 'none' } }}
+            onOk={() => setBatchResult(null)}
+            onCancel={() => setBatchResult(null)}
+            width={640}
+          >
+            <div style={{ marginBottom: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <Tag color="blue">{t('kb_batch_total', { count: batchResult.total_files })}</Tag>
+              <Tag color="green">{t('kb_batch_success_count', { count: batchResult.success_count })}</Tag>
+              <Tag color="orange">{t('kb_batch_skipped_count', { count: batchResult.duplicate_skipped_count })}</Tag>
+              <Tag color="red">{t('kb_batch_failed_count', { count: batchResult.failed_count })}</Tag>
+            </div>
+            {batchResult.results.length > 0 && (
+              <Table
+                size="small"
+                dataSource={batchResult.results}
+                rowKey={(_, idx) => String(idx)}
+                pagination={false}
+                scroll={{ y: 300 }}
+                columns={[
+                  {
+                    title: t('kb_document_title'),
+                    dataIndex: 'title',
+                    key: 'title',
+                  },
+                  {
+                    title: t('kb_batch_status'),
+                    dataIndex: 'status',
+                    key: 'status',
+                    width: 120,
+                    render: (status: string) => {
+                      const statusMap: Record<string, { color: string; text: string }> = {
+                        success: { color: 'green', text: t('kb_batch_status_success') },
+                        duplicate_skipped: { color: 'orange', text: t('kb_batch_status_duplicate') },
+                        failure: { color: 'red', text: t('kb_batch_status_failure') },
+                      };
+                      const s = statusMap[status] || { color: 'default', text: status };
+                      return <Tag color={s.color}>{s.text}</Tag>;
+                    },
+                  },
+                ]}
+              />
+            )}
           </Modal>
         )}
       </div>
