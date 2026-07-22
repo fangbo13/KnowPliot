@@ -100,7 +100,7 @@ class ChatMessageRequestSerializerTest(SimpleTestCase):
         self.assertEqual(serializer.validated_data["client_request_id"], request_id)
 
         invalid = ChatMessageRequestSerializer(
-            data={"content": "hello", "answer_mode": "slow", "protocol_version": 3}
+            data={"content": "hello", "answer_mode": "slow", "protocol_version": 4}
         )
         self.assertFalse(invalid.is_valid())
         self.assertEqual(set(invalid.errors), {"answer_mode", "protocol_version"})

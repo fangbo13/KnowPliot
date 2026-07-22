@@ -138,7 +138,7 @@ class ChatMessageRequestSerializer(serializers.Serializer):
     )
     thinking_enabled = serializers.BooleanField(default=False, required=False)
     protocol_version = serializers.ChoiceField(
-        choices=[1, 2],
+        choices=[1, 2, 3],
         default=1,
         required=False,
     )

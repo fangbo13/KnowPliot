@@ -240,6 +240,7 @@ class ChatTurn(models.Model):
     attempt_count = models.PositiveIntegerField(default=1)
     last_event_seq = models.PositiveIntegerField(default=0)
     error_code = models.CharField(max_length=64, blank=True, default="")
+    protocol_version = models.PositiveSmallIntegerField(default=1)
     started_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -274,6 +275,10 @@ class ChatTurn(models.Model):
                     )
                 ),
                 name="chat_turn_thinking_snapshot_ck",
+            ),
+            models.CheckConstraint(
+                check=models.Q(protocol_version__in=(1, 2, 3)),
+                name="chat_turn_protocol_version_ck",
             ),
         ]
         indexes = [

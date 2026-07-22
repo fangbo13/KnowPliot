@@ -7,7 +7,7 @@ import os
 import warnings
 from pathlib import Path
 
-from .parsing import env_bool
+from .parsing import env_bool, validate_capacity_settings
 
 # Load .env file
 try:
@@ -253,6 +253,14 @@ ACTION_OUTBOX_DELIVERY_ADAPTER = os.environ.get(
     "",
 )
 CHAT_COORDINATION_REDIS_URL = os.environ.get("CHAT_COORDINATION_REDIS_URL", CELERY_BROKER_URL)
+CHAT_EVENTS_REDIS_URL = os.environ.get(
+    "CHAT_EVENTS_REDIS_URL",
+    CHAT_COORDINATION_REDIS_URL,
+)
+CHAT_CAPACITY_REDIS_URL = os.environ.get(
+    "CHAT_CAPACITY_REDIS_URL",
+    CHAT_EVENTS_REDIS_URL,
+)
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
@@ -267,6 +275,43 @@ CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "yes",
     "on",
 }
+CHAT_STREAM_V3 = env_bool("CHAT_STREAM_V3", default=False)
+CHAT_GENERATION_TARGET_ACTIVE = int(
+    os.environ.get("CHAT_GENERATION_TARGET_ACTIVE", "500")
+)
+CHAT_GENERATION_MAX_OUTSTANDING = int(
+    os.environ.get("CHAT_GENERATION_MAX_OUTSTANDING", "625")
+)
+CHAT_GENERATION_RESERVATION_TTL_SECONDS = int(
+    os.environ.get("CHAT_GENERATION_RESERVATION_TTL_SECONDS", "180")
+)
+CHAT_GENERATION_RETRY_AFTER_SECONDS = int(
+    os.environ.get("CHAT_GENERATION_RETRY_AFTER_SECONDS", "5")
+)
+CHAT_GENERATION_WORKER_CONCURRENCY = int(
+    os.environ.get("CHAT_GENERATION_WORKER_CONCURRENCY", "25")
+)
+CHAT_EVENT_V3_TTL_SECONDS = int(
+    os.environ.get("CHAT_EVENT_V3_TTL_SECONDS", "900")
+)
+CHAT_EVENT_V3_MAXLEN = int(os.environ.get("CHAT_EVENT_V3_MAXLEN", "4096"))
+PROVIDER_HTTP_MAX_CONNECTIONS = int(
+    os.environ.get("PROVIDER_HTTP_MAX_CONNECTIONS", "32")
+)
+PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS = int(
+    os.environ.get("PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS", "16")
+)
+validate_capacity_settings(
+    target_active=CHAT_GENERATION_TARGET_ACTIVE,
+    max_outstanding=CHAT_GENERATION_MAX_OUTSTANDING,
+    reservation_ttl_seconds=CHAT_GENERATION_RESERVATION_TTL_SECONDS,
+    retry_after_seconds=CHAT_GENERATION_RETRY_AFTER_SECONDS,
+    worker_concurrency=CHAT_GENERATION_WORKER_CONCURRENCY,
+    event_ttl_seconds=CHAT_EVENT_V3_TTL_SECONDS,
+    event_max_length=CHAT_EVENT_V3_MAXLEN,
+    provider_max_connections=PROVIDER_HTTP_MAX_CONNECTIONS,
+    provider_max_keepalive_connections=PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS,
+)
 CAPABILITY_NAV = env_bool("CAPABILITY_NAV", default=False)
 DEEP_ANSWER_MODE = env_bool("DEEP_ANSWER_MODE", default=False)
 THINKING_MODE = env_bool("THINKING_MODE", default=False)
