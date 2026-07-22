@@ -491,6 +491,44 @@ h1, h2, h3, h4, h5 {
   .composer { padding: 8px 12px; }
   .stat-card { padding: 12px; }
   :root { --sidebar-width-expanded: 0px; --sidebar-width-collapsed: 0px; }
+
+  /* C1: Prevent table overflow on mobile — horizontal scroll instead of layout break */
+  .ant-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ant-table { min-width: 500px; }
+
+  /* C1: Multi-column grids collapse to single column on mobile */
+  .ant-row { flex-direction: column !important; }
+  .ant-col { max-width: 100% !important; flex: 0 0 100% !important; }
+
+  /* C1: Descriptions/Stats grids become single column */
+  .ant-descriptions-row { display: flex; flex-wrap: wrap; }
+  .ant-descriptions-item { flex: 1 1 100%; }
+
+  /* C1: Card-based grids (stat cards, dashboard widgets) → single column */
+  [class*="stat-grid"],
+  [class*="card-grid"],
+  [style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* C1: Fixed bottom action bar for primary actions on mobile */
+  .mobile-action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px env(safe-area-inset-bottom, 12px);
+    background: var(--color-bg-container);
+    border-top: 1px solid var(--color-border);
+    box-shadow: var(--shadow-lg);
+  }
+  .mobile-action-bar .ant-btn { flex: 1; }
+
+  /* C1: Ensure page content has bottom padding when action bar is visible */
+  .has-mobile-action-bar { padding-bottom: 72px !important; }
 }
 
 @media (max-width: 480px) {

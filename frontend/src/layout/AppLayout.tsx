@@ -38,6 +38,7 @@ const SpaceSwitcher = lazy(() => import('../components/SpaceSwitcher'));
 const NotificationBell = lazy(() => import('../components/NotificationBell'));
 const SessionRenameModal = lazy(() => import('../components/chat/SessionRenameModal'));
 const CommandPalette = lazy(() => import('../components/CommandPalette'));
+const PageTransition = lazy(() => import('../components/PageTransition'));
 
 function clampToViewport(x: number, y: number, w = 180, h = 140) {
   return { x: Math.max(8, Math.min(x, window.innerWidth - w - 8)), y: Math.max(8, Math.min(y, window.innerHeight - h - 8)) };
@@ -490,9 +491,11 @@ export default function AppLayout() {
         <NetworkStatusBanner />
         <main id="main-content" role="main" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <ErrorBoundary title={t('error_boundary_title')} description={t('error_boundary_desc')} retryText={t('error_boundary_retry')}>
-            <div className="section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <Outlet />
-            </div>
+            <Suspense fallback={<div style={{ flex: 1 }} />}>
+              <PageTransition>
+                <Outlet />
+              </PageTransition>
+            </Suspense>
           </ErrorBoundary>
         </main>
       </div>
