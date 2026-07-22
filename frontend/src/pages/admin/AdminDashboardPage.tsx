@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { Alert, Card, Table, Button, Space, Typography, Spin, message, Descriptions } from 'antd';
+import { Alert, Card, Table, Button, Space, Typography, Skeleton, message, Descriptions } from 'antd';
 import {
   ReloadOutlined, TeamOutlined,
   DashboardOutlined, SafetyCertificateOutlined,
@@ -408,8 +408,8 @@ export default function AdminDashboardPage() {
             />
           )}
           {statusLoading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}>
-              <Spin />
+            <div style={{ padding: 24 }}>
+              <Skeleton active paragraph={{ rows: 3 }} />
             </div>
           ) : systemHealth && systemMetrics ? (
             <Descriptions column={1} size="small" bordered={false} style={{ marginBottom: 12 }}>

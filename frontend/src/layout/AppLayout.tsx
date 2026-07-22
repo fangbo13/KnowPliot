@@ -240,11 +240,13 @@ export default function AppLayout() {
       chatState.removeSessionState(id);
       broadcastSessionDelete(id);
       loadSessions();
+      void notify('success', t('session_deleted_success'));
     } catch (err) {
       console.error('Failed to delete session:', err);
+      void notify('error', t('session_delete_failed'));
     }
     closeMenu();
-  }, [loadSessions, closeMenu]);
+  }, [loadSessions, closeMenu, t]);
 
   const openRenameSession = useCallback((session: { id: string; title: string }) => { setRenameSessionTarget(session); closeMenu(); }, [closeMenu]);
 
@@ -302,7 +304,12 @@ export default function AppLayout() {
   const renderList = () => (
     <div className="sidebar-scroll">
       {sessions.length === 0 ? (
-        <div className="sidebar-empty">{t('sidebar_empty_state')}</div>
+        <div className="sidebar-empty">
+          <span style={{ display: 'block', marginBottom: 12 }}>{t('sidebar_empty_state')}</span>
+          <button className="new-chat-btn" onClick={handleNewChat} style={{ width: '100%' }}>
+            <PlusOutlined />{t('sidebar_new_chat')}
+          </button>
+        </div>
       ) : (
         groupOrder.map((groupKey) => {
           const groupSessions = sidebarSessions[groupKey];

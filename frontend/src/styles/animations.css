@@ -38,6 +38,21 @@
 .skeleton-table {
   background: var(--color-fill);
   border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--color-fill-secondary, rgba(255,255,255,0.06)), transparent);
+  animation: kp-skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes kp-skeleton-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .pulse-subtle { opacity: 0.85; }
@@ -83,6 +98,7 @@
   .stagger-fade-in > *,
   .section-enter,
   .success-check,
+  .skeleton-active::after,
   .fade-enter-active,
   .fade-appear-active,
   .fade-leave-active {

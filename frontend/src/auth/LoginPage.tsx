@@ -33,6 +33,47 @@ function firstError(data: any): string {
   return '';
 }
 
+/** Calculate password strength: weak / medium / strong. */
+function passwordStrength(pwd: string): 'weak' | 'medium' | 'strong' {
+  if (!pwd) return 'weak';
+  let score = 0;
+  if (pwd.length >= 8) score++;
+  if (pwd.length >= 12) score++;
+  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score++;
+  if (/\d/.test(pwd)) score++;
+  if (/[^a-zA-Z0-9]/.test(pwd)) score++;
+  if (score <= 2) return 'weak';
+  if (score <= 3) return 'medium';
+  return 'strong';
+}
+
+/** Visual password-strength indicator using CSS variables (light/dark aware). */
+function PasswordStrengthBar({ pwd, t }: { pwd: string; t: (k: string) => string }) {
+  const strength = passwordStrength(pwd);
+  if (!pwd) return null;
+  const colors: Record<string, string> = {
+    weak: 'var(--color-error)',
+    medium: 'var(--color-warning)',
+    strong: 'var(--color-success)',
+  };
+  const widths: Record<string, string> = { weak: '33%', medium: '66%', strong: '100%' };
+  return (
+    <div style={{ marginBottom: 8, marginTop: -8, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--color-border-secondary)', overflow: 'hidden' }}>
+        <div style={{
+          width: widths[strength],
+          height: '100%',
+          background: colors[strength],
+          transition: 'width 0.3s ease, background 0.3s ease',
+        }} />
+      </div>
+      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap' }}>
+        {t(`password_strength_${strength}`)}
+      </span>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const { t, i18n } = useTranslation('common');
   const { login } = useAuth();
@@ -50,6 +91,7 @@ export default function LoginPage() {
   const [mfaCode, setMfaCode] = useState('');
   const [resetOpen, setResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
 
   // Admin registration entry is hidden by default; shown only via ?admin=1 query param
   // to keep the public login page clean for regular users.
@@ -271,8 +313,14 @@ export default function LoginPage() {
               />
             </Form.Item>
             <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" onChange={(e) => setRegPassword(e.target.value)} />
             </Form.Item>
+            <PasswordStrengthBar pwd={regPassword} t={t} />
+            {!regPassword && (
+              <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: -4, marginBottom: 8 }}>
+                {t('password_strength_hint')}
+              </p>
+            )}
             {confirmPasswordField}
             <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
               <div>
@@ -299,8 +347,14 @@ export default function LoginPage() {
               <Input prefix={<SafetyCertificateOutlined />} placeholder={t('admin_code_placeholder')} autoComplete="off" className="input-focus-float" />
             </Form.Item>
             <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" onChange={(e) => setRegPassword(e.target.value)} />
             </Form.Item>
+            <PasswordStrengthBar pwd={regPassword} t={t} />
+            {!regPassword && (
+              <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: -4, marginBottom: 8 }}>
+                {t('password_strength_hint')}
+              </p>
+            )}
             {confirmPasswordField}
             <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
               <div>

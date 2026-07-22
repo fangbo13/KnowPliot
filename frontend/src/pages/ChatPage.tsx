@@ -416,7 +416,20 @@ export default function ChatPageContainer() {
         ) : null}
 
         <div style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity var(--dur) var(--ease-out)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <Suspense fallback={<div className="chat-route-loading" role="status">{t('loading_messages')}</div>}>
+          <Suspense fallback={
+            <div className="chat-route-loading skeleton-active" role="status" style={{ padding: 24 }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+                <div className="skeleton-card skeleton-active" style={{ width: 40, height: 40, borderRadius: '50%' }} />
+                <div style={{ flex: 1 }}>
+                  <div className="skeleton-card skeleton-active" style={{ height: 12, width: '40%', marginBottom: 8 }} />
+                  <div className="skeleton-card skeleton-active" style={{ height: 12, width: '60%' }} />
+                </div>
+              </div>
+              <div className="skeleton-card skeleton-active" style={{ height: 12, marginBottom: 8, width: '90%' }} />
+              <div className="skeleton-card skeleton-active" style={{ height: 12, marginBottom: 8, width: '75%' }} />
+              <div className="skeleton-card skeleton-active" style={{ height: 12, width: '50%' }} />
+            </div>
+          }>
             <VirtualizedMessageList
               virtuosoRef={virtuosoRef}
               messages={messages}
