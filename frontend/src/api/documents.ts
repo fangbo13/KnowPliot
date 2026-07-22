@@ -91,7 +91,7 @@ export const documentApi = {
   },
 
   async deleteDocument(id: string): Promise<void> {
-    await apiClient.delete(`/documents/${id}/`);
+    await apiClient.delete(`/documents/${id}/?hard=true`);
   },
 
   async archiveDocument(id: string): Promise<void> {

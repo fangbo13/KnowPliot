@@ -18,6 +18,7 @@ import {
   RollbackOutlined,
   FileAddOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -155,6 +156,23 @@ export default function KnowledgeBasePage() {
     }
   };
 
+  // KB-12-Features §12: Hard delete (permanent) with conflict protection
+  const handleDelete = async (id: string) => {
+    if (!canManage) return;
+    try {
+      await documentApi.deleteDocument(id);
+      message.success(t('delete_success'));
+      loadDocuments();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number } };
+      if (axiosErr?.response?.status === 409) {
+        message.error(t('kb_delete_conflict'));
+      } else {
+        message.error(t('kb_delete_failed'));
+      }
+    }
+  };
+
   const handleDownload = async (record: Document) => {
     if (!canDownload) return;
     try {
@@ -234,6 +252,19 @@ export default function KnowledgeBasePage() {
       okText: t('archive'),
       cancelText: t('cancel'),
       onOk: () => handleArchive(id),
+    });
+  };
+
+  // KB-12-Features §12: Delete confirmation (permanent, danger)
+  const confirmDelete = (id: string) => {
+    if (!canManage) return;
+    Modal.confirm({
+      title: t('delete_confirm'),
+      content: t('kb_delete_confirm'),
+      okText: t('delete'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: () => handleDelete(id),
     });
   };
 
@@ -529,6 +560,17 @@ export default function KnowledgeBasePage() {
               disabled={record.status === 'archived'}
               aria-label={t('archive')}
               title={t('archive')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canManage && (
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => confirmDelete(record.id)}
+              aria-label={t('delete')}
+              title={t('delete')}
               style={{ borderRadius: 6 }}
             />
           )}
