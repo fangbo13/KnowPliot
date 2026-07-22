@@ -1446,3 +1446,54 @@ PostgreSQL migration timing, live Redis multi-worker behavior, real provider
 streaming/policy binding, authenticated browser role journeys, clipboard/native
 share, source download, visual layout, and reduced motion. No service or deployed
 environment was started during this implementation.
+
+## 17. v1.76.1 Recoverable Chat Capacity Addendum (2026-07-22)
+
+v1.76.1 adds a backward-compatible, opt-in Chat Stream Protocol v3 for bounded,
+recoverable asynchronous generation. It does not replace the v1/v2 paths until
+both backend and frontend rollout flags are enabled.
+
+### 17.1 Protocol and correctness requirements
+
+- A v3 send is accepted asynchronously with `202 Accepted` and returns a stable
+  `turn_id`, `client_request_id`, status URL, events URL, and cancel URL.
+- The event stream is Redis Stream-backed. Events have strictly increasing
+  sequence IDs and reconnect from the last confirmed `after` cursor or
+  `Last-Event-ID`; replay must neither lose confirmed events nor duplicate
+  persisted assistant content.
+- Client disconnect is a consumer detach, not an implicit cancellation. Cancel
+  is an authenticated, owned, idempotent operation; terminal turns cannot be
+  cancelled.
+- Generation runs on the dedicated `chat_generation` queue. Admission is
+  Redis-backed and bounded by `CHAT_GENERATION_TARGET_ACTIVE` and
+  `CHAT_GENERATION_MAX_OUTSTANDING`; rejected work returns controlled `429` plus
+  `Retry-After` and must not create model work.
+- v3 requires `CHAT_STREAM_V3=true`; the frontend uses it only with
+  `VITE_CHAT_STREAM_V3=true`. Both defaults are false. Disabling the frontend
+  flag before the backend flag is the rollback order.
+
+### 17.2 Operations and observability requirements
+
+- Internal Prometheus metrics are served only from the token-protected internal
+  endpoint. Metric labels must be bounded route/status/category values; they
+  must not contain user, session, Turn, prompt, or credential data.
+- The reference capacity topology separates web, ASGI stream gateway,
+  generation worker, broker Redis, event Redis, PgBouncer, and Prometheus.
+  `docker-compose.capacity.yml` is an isolated test laboratory with its own
+  Compose project and volumes; it is not a production deployment prescription.
+- Production rollout requires PostgreSQL migration rehearsal, Redis durability
+  and access control, staged live-provider validation, and measured resource
+  sizing. Additive Turn schema is retained during rollback.
+
+### 17.3 Capacity acceptance status
+
+The synthetic capacity laboratory completed 500 simultaneous v3 streams with
+500/500 terminal success, no ordering/duplicate/terminal failures, and 476.385
+ms first-event P95. Its 500-identity REST mix completed 2,700 requests with zero
+failures, 58.56 ms ordinary-read P95, and 126.17 ms send-acceptance P95.
+
+The all-at-once 500-send acceptance burst measured 28,208.9 ms P95 and missed
+the strict 800 ms acceptance objective. Accordingly, v1.76.1 is verified for
+500 synthetic concurrent stream completion but is not production-capacity
+certified. Real-provider, fault-injection, clean-image, and production-hardware
+evidence are required before making a production concurrency claim.
