@@ -104,7 +104,10 @@ export default function LoginPage() {
   };
 
   const syncLanguage = (pref?: string) => {
-    if (pref && pref !== i18n.language) i18n.changeLanguage(pref);
+    if (pref && pref !== i18n.language) {
+      i18n.changeLanguage(pref);
+      localStorage.setItem('ey-language', pref);
+    }
   };
 
   // NOTE: login auth data-flow preserved verbatim from the hardened V4.3 implementation.
@@ -269,7 +272,7 @@ export default function LoginPage() {
           >
             <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{t('demo_hint')}</span>
             <Button type="text" size="small" icon={<UserSwitchOutlined />}
-              onClick={() => form.setFieldsValue({ email: 'admin@test.ey.com', password: 'admin123' })}
+              onClick={() => form.setFieldsValue({ email: 'admin@ey.com', password: 'admin123' })}
               style={{ color: 'var(--accent-text)', fontWeight: 600, flexShrink: 0 }}>
               {t('demo_fill_btn')}
             </Button>

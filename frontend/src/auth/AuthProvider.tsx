@@ -4,8 +4,9 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import apiClient from '../api/client';
+import i18n from '../i18n';
 
 interface AdminScope {
   org_ids: string[];
@@ -130,6 +131,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false;
     }
   }, []);
+
+  // F-02 fix: reactively sync the user's language_preference to i18n + localStorage
+  // when the user changes (login, profile update).  Skip the initial mount so that
+  // page reloads honour the ey-language localStorage value (which may differ from
+  // the backend preference if the user toggled language via the UI without saving
+  // to their profile).
+  const prevUserId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const userId = state.user?.id;
+    const lang = state.user?.language_preference;
+    // Only sync when the user actually changes (login, logout, profile update).
+    // Skip the very first run (initial mount / page reload) to respect ey-language.
+    if (prevUserId.current !== undefined && userId !== prevUserId.current) {
+      if (lang === 'en' || lang === 'zh') {
+        i18n.changeLanguage(lang);
+        localStorage.setItem('ey-language', lang);
+      }
+    }
+    prevUserId.current = userId;
+  }, [state.user?.id, state.user?.language_preference]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout }}>

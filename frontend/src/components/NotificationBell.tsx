@@ -18,7 +18,7 @@ import {
   safeNotificationPath,
   type FeedItem,
 } from '../api/notifications';
-import { getRateLimitDetails, isAbortError } from '../api/client';
+import { getAuthToken, getRateLimitDetails, isAbortError } from '../api/client';
 
 const LEVEL_COLOR: Record<string, string> = {
   info: 'var(--accent)',
@@ -43,8 +43,9 @@ function timeAgo(iso: string | null, _zh: boolean, t: (key: string, options?: Re
 
 /**
  * V7.0 NotificationBell — top-bar bell with an unread badge and a dropdown feed
- * merging targeted notifications and broadcast announcements. Polls the unread
- * count every 60s; loads the full feed only when opened.
+ * merging targeted notifications and broadcast announcements. Uses SSE for
+ * real-time push (C-02) with automatic fallback to 30s polling; loads the full
+ * feed only when opened.
  */
 export default function NotificationBell() {
   const { t, i18n } = useTranslation('common');
@@ -59,6 +60,9 @@ export default function NotificationBell() {
   const countControllerRef = useRef<AbortController | null>(null);
   const feedControllerRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
+  // C-02: SSE connection for real-time notification push
+  const sseRef = useRef<EventSource | null>(null);
+  const pollingRef = useRef<number | null>(null);
 
   const loadCount = useCallback(async () => {
     const controller = new AbortController();
@@ -78,9 +82,71 @@ export default function NotificationBell() {
 
   useEffect(() => {
     loadCount();
-    const id = setInterval(loadCount, 60000);
+
+    // C-02: Try SSE first; fall back to 30s polling on failure.
+    const token = getAuthToken();
+    if (token) {
+      try {
+        const es = new EventSource(`/api/v1/notifications/stream/?token=${encodeURIComponent(token)}`);
+        sseRef.current = es;
+
+        es.onmessage = (event) => {
+          // SSE is alive – stop polling fallback if active.
+          if (pollingRef.current !== null) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'unread_count' && typeof msg.data?.count === 'number') {
+              setCount(msg.data.count);
+            } else if (msg.type === 'notification' && msg.data) {
+              const d = msg.data;
+              const feedItem: FeedItem = {
+                id: d.id,
+                kind: 'notification',
+                type: d.category || '',
+                title: d.title || '',
+                body: d.body || '',
+                level: d.level || 'info',
+                link: d.deep_link || '',
+                version: '',
+                is_read: d.read ?? false,
+                created_at: d.created_at || null,
+                action_kind: null,
+                resource_type: null,
+                resource_id: null,
+                resource_version: null,
+                allowed_actions: [],
+                action_state: 'none',
+                deep_link: d.deep_link || '',
+              };
+              setItems((prev) => {
+                if (prev.some((x) => x.id === feedItem.id)) return prev;
+                return [feedItem, ...prev];
+              });
+            }
+          } catch { /* ignore malformed SSE payloads */ }
+        };
+
+        es.onerror = () => {
+          // SSE connection failed – start polling fallback (30s).
+          if (pollingRef.current === null) {
+            pollingRef.current = window.setInterval(loadCount, 30000);
+          }
+        };
+      } catch {
+        // EventSource not supported – use polling.
+        pollingRef.current = window.setInterval(loadCount, 30000);
+      }
+    } else {
+      // No auth token – use polling.
+      pollingRef.current = window.setInterval(loadCount, 30000);
+    }
+
     return () => {
-      clearInterval(id);
+      if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
+      if (pollingRef.current !== null) { clearInterval(pollingRef.current); pollingRef.current = null; }
       countControllerRef.current?.abort();
     };
   }, [loadCount]);

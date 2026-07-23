@@ -272,6 +272,39 @@ h1, h2, h3, h4, h5 {
 [data-theme="dark"] .hljs-variable, [data-theme="dark"] .hljs-params { color: var(--hljs-variable); }
 
 /* ============================================================================
+   Dark-mode Ant Design component overrides (UI-01)
+   ========================================================================= */
+/* Badge: hardcoded rgba(0,0,0,0.88) text invisible on dark backgrounds */
+[data-theme="dark"] .ant-badge-count {
+  color: var(--color-text-on-accent) !important;
+}
+[data-theme="dark"] .ant-badge-dot {
+  background: var(--accent) !important;
+}
+/* Tag: ensure readable text in dark mode */
+[data-theme="dark"] .ant-tag {
+  color: var(--color-text) !important;
+  border-color: var(--color-border-secondary) !important;
+}
+/* Alert: fix low-contrast text in dark mode */
+[data-theme="dark"] .ant-alert-message,
+[data-theme="dark"] .ant-alert-description {
+  color: var(--color-text) !important;
+}
+/* Tabs: ensure tab text is visible in dark mode */
+[data-theme="dark"] .ant-tabs-tab {
+  color: var(--color-text-secondary) !important;
+}
+[data-theme="dark"] .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--color-text) !important;
+}
+/* Modal: ensure title and body text are visible in dark mode */
+[data-theme="dark"] .ant-modal-title,
+[data-theme="dark"] .ant-modal-content {
+  color: var(--color-text) !important;
+}
+
+/* ============================================================================
    Utility / a11y
    ============================================================================ */
 .gradient-text {

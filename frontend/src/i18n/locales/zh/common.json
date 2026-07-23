@@ -802,5 +802,8 @@
   "forbidden_description": "你没有访问该工作空间所需的权限。",
   "forbidden_go_chat": "返回对话",
   "no_space_guidance_title": "加入工作空间",
-  "no_space_guidance_description": "你尚未加入任何工作空间。发现可用空间或使用访问码加入以开始使用。"
+  "no_space_guidance_description": "你尚未加入任何工作空间。发现可用空间或使用访问码加入以开始使用。",
+  "notification_retry_after": "{{seconds}} 秒后重试",
+  "space_joined_success": "已加入 {{name}}",
+  "join_code_invalid": "加入码无效，请检查后重试。"
 }

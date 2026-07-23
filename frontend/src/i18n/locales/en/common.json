@@ -804,5 +804,8 @@
   "forbidden_description": "You do not have the capability required for this workspace.",
   "forbidden_go_chat": "Back to chat",
   "no_space_guidance_title": "Join a workspace",
-  "no_space_guidance_description": "You haven't joined a workspace yet. Discover available spaces or join with an access code to get started."
+  "no_space_guidance_description": "You haven't joined a workspace yet. Discover available spaces or join with an access code to get started.",
+  "notification_retry_after": "retry after {{seconds}}s",
+  "space_joined_success": "Joined {{name}}",
+  "join_code_invalid": "Invalid join code, please check and try again."
 }

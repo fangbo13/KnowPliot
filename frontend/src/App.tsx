@@ -82,20 +82,10 @@ function App({
   const expectedNavigationMode = capabilityNavigationEnabled ? 'capability' : 'legacy';
 
   useEffect(() => {
-    const syncLanguage = () => {
-      try {
-        const authStr = localStorage.getItem('ey-auth');
-        if (authStr) {
-          const auth = JSON.parse(authStr);
-          if (auth?.user?.language_preference && auth.user.language_preference !== i18n.language) {
-            i18n.changeLanguage(auth.user.language_preference);
-          }
-        }
-      } catch {
-        // Ignore corrupt compatibility state.
-      }
-    };
-    syncLanguage();
+    // F-01 fix: language persistence is now handled by AuthProvider's useEffect,
+    // which syncs user.language_preference to i18n + ey-language localStorage on
+    // login / profile update.  On page reload, i18n initialises from ey-language
+    // (set in i18n/index.ts getInitialLanguage).  We no longer override it here.
 
     const langHandler = () => {
       const lang = i18n.language || 'en';
