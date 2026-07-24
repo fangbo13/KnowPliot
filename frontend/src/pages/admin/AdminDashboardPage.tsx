@@ -96,17 +96,32 @@ export default function AdminDashboardPage() {
     setStatusLoading(true);
     setStatusError(null);
     try {
-      const [health, metrics, jobs, quality] = await Promise.all([
+      const results = await Promise.allSettled([
         withRequestSignal(controller.signal, () => adminApi.health()),
         withRequestSignal(controller.signal, () => adminApi.metrics()),
         withRequestSignal(controller.signal, () => adminApi.ingestionJobs()),
         withRequestSignal(controller.signal, () => adminApi.documentQuality()),
       ]);
       if (controller.signal.aborted || sequence !== statusSequenceRef.current) return;
-      setSystemHealth(health);
-      setSystemMetrics(metrics);
-      setIngestionJobs(jobs);
-      setDocumentQuality(quality);
+      // With allSettled, each API loads independently — one failure no longer
+      // prevents the others from rendering. Only show a full error when ALL
+      // four requests rejected.
+      let healthOk = false, metricsOk = false, jobsOk = false, qualityOk = false;
+      if (results[0].status === 'fulfilled') { setSystemHealth(results[0].value); healthOk = true; }
+      if (results[1].status === 'fulfilled') { setSystemMetrics(results[1].value); metricsOk = true; }
+      if (results[2].status === 'fulfilled') { setIngestionJobs(results[2].value); jobsOk = true; }
+      if (results[3].status === 'fulfilled') { setDocumentQuality(results[3].value); qualityOk = true; }
+      // Only set error if every request failed
+      if (!healthOk && !metricsOk && !jobsOk && !qualityOk) {
+        const firstError = results.find(r => r.status === 'rejected');
+        const rateLimit = firstError ? getRateLimitDetails(firstError.reason) : null;
+        setStatusError(rateLimit
+          ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+          : { code: 'load', retryAfterSeconds: null });
+      } else if (!healthOk || !metricsOk || !jobsOk || !qualityOk) {
+        // Partial failure — show a non-blocking warning instead of blocking the entire page
+        setStatusError({ code: 'load', retryAfterSeconds: null });
+      }
     } catch (error: unknown) {
       if (isAbortError(error) || controller.signal.aborted || sequence !== statusSequenceRef.current) return;
       const rateLimit = getRateLimitDetails(error);

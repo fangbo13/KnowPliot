@@ -26,7 +26,7 @@ const baseProps = {
 describe('ChatComposer answer mode control', () => {
   afterEach(cleanup);
 
-  it('shows governed deep alongside fast and reports an explicit selection', () => {
+  it('shows a fast/deep toggle and reports an explicit selection', () => {
     const onAnswerModeChange = vi.fn();
 
     render(<ChatComposer {...({
@@ -36,12 +36,13 @@ describe('ChatComposer answer mode control', () => {
       onAnswerModeChange,
     } as any)} />);
 
-    expect(screen.getByRole('button', { name: 'answer_mode_fast' }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(screen.getByRole('button', { name: 'answer_mode_deep' }));
+    const toggle = screen.getByRole('switch', { name: 'answer_mode_label' });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(toggle);
     expect(onAnswerModeChange).toHaveBeenCalledWith('deep');
   });
 
-  it('does not render a deep affordance when server eligibility is absent', () => {
+  it('disables the deep toggle when server eligibility is absent', () => {
     render(<ChatComposer {...({
       ...baseProps,
       answerMode: 'fast',
@@ -49,8 +50,9 @@ describe('ChatComposer answer mode control', () => {
       onAnswerModeChange: vi.fn(),
     } as any)} />);
 
-    expect(screen.getByRole('button', { name: 'answer_mode_fast' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'answer_mode_deep' })).toBeNull();
+    const toggle = screen.getByRole('switch', { name: 'answer_mode_label' });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(toggle.hasAttribute('disabled')).toBe(true);
   });
 
   it('renders the independent thinking switch only when all gates are already true', () => {
@@ -89,7 +91,7 @@ describe('ChatComposer answer mode control', () => {
       onThinkingChange,
     } as any)} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'answer_mode_fast' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'answer_mode_label' }));
     expect(onAnswerModeChange).toHaveBeenCalledWith('fast');
     expect(screen.getByRole('switch', { name: 'thinking_mode_label' }).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(screen.getByRole('switch', { name: 'thinking_mode_label' }));

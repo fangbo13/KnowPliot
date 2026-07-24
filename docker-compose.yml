@@ -32,6 +32,8 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.docker
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      CAPABILITY_NAV: "true"
+      WORKSPACE_PERMANENT_DELETE: "true"
     # V4.6: gunicorn with threaded workers replaces runserver so concurrent SSE chat
     # streams don't block each other (each reply holds a worker thread for its whole
     # duration). 2 workers x 8 threads = 16 concurrent streams. --reload keeps dev
@@ -76,6 +78,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: final
+      args:
+        VITE_CAPABILITY_NAV: "true"
+        VITE_WORKSPACE_PERMANENT_DELETE: "true"
     environment:
       VITE_PROXY_TARGET: http://backend:8000
     volumes:

@@ -9,7 +9,24 @@ import { useParams } from 'react-router-dom';
 
 import { capabilitiesApi } from '../api/capabilities';
 import { useSpaceStore } from '../store/spaceStore';
-import { CapabilityGate, ForbiddenPage } from './CapabilityGate';
+import { ForbiddenPage } from './CapabilityGate';
+
+/** Any capability that grants access to at least one section of the workspace console. */
+const WORKSPACE_CONSOLE_CAPABILITIES = new Set<string>([
+  'workspace.manage',
+  'workspace.members.manage',
+  'workspace.invites.manage',
+  'workspace.access_requests.manage',
+  'workspace.settings.manage',
+  'workspace.lifecycle.manage',
+  'workspace.delete.permanent',
+  'workspace.ownership.read',
+  'workspace.ownership.transfer.request',
+  'workspace.ownership.transfer.accept',
+  'knowledge.read',
+  'quality.read',
+  'audit.read',
+]);
 
 /**
  * A workspace URL is itself a scope selection. Converge the active scope first;
@@ -28,9 +45,11 @@ export function WorkspaceCapabilityBoundary({ children }: { children: ReactNode 
     setDeniedSpaceId(null);
     void capabilitiesApi.me(spaceId, controller.signal).then(
       async (snapshot) => {
-        const canManage = snapshot.capabilities.includes('workspace.manage');
+        const hasConsoleAccess = snapshot.capabilities.some(
+          (cap) => WORKSPACE_CONSOLE_CAPABILITIES.has(cap),
+        );
         const isScoped = snapshot.scopes.space_ids.includes(spaceId);
-        if (!canManage || !isScoped) {
+        if (!hasConsoleAccess || !isScoped) {
           if (!controller.signal.aborted) setDeniedSpaceId(spaceId);
           return;
         }
@@ -56,9 +75,5 @@ export function WorkspaceCapabilityBoundary({ children }: { children: ReactNode 
     );
   }
 
-  return (
-    <CapabilityGate required="workspace.manage" spaceId={spaceId}>
-      {children}
-    </CapabilityGate>
-  );
+  return <>{children}</>;
 }

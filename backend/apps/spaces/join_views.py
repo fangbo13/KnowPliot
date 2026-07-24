@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from apps.rbac.capabilities import resolve_capabilities
 
 from .discovery import authorized_discovery_queryset
+from .permissions import effective_space_memberships
 from .governed import GovernedWorkflowError, require_idempotency_key
 from .join_services import (
     _access_code_body,
@@ -453,6 +454,12 @@ def discoverable_spaces_view(request):
     queryset = authorized_discovery_queryset(request.user).filter(
         join_policy=KnowledgeSpace.JOIN_POLICY_GLOBAL,
     )
+    member_ids = set(
+        str(sid)
+        for sid in effective_space_memberships(request.user).values_list(
+            "space_id", flat=True
+        )
+    )
     rows = list(
         queryset.values(
             "id",
@@ -463,6 +470,8 @@ def discoverable_spaces_view(request):
             "status",
         )[:100]
     )
+    for row in rows:
+        row["is_member"] = str(row["id"]) in member_ids
     return Response({"results": rows, "next_cursor": None})
 
 

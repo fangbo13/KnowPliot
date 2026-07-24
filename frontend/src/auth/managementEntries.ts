@@ -30,13 +30,16 @@ export function buildManagementEntries(
         : '/spaces/manage',
     });
   }
-  // Knowledge base entry always routes to the workspace-scoped path so that
-  // regular users with knowledge permissions don't land in the admin backend.
+  // In capability mode the knowledge base lives under the workspace-scoped
+  // route; in legacy mode it falls back to the admin knowledge page so the
+  // link does not redirect to /spaces/manage.
   if (activeSpaceId && access.has('knowledge.read')) {
     entries.push({
       id: 'knowledge',
       label: t?.('knowledge_base') || 'Knowledge base',
-      to: `/workspace/${activeSpaceId}/manage/knowledge`,
+      to: access.enabled
+        ? `/workspace/${activeSpaceId}/manage/knowledge`
+        : '/admin/knowledge',
     });
   }
   return entries;

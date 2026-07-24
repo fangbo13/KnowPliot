@@ -100,40 +100,37 @@ export default function ChatComposer({
       <div className="composer-mode" role="group" aria-label={t('answer_mode_label')}>
         <button
           type="button"
-          className="composer-mode-btn"
-          aria-label={t('answer_mode_fast')}
-          aria-pressed={answerMode === 'fast'}
-          disabled={disabled || isStreaming}
-          onClick={() => onAnswerModeChange?.('fast')}
-        >
-          {t('answer_mode_fast')}
-        </button>
-        <button
-          type="button"
-          className="composer-mode-btn"
-          aria-label={t('answer_mode_deep')}
-          aria-pressed={answerMode === 'deep'}
+          className="composer-mode-toggle"
+          role="switch"
+          aria-label={t('answer_mode_label')}
+          aria-checked={answerMode === 'deep'}
           disabled={disabled || isStreaming || !canUseDeep}
           title={!canUseDeep ? t('deep_mode_unavailable') || 'Deep mode is not available' : undefined}
-          onClick={() => onAnswerModeChange?.('deep')}
+          onClick={() => onAnswerModeChange?.(answerMode === 'fast' ? 'deep' : 'fast')}
         >
-          {t('answer_mode_deep')}
-        </button>
-        <button
-          type="button"
-          className={`composer-mode-btn composer-thinking-btn${thinkingEnabled ? ' is-enabled' : ''}`}
-          role="switch"
-          aria-label={t('thinking_mode_label')}
-          aria-checked={thinkingEnabled}
-          disabled={disabled || isStreaming || !canUseThinking}
-          title={!canUseThinking ? t('thinking_mode_unavailable') || 'Thinking mode is not available' : undefined}
-          onClick={() => onThinkingChange?.(!thinkingEnabled)}
-        >
-          {t('thinking_mode_label')}
-          <span className="composer-thinking-state" aria-hidden="true">
-            {thinkingEnabled ? t('thinking_mode_on') : t('thinking_mode_off')}
+          <span className="composer-mode-toggle-track">
+            <span className="composer-mode-toggle-thumb" />
+          </span>
+          <span className="composer-mode-toggle-label">
+            {answerMode === 'deep' ? t('answer_mode_deep') : t('answer_mode_fast')}
           </span>
         </button>
+        {canUseThinking && (
+          <button
+            type="button"
+            className={`composer-mode-btn composer-thinking-btn${thinkingEnabled ? ' is-enabled' : ''}`}
+            role="switch"
+            aria-label={t('thinking_mode_label')}
+            aria-checked={thinkingEnabled}
+            disabled={disabled || isStreaming}
+            onClick={() => onThinkingChange?.(!thinkingEnabled)}
+          >
+            {t('thinking_mode_label')}
+            <span className="composer-thinking-state" aria-hidden="true">
+              {thinkingEnabled ? t('thinking_mode_on') : t('thinking_mode_off')}
+            </span>
+          </button>
+        )}
       </div>
       <div className={`composer${focused ? ' is-focused' : ''}${disabled ? ' is-disabled' : ''}`}>
         <div className="composer-inner">

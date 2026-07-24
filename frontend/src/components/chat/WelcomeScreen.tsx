@@ -15,7 +15,7 @@ import ChatComposer from './ChatComposer';
 
 interface WelcomeScreenProps {
   onQuickAction: (q: string) => void;
-  onSendMessage?: (msg: string, options?: { answerMode?: string; thinkingEnabled?: boolean }) => void;
+  onSendMessage?: (msg: string, options?: { answerMode?: 'fast' | 'deep'; thinkingEnabled?: boolean }) => void;
   templateQuickQuestions?: string[];
 }
 

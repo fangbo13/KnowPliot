@@ -361,6 +361,11 @@ def space_switch(request, pk):
     SpaceMembership.objects.filter(space=space, user=request.user).update(
         last_accessed_at=timezone.now()
     )
+    # Persist the switched space as the user's default so subsequent
+    # page loads and the frontend ProtectedRoute know the user has a space.
+    if request.user.default_space_id != space.id:
+        request.user.default_space = space
+        request.user.save(update_fields=["default_space"])
     from .discovery import record_authorized_usage
 
     record_authorized_usage(user=request.user, space=space)

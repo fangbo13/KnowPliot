@@ -109,6 +109,10 @@ def _preflight_space(*, actor, space_id) -> KnowledgeSpace:
         )
     except KnowledgeSpace.DoesNotExist as exc:
         raise NotFound("Space not found.") from exc
+    # Platform admins (superusers / RBAC 'admin' role) may manage any workspace.
+    from .permissions import is_platform_admin
+    if is_platform_admin(actor):
+        return space
     if space.owner_id != actor.pk:
         raise NotFound("Space not found.")
     membership = SpaceMembership.objects.filter(
@@ -165,20 +169,23 @@ def _lock_space_graph(*, actor, preflight: KnowledgeSpace) -> tuple[KnowledgeSpa
         .order_by("pk")
         .get()
     )
-    membership = (
-        SpaceMembership.objects.select_for_update(of=("self",))
-        .filter(
-            space_id=space.pk,
-            user_id=actor.pk,
-            role=SpaceMembership.ROLE_OWNER,
-            status="active",
-            expires_at__isnull=True,
+    from .permissions import is_platform_admin
+    is_admin = is_platform_admin(actor)
+    if not is_admin:
+        membership = (
+            SpaceMembership.objects.select_for_update(of=("self",))
+            .filter(
+                space_id=space.pk,
+                user_id=actor.pk,
+                role=SpaceMembership.ROLE_OWNER,
+                status="active",
+                expires_at__isnull=True,
+            )
+            .order_by("pk")
+            .first()
         )
-        .order_by("pk")
-        .first()
-    )
-    if space.owner_id != actor.pk or membership is None:
-        raise NotFound("Space not found.")
+        if space.owner_id != actor.pk or membership is None:
+            raise NotFound("Space not found.")
     return space, locator
 
 

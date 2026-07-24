@@ -145,6 +145,7 @@ export interface AuditLog {
 export interface AuditLogQuery {
   action?: string;
   result?: 'success' | 'denied' | 'failure';
+  user_id?: string;
   organization?: string;
   business_line?: string;
   space?: string;
@@ -643,4 +644,65 @@ export const adminApi = {
     const { data } = await apiClient.post(`/admin/reports/export-jobs/${id}/retry/`, {});
     return data;
   },
+
+  // --- Workspace management ---
+  async listSpaces(params?: {
+    status?: 'active' | 'archived';
+    q?: string;
+    organization?: string;
+    business_line?: string;
+    work_group?: string;
+    office_location?: string;
+    page?: number;
+    page_size?: number;
+  }, signal?: AbortSignal): Promise<{
+    count: number;
+    next: string | null;
+    previous: string | null;
+    results: AdminSpaceListItem[];
+  }> {
+    const config: Record<string, unknown> = {};
+    if (signal) config.signal = signal;
+    if (params) config.params = params;
+    const { data } = await adminGet<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: AdminSpaceListItem[];
+    }>('/admin/spaces/', config);
+    return data;
+  },
+  async archiveSpace(id: string): Promise<AdminSpaceListItem> {
+    const { data } = await apiClient.post(`/admin/spaces/${id}/archive/`, {});
+    return data;
+  },
+  async restoreSpace(id: string): Promise<AdminSpaceListItem> {
+    const { data } = await apiClient.post(`/admin/spaces/${id}/restore/`, {});
+    return data;
+  },
 };
+
+export interface AdminSpaceListItem {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  status: 'active' | 'archived';
+  visibility: string;
+  organization: string;
+  organization_name: string;
+  business_line: string | null;
+  business_line_name: string | null;
+  work_group: string | null;
+  work_group_name: string | null;
+  office_locations: Array<{ id: string; display_name: string }>;
+  owner: string | null;
+  owner_email: string | null;
+  owner_name: string | null;
+  lifecycle_version: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+  document_count: number;
+}

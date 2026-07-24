@@ -206,11 +206,13 @@ def can_restore_space(user, space: KnowledgeSpace) -> bool:
     Archived spaces are intentionally outside the normal effective-role
     boundary. Restoration therefore rechecks the explicit canonical owner
     membership while still requiring active organization and business-line
-    parents.
+    parents.  Platform admins may restore any workspace.
     """
 
     if not user or not user.is_authenticated:
         return False
+    if is_platform_admin(user):
+        return True
     if space.organization.status != "active":
         return False
     if space.business_line_id and space.business_line.status != "active":

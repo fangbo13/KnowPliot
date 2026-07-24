@@ -64,6 +64,8 @@
 
 .kp-creation-form-card {
   margin-bottom: 24px;
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
 }
 
 .kp-creation-form-grid {

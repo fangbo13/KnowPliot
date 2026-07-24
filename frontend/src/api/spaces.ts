@@ -117,6 +117,7 @@ export interface DiscoverableSpaceCard {
   description: string;
   join_policy: JoinPolicy;
   status: 'active' | 'archived';
+  is_member?: boolean;
 }
 
 export interface InviteCode {

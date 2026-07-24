@@ -26,6 +26,7 @@ const DEFINITIONS: Record<ConsoleKind, Array<Omit<ConsoleNavigationItem, 'to'>>>
     { segment: 'knowledge', label: 'Knowledge metadata', capability: 'platform.knowledge.read' },
     { segment: 'metrics', label: 'Metrics', capability: 'platform.metrics.read' },
     { segment: 'audit', label: 'Audit', capability: 'platform.audit.read' },
+    { segment: 'spaces', label: 'Workspaces', capability: 'platform.access' },
     { segment: 'model', label: 'Models', capability: 'platform.models.manage' },
   ],
   governance: [

@@ -307,9 +307,6 @@ export default function AppLayout() {
       {sessions.length === 0 ? (
         <div className="sidebar-empty">
           <span style={{ display: 'block', marginBottom: 12 }}>{t('sidebar_empty_state')}</span>
-          <button className="new-chat-btn" onClick={handleNewChat} style={{ width: '100%' }}>
-            <PlusOutlined />{t('sidebar_new_chat')}
-          </button>
         </div>
       ) : (
         groupOrder.map((groupKey) => {

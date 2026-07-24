@@ -153,13 +153,13 @@ export default function SpaceDiscoveryPage() {
                     <div style={{ color: 'var(--color-text-secondary)', marginTop: 4 }}>{space.description}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {joinStatuses[space.id] === 'joined' ? (
+                    {space.is_member || joinStatuses[space.id] === 'joined' ? (
                       <Tag color="green">{t('joined', { defaultValue: '已加入' })}</Tag>
                     ) : (
                       <Button
                         type="primary"
                         loading={joinStatuses[space.id] === 'joining'}
-                        disabled={joinStatuses[space.id] === 'joined'}
+                        disabled={joinStatuses[space.id] === 'joined' || space.is_member}
                         onClick={() => void handleGlobalJoin(space)}
                       >
                         {t('join', { defaultValue: '加入' })}

@@ -881,3 +881,162 @@ def scoped_user_assignment(request, user_id):
         },
         status=status.HTTP_201_CREATED,
     )
+
+
+# ---------------------------------------------------------------------------
+# V7.5 Admin workspace overview — list / archive / restore / delete.
+# ---------------------------------------------------------------------------
+
+class AdminSpaceListSerializer(serializers.ModelSerializer):
+    """Serializer for the admin workspace overview table."""
+    organization_name = serializers.CharField(source="organization.name", read_only=True)
+    business_line_name = serializers.CharField(source="business_line.name", read_only=True, allow_null=True)
+    work_group_name = serializers.CharField(source="work_group.display_name", read_only=True, allow_null=True)
+    office_locations = serializers.SerializerMethodField()
+    owner_email = serializers.CharField(source="owner.email", read_only=True, allow_null=True)
+    owner_name = serializers.SerializerMethodField()
+    member_count = serializers.SerializerMethodField()
+    document_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KnowledgeSpace
+        fields = [
+            "id",
+            "name",
+            "code",
+            "description",
+            "status",
+            "visibility",
+            "organization",
+            "organization_name",
+            "business_line",
+            "business_line_name",
+            "work_group",
+            "work_group_name",
+            "office_locations",
+            "owner",
+            "owner_email",
+            "owner_name",
+            "lifecycle_version",
+            "archived_at",
+            "created_at",
+            "updated_at",
+            "member_count",
+            "document_count",
+        ]
+        read_only_fields = fields
+
+    def get_owner_name(self, obj):
+        owner = getattr(obj, "owner", None)
+        if owner is None:
+            return None
+        parts = [owner.first_name, owner.last_name]
+        full = " ".join(p for p in parts if p).strip()
+        return full or owner.email
+
+    def get_member_count(self, obj):
+        return SpaceMembership.objects.filter(space=obj, status="active").count()
+
+    def get_document_count(self, obj):
+        from apps.knowledge.models import Document
+        return Document.objects.filter(space=obj).count()
+
+    def get_office_locations(self, obj):
+        return [
+            {"id": loc.id, "display_name": loc.display_name}
+            for loc in obj.office_locations.all()
+        ]
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_space_list(request):
+    """List all workspaces visible to the caller's admin scope.
+
+    Platform admins see every workspace.  Scoped admins see workspaces in
+    their organization or business line.  Supports `status` and `q` query
+    filters and returns paginated results.
+    """
+    if not is_platform_admin(request.user):
+        org_ids, line_ids = admin_scope(request.user)
+        if not org_ids and not line_ids:
+            return Response({"results": [], "count": 0, "next": None, "previous": None})
+        qs = KnowledgeSpace.objects.select_related(
+            "organization", "business_line", "work_group", "owner"
+        ).prefetch_related("office_locations").filter(
+            Q(organization_id__in=org_ids) | Q(business_line_id__in=line_ids)
+        )
+    else:
+        qs = KnowledgeSpace.objects.select_related(
+            "organization", "business_line", "work_group", "owner"
+        ).prefetch_related("office_locations")
+
+    status_filter = request.query_params.get("status")
+    if status_filter in ("active", "archived"):
+        qs = qs.filter(status=status_filter)
+
+    query = request.query_params.get("q", "").strip()
+    if query:
+        qs = qs.filter(Q(name__icontains=query) | Q(code__icontains=query))
+
+    org_filter = request.query_params.get("organization", "").strip()
+    if org_filter:
+        qs = qs.filter(organization_id=org_filter)
+
+    bl_filter = request.query_params.get("business_line", "").strip()
+    if bl_filter:
+        qs = qs.filter(business_line_id=bl_filter)
+
+    wg_filter = request.query_params.get("work_group", "").strip()
+    if wg_filter:
+        qs = qs.filter(work_group_id=wg_filter)
+
+    ol_filter = request.query_params.get("office_location", "").strip()
+    if ol_filter:
+        qs = qs.filter(office_locations=ol_filter)
+
+    qs = qs.order_by("-updated_at")
+
+    page_size = min(int(request.query_params.get("page_size", 20)), 100)
+    page_num = int(request.query_params.get("page", 1))
+    total = qs.count()
+    start = (page_num - 1) * page_size
+    end = start + page_size
+    items = qs[start:end]
+
+    return Response({
+        "count": total,
+        "next": None if end >= total else f"?page={page_num + 1}",
+        "previous": None if page_num <= 1 else f"?page={page_num - 1}",
+        "results": AdminSpaceListSerializer(items, many=True).data,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def admin_space_archive(request, pk):
+    """Archive a workspace from the admin console."""
+    try:
+        space = KnowledgeSpace.objects.get(pk=pk)
+    except KnowledgeSpace.DoesNotExist as exc:
+        raise NotFound("Space not found.") from exc
+    if not _can_manage_space(request.user, space):
+        raise PermissionDenied("You cannot archive this workspace.")
+    from .deletion_services import archive_workspace
+    space = archive_workspace(actor=request.user, space_id=pk)
+    return Response(AdminSpaceListSerializer(space, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def admin_space_restore(request, pk):
+    """Restore an archived workspace from the admin console."""
+    try:
+        space = KnowledgeSpace.objects.get(pk=pk)
+    except KnowledgeSpace.DoesNotExist as exc:
+        raise NotFound("Space not found.") from exc
+    if not _can_manage_space(request.user, space):
+        raise PermissionDenied("You cannot restore this workspace.")
+    from .deletion_services import restore_workspace
+    space = restore_workspace(actor=request.user, space_id=pk)
+    return Response(AdminSpaceListSerializer(space, context={"request": request}).data)

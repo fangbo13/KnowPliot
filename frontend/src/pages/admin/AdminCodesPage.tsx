@@ -5,7 +5,7 @@
  */
 
 // V7.0 admin console — issue / list / revoke tiered Admin Registration Codes.
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   Alert, Card, Table, Button, Tag, Modal, Select, Input, Space, Popconfirm,
   Typography, message as antdMessage,
@@ -34,6 +34,12 @@ export default function AdminCodesPage() {
   const [maxUses, setMaxUses] = useState(1);
   const [creating, setCreating] = useState(false);
   const [generated, setGenerated] = useState<string | null>(null);
+
+  // Filter state
+  const [roleFilter, setRoleFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [orgFilter, setOrgFilter] = useState<string | undefined>();
+  const [codeSearch, setCodeSearch] = useState('');
 
   const refresh = useCallback(async () => {
     const sequence = ++sequenceRef.current;
@@ -94,6 +100,16 @@ export default function AdminCodesPage() {
     catch { antdMessage.error(t('invite_revoke_failed') || 'Failed'); }
   };
 
+  const filteredCodes = useMemo(() => {
+    return codes.filter((code) => {
+      if (roleFilter && code.grants_role !== roleFilter) return false;
+      if (statusFilter && code.status !== statusFilter) return false;
+      if (orgFilter && code.organization !== orgFilter) return false;
+      if (codeSearch && !code.code_prefix.toLowerCase().includes(codeSearch.toLowerCase())) return false;
+      return true;
+    });
+  }, [codes, roleFilter, statusFilter, orgFilter, codeSearch]);
+
   const columns = [
     { title: t('access_code') || 'Code', dataIndex: 'code_prefix', key: 'code', render: (p: string) => `${p}…` },
     { title: t('admin_grants_role'), dataIndex: 'grants_role', key: 'grants_role', render: (r: string) => <Tag color={r === 'org_admin' ? 'gold' : 'blue'}>{r}</Tag> },
@@ -138,7 +154,48 @@ export default function AdminCodesPage() {
             action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
           />
         )}
-        <Table rowKey="id" loading={loading} dataSource={codes} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Input.Search
+            placeholder={t('access_code') || 'Search code'}
+            value={codeSearch}
+            onChange={(e) => setCodeSearch(e.target.value)}
+            allowClear
+            style={{ width: 180 }}
+          />
+          <Select
+            allowClear
+            placeholder="Grants Role"
+            value={roleFilter}
+            onChange={(value) => setRoleFilter(value ?? undefined)}
+            options={[
+              { value: 'org_admin', label: 'org_admin' },
+              { value: 'business_admin', label: 'business_admin' },
+            ]}
+            style={{ width: 160 }}
+          />
+          <Select
+            allowClear
+            placeholder="Status"
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value ?? undefined)}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'revoked', label: 'Revoked' },
+            ]}
+            style={{ width: 120 }}
+          />
+          <Select
+            showSearch
+            allowClear
+            placeholder="Organization"
+            value={orgFilter}
+            onChange={(value) => setOrgFilter(value ?? undefined)}
+            options={orgs.map((o) => ({ value: o.id, label: o.name }))}
+            optionFilterProp="label"
+            style={{ width: 200 }}
+          />
+        </Space>
+        <Table rowKey="id" loading={loading} dataSource={filteredCodes} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 
       <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_issue_code')} open={open} onOk={issue} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>

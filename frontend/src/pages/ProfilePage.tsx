@@ -15,6 +15,13 @@ import { accountApi } from '../api/account';
 import { useSpaceStore } from '../store/spaceStore';
 import { useTheme } from '../hooks/useTheme';
 
+// EY China major office locations — 安永各大所地址
+const EY_OFFICE_LOCATIONS = [
+  '北京', '上海', '广州', '深圳', '成都', '武汉', '杭州', '南京',
+  '青岛', '大连', '厦门', '天津', '苏州', '西安', '重庆', '济南',
+  '沈阳', '长沙', '郑州', '合肥', '昆明', '海口', '香港', '澳门',
+];
+
 export default function ProfilePage() {
   const { t } = useTranslation('common');
   const { user, login } = useAuth();
@@ -26,6 +33,9 @@ export default function ProfilePage() {
   const [mfaOpen, setMfaOpen] = useState(false);
   const [mfaSecret, setMfaSecret] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  // office_location is in Card 1 (outside the preferences Form), so it is
+  // managed as independent state and manually included in the API call.
+  const [officeLocation, setOfficeLocation] = useState(user?.office_location || '');
 
   const handleFinish = async (values: {
     language_preference: string;
@@ -37,6 +47,7 @@ export default function ProfilePage() {
     setLoading(true);
     try {
       const response = await apiClient.patch('/auth/me/preferences/', {
+        office_location: officeLocation || null,
         language_preference: values.language_preference,
         theme_preference: values.theme_preference,
         default_space: values.default_space || null,
@@ -51,7 +62,7 @@ export default function ProfilePage() {
         const token = saved ? JSON.parse(saved).token : null;
         login({
           token,
-          user: { ...user, ...response.data },
+          user: { ...user, ...response.data, office_location: officeLocation },
         });
       }
       
@@ -135,9 +146,19 @@ export default function ProfilePage() {
                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 4 }}>
                   <EnvironmentOutlined /> {t('office_location')} <span style={{ color: 'var(--color-error, #c0392b)' }}>*</span>
                 </Typography.Text>
-                <Form.Item name="office_location" rules={[{ required: true, message: t('validation_office_required', '请选择办公地点') }]} style={{ marginTop: 6, marginBottom: 0 }}>
-                  <Input size="middle" placeholder={t('office_location_placeholder', '请输入办公地点')} style={{ borderRadius: 8 }} />
-                </Form.Item>
+                <Select
+                  size="middle"
+                  showSearch
+                  value={officeLocation || undefined}
+                  onChange={(val) => setOfficeLocation(val)}
+                  placeholder={t('office_location_placeholder', '请选择办公地点')}
+                  style={{ marginTop: 6, borderRadius: 8, width: '100%' }}
+                  popupClassName="menu-pop-dropdown"
+                >
+                  {EY_OFFICE_LOCATIONS.map((loc) => (
+                    <Select.Option key={loc} value={loc}>{loc}</Select.Option>
+                  ))}
+                </Select>
               </div>
             </Col>
             <Col xs={24} sm={12}>
@@ -186,7 +207,6 @@ export default function ProfilePage() {
               default_space: user?.default_space || undefined,
               announcements: user?.notification_preferences?.announcements ?? true,
               quality: user?.notification_preferences?.quality ?? true,
-              office_location: user?.office_location || '',
             }}
             onFinish={handleFinish}
           >
