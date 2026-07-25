@@ -28,14 +28,17 @@ export interface TaxonomyOption {
 
 export interface WorkspaceCreationSubmission {
   name: string;
-  code: string;
+  code?: string;
   purpose: string;
   visibility: 'private' | 'business_line' | 'organization' | 'public_demo';
   join_policy: 'access_code' | 'global';
   join_code?: string;
   business_line_id: string;
+  business_line_name?: string;
   work_group_id: string;
+  work_group_name?: string;
   office_location_ids: string[];
+  office_location_names?: string[];
   template_version_id: string | null;
 }
 
@@ -131,7 +134,7 @@ export const workspaceCreationApi = {
   async reviewQueue(signal?: AbortSignal): Promise<WorkspaceCreationRequest[]> {
     const { data } = await coalescedGet<WorkspaceCreationPage>(
       '/admin/governed-requests/',
-      readConfig(signal, { action: 'workspace_create', status: 'pending' }),
+      readConfig(signal, { action: 'workspace_create' }),
     );
     return data.results;
   },
@@ -147,6 +150,7 @@ export const workspaceCreationApi = {
   async approve(
     request: WorkspaceCreationRequest,
     impact: WorkspaceCreationImpact,
+    bypassSeparation = false,
   ): Promise<WorkspaceCreationRequest> {
     const { data } = await apiClient.post(
       `/admin/governed-requests/${request.request_id}/approve/`,
@@ -154,6 +158,7 @@ export const workspaceCreationApi = {
         expected_request_version: request.request_version,
         impact_version: impact.impact_version,
         acknowledge_requester_becomes_owner: true,
+        bypass_separation: bypassSeparation,
       },
       { headers: { 'Idempotency-Key': crypto.randomUUID() } },
     );

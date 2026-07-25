@@ -28,7 +28,7 @@ import {
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, CopyOutlined, SyncOutlined, SwapOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useSpaceStore } from '../store/spaceStore';
 import {
   spacesApi,
@@ -67,6 +67,19 @@ export default function SpaceManagementPage() {
   const canManageInvites = access.has('workspace.invites.manage');
   const canReadMembers = !access.enabled || canManageMembers;
   const canManageJoinPolicy = canManageSettings;
+
+  // Detect current management section from the URL path so each sub-route
+  // only renders the card(s) it owns (settings / members / invites).
+  const location = useLocation();
+  const pathSegments = location.pathname.split('/').filter(Boolean);
+  const rawSection = pathSegments[pathSegments.length - 1] || '';
+  const section: 'settings' | 'members' | 'invites' =
+    rawSection === 'members' ? 'members' : rawSection === 'invites' ? 'invites' : 'settings';
+  const showSettings = section === 'settings';
+  const showJoinPolicy = section === 'settings';
+  const showMembers = section === 'members';
+  const showInvites = section === 'invites';
+  const useGrid = showSettings && showJoinPolicy;
 
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invites, setInvites] = useState<InviteCode[]>([]);
@@ -460,6 +473,8 @@ export default function SpaceManagementPage() {
           />
         )}
 
+        <div className={useGrid ? 'kp-mgmt-grid' : ''} style={{ marginBottom: 24 }}>
+        {showSettings && (
         <Card
           title={
             <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -509,7 +524,9 @@ export default function SpaceManagementPage() {
             )}
           </Space>
         </Card>
+        )}
 
+        {showJoinPolicy && (
         <Card
           title={
             <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -616,7 +633,9 @@ export default function SpaceManagementPage() {
             )}
           </Space>
         </Card>
+        )}
 
+        {showMembers && (
         <Card
           title={
             <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -699,8 +718,9 @@ export default function SpaceManagementPage() {
             locale={{ emptyText: <div style={{ padding: 40 }}><div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div><div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_members') || '暂无成员'}</div></div> }}
           />
         </Card>
+        )}
 
-        {canManageInvites && (
+        {showInvites && canManageInvites && (
           <Card
             title={
               <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -752,6 +772,7 @@ export default function SpaceManagementPage() {
             />
           </Card>
         )}
+        </div>
 
         {isOwner && (
           <Card

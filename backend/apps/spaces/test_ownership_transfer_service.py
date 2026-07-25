@@ -98,6 +98,49 @@ class OwnershipTransferServiceTests(TestCase):
             SpaceMembership.ROLE_OWNER,
         )
 
+    def test_acceptance_auto_creates_membership_for_non_member_successor(self):
+        """A successor who is not yet a space member is auto-added on acceptance."""
+        from apps.spaces.ownership_services import OwnershipTransferService
+
+        external = get_user_model().objects.create_user(
+            username="external-successor", email="external-successor@example.test", password="safe-password"
+        )
+        # Give the external user an active membership in the same organization
+        # via a different space so the request validation passes.
+        create_space_with_owner(
+            organization=self.space.organization,
+            owner=external,
+            name="External home",
+            code="external-home",
+        )
+        self.assertFalse(
+            SpaceMembership.objects.filter(space=self.space, user=external).exists()
+        )
+
+        transfer = OwnershipTransferService.request(
+            actor=self.owner,
+            space_id=self.space.id,
+            to_owner_id=external.id,
+            expected_ownership_version=1,
+            idempotency_key=uuid.uuid4(),
+            reason_code="voluntary",
+        )
+        completed = OwnershipTransferService.accept(actor=external, transfer_id=transfer.id)
+
+        self.space.refresh_from_db()
+        self.assertEqual(completed.status, OwnershipTransfer.STATUS_COMPLETED)
+        self.assertEqual(self.space.owner_id, external.id)
+        self.assertEqual(self.space.ownership_version, 2)
+        membership = SpaceMembership.objects.get(space=self.space, user=external)
+        self.assertEqual(membership.role, SpaceMembership.ROLE_OWNER)
+        self.assertEqual(membership.status, "active")
+        self.assertEqual(membership.source_kind, SpaceMembership.SOURCE_OWNERSHIP)
+        # Previous owner is downgraded to member.
+        self.assertEqual(
+            SpaceMembership.objects.get(space=self.space, user=self.owner).role,
+            SpaceMembership.ROLE_MEMBER,
+        )
+
     def test_decline_and_cancel_are_terminal_without_changing_owner(self):
         from apps.spaces.ownership_services import OwnershipTransferService
 

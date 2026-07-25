@@ -13,7 +13,7 @@ V4.2 SYS-V4.2-020: Added BlacklistCheckingTokenRefreshView — checks if
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -51,7 +51,16 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     This ensures the frontend receives roles[] and permissions[] on login,
     enabling immediate RoleGuard/permission checks without a separate API call.
+
+    V7.1: Added login_type field and role enforcement — the /admintest entrance
+    only accepts platform super admins, while /login rejects super admins.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["login_type"] = serializers.CharField(
+            trim_whitespace=True, write_only=True, required=False, default="regular"
+        )
 
     @classmethod
     def get_token(cls, user):
@@ -65,6 +74,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         from django.contrib.auth import authenticate
         from rest_framework.exceptions import AuthenticationFailed
         from .security import create_mfa_challenge, issue_token_pair
+        from .identity import platform_admin_flags, identity_payload
 
         self.user = authenticate(
             request=self.context.get("request"),
@@ -73,6 +83,21 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         )
         if self.user is None or not self.user.is_active:
             raise AuthenticationFailed("No active account found with the given credentials")
+
+        # V7.1: Enforce login entrance separation by role.
+        login_type = attrs.get("login_type") or "regular"
+        is_super = platform_admin_flags(self.user)["is_super_admin"]
+        if login_type == "admin" and not is_super:
+            raise AuthenticationFailed(
+                "Access denied. This entrance is reserved for the platform super admin.",
+                code="not_super_admin",
+            )
+        if login_type == "regular" and is_super:
+            raise AuthenticationFailed(
+                "This is a super admin account. Please use the super admin login page.",
+                code="super_admin_blocked",
+            )
+
         if self.user.mfa_enabled:
             return {
                 "mfa_required": True,
@@ -80,7 +105,6 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 "expires_in": 300,
             }
         data = issue_token_pair(self.user, self.context.get("request"))
-        from .identity import identity_payload
         data["user"] = identity_payload(self.user)
         return data
 

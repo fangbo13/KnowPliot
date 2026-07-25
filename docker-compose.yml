@@ -33,6 +33,8 @@ services:
       DJANGO_SETTINGS_MODULE: config.settings.docker
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       CAPABILITY_NAV: "true"
+      WORKSPACE_CREATION_APPROVAL: "true"
+      WORKSPACE_JOIN_V2: "true"
       WORKSPACE_PERMANENT_DELETE: "true"
     # V4.6: gunicorn with threaded workers replaces runserver so concurrent SSE chat
     # streams don't block each other (each reply holds a worker thread for its whole

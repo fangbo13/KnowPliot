@@ -201,6 +201,7 @@
   display: flex; align-items: center; gap: 9px;
   padding: 10px 12px;
   border-top: 1px solid var(--color-border-secondary);
+  margin-top: auto;
 }
 .sidebar-avatar {
   width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
@@ -767,6 +768,20 @@
 .page-head { margin-bottom: 36px; }
 .page-title { font-family: var(--font-family-display); font-weight: 500; font-size: 25px; margin: 0 0 4px; letter-spacing: -0.01em; color: var(--color-text); }
 .page-sub { color: var(--color-text-secondary); margin: 0; font-size: 14px; }
+
+/* ============================================================================
+   Space management — two-column responsive grid for settings cards
+   ============================================================================ */
+.kp-mgmt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.kp-mgmt-grid > .ant-card { margin-bottom: 0 !important; }
+@media (max-width: 991px) {
+  .kp-mgmt-grid { grid-template-columns: 1fr; }
+}
 
 /* ============================================================================
    Tablet (768–1024px) — narrower sidebar, tighter padding

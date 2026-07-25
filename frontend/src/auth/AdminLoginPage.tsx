@@ -40,12 +40,19 @@ export default function AdminLoginPage() {
       const response = await fetch('/api/v1/auth/token/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: values.email, password: values.password }),
+        body: JSON.stringify({ email: values.email, password: values.password, login_type: 'admin' }),
       });
-      if (!response.ok) throw new Error('login_failed');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        if (errData.code === 'not_super_admin') {
+          setError(t('admin_login_not_super'));
+          return;
+        }
+        throw new Error('login_failed');
+      }
       const tokenData = await response.json();
       if (tokenData.mfa_required) {
-        setError(t('admin_login_mfa_required', 'This account has MFA enabled. Please use the regular login page.'));
+        setError(t('admin_login_mfa_required'));
         return;
       }
 
@@ -55,9 +62,10 @@ export default function AdminLoginPage() {
       if (!profileResponse.ok) throw new Error('profile_load_failed');
       const user = await profileResponse.json();
 
-      // Only allow superuser login through this entry point.
+      // Defense-in-depth: backend already enforces this via login_type='admin',
+      // but keep the check in case of a future serializer regression.
       if (!user.is_superuser && !user.is_super_admin) {
-        setError(t('admin_login_not_super', 'Access denied. This entrance is reserved for the platform super admin.'));
+        setError(t('admin_login_not_super'));
         return;
       }
 

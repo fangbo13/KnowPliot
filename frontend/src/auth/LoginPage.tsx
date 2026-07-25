@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Form, Input, Button, Alert, Tabs, Select, Modal } from 'antd';
 import {
-  MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined,
+  MailOutlined, LockOutlined, LoginOutlined, GlobalOutlined,
   SunOutlined, MoonOutlined, UserAddOutlined, SafetyCertificateOutlined, TeamOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -118,9 +118,16 @@ export default function LoginPage() {
       const response = await fetch('/api/v1/auth/token/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: values.email, password: values.password }),
+        body: JSON.stringify({ email: values.email, password: values.password, login_type: 'regular' }),
       });
-      if (!response.ok) throw new Error('login_failed');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        if (errData.code === 'super_admin_blocked') {
+          setError(t('login_super_admin_blocked'));
+          return;
+        }
+        throw new Error('login_failed');
+      }
       const tokenData = await response.json();
       if (tokenData.mfa_required) {
         setMfaChallenge(tokenData.challenge);
@@ -263,20 +270,6 @@ export default function LoginPage() {
       label: <span><LoginOutlined /> {t('auth_tab_signin')}</span>,
       children: (
         <div className="login-input-wrapper">
-          <div
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-              marginBottom: 24, padding: '10px 14px', background: 'var(--accent-soft)',
-              border: '1px solid var(--color-border-secondary)', borderRadius: 12,
-            }}
-          >
-            <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{t('demo_hint')}</span>
-            <Button type="text" size="small" icon={<UserSwitchOutlined />}
-              onClick={() => form.setFieldsValue({ email: 'admin@ey.com', password: 'admin123' })}
-              style={{ color: 'var(--accent-text)', fontWeight: 600, flexShrink: 0 }}>
-              {t('demo_fill_btn')}
-            </Button>
-          </div>
           <Form form={form} layout="vertical" size="large" onFinish={handleLogin} requiredMark={false} validateTrigger="onChange">
             <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
               <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />

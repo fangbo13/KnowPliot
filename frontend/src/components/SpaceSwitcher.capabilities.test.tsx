@@ -21,6 +21,10 @@ vi.mock('../auth/CapabilityProvider', () => ({
   }),
 }));
 
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => vi.fn(),
+}));
+
 vi.mock('../store/spaceStore', () => ({
   useSpaceStore: () => ({
     spaces: [{

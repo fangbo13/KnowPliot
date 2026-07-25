@@ -41,6 +41,8 @@
   "admin_login_feature_3": "Audit & compliance oversight",
   "admin_login_not_super": "Access denied. This entrance is reserved for the platform super admin.",
   "admin_login_mfa_required": "This account has MFA enabled. Please use the regular login page.",
+  "login_super_admin_blocked": "This is a super admin account. Please use the super admin login entrance.",
+  "go_admin_login": "Go to Super Admin Login",
   "delete_confirm": "Confirm Delete",
   "delete_confirm_content": "Are you sure you want to delete this document? This action cannot be undone.",
   "archive": "Archive",

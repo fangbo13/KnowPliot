@@ -5,10 +5,13 @@ import { KeyOutlined } from '@ant-design/icons';
 
 import { spacesApi, type DiscoverableSpaceCard } from '../api/spaces';
 import { getApiErrorCode, getRateLimitDetails, isAbortError } from '../api/client';
+import { useCapabilities } from '../auth/CapabilityProvider';
 import { EmptyState, PageHeader, Surface } from '../design/primitives';
 
 export default function SpaceDiscoveryPage() {
   const { t } = useTranslation('common');
+  const capabilities = useCapabilities();
+  const joinV2Enabled = capabilities.snapshot?.feature_availability.workspace_join_v2 ?? false;
   const [spaces, setSpaces] = useState<DiscoverableSpaceCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
@@ -22,6 +25,12 @@ export default function SpaceDiscoveryPage() {
   const joinController = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    if (!joinV2Enabled) {
+      setSpaces([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const sequence = ++requestSequence.current;
     controllerRef.current?.abort();
     const controller = new AbortController();
@@ -39,7 +48,7 @@ export default function SpaceDiscoveryPage() {
     } finally {
       if (sequence === requestSequence.current && !controller.signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [joinV2Enabled]);
 
   useEffect(() => {
     void load();
@@ -102,82 +111,96 @@ export default function SpaceDiscoveryPage() {
 
   return (
     <div className="page section-enter">
-      <PageHeader title={t('space_discovery', { defaultValue: '空间发现' })} description={t('space_discovery_description', { defaultValue: '浏览可加入的工作空间' })} />
-      <Surface>
-        {/* 凭码加入 */}
-        <div style={{ marginBottom: 24, display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <Input
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value)}
-            placeholder={t('join_code_placeholder', { defaultValue: '输入加入码，如 KP-AB12CD' })}
-            prefix={<KeyOutlined style={{ color: 'var(--color-text-secondary)' }} />}
-            style={{ flex: '1 1 320px' }}
-            onPressEnter={() => void handleJoinByCode()}
-            disabled={joinSubmitting}
-          />
-          <Button
-            type="primary"
-            loading={joinSubmitting}
-            disabled={!joinCode.trim()}
-            onClick={() => void handleJoinByCode()}
-          >
-            {t('join_by_code', { defaultValue: '凭码加入' })}
-          </Button>
-          {joinSuccess && <Alert type="success" showIcon message={joinSuccess} style={{ width: '100%' }} />}
-          {joinError && <Alert type="error" showIcon message={joinError} style={{ width: '100%' }} />}
-        </div>
+      <div className="page-inner" style={{ maxWidth: 'var(--content-max)' }}>
+        <PageHeader
+          title={t('space_discovery', { defaultValue: '空间发现' })}
+          description={t('space_discovery_description', { defaultValue: '浏览可加入的工作空间' })}
+        />
+        <Surface className="space-discovery__surface">
+          {/* 凭码加入 */}
+          <div className="space-discovery__join-bar">
+            <Input
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              placeholder={t('join_code_placeholder', { defaultValue: '输入加入码，如 KP-AB12CD' })}
+              prefix={<KeyOutlined style={{ color: 'var(--color-text-secondary)' }} />}
+              style={{ flex: '1 1 280px' }}
+              onPressEnter={() => void handleJoinByCode()}
+              disabled={joinSubmitting}
+            />
+            <Button
+              type="primary"
+              loading={joinSubmitting}
+              disabled={!joinCode.trim()}
+              onClick={() => void handleJoinByCode()}
+            >
+              {t('join_by_code', { defaultValue: '凭码加入' })}
+            </Button>
+          </div>
+          {joinSuccess && <Alert type="success" showIcon message={joinSuccess} className="space-discovery__feedback" />}
+          {joinError && <Alert type="error" showIcon message={joinError} className="space-discovery__feedback" />}
 
-        {/* 全局可见空间列表 */}
-        {loading ? (
-          <p role="status">{t('loading', { defaultValue: '加载中…' })}</p>
-        ) : error ? (
-          <Alert
-            type="error"
-            showIcon
-            message={error.code === 'rate_limited'
-              ? `${t('rate_limited', { defaultValue: '请求过于频繁' })}${error.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: error.retryAfterSeconds, defaultValue: `${error.retryAfterSeconds} 秒后重试` })}`}`
-              : t('load_error', { defaultValue: '加载失败' })}
-            action={<Button onClick={() => void load()}>{t('error_retry', { defaultValue: '重试' })}</Button>}
-          />
-        ) : spaces.length === 0 ? (
-          <EmptyState icon="K" title={t('space_discovery_empty', { defaultValue: '没有可发现的空间' })} />
-        ) : (
-          <List
-            dataSource={spaces}
-            renderItem={(space) => (
-              <List.Item>
-                <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                  <div style={{ flex: '1 1 300px', minWidth: 200 }}>
-                    <strong>{space.name}</strong>{' '}
-                    <Tag bordered={false} color="blue">{t(`join_policy_${space.join_policy}`, { defaultValue: space.join_policy === 'global' ? '全局可见' : '邀请码' })}</Tag>
-                    <div style={{ color: 'var(--color-text-secondary)', marginTop: 4 }}>{space.description}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {space.is_member || joinStatuses[space.id] === 'joined' ? (
-                      <Tag color="green">{t('joined', { defaultValue: '已加入' })}</Tag>
-                    ) : (
-                      <Button
-                        type="primary"
-                        loading={joinStatuses[space.id] === 'joining'}
-                        disabled={joinStatuses[space.id] === 'joined' || space.is_member}
-                        onClick={() => void handleGlobalJoin(space)}
-                      >
-                        {t('join', { defaultValue: '加入' })}
-                      </Button>
+          {/* 分隔线 */}
+          <hr className="space-discovery__divider" />
+
+          {/* 全局可见空间列表 */}
+          {loading ? (
+            <p role="status" className="space-discovery__status">{t('loading', { defaultValue: '加载中…' })}</p>
+          ) : error ? (
+            <Alert
+              type="error"
+              showIcon
+              message={error.code === 'rate_limited'
+                ? `${t('rate_limited', { defaultValue: '请求过于频繁' })}${error.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: error.retryAfterSeconds, defaultValue: `${error.retryAfterSeconds} 秒后重试` })}`}`
+                : t('load_error', { defaultValue: '加载失败' })}
+              action={<Button onClick={() => void load()}>{t('error_retry', { defaultValue: '重试' })}</Button>}
+            />
+          ) : spaces.length === 0 ? (
+            <EmptyState
+              className="space-discovery__empty"
+              icon={<span className="space-discovery__badge">K</span>}
+              iconLabel="KnowPilot"
+              title={t('space_discovery_empty', { defaultValue: '暂无可申请的其他工作空间' })}
+              body={t('space_discovery_empty_body', { defaultValue: '当有新的工作空间开放加入时，将显示在此处。你也可以使用加入码快速加入指定空间。' })}
+            />
+          ) : (
+            <List
+              dataSource={spaces}
+              renderItem={(space) => (
+                <List.Item>
+                  <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 300px', minWidth: 200 }}>
+                      <strong>{space.name}</strong>{' '}
+                      <Tag bordered={false} color="blue">{t(`join_policy_${space.join_policy}`, { defaultValue: space.join_policy === 'global' ? '全局可见' : '邀请码' })}</Tag>
+                      <div style={{ color: 'var(--color-text-secondary)', marginTop: 4 }}>{space.description}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {space.is_member || joinStatuses[space.id] === 'joined' ? (
+                        <Tag color="green">{t('joined', { defaultValue: '已加入' })}</Tag>
+                      ) : (
+                        <Button
+                          type="primary"
+                          loading={joinStatuses[space.id] === 'joining'}
+                          disabled={joinStatuses[space.id] === 'joined' || space.is_member}
+                          onClick={() => void handleGlobalJoin(space)}
+                        >
+                          {t('join', { defaultValue: '加入' })}
+                        </Button>
+                      )}
+                    </div>
+                    {joinStatuses[space.id] === 'failed' && (
+                      <Alert type="error" showIcon message={t('join_failed', { defaultValue: '加入失败，请重试。' })} style={{ width: '100%' }} />
+                    )}
+                    {joinStatuses[space.id] === 'rate_limited' && (
+                      <Alert type="warning" showIcon message={t('rate_limited', { defaultValue: '请求过于频繁，请稍后重试。' })} style={{ width: '100%' }} />
                     )}
                   </div>
-                  {joinStatuses[space.id] === 'failed' && (
-                    <Alert type="error" showIcon message={t('join_failed', { defaultValue: '加入失败，请重试。' })} style={{ width: '100%' }} />
-                  )}
-                  {joinStatuses[space.id] === 'rate_limited' && (
-                    <Alert type="warning" showIcon message={t('rate_limited', { defaultValue: '请求过于频繁，请稍后重试。' })} style={{ width: '100%' }} />
-                  )}
-                </div>
-              </List.Item>
-            )}
-          />
-        )}
-      </Surface>
+                </List.Item>
+              )}
+            />
+          )}
+        </Surface>
+      </div>
     </div>
   );
 }

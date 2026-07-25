@@ -24,6 +24,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 
 import { getRateLimitDetails, isAbortError } from '../api/client';
 import { useAuthorization, useCapabilities } from '../auth/CapabilityProvider';
@@ -37,13 +38,9 @@ function getModalTransitionName(): string | undefined {
   return reducedMotion || !('TransitionEvent' in window) ? '' : undefined;
 }
 
-function openCreationRequestPage() {
-  window.history.pushState({}, '', '/spaces/create');
-  window.dispatchEvent(new PopStateEvent('popstate'));
-}
-
 export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boolean }) {
   const { t } = useTranslation('common');
+  const navigate = useNavigate();
   const access = useAuthorization();
   const capabilities = useCapabilities();
   const { spaces, activeSpaceId, setActiveSpace, joinByCode } = useSpaceStore();
@@ -188,7 +185,7 @@ export default function SpaceSwitcher({ collapsed = false }: { collapsed?: boole
       key: 'create',
       icon: <PlusOutlined />,
       label: t('create_space') || 'Request a workspace',
-      onClick: openCreationRequestPage,
+      onClick: () => navigate('/spaces/create'),
     }] : []),
   ];
 

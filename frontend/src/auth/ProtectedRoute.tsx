@@ -10,8 +10,14 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from './AuthProvider';
 import { useSpaceStore } from '../store/spaceStore';
 
-/** Paths a spaceless user may access without being redirected to the guidance page. */
-const SPACELESS_SAFE_PATHS = ['/spaces/discover', '/profile', '/ownership-transfers'];
+/** Paths a spaceless user may access without being redirected to the guidance page.
+ *  Admin/governance/workspace-management routes are workspace-independent and must
+ *  remain accessible to platform/org/business admins who may not have a
+ *  default_space.  The CapabilityGate on those routes still enforces authorization. */
+const SPACELESS_SAFE_PATHS = [
+  '/spaces/discover', '/spaces/create', '/profile', '/ownership-transfers',
+  '/platform-admin', '/governance', '/admin', '/workspace',
+];
 
 function SpaceGuidancePage() {
   const { t } = useTranslation('common');

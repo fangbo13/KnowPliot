@@ -41,6 +41,8 @@
   "admin_login_feature_3": "审计与合规监督",
   "admin_login_not_super": "访问被拒绝。此入口仅限平台超管使用。",
   "admin_login_mfa_required": "该账户已启用 MFA，请使用常规登录页面。",
+  "login_super_admin_blocked": "此账户为超管账户，请通过超管登录入口登录。",
+  "go_admin_login": "前往超管登录",
   "delete_confirm": "确认删除",
   "delete_confirm_content": "确定要删除此文档吗？此操作无法撤销。",
   "archive": "归档",
