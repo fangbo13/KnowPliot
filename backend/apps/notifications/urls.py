@@ -6,6 +6,7 @@
 
 from django.urls import path
 
+from .sse_views import notification_stream
 from .views import (
     announcements,
     mark_all_read,
@@ -23,4 +24,6 @@ urlpatterns = [
     path("<uuid:item_id>/actions/<str:action>/", notification_action, name="notifications-action"),
     # Admin: publish / list announcements (version updates).
     path("announcements/", announcements, name="notifications-announcements"),
+    # C-02: SSE real-time notification stream.
+    path("stream/", notification_stream, name="notifications-stream"),
 ]

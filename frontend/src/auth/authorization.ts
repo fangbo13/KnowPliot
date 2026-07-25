@@ -71,7 +71,18 @@ interface AuthorizationAdapterInput {
   activeSpaceId?: string | null;
 }
 
+/** Capabilities prefixed with `workspace.` but granted at the account or
+ *  governance level — they must remain available even when no active
+ *  workspace is selected, so they are excluded from the workspace-bound
+ *  gating in `has()`. */
+const ACCOUNT_OR_GOVERNANCE_WORKSPACE_CAPABILITIES = new Set<Capability>([
+  'workspace.creation.request',
+  'workspace.ownership.read',
+  'workspace.ownership.transfer.force',
+]);
+
 function isWorkspaceBoundCapability(capability: Capability): boolean {
+  if (ACCOUNT_OR_GOVERNANCE_WORKSPACE_CAPABILITIES.has(capability)) return false;
   return capability.startsWith('chat.') ||
     capability.startsWith('workspace.') ||
     capability.startsWith('knowledge.') ||

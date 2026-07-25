@@ -10,9 +10,11 @@ import {
   Button,
   Card,
   Checkbox,
-  Empty,
   Form,
   Input,
+  Modal,
+  Radio,
+  Segmented,
   Select,
   Skeleton,
   Space,
@@ -22,6 +24,7 @@ import {
 } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { getApiErrorCode, getRateLimitDetails, isAbortError } from '../api/client';
 import { templatesApi, type ScenarioTemplate } from '../api/templates';
@@ -32,10 +35,58 @@ import {
   type WorkspaceCreationSubmission,
 } from '../api/workspaceCreation';
 import { useCapabilities } from '../auth/CapabilityProvider';
+import { useAuth } from '../auth/AuthProvider';
 import './WorkspaceCreationPage.css';
 
 const { Text, Title, Paragraph } = Typography;
 const TERMINAL = new Set(['completed', 'rejected', 'cancelled', 'expired', 'invalidated', 'failed']);
+
+/** Service-line codes — mirror User.SERVICE_LINE_CHOICES on the backend. */
+const SERVICE_LINES = ['assurance', 'consulting', 'tax', 'strategy_transactions', 'core'] as const;
+
+/** EY China major office locations — mirror ProfilePage registration options. */
+const EY_OFFICE_LOCATIONS = [
+  '北京', '上海', '广州', '深圳', '成都', '武汉', '杭州', '南京',
+  '青岛', '大连', '厦门', '天津', '苏州', '西安', '重庆', '济南',
+  '沈阳', '长沙', '郑州', '合肥', '昆明', '海口', '香港', '澳门',
+];
+
+/**
+ * Resolve a business-line taxonomy option to the same label shown during
+ * registration (service-line i18n key).  Falls back to the taxonomy
+ * display_name when the code does not match a known service line.
+ */
+function serviceLineLabel(item: TaxonomyOption, t: (key: string) => string): string {
+  const code = item.normalized_code;
+  return (SERVICE_LINES as readonly string[]).includes(code) ? t(`sl_${code}`) : item.display_name;
+}
+
+/**
+ * Filter office-location taxonomy options to only those that match the
+ * registration-time EY_OFFICE_LOCATIONS list.  Falls back to the full
+ * taxonomy list when no overlap exists (e.g. seed data mismatch).
+ */
+function registrationOffices(locations: TaxonomyOption[]): TaxonomyOption[] {
+  const filtered = locations.filter((loc) => EY_OFFICE_LOCATIONS.includes(loc.display_name));
+  return filtered.length > 0 ? filtered : locations;
+}
+
+/**
+ * Pick office location IDs to auto-select based on user profile.
+ * If only one location exists, select it. Otherwise try matching the
+ * user's office_location against display_name or normalized_code.
+ */
+function pickAutoOffices(locations: TaxonomyOption[], userOffice?: string): string[] {
+  if (locations.length === 0) return [];
+  if (locations.length === 1) return [locations[0].id];
+  if (userOffice) {
+    const matched = locations.find(
+      (loc) => loc.display_name === userOffice || loc.normalized_code === userOffice,
+    );
+    if (matched) return [matched.id];
+  }
+  return [];
+}
 
 function errorDescription(error: unknown): string {
   const rateLimit = getRateLimitDetails(error);
@@ -46,8 +97,8 @@ function errorDescription(error: unknown): string {
   }
   const code = getApiErrorCode(error);
   if (code === 'workspace_creation_disabled') return '创建申请当前不可用，请联系平台管理员检查内测策略。';
-  if (code === 'space_locator_conflict') return '该工作区短代码已被占用，请更换后重试。';
-  if (code === 'request_already_pending') return '该短代码已经有一条待审批申请。';
+  if (code === 'space_locator_conflict') return '工作区标识冲突，请重新提交申请。';
+  if (code === 'request_already_pending') return '已有同标识的待审批申请，请重新提交。';
   return '暂时无法完成请求，请检查内容后重试。';
 }
 
@@ -66,6 +117,8 @@ function requestStatus(status: WorkspaceCreationRequest['status']) {
 
 export default function WorkspaceCreationPage() {
   const capabilities = useCapabilities();
+  const { user } = useAuth();
+  const { t } = useTranslation('common');
   const [searchParams] = useSearchParams();
   const [form] = Form.useForm<WorkspaceCreationSubmission>();
   const [businessLines, setBusinessLines] = useState<TaxonomyOption[]>([]);
@@ -79,12 +132,19 @@ export default function WorkspaceCreationPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'processed' | 'all'>('pending');
   const loadSequence = useRef(0);
   const loadController = useRef<AbortController | null>(null);
   const dependentController = useRef<AbortController | null>(null);
   const submitController = useRef<AbortController | null>(null);
 
   const creationEnabled = capabilities.snapshot?.feature_availability.workspace_creation_approval ?? false;
+
+  const filteredRequests = useMemo(() => {
+    if (filterStatus === 'all') return requests;
+    if (filterStatus === 'pending') return requests.filter((r) => r.status === 'pending');
+    return requests.filter((r) => r.status !== 'pending');
+  }, [requests, filterStatus]);
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -103,13 +163,40 @@ export default function WorkspaceCreationPage() {
       setBusinessLines(lines);
       setRequests(mine);
       setTemplates(availableTemplates);
+      // Auto-select business line — prefer the user's service_line, fall back to
+      // single-option auto-select.  Reuses the registration profile.
+      const matchedLine = user?.service_line
+        ? lines.find((line) => line.normalized_code === user.service_line)
+        : undefined;
+      const autoLine = matchedLine ?? (lines.length === 1 ? lines[0] : undefined);
+      if (autoLine) {
+        form.setFieldValue('business_line_id', autoLine.id);
+        try {
+          const [groups, locations] = await Promise.all([
+            workspaceCreationApi.taxonomy('work-groups', autoLine.id, controller.signal),
+            workspaceCreationApi.taxonomy('office-locations', autoLine.parent_id, controller.signal),
+          ]);
+          if (controller.signal.aborted || sequence !== loadSequence.current) return;
+          setWorkGroups(groups);
+          setOffices(locations);
+          if (groups.length === 1) {
+            form.setFieldValue('work_group_id', groups[0].id);
+          }
+          const autoOfficeIds = pickAutoOffices(locations, user?.office_location);
+          if (autoOfficeIds.length > 0) {
+            form.setFieldValue('office_location_ids', autoOfficeIds);
+          }
+        } catch (depError: unknown) {
+          if (!isAbortError(depError) && sequence === loadSequence.current) message.error(errorDescription(depError));
+        }
+      }
     } catch (loadError: unknown) {
       if (!isAbortError(loadError) && sequence === loadSequence.current) setError(errorDescription(loadError));
     } finally {
       if (!controller.signal.aborted && sequence === loadSequence.current) setLoading(false);
       if (loadController.current === controller) loadController.current = null;
     }
-  }, []);
+  }, [form, user]);
 
   useEffect(() => {
     void load();
@@ -150,12 +237,32 @@ export default function WorkspaceCreationPage() {
       if (controller.signal.aborted || sequence !== loadSequence.current) return;
       setWorkGroups(groups);
       setOffices(locations);
+      if (groups.length === 1) {
+        form.setFieldValue('work_group_id', groups[0].id);
+      }
+      const autoOfficeIds = pickAutoOffices(locations, user?.office_location);
+      if (autoOfficeIds.length > 0) {
+        form.setFieldValue('office_location_ids', autoOfficeIds);
+      }
     } catch (loadError: unknown) {
       if (!isAbortError(loadError) && sequence === loadSequence.current) message.error(errorDescription(loadError));
     } finally {
       if (!controller.signal.aborted && sequence === loadSequence.current) setDependentLoading(false);
       if (dependentController.current === controller) dependentController.current = null;
     }
+  };
+
+  const confirmSubmit = () => {
+    if (submitting || !confirmed) return;
+    Modal.confirm({
+      title: '确认提交审批申请',
+      content: '提交后申请将进入平台审批流程，提交后不可修改。是否确定提交？',
+      okText: '确认提交',
+      cancelText: '取消',
+      onOk: () => {
+        form.submit();
+      },
+    });
   };
 
   const submit = async (values: WorkspaceCreationSubmission) => {
@@ -167,8 +274,9 @@ export default function WorkspaceCreationPage() {
       const request = await workspaceCreationApi.submit({
         ...values,
         name: values.name.trim(),
-        code: values.code.trim().toLowerCase(),
         purpose: values.purpose.trim(),
+        visibility: values.join_policy === 'global' ? 'organization' : 'private',
+        join_code: values.join_code?.trim() || undefined,
         template_version_id: values.template_version_id || null,
       }, controller.signal);
       if (controller.signal.aborted) return;
@@ -183,6 +291,17 @@ export default function WorkspaceCreationPage() {
       if (!controller.signal.aborted) setSubmitting(false);
       if (submitController.current === controller) submitController.current = null;
     }
+  };
+
+  const confirmCancel = (request: WorkspaceCreationRequest) => {
+    Modal.confirm({
+      title: '确认取消审批申请',
+      content: '取消后该申请将被撤销且不可恢复。是否确定取消？',
+      okText: '确认取消',
+      cancelText: '返回',
+      okButtonProps: { danger: true },
+      onOk: () => void cancel(request),
+    });
   };
 
   const cancel = async (request: WorkspaceCreationRequest) => {
@@ -245,7 +364,7 @@ export default function WorkspaceCreationPage() {
           <Form<WorkspaceCreationSubmission>
             form={form}
             layout="vertical"
-            initialValues={{ visibility: 'private', office_location_ids: [], template_version_id: null }}
+            initialValues={{ visibility: 'private', join_policy: 'access_code', office_location_ids: [], template_version_id: null }}
             onFinish={(values) => void submit(values)}
             requiredMark="optional"
           >
@@ -253,15 +372,12 @@ export default function WorkspaceCreationPage() {
               <Form.Item name="name" label="工作区名称" rules={[{ required: true }, { max: 200 }]}>
                 <Input placeholder="例如：审计方法论知识库" autoComplete="off" />
               </Form.Item>
-              <Form.Item name="code" label="短代码" extra="仅使用小写字母、数字和连字符。" rules={[{ required: true }, { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ }]}>
-                <Input placeholder="audit-methodology" autoComplete="off" />
-              </Form.Item>
               <Form.Item name="business_line_id" label="业务线" rules={[{ required: true }]}>
                 <Select
                   showSearch
                   optionFilterProp="label"
                   placeholder="选择业务线"
-                  options={businessLines.map((item) => ({ value: item.id, label: item.display_name }))}
+                  options={businessLines.map((item) => ({ value: item.id, label: serviceLineLabel(item, t) }))}
                   onChange={(value) => void selectBusinessLine(value)}
                 />
               </Form.Item>
@@ -269,15 +385,26 @@ export default function WorkspaceCreationPage() {
                 <Select loading={dependentLoading} disabled={!workGroups.length} placeholder="先选择业务线" options={workGroups.map((item) => ({ value: item.id, label: item.display_name }))} />
               </Form.Item>
               <Form.Item name="office_location_ids" label="办公地点" rules={[{ required: true, type: 'array', min: 1, message: '至少选择一个办公地点' }]}>
-                <Select mode="multiple" loading={dependentLoading} disabled={!offices.length} placeholder="至少选择一个地点" options={offices.map((item) => ({ value: item.id, label: item.display_name }))} />
+                <Select mode="multiple" loading={dependentLoading} disabled={!offices.length} placeholder="至少选择一个地点" options={registrationOffices(offices).map((item) => ({ value: item.id, label: item.display_name }))} />
               </Form.Item>
-              <Form.Item name="visibility" label="可见范围" rules={[{ required: true }]}>
-                <Select options={[
-                  { value: 'private', label: '私有' },
-                  { value: 'business_line', label: '业务线可见' },
-                  { value: 'organization', label: '组织可见' },
-                  { value: 'public_demo', label: '公开演示' },
-                ]} />
+              <Form.Item className="kp-creation-span" name="join_policy" label="加入策略" rules={[{ required: true }]} tooltip="选择空间的加入方式。邀请码模式下空间不可被发现，成员需凭码加入；全局可见模式下空间在发现页展示，用户可直接加入。">
+                <Radio.Group>
+                  <Space direction="vertical">
+                    <Radio value="access_code">邀请码加入 — 空间隐藏，凭加入码加入</Radio>
+                    <Radio value="global">全局可见 — 在发现页展示，用户可直接加入</Radio>
+                  </Space>
+                </Radio.Group>
+              </Form.Item>
+              <Form.Item className="kp-creation-span" shouldUpdate={(prev, curr) => prev.join_policy !== curr.join_policy}>
+                {({ getFieldValue }) => (
+                  getFieldValue('join_policy') === 'access_code' ? (
+                    <Form.Item name="join_code" label="加入码" extra="留空则系统自动生成。可自定义 4-20 位字母、数字和连字符的加入码。" rules={[{ max: 24 }]}>
+                      <Input placeholder="留空自动生成，如 KP-AB12CD" autoComplete="off" />
+                    </Form.Item>
+                  ) : (
+                    <Alert type="info" showIcon message="全局可见空间将出现在发现页，任何已认证用户均可直接加入。" style={{ marginBottom: 24 }} />
+                  )
+                )}
               </Form.Item>
               <Form.Item className="kp-creation-span" name="purpose" label="用途说明" rules={[{ required: true }, { min: 8 }, { max: 2000 }]}>
                 <Input.TextArea rows={4} showCount maxLength={2000} placeholder="说明知识边界、目标使用者和预期价值。" />
@@ -292,39 +419,60 @@ export default function WorkspaceCreationPage() {
               </Checkbox>
             </div>
             <Space>
-              <Button type="primary" htmlType="submit" loading={submitting} disabled={!confirmed}>提交审批</Button>
+              <Button type="primary" htmlType="button" loading={submitting} disabled={!confirmed} onClick={confirmSubmit}>提交审批</Button>
               <Button onClick={() => { form.resetFields(); setConfirmed(false); setShowForm(false); }}>取消填写</Button>
             </Space>
           </Form>
         </Card>
       )}
 
-      <section className="kp-creation-list" aria-label="我的工作区创建申请">
-        {requests.length === 0 ? (
-          <Empty description="还没有创建申请" />
-        ) : requests.map((request) => {
-          const status = requestStatus(request.status);
-          return (
-            <Card key={request.request_id} className="kp-creation-request" bordered={false}>
-              <div>
-                <Space wrap>
-                  <Title level={4}>{request.submitted?.name ?? '工作区创建申请'}</Title>
-                  <Tag color={status.color}>{status.label}</Tag>
-                </Space>
-                <Paragraph>{request.submitted?.purpose ?? '申请详情已记录。'}</Paragraph>
-                <Text type="secondary">
-                  {request.submitted?.code ? `代码 ${request.submitted.code} · ` : ''}
-                  版本 {request.request_version}
-                  {request.expires_at ? ` · 有效期至 ${new Date(request.expires_at).toLocaleString()}` : ''}
-                </Text>
-              </div>
-              {request.status === 'pending' && !TERMINAL.has(request.status) && (
-                <Button danger onClick={() => void cancel(request)}>取消申请</Button>
-              )}
-            </Card>
-          );
-        })}
-      </section>
+      {!showForm && (
+        <>
+          <div className="kp-creation-filter">
+            <Segmented
+              value={filterStatus}
+              onChange={(value) => setFilterStatus(value as typeof filterStatus)}
+              options={[
+                { label: '待审批', value: 'pending' },
+                { label: '已处理', value: 'processed' },
+                { label: '全部', value: 'all' },
+              ]}
+            />
+          </div>
+          {filteredRequests.length > 0 ? (
+            <section className="kp-creation-list" aria-label="我的工作区创建申请">
+              {filteredRequests.map((request) => {
+                const status = requestStatus(request.status);
+                return (
+                  <Card key={request.request_id} className="kp-creation-request" bordered={false}>
+                    <div>
+                      <Space wrap>
+                        <Title level={4}>{request.submitted?.name ?? '工作区创建申请'}</Title>
+                        <Tag color={status.color}>{status.label}</Tag>
+                      </Space>
+                      <Paragraph>{request.submitted?.purpose ?? '申请详情已记录。'}</Paragraph>
+                      <Text type="secondary">
+                        {request.submitted?.code ? `代码 ${request.submitted.code} · ` : ''}
+                        版本 {request.request_version}
+                        {request.expires_at ? ` · 有效期至 ${new Date(request.expires_at).toLocaleString()}` : ''}
+                      </Text>
+                    </div>
+                    {request.status === 'pending' && !TERMINAL.has(request.status) && (
+                      <Button danger onClick={() => confirmCancel(request)}>取消申请</Button>
+                    )}
+                  </Card>
+                );
+              })}
+            </section>
+          ) : (
+            <div className="kp-creation-empty">
+              <Text type="secondary">
+                {filterStatus === 'pending' ? '当前没有待审批的申请。' : filterStatus === 'processed' ? '当前没有已处理的申请。' : '还没有创建申请。'}
+              </Text>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

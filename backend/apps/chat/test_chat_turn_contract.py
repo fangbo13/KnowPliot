@@ -100,7 +100,7 @@ class ChatMessageRequestSerializerTest(SimpleTestCase):
         self.assertEqual(serializer.validated_data["client_request_id"], request_id)
 
         invalid = ChatMessageRequestSerializer(
-            data={"content": "hello", "answer_mode": "slow", "protocol_version": 3}
+            data={"content": "hello", "answer_mode": "slow", "protocol_version": 4}
         )
         self.assertFalse(invalid.is_valid())
         self.assertEqual(set(invalid.errors), {"answer_mode", "protocol_version"})
@@ -232,6 +232,26 @@ class ChatTurnBeginServiceTest(SimpleTestCase):
         self.assertIs(result.turn.user, self.user)
         self.assertIs(result.turn.space, self.space)
         self.assertEqual(self.atomic_entries, 1)
+
+    def test_protocol_three_is_persisted_and_part_of_idempotent_identity(self):
+        repository = FakeTurnRepository()
+        repository.locked_session = self.session
+
+        created = begin_chat_turn(
+            session=self.session,
+            client_request_id=self.request_id,
+            content="same question",
+            answer_mode="fast",
+            protocol_version=3,
+            repository=repository,
+            atomic_factory=self.atomic,
+        )
+
+        self.assertEqual(created.turn.protocol_version, 3)
+
+        duplicate_repository = FakeTurnRepository(created.turn, self.session)
+        duplicate = self.begin(duplicate_repository)
+        self.assertEqual(duplicate.disposition, BeginTurnDisposition.CONFLICT)
 
     def test_regeneration_reuses_the_original_question_without_creating_a_duplicate(self):
         repository = FakeTurnRepository()

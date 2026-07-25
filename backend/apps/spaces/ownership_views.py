@@ -108,18 +108,16 @@ def ownership_candidates(request, pk):
     except ValueError:
         return Response({"error_code": "invalid_pagination"}, status=status.HTTP_400_BAD_REQUEST)
     if purpose == "voluntary":
-        rows = SpaceMembership.objects.select_related("user").filter(
-            space=space,
-            status="active",
-        ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())).exclude(
-            user_id=space.owner_id
-        ).exclude(role=SpaceMembership.ROLE_GUEST)
+        users = type(request.user).objects.filter(is_active=True).filter(
+            space_memberships__space__organization=space.organization,
+            space_memberships__status="active",
+        ).exclude(pk=space.owner_id).distinct()
         if search:
-            rows = rows.filter(Q(user__username__icontains=search) | Q(user__email__icontains=search))
-        page = list(rows.filter(user__is_active=True).order_by("user__username")[offset:offset + limit + 1])
+            users = users.filter(Q(username__icontains=search) | Q(email__icontains=search))
+        page = list(users.order_by("username")[offset:offset + limit + 1])
         result = [
-            {"id": str(row.user_id), "display_name": row.user.get_full_name() or row.user.username, "role": row.role, "requires_membership": False}
-            for row in page[:limit]
+            {"id": str(user.id), "display_name": user.get_full_name() or user.username, "requires_membership": not SpaceMembership.objects.filter(space=space, user=user).exists()}
+            for user in page[:limit]
         ]
     else:
         users = type(request.user).objects.filter(is_active=True).filter(

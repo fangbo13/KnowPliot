@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import random
 import secrets
 import unicodedata
 import uuid
@@ -886,7 +887,12 @@ def create_invitation(*, actor, space, payload, idempotency_key):
         with operation_record(actor=actor, operation_code="space_invitation.create", key=idempotency_key, request_digest=digest, target_uuid=space.id) as (operation, replay):
             if replay:
                 return replay_response(operation)
-            space = _lock_active_owner_space(actor=actor, space_id=space.id)
+            # Relax permission: owner-only by default, but any active member
+            # can invite when space.allow_member_invite is True (spec §2.3).
+            if space.allow_member_invite:
+                space = _lock_active_member_space(actor=actor, space_id=space.id)
+            else:
+                space = _lock_active_owner_space(actor=actor, space_id=space.id)
             if target_user is not None:
                 target_user = (
                     get_user_model()
@@ -1244,6 +1250,409 @@ def redeem_invitation(*, actor, raw_token, action, idempotency_key):
     )
 
 
+# ---------------------------------------------------------------------------
+# Simplified join-policy functions (spec §2 — access_code / global modes)
+# ---------------------------------------------------------------------------
+
+_JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_join_code():
+    """Generate a system join code: ``KP-`` + 6 chars from a safe alphabet."""
+    body = "".join(random.choices(_JOIN_CODE_ALPHABET, k=6))
+    return f"KP-{body}"
+
+
+def validate_custom_join_code(code):
+    """Validate and normalise a user-supplied join code.
+
+    Rules (spec §2.2.1): 4-20 chars, alphanumeric + hyphens, stored uppercase.
+    """
+    code = (code or "").strip().upper()
+    if not (4 <= len(code) <= 20):
+        raise ValidationError({"join_code": "Must be 4-20 characters."})
+    if not all(c.isalnum() or c == "-" for c in code):
+        raise ValidationError({"join_code": "Only letters, digits, and hyphens are allowed."})
+    return code
+
+
+def _generate_unique_join_code():
+    """Generate a ``join_code`` that does not collide with existing values."""
+    for _ in range(5):
+        candidate = generate_join_code()
+        if not KnowledgeSpace.objects.filter(join_code__iexact=candidate).exists():
+            return candidate
+    raise GovernedWorkflowError("join_code_generation_failed", status_code=500)
+
+
+def _lock_active_member_space(*, actor, space_id):
+    """Lock space and check that *actor* is an active member (any role)."""
+
+    try:
+        space = (
+            KnowledgeSpace.objects.select_for_update(of=("self",))
+            .order_by("pk")
+            .get(pk=space_id)
+        )
+    except KnowledgeSpace.DoesNotExist as exc:
+        raise NotFound("Workspace not found.") from exc
+    member_mirror = (
+        SpaceMembership.objects.select_for_update(of=("self",))
+        .filter(
+            space=space,
+            user=actor,
+            status="active",
+            expires_at__isnull=True,
+        )
+        .order_by("pk")
+        .first()
+    )
+    if not actor.is_active or member_mirror is None:
+        raise GovernedWorkflowError("workspace_member_required", status_code=403)
+    parents_active = (
+        space.organization.status == "active"
+        and (
+            space.business_line_id is None
+            or space.business_line.status == "active"
+        )
+    )
+    if space.status != "active" or not parents_active:
+        raise GovernedWorkflowError("workspace_not_writable")
+    return space
+
+
+def _lock_manage_space(*, actor, space_id):
+    """Lock space and check that *actor* is owner or knowledge_admin."""
+
+    try:
+        space = (
+            KnowledgeSpace.objects.select_for_update(of=("self",))
+            .order_by("pk")
+            .get(pk=space_id)
+        )
+    except KnowledgeSpace.DoesNotExist as exc:
+        raise NotFound("Workspace not found.") from exc
+    admin_mirror = (
+        SpaceMembership.objects.select_for_update(of=("self",))
+        .filter(
+            space=space,
+            user=actor,
+            role__in=[
+                SpaceMembership.ROLE_OWNER,
+                SpaceMembership.ROLE_KNOWLEDGE_ADMIN,
+            ],
+            status="active",
+            expires_at__isnull=True,
+        )
+        .order_by("pk")
+        .first()
+    )
+    if not actor.is_active or (admin_mirror is None and not actor.is_superuser):
+        raise GovernedWorkflowError("workspace_admin_required", status_code=403)
+    parents_active = (
+        space.organization.status == "active"
+        and (
+            space.business_line_id is None
+            or space.business_line.status == "active"
+        )
+    )
+    if space.status != "active" or not parents_active:
+        raise GovernedWorkflowError("workspace_not_writable")
+    return space
+
+
+def join_by_code(*, actor, join_code, idempotency_key):
+    """Join a workspace by its join code (simplified access_code mode)."""
+
+    code = (join_code or "").strip().upper()
+    digest = digest_payload({"actor_id": actor.id, "join_code": code})
+    with durable_governed_transaction():
+        with operation_record(
+            actor=actor,
+            operation_code="space_join.by_code",
+            key=idempotency_key,
+            request_digest=digest,
+        ) as (operation, replay):
+            if replay:
+                return replay_response(operation)
+            space = (
+                KnowledgeSpace.objects.select_for_update(of=("self",))
+                .filter(
+                    join_code__iexact=code,
+                    join_policy=KnowledgeSpace.JOIN_POLICY_ACCESS_CODE,
+                )
+                .order_by("pk")
+                .first()
+            )
+            if space is None:
+                raise NotFound("Join code not found.")
+            if space.status != "active":
+                raise GovernedWorkflowError("workspace_not_available", status_code=403)
+            parents_active = (
+                space.organization.status == "active"
+                and (
+                    space.business_line_id is None
+                    or space.business_line.status == "active"
+                )
+            )
+            if not parents_active:
+                raise GovernedWorkflowError("workspace_not_available", status_code=403)
+            existing = (
+                SpaceMembership.objects.select_for_update(of=("self",))
+                .filter(space=space, user=actor)
+                .order_by("pk")
+                .first()
+            )
+            if existing is not None and existing.is_effective:
+                raise GovernedWorkflowError("already_member", status_code=409)
+            if existing is None:
+                membership = SpaceMembership.objects.create(
+                    space=space,
+                    user=actor,
+                    role=SpaceMembership.ROLE_MEMBER,
+                    status="active",
+                    source_kind=SpaceMembership.SOURCE_JOIN_CODE,
+                )
+            else:
+                existing.role = SpaceMembership.ROLE_MEMBER
+                existing.status = "active"
+                existing.expires_at = None
+                existing.source_kind = SpaceMembership.SOURCE_JOIN_CODE
+                existing.membership_version += 1
+                existing.save(
+                    update_fields=[
+                        "role",
+                        "status",
+                        "expires_at",
+                        "source_kind",
+                        "membership_version",
+                        "updated_at",
+                    ]
+                )
+                membership = existing
+            _audit(
+                actor,
+                space=space,
+                event="join_by_code",
+                resource=membership,
+                details={"join_policy": space.join_policy},
+            )
+            body = {
+                "space_id": str(space.id),
+                "space_name": space.name,
+                "membership_id": str(membership.id),
+                "role": membership.role,
+                "source": membership.source_kind,
+            }
+            complete_operation_record(
+                operation,
+                status_code=201,
+                body=body,
+                result_reference=membership.id,
+            )
+            return body
+
+
+def global_join(*, actor, space_id, idempotency_key):
+    """Join a globally-visible workspace directly (simplified global mode)."""
+
+    digest = digest_payload({"actor_id": actor.id, "space_id": str(space_id)})
+    with durable_governed_transaction():
+        with operation_record(
+            actor=actor,
+            operation_code="space_join.global",
+            key=idempotency_key,
+            request_digest=digest,
+            target_uuid=space_id,
+        ) as (operation, replay):
+            if replay:
+                return replay_response(operation)
+            try:
+                space = (
+                    KnowledgeSpace.objects.select_for_update(of=("self",))
+                    .order_by("pk")
+                    .get(pk=space_id)
+                )
+            except KnowledgeSpace.DoesNotExist as exc:
+                raise NotFound("Workspace not found.") from exc
+            if space.join_policy != KnowledgeSpace.JOIN_POLICY_GLOBAL:
+                raise GovernedWorkflowError(
+                    "workspace_not_discoverable",
+                    status_code=403,
+                )
+            if space.status != "active":
+                raise GovernedWorkflowError("workspace_not_available", status_code=403)
+            existing = (
+                SpaceMembership.objects.select_for_update(of=("self",))
+                .filter(space=space, user=actor)
+                .order_by("pk")
+                .first()
+            )
+            if existing is not None and existing.is_effective:
+                raise GovernedWorkflowError("already_member", status_code=409)
+            if existing is None:
+                membership = SpaceMembership.objects.create(
+                    space=space,
+                    user=actor,
+                    role=SpaceMembership.ROLE_MEMBER,
+                    status="active",
+                    source_kind=SpaceMembership.SOURCE_DISCOVERY,
+                )
+            else:
+                existing.role = SpaceMembership.ROLE_MEMBER
+                existing.status = "active"
+                existing.expires_at = None
+                existing.source_kind = SpaceMembership.SOURCE_DISCOVERY
+                existing.membership_version += 1
+                existing.save(
+                    update_fields=[
+                        "role",
+                        "status",
+                        "expires_at",
+                        "source_kind",
+                        "membership_version",
+                        "updated_at",
+                    ]
+                )
+                membership = existing
+            _audit(
+                actor,
+                space=space,
+                event="global_join",
+                resource=membership,
+                details={"join_policy": space.join_policy},
+            )
+            body = {
+                "space_id": str(space.id),
+                "space_name": space.name,
+                "membership_id": str(membership.id),
+                "role": membership.role,
+                "source": membership.source_kind,
+            }
+            complete_operation_record(
+                operation,
+                status_code=201,
+                body=body,
+                result_reference=membership.id,
+            )
+            return body
+
+
+def regenerate_join_code(*, actor, space_id, custom_code=None, idempotency_key):
+    """Regenerate (or set a custom) join code for a workspace."""
+
+    digest = digest_payload(
+        {"space_id": str(space_id), "custom_code": custom_code}
+    )
+    with durable_governed_transaction():
+        with operation_record(
+            actor=actor,
+            operation_code="space_join_code.regenerate",
+            key=idempotency_key,
+            request_digest=digest,
+            target_uuid=space_id,
+        ) as (operation, replay):
+            if replay:
+                return replay_response(operation)
+            space = _lock_manage_space(actor=actor, space_id=space_id)
+            if custom_code:
+                new_code = validate_custom_join_code(custom_code)
+                if (
+                    KnowledgeSpace.objects.exclude(pk=space.pk)
+                    .filter(join_code__iexact=new_code)
+                    .exists()
+                ):
+                    raise ValidationError(
+                        {"join_code": "This code is already in use."}
+                    )
+            else:
+                new_code = _generate_unique_join_code()
+            old_code = space.join_code
+            space.join_code = new_code
+            space.join_code_updated_at = timezone.now()
+            space.save(
+                update_fields=["join_code", "join_code_updated_at", "updated_at"]
+            )
+            _audit(
+                actor,
+                space=space,
+                event="join_code_regenerated",
+                resource=space,
+                details={
+                    "old_code_prefix": (old_code or "")[:6] if old_code else None,
+                    "new_code_prefix": new_code[:6],
+                },
+            )
+            body = {
+                "space_id": str(space.id),
+                "join_code": new_code,
+                "join_policy": space.join_policy,
+                "join_code_updated_at": space.join_code_updated_at.isoformat(),
+            }
+            complete_operation_record(
+                operation,
+                status_code=200,
+                body=body,
+                result_reference=space.id,
+            )
+            return body
+
+
+def switch_join_policy(*, actor, space_id, new_policy, idempotency_key):
+    """Switch the join policy of a workspace between access_code and global."""
+
+    if new_policy not in (
+        KnowledgeSpace.JOIN_POLICY_ACCESS_CODE,
+        KnowledgeSpace.JOIN_POLICY_GLOBAL,
+    ):
+        raise ValidationError({"join_policy": "Invalid join policy."})
+    digest = digest_payload({"space_id": str(space_id), "new_policy": new_policy})
+    with durable_governed_transaction():
+        with operation_record(
+            actor=actor,
+            operation_code="space_join_policy.switch",
+            key=idempotency_key,
+            request_digest=digest,
+            target_uuid=space_id,
+        ) as (operation, replay):
+            if replay:
+                return replay_response(operation)
+            space = _lock_manage_space(actor=actor, space_id=space_id)
+            if space.join_policy == new_policy:
+                raise GovernedWorkflowError("join_policy_unchanged", status_code=409)
+            if (
+                new_policy == KnowledgeSpace.JOIN_POLICY_ACCESS_CODE
+                and not space.join_code
+            ):
+                space.join_code = _generate_unique_join_code()
+            space.join_policy = new_policy
+            space.save(update_fields=["join_policy", "join_code", "updated_at"])
+            _audit(
+                actor,
+                space=space,
+                event="join_policy_switched",
+                resource=space,
+                details={"new_policy": new_policy},
+            )
+            body = {
+                "space_id": str(space.id),
+                "join_policy": space.join_policy,
+                "join_code": (
+                    space.join_code
+                    if space.join_policy
+                    == KnowledgeSpace.JOIN_POLICY_ACCESS_CODE
+                    else None
+                ),
+            }
+            complete_operation_record(
+                operation,
+                status_code=200,
+                body=body,
+                result_reference=space.id,
+            )
+            return body
+
+
 # Django expressions are used only in locked convergence updates.
 from django.db import models  # noqa: E402
 
@@ -1259,4 +1668,10 @@ __all__ = [
     "revoke_invitation",
     "respond_invitation",
     "redeem_invitation",
+    "generate_join_code",
+    "validate_custom_join_code",
+    "join_by_code",
+    "global_join",
+    "regenerate_join_code",
+    "switch_join_policy",
 ]

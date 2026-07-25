@@ -185,6 +185,12 @@ apiClient.interceptors.request.use((config) => {
   if (spaceId) {
     config.headers['X-Space-Id'] = spaceId;
   }
+  // When sending FormData, remove the default JSON Content-Type so the browser
+  // attaches the correct multipart/form-data boundary automatically.
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+    delete config.headers.common?.['Content-Type'];
+  }
   return config;
 });
 

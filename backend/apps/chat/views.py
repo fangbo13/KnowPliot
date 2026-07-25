@@ -13,7 +13,7 @@ from html import escape
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Exists, Max, OuterRef, Q, Subquery
+from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -25,7 +25,6 @@ from rest_framework.pagination import CursorPagination
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
-from apps.rag.errors import ProviderGenerationError
 from apps.rag.language import resolve_reply_language
 from apps.rbac.capabilities import resolve_capabilities
 from apps.spaces.generation_policy import (
@@ -50,11 +49,11 @@ from apps.spaces.permissions import (
 
 from .coordination import (
     CoordinationUnavailableError,
-    LeaseLostError,
     RedisSessionLease,
     create_redis_client,
     lease_exists,
 )
+from .generation import NeverCancelled, iter_chat_turn
 from .metrics import ChatStreamMetrics, merge_turn_metrics
 from .models import ChatSession, ChatTurn, Citation, ConversationShare, Feedback, Message
 from .serializers import (
@@ -83,6 +82,7 @@ from .stream_events import (
     RedisTurnEventStore,
     converge_stale_turn,
 )
+from .v3_views import accept_chat_turn_v3
 
 logger = logging.getLogger(__name__)
 
@@ -1036,6 +1036,11 @@ def send_message(request, session_id=None, message_id=None):
     requested_answer_mode = serializer.validated_data["answer_mode"]
     requested_thinking_enabled = serializer.validated_data["thinking_enabled"]
     protocol_version = serializer.validated_data["protocol_version"]
+    if protocol_version == 3 and not settings.CHAT_STREAM_V3:
+        return Response(
+            {"code": "stream_protocol_unavailable"},
+            status=status.HTTP_409_CONFLICT,
+        )
     use_v2 = _stream_v2_enabled(protocol_version)
     user = request.user
     # Post-V3 Part 4: the AI reply language is resolved after the session's
@@ -1131,6 +1136,7 @@ def send_message(request, session_id=None, message_id=None):
             thinking_budget=generation_policy.thinking_budget,
             policy_fallback_code=generation_policy.fallback_code,
             model_id=generation_policy.model_id,
+            protocol_version=protocol_version,
             question_message=question_message_override,
         )
     except ChatTurnScopeError:
@@ -1156,6 +1162,16 @@ def send_message(request, session_id=None, message_id=None):
             },
             response_status=status.HTTP_409_CONFLICT,
             turn=turn,
+        )
+    if protocol_version == 3 and begin_result.disposition in {
+        BeginTurnDisposition.CREATED,
+        BeginTurnDisposition.RETRY,
+        BeginTurnDisposition.IN_PROGRESS,
+        BeginTurnDisposition.COMPLETED,
+    }:
+        return accept_chat_turn_v3(
+            turn,
+            disposition=begin_result.disposition,
         )
     if begin_result.disposition == BeginTurnDisposition.IN_PROGRESS:
         return _turn_response(
@@ -1330,374 +1346,83 @@ def send_message(request, session_id=None, message_id=None):
         # V4.2 SYS-V4.2-014: SSE timeout limit — abort stream if total time exceeds 60s
         # Prevents runserver from being blocked indefinitely by DashScope failures.
         sse_timeout_seconds = 60
-        response_tokens = []
-        citations_data = []
-        quality_data = {}
-        client_disconnected = False
-        pipeline = None
-        answering_announced = False
-
         if meta_event is not None:
             # First application event: history/RAG/model work has not started.
             stream_metrics.mark_first_event(time.monotonic())
             yield meta_event.to_sse()
 
-        def record_invocation(
-            invocation_status,
-            *,
-            error_code="",
-            message=None,
-            token_count=None,
-        ):
-            """Persist safe operational telemetry without breaking the stream."""
-            try:
-                from apps.chat.models import ModelInvocation
-
-                ModelInvocation.objects.create(
-                    session=session,
-                    message=message,
-                    question_message=question_message,
-                    space=space,
-                    model=getattr(pipeline, "model_name", turn.model_id),
-                    status=invocation_status,
-                    token_count=token_count,
-                    latency_ms=int((time.time() - start_time) * 1000),
-                    error_code=error_code,
-                )
-            except Exception:
-                logger.error(
-                    "model_invocation_persist_failed session_id=%s turn_id=%s "
-                    "code=persistence_error",
-                    session_id,
-                    turn.id,
-                )
-
+        shared_events = iter_chat_turn(
+            turn.id,
+            cancellation_probe=NeverCancelled(),
+            _turn=turn,
+            _lease=lease,
+            _lease_preacquired=True,
+            _lease_started=True,
+            _release_lease=False,
+            _history_loader=_conversation_history,
+            _citation_saver=_save_citations,
+            _token_counter=_estimate_token_count,
+            _regenerate_source=regenerate_source,
+            _started_at=start_time,
+            _stream_metrics=stream_metrics,
+            _deadline_seconds=sse_timeout_seconds,
+            _emit_transport_events=True,
+            _query=content,
+            _language=language,
+        )
         try:
-            # History evaluation is deliberately inside the guarded stream. A
-            # database/read failure after Turn acceptance must become retryable.
-            history = _conversation_history(session, question_message)
-            from apps.rag.pipeline import RAGPipeline
-
-            pipeline = RAGPipeline()
-            pipeline.model_name = turn.model_id
-            pipeline.answer_mode = turn.answer_mode
-            pipeline.thinking_enabled = turn.thinking_enabled
-            pipeline.thinking_budget = turn.thinking_budget
-            lease.ensure_owned()
-            transition_chat_turn(
-                turn,
-                ChatTurn.STATUS_RETRIEVING,
-                model_id=generation_policy.model_id,
-            )
-            if use_v2:
-                yield v2_event("phase", {"phase": "retrieving"})
-            for event in pipeline.retrieve_and_generate(
-                query=content,
-                user_profile=user,
-                conversation_history=history,
-                language=language,
-                space_id=str(space.id) if space else None,  # V6.0 space isolation
-            ):
-                lease.ensure_owned()
-                # H-04: Check if client disconnected
-                # Django's StreamingHttpResponse will raise GeneratorExit
-                # when the client closes the connection
-                event_type = event.get("event")
-                data = event.get("data", {})
-                if event_type in {"citations", "quality", "token"}:
-                    stream_metrics.mark_first_event(time.monotonic())
-
-                if event_type == "citations":
-                    citations_data = data
-                    # Part 2 measure-first metric: record chunks returned.
-                    stream_metrics.mark_retrieval_result(
-                        len(data) if isinstance(data, list) else 0
+            for domain_event in shared_events:
+                if domain_event.name == "error":
+                    code = domain_event.data.get("code", "stream_error")
+                    if code in {"stream_error", "answer_save_error"}:
+                        logger.error(
+                            "chat_stream_failed session_id=%s turn_id=%s code=%s",
+                            session_id,
+                            turn.id,
+                            code,
+                        )
+                    if use_v2:
+                        yield v2_event(
+                            "error",
+                            domain_event.data,
+                            terminal=True,
+                        )
+                    else:
+                        yield terminal_error(code)
+                    return
+                if use_v2:
+                    yield v2_event(
+                        domain_event.name,
+                        domain_event.data,
+                        terminal=domain_event.terminal,
                     )
-                    if use_v2:
-                        yield v2_event("citations", data)
-                    else:
-                        yield "event: citations\n"
-                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-                elif event_type == "quality":
-                    quality_data = data
-                    retrieval_ms = data.get("retrieval_latency_ms")
-                    if isinstance(retrieval_ms, (int, float)) and not isinstance(
-                        retrieval_ms, bool
-                    ):
-                        stream_metrics.mark_retrieval(retrieval_ms)
-                    if use_v2:
-                        yield v2_event("quality", data)
-                    else:
-                        yield "event: quality\n"
-                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-                elif event_type == "metrics":
-                    reasoning_ms = data.get("reasoning_ms")
-                    if isinstance(reasoning_ms, (int, float)) and not isinstance(
-                        reasoning_ms, bool
-                    ):
-                        stream_metrics.mark_reasoning(reasoning_ms)
-
-                elif event_type == "phase":
-                    # V4 Part 3: Forward pipeline phase events (e.g. "thinking")
-                    # to the client as progressive safe-labels via SSE v2.
-                    stream_metrics.mark_first_event(time.monotonic())
-                    if use_v2:
-                        yield v2_event("phase", data)
-
-                elif event_type == "token":
-                    # V4.2 SYS-V4.2-014: Check SSE timeout — abort if stream exceeds limit
-                    if time.time() - start_time > sse_timeout_seconds:
-                        logger.warning(
-                            "SSE timeout for session %s — stream exceeded %ds",
-                            session_id, sse_timeout_seconds,
-                        )
-                        record_invocation("timeout", error_code="stream_timeout")
-                        _mark_turn_failed(turn, "stream_timeout")
-                        _record_turn_metrics(
-                            turn,
-                            **stream_metrics.snapshot(now=time.monotonic()),
-                        )
-                        yield terminal_error("stream_timeout")
-                        return
-
-                    token = data.get("token", "")
-                    stream_metrics.mark_first_answer(time.monotonic())
-                    if turn.status != ChatTurn.STATUS_ANSWERING:
-                        transition_chat_turn(
-                            turn,
-                            ChatTurn.STATUS_ANSWERING,
-                            model_id=pipeline.model_name,
-                        )
-                    if use_v2 and not answering_announced:
-                        answering_announced = True
-                        yield v2_event("phase", {"phase": "answering"})
-                    response_tokens.append(token)
-                    if use_v2:
-                        yield v2_event("answer_delta", {"text": token})
-                    else:
-                        yield "event: token\n"
-                        yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
-
-        except GeneratorExit:
-            # H-04: Client disconnected during streaming
-            client_disconnected = True
-            logger.info("Client disconnected during stream for session %s", session_id)
-            record_invocation("cancelled", error_code="client_disconnected")
-            try:
-                transition_chat_turn(
-                    turn,
-                    ChatTurn.STATUS_FAILED,
-                    error_code="client_disconnected",
-                )
-            except InvalidTurnTransitionError:
-                logger.info("Turn %s was already terminal on disconnect", turn.id)
-            persist_terminal_event("client_disconnected")
-            _record_turn_metrics(
-                turn,
-                increments=("disconnect_count",),
-                **stream_metrics.snapshot(now=time.monotonic()),
-                disconnect_count=1,
-            )
-            return
-        except ProviderGenerationError:
-            record_invocation("failure", error_code="provider_unavailable")
-            _mark_turn_failed(turn, "provider_unavailable")
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
-            yield terminal_error("provider_unavailable")
-            return
-        except LeaseLostError:
-            logger.warning("Session lease was lost for Turn %s", turn.id)
-            record_invocation("failure", error_code="lease_lost")
-            _mark_turn_failed(turn, "lease_lost")
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
-            yield terminal_error("lease_lost")
-            return
+                    continue
+                if domain_event.name == "citations":
+                    yield "event: citations\n"
+                    yield (
+                        f"data: {json.dumps(domain_event.data, ensure_ascii=False)}\n\n"
+                    )
+                elif domain_event.name == "quality":
+                    yield "event: quality\n"
+                    yield (
+                        f"data: {json.dumps(domain_event.data, ensure_ascii=False)}\n\n"
+                    )
+                elif domain_event.name == "answer_delta":
+                    yield "event: token\n"
+                    yield (
+                        "data: "
+                        f"{json.dumps({'token': domain_event.data['text']}, ensure_ascii=False)}"
+                        "\n\n"
+                    )
+                elif domain_event.name == "done":
+                    yield "event: done\n"
+                    yield (
+                        f"data: {json.dumps(domain_event.data, ensure_ascii=False)}\n\n"
+                    )
         except EventStoreUnavailableError:
-            logger.warning("Event store became unavailable for Turn %s", turn.id)
-            record_invocation("failure", error_code="coordination_unavailable")
             _mark_turn_failed(turn, "coordination_unavailable")
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
             return
-        except Exception:
-            logger.error(
-                "chat_stream_failed session_id=%s turn_id=%s code=stream_error",
-                session_id,
-                turn.id,
-            )
-            record_invocation("failure", error_code="stream_error")
-            _mark_turn_failed(turn, "stream_error")
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
-            with suppress(EventStoreUnavailableError):
-                yield terminal_error("stream_error")
-            return
-
-        # H-04: Don't save message if client disconnected before streaming completed
-        if client_disconnected:
-            logger.info("Skipping message save — client disconnected for session %s", session_id)
-            return
-
-        pre_save_status = turn.status
-        try:
-            # Persist the answer before declaring the Turn complete. Save failures
-            # remain recoverable under the same client_request_id.
-            lease.ensure_owned()
-            transition_chat_turn(turn, ChatTurn.STATUS_SAVING)
-            if use_v2:
-                yield v2_event("phase", {"phase": "saving"})
-            lease.ensure_owned()
-            with transaction.atomic():
-                elapsed_ms = int((time.time() - start_time) * 1000)
-                assistant_content = "".join(response_tokens)
-
-                # H-03: Use tiktoken for accurate token count
-                token_count = _estimate_token_count(assistant_content)
-
-                version_values = {}
-                if regenerate_source is not None:
-                    max_version = Message.objects.filter(
-                        version_group_id=regenerate_source.version_group_id,
-                    ).aggregate(value=Max("version_number"))["value"] or 1
-                    Message.objects.filter(
-                        version_group_id=regenerate_source.version_group_id,
-                        is_current_version=True,
-                    ).update(is_current_version=False)
-                    version_values = {
-                        "version_group_id": regenerate_source.version_group_id,
-                        "version_number": max_version + 1,
-                        "is_current_version": True,
-                        "supersedes_message": regenerate_source,
-                    }
-
-                assistant_message = Message.objects.create(
-                    session=session,
-                    role="assistant",
-                    content=assistant_content,
-                    token_count=token_count,
-                    model_used=pipeline.model_name,
-                    response_time_ms=elapsed_ms,
-                    retrieval_count=len(citations_data),
-                    confidence_score=quality_data.get("score"),
-                    confidence_label=quality_data.get("confidence", ""),
-                    needs_human_review=quality_data.get("needs_human_review", False),
-                    retrieval_mode=quality_data.get("retrieval_mode", ""),
-                    retrieval_latency_ms=quality_data.get("retrieval_latency_ms"),
-                    space=space,  # V6.0 space isolation
-                    **version_values,
-                )
-
-                # Save citations
-                _save_citations(assistant_message, citations_data, space)
-                record_invocation(
-                    "success",
-                    message=assistant_message,
-                    token_count=token_count,
-                )
-                ChatSession.objects.filter(pk=session.pk).update(updated_at=timezone.now())
-                transition_chat_turn(
-                    turn,
-                    ChatTurn.STATUS_COMPLETED,
-                    assistant_message=assistant_message,
-                    model_id=pipeline.model_name,
-                )
-                safe_timings = stream_metrics.snapshot(now=time.monotonic())
-                # Part 2 measure-first metrics: routing_decision records whether
-                # the pipeline retrieved, skipped retrieval, or hit cache. Until
-                # routing/cache code is built, every turn uses the default route.
-                safe_timings["routing_decision"] = "retrieve"
-                _record_turn_metrics(turn, **safe_timings)
-        except GeneratorExit:
-            record_invocation("cancelled", error_code="client_disconnected")
-            try:
-                transition_chat_turn(
-                    turn,
-                    ChatTurn.STATUS_FAILED,
-                    error_code="client_disconnected",
-                )
-            except InvalidTurnTransitionError:
-                logger.info("Turn %s was already terminal on disconnect", turn.id)
-            persist_terminal_event("client_disconnected")
-            _record_turn_metrics(
-                turn,
-                increments=("disconnect_count",),
-                **stream_metrics.snapshot(now=time.monotonic()),
-                disconnect_count=1,
-            )
-            return
-        except LeaseLostError:
-            record_invocation("failure", error_code="lease_lost")
-            turn.status = pre_save_status
-            _mark_turn_failed(turn, "lease_lost")
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
-            yield terminal_error("lease_lost")
-            return
-        except EventStoreUnavailableError:
-            turn.status = pre_save_status
-            _mark_turn_failed(turn, "coordination_unavailable")
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
-            return
-        except Exception:
-            logger.error(
-                "answer_persist_failed turn_id=%s code=answer_save_error",
-                turn.id,
-            )
-            record_invocation("failure", error_code="answer_save_error")
-            try:
-                # The atomic save rolled the database back to this lifecycle
-                # state; mirror it in memory before applying the failure state.
-                turn.status = pre_save_status
-                turn.assistant_message = None
-                turn.completed_at = None
-                _mark_turn_failed(turn, "answer_save_error")
-            except Exception:
-                logger.error(
-                    "answer_failure_state_persist_failed turn_id=%s "
-                    "code=persistence_error",
-                    turn.id,
-                )
-            _record_turn_metrics(
-                turn,
-                **stream_metrics.snapshot(now=time.monotonic()),
-            )
-            with suppress(EventStoreUnavailableError):
-                yield terminal_error("answer_save_error")
-            return
-
-        done_data = {
-            "message_id": str(assistant_message.id),
-            "session_id": str(session.id),
-            "model": pipeline.model_name,
-            "turn_id": str(turn.id),
-            "client_request_id": str(turn.client_request_id),
-        }
-        if use_v2:
-            yield v2_event(
-                "usage",
-                {"output_tokens": token_count, **safe_timings},
-            )
-            yield v2_event("done", done_data, terminal=True)
-        else:
-            yield "event: done\n"
-            yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+        return
 
     def close_stream_resources():
         try:

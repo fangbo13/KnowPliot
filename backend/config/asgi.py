@@ -2,7 +2,12 @@
 # Licensed under the CC BY-NC-SA 4.0 License.
 # See LICENSE file in the project root for full license details.
 
-"""ASGI config."""
+"""ASGI config.
+
+The Django application includes native async chat-v3 streaming views. They
+must remain behind an ASGI server so Redis blocking reads do not consume a
+synchronous request worker.
+"""
 
 import os
 

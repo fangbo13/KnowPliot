@@ -13,7 +13,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
   PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
-  CompassOutlined,
+  CompassOutlined, ArrowLeftOutlined,
 } from '@ant-design/icons';
 import { lazy, Suspense, useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../auth/AuthProvider';
@@ -38,6 +38,7 @@ const SpaceSwitcher = lazy(() => import('../components/SpaceSwitcher'));
 const NotificationBell = lazy(() => import('../components/NotificationBell'));
 const SessionRenameModal = lazy(() => import('../components/chat/SessionRenameModal'));
 const CommandPalette = lazy(() => import('../components/CommandPalette'));
+const PageTransition = lazy(() => import('../components/PageTransition'));
 
 function clampToViewport(x: number, y: number, w = 180, h = 140) {
   return { x: Math.max(8, Math.min(x, window.innerWidth - w - 8)), y: Math.max(8, Math.min(y, window.innerHeight - h - 8)) };
@@ -51,15 +52,15 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const access = useAuthorization();
   const navigate = useNavigate();
+  const { t } = useTranslation('common');
   const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
   const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
-  const managementEntries = buildManagementEntries(access, activeSpaceId);
+  const managementEntries = buildManagementEntries(access, activeSpaceId, t);
   const canAsk = access.has('chat.ask');
   const canUseHistory = access.has('chat.history');
   const canExport = access.has('chat.export');
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
-  const { t } = useTranslation('common');
   const [shellEnhancementsReady, setShellEnhancementsReady] = useState(false);
 
   // The route and composer are interactive after the first commit. Secondary
@@ -81,10 +82,17 @@ export default function AppLayout() {
   const debouncedSidebarSearch = useDebounce(sidebarSearch, 300);
   const bp = useBreakpoint();
   const isMobile = bp.sm;
+  const isTablet = bp.md && !bp.sm; // 768–1024px
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('ey-sidebar-collapsed') === 'true');
   useEffect(() => { localStorage.setItem('ey-sidebar-collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
+  // Auto-collapse sidebar when entering tablet range to maximise content area.
+  // The user can still expand it via the toggle button; this only fires on the
+  // desktop→tablet transition (isTablet changes), not on every re-render.
+  useEffect(() => {
+    if (isTablet) setSidebarCollapsed(true);
+  }, [isTablet]);
   const toggleSidebarCollapsed = useCallback(() => setSidebarCollapsed((p) => !p), []);
 
   const [onboardingVisible, setOnboardingVisible] = useState(() => !localStorage.getItem('ey-onboarding-seen'));
@@ -233,11 +241,13 @@ export default function AppLayout() {
       chatState.removeSessionState(id);
       broadcastSessionDelete(id);
       loadSessions();
+      void notify('success', t('session_deleted_success'));
     } catch (err) {
       console.error('Failed to delete session:', err);
+      void notify('error', t('session_delete_failed'));
     }
     closeMenu();
-  }, [loadSessions, closeMenu]);
+  }, [loadSessions, closeMenu, t]);
 
   const openRenameSession = useCallback((session: { id: string; title: string }) => { setRenameSessionTarget(session); closeMenu(); }, [closeMenu]);
 
@@ -295,7 +305,9 @@ export default function AppLayout() {
   const renderList = () => (
     <div className="sidebar-scroll">
       {sessions.length === 0 ? (
-        <div className="sidebar-empty">{t('sidebar_empty_state')}</div>
+        <div className="sidebar-empty">
+          <span style={{ display: 'block', marginBottom: 12 }}>{t('sidebar_empty_state')}</span>
+        </div>
       ) : (
         groupOrder.map((groupKey) => {
           const groupSessions = sidebarSessions[groupKey];
@@ -451,6 +463,7 @@ export default function AppLayout() {
             <button className="icon-btn" title={t('expand_sidebar') || 'Expand sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('expand_sidebar') || 'Expand sidebar'}><MenuUnfoldOutlined /></button>
           )}
           {isMobile && <button className="icon-btn" onClick={() => setMobileDrawerOpen(true)} aria-label={t('mobile_menu') || 'Open menu'}><MenuOutlined /></button>}
+          <button className="icon-btn" title={t('go_back') || 'Go back'} onClick={() => navigate(-1)} aria-label={t('go_back') || 'Go back'}><ArrowLeftOutlined /></button>
           <button className="icon-btn" title="⌘K" onClick={() => setCmdkOpen(true)} aria-label={t('cmdk_placeholder', { defaultValue: 'Search' })}><SearchOutlined /></button>
 
           <span className="spacer" />
@@ -466,7 +479,7 @@ export default function AppLayout() {
           <details className="header-menu">
             <summary className="icon-btn" aria-label={t('user_menu') || 'User menu'} style={{ width: 'auto', gap: 8, padding: '0 8px' }}>
               <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>
-              {!isMobile && <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>}
+              {!isMobile && !isTablet && <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>}
             </summary>
             <div className="menu-pop header-menu-pop">{renderMenuItems(userMenu.items)}</div>
           </details>
@@ -475,9 +488,11 @@ export default function AppLayout() {
         <NetworkStatusBanner />
         <main id="main-content" role="main" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <ErrorBoundary title={t('error_boundary_title')} description={t('error_boundary_desc')} retryText={t('error_boundary_retry')}>
-            <div className="section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <Outlet />
-            </div>
+            <Suspense fallback={<div style={{ flex: 1 }} />}>
+              <PageTransition>
+                <Outlet />
+              </PageTransition>
+            </Suspense>
           </ErrorBoundary>
         </main>
       </div>

@@ -138,7 +138,7 @@ class ChatMessageRequestSerializer(serializers.Serializer):
     )
     thinking_enabled = serializers.BooleanField(default=False, required=False)
     protocol_version = serializers.ChoiceField(
-        choices=[1, 2],
+        choices=[1, 2, 3],
         default=1,
         required=False,
     )
@@ -194,6 +194,7 @@ class ChatTurnStatusSerializer(serializers.ModelSerializer):
             "client_request_id",
             "session",
             "status",
+            "protocol_version",
             "requested_answer_mode",
             "answer_mode",
             "requested_thinking_enabled",

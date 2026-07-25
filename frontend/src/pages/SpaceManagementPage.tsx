@@ -21,11 +21,14 @@ import {
   Modal,
   Popconfirm,
   Alert,
+  Radio,
+  Switch,
+  Table,
   message as antdMessage,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, CopyOutlined, SyncOutlined, SwapOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useSpaceStore } from '../store/spaceStore';
 import {
   spacesApi,
@@ -33,6 +36,10 @@ import {
   type SpaceMember,
   type InviteCode,
   type SpaceRole,
+  type JoinCodeInfo,
+  type JoinPolicy,
+  type OwnershipDetail,
+  type OwnershipCandidate,
 } from '../api/spaces';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { getRateLimitDetails, isAbortError, withRequestSignal } from '../api/client';
@@ -43,7 +50,7 @@ export default function SpaceManagementPage() {
   const { t } = useTranslation('common');
   const access = useAuthorization();
   const { spaceId: routeSpaceId } = useParams<{ spaceId: string }>();
-  const { activeSpaceId, getActiveSpace, loadSpaces } = useSpaceStore();
+  const { activeSpaceId, getActiveSpace, loadSpaces, spaces: allSpaces } = useSpaceStore();
   const storeActive = getActiveSpace();
   const spaceId = routeSpaceId || activeSpaceId;
   const [routeSpace, setRouteSpace] = useState<KnowledgeSpace | null>(null);
@@ -59,6 +66,20 @@ export default function SpaceManagementPage() {
   const canManageMembers = access.has('workspace.members.manage');
   const canManageInvites = access.has('workspace.invites.manage');
   const canReadMembers = !access.enabled || canManageMembers;
+  const canManageJoinPolicy = canManageSettings;
+
+  // Detect current management section from the URL path so each sub-route
+  // only renders the card(s) it owns (settings / members / invites).
+  const location = useLocation();
+  const pathSegments = location.pathname.split('/').filter(Boolean);
+  const rawSection = pathSegments[pathSegments.length - 1] || '';
+  const section: 'settings' | 'members' | 'invites' =
+    rawSection === 'members' ? 'members' : rawSection === 'invites' ? 'invites' : 'settings';
+  const showSettings = section === 'settings';
+  const showJoinPolicy = section === 'settings';
+  const showMembers = section === 'members';
+  const showInvites = section === 'invites';
+  const useGrid = showSettings && showJoinPolicy;
 
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invites, setInvites] = useState<InviteCode[]>([]);
@@ -106,6 +127,23 @@ export default function SpaceManagementPage() {
   const [memberRole, setMemberRole] = useState<SpaceRole>('member');
   const [addingMember, setAddingMember] = useState(false);
 
+  // Join policy management
+  const [joinCodeInfo, setJoinCodeInfo] = useState<JoinCodeInfo | null>(null);
+  const [switchingPolicy, setSwitchingPolicy] = useState(false);
+  const [regeneratingCode, setRegeneratingCode] = useState(false);
+  const [togglingInvite, setTogglingInvite] = useState(false);
+  const [customCodeModalOpen, setCustomCodeModalOpen] = useState(false);
+  const [customCode, setCustomCode] = useState('');
+
+  // Bug#9: Ownership transfer state (single + batch)
+  const [ownership, setOwnership] = useState<OwnershipDetail | null>(null);
+  const [ownerCandidates, setOwnerCandidates] = useState<OwnershipCandidate[]>([]);
+  const [ownerUser, setOwnerUser] = useState<string>();
+  const [transferring, setTransferring] = useState(false);
+  const [batchSelectedSpaceIds, setBatchSelectedSpaceIds] = useState<string[]>([]);
+  const [batchTargetUser, setBatchTargetUser] = useState<string>();
+  const [batchTransferring, setBatchTransferring] = useState(false);
+
   const refresh = useCallback(async () => {
     if (!spaceId) return;
     const sequence = ++requestSequence.current;
@@ -115,17 +153,19 @@ export default function SpaceManagementPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [m, inv] = await Promise.all([
+      const [m, inv, jci] = await Promise.all([
         canReadMembers
           ? withRequestSignal(controller.signal, () => spacesApi.members(spaceId))
           : Promise.resolve([]),
         canManageInvites
           ? withRequestSignal(controller.signal, () => spacesApi.listInvites(spaceId))
           : Promise.resolve([]),
+        withRequestSignal(controller.signal, () => spacesApi.getJoinCode(spaceId)).catch(() => null),
       ]);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setMembers(m);
       setInvites(inv);
+      if (jci) setJoinCodeInfo(jci);
     } catch (error: unknown) {
       if (isAbortError(error) || controller.signal.aborted || sequence !== requestSequence.current) return;
       const rateLimit = getRateLimitDetails(error);
@@ -137,22 +177,32 @@ export default function SpaceManagementPage() {
     }
   }, [spaceId, canManageInvites, canReadMembers]);
 
+  // Bug#14: auto-retry once on initial mount if the first load fails.
+  const [autoRetried, setAutoRetried] = useState(false);
   useEffect(() => {
-    // A direct scoped-console route resolves its workspace independently.
-    // Starting member/invite reads before that route resource is durable in
-    // component state creates an abort/coalescing race: the resource arrival
-    // tears down the first read and the replacement can inherit its aborted
-    // promise. Wait for the authoritative route workspace before reading.
     if (!active) return;
     setName(active.name);
     setDescription(active.description);
     setVisibility(active.visibility);
-    refresh();
+    setJoinCodeInfo({
+      space_id: active.id,
+      join_policy: active.join_policy,
+      join_code: active.join_code,
+      allow_member_invite: active.allow_member_invite,
+      join_code_updated_at: active.join_code_updated_at,
+    });
+    refresh().then(() => {}).catch(() => {
+      // Bug#14: auto-retry after 2s if the first load fails
+      if (!autoRetried) {
+        setAutoRetried(true);
+        setTimeout(() => void refresh(), 2000);
+      }
+    });
     return () => {
       requestSequence.current += 1;
       controllerRef.current?.abort();
     };
-  }, [active?.id, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active?.id, refresh, autoRetried]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveSettings = async () => {
     if (!spaceId) return;
@@ -236,8 +286,155 @@ export default function SpaceManagementPage() {
     }
   };
 
-  // Roles assignable to a space member from this page.
-  const MEMBER_ROLE_OPTIONS = ['knowledge_admin', 'reviewer', 'member', 'guest'];
+  const handleSwitchPolicy = async (newPolicy: JoinPolicy) => {
+    if (!spaceId || newPolicy === joinCodeInfo?.join_policy) return;
+    setSwitchingPolicy(true);
+    try {
+      await spacesApi.switchJoinPolicy(spaceId, newPolicy);
+      await refresh();
+      await loadSpaces();
+      antdMessage.success(t('join_policy_switched') || 'Join policy updated');
+    } catch {
+      antdMessage.error(t('join_policy_switch_failed') || 'Failed to switch join policy');
+    } finally {
+      setSwitchingPolicy(false);
+    }
+  };
+
+  const handleRegenerateCode = async () => {
+    if (!spaceId) return;
+    setRegeneratingCode(true);
+    try {
+      const result = await spacesApi.regenerateJoinCode(spaceId, customCode.trim() || undefined);
+      setJoinCodeInfo(prev => prev ? {
+        ...prev,
+        join_code: result.join_code,
+        join_code_updated_at: result.join_code_updated_at,
+      } : {
+        space_id: result.space_id,
+        join_policy: result.join_policy,
+        join_code: result.join_code,
+        allow_member_invite: true,
+        join_code_updated_at: result.join_code_updated_at,
+      });
+      setCustomCodeModalOpen(false);
+      setCustomCode('');
+      antdMessage.success(t('join_code_regenerated') || 'Join code regenerated');
+    } catch {
+      antdMessage.error(t('join_code_regenerate_failed') || 'Failed to regenerate join code');
+    } finally {
+      setRegeneratingCode(false);
+    }
+  };
+
+  const handleToggleMemberInvite = async (checked: boolean) => {
+    if (!spaceId) return;
+    setTogglingInvite(true);
+    try {
+      await spacesApi.toggleAllowMemberInvite(spaceId, checked);
+      setJoinCodeInfo(prev => prev ? { ...prev, allow_member_invite: checked } : prev);
+      antdMessage.success(t('invite_permission_updated') || 'Invite permission updated');
+    } catch {
+      antdMessage.error(t('invite_permission_update_failed') || 'Failed to update invite permission');
+    } finally {
+      setTogglingInvite(false);
+    }
+  };
+
+  const copyJoinCode = () => {
+    if (joinCodeInfo?.join_code) {
+      navigator.clipboard.writeText(joinCodeInfo.join_code);
+      antdMessage.success(t('copied') || 'Copied to clipboard');
+    }
+  };
+
+  // Bug#9: Owner check — must be declared before useEffect that uses it
+  const isOwner = access.has('workspace.ownership.transfer.request') || access.has('workspace.ownership.transfer.force');
+
+  // Bug#9: Load ownership details for single transfer
+  useEffect(() => {
+    if (!spaceId || !isOwner) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const [detail, candidates] = await Promise.all([
+          spacesApi.ownership(spaceId, controller.signal),
+          spacesApi.ownershipCandidatePage(spaceId, '', 'voluntary', 0, controller.signal),
+        ]);
+        if (controller.signal.aborted) return;
+        setOwnership(detail);
+        setOwnerCandidates(candidates.results);
+      } catch {
+        // ignore — ownership section degrades gracefully
+      }
+    })();
+    return () => controller.abort();
+  }, [spaceId, isOwner]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bug#9: Single ownership transfer
+  const handleSingleTransfer = async () => {
+    if (!spaceId || !ownerUser || !ownership) return;
+    setTransferring(true);
+    try {
+      await spacesApi.requestOwnershipTransfer(spaceId, {
+        to_user_id: ownerUser,
+        expected_ownership_version: ownership.ownership_version,
+        reason_code: 'voluntary',
+      });
+      antdMessage.success(t('batch_transfer_success') || 'Ownership transfer initiated');
+      setOwnerUser(undefined);
+      const [detail, candidates] = await Promise.all([
+        spacesApi.ownership(spaceId),
+        spacesApi.ownershipCandidatePage(spaceId, '', 'voluntary', 0),
+      ]);
+      setOwnership(detail);
+      setOwnerCandidates(candidates.results);
+    } catch {
+      antdMessage.error(t('batch_transfer_failed') || 'Transfer failed');
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  // Bug#9: Batch ownership transfer
+  const handleBatchTransfer = async () => {
+    if (!batchTargetUser || batchSelectedSpaceIds.length === 0) return;
+    setBatchTransferring(true);
+    let success = 0;
+    let failed = 0;
+    for (const sid of batchSelectedSpaceIds) {
+      try {
+        const detail = await spacesApi.ownership(sid);
+        await spacesApi.requestOwnershipTransfer(sid, {
+          to_user_id: batchTargetUser,
+          expected_ownership_version: detail.ownership_version,
+          reason_code: 'voluntary',
+        });
+        success++;
+      } catch {
+        failed++;
+      }
+    }
+    if (success > 0) antdMessage.success(`${t('batch_transfer_success') || 'Transfer successful'} (${success}/${batchSelectedSpaceIds.length})`);
+    if (failed > 0) antdMessage.error(`${t('batch_transfer_failed') || 'Transfer failed'} (${failed}/${batchSelectedSpaceIds.length})`);
+    setBatchSelectedSpaceIds([]);
+    setBatchTargetUser(undefined);
+    setBatchTransferring(false);
+    if (spaceId && isOwner) {
+      try {
+        const [detail, candidates] = await Promise.all([
+          spacesApi.ownership(spaceId),
+          spacesApi.ownershipCandidatePage(spaceId, '', 'voluntary', 0),
+        ]);
+        setOwnership(detail);
+        setOwnerCandidates(candidates.results);
+      } catch { /* ignore */ }
+    }
+  };
+
+  // Roles assignable from this page. 'guest' is removed per Bug#13 — accepted
+  // invitations default to 'member'. Only the owner can change roles.
+  const MEMBER_ROLE_OPTIONS: SpaceRole[] = ['knowledge_admin', 'reviewer', 'member'];
 
   if (!active) {
     return (
@@ -276,6 +473,8 @@ export default function SpaceManagementPage() {
           />
         )}
 
+        <div className={useGrid ? 'kp-mgmt-grid' : ''} style={{ marginBottom: 24 }}>
+        {showSettings && (
         <Card
           title={
             <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -325,7 +524,118 @@ export default function SpaceManagementPage() {
             )}
           </Space>
         </Card>
+        )}
 
+        {showJoinPolicy && (
+        <Card
+          title={
+            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
+              {t('join_policy_title') || '加入策略'}
+            </span>
+          }
+          styles={{ body: { padding: '28px' } }}
+          className="glass-panel hover-lift"
+          style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            {/* Current policy display */}
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('current_join_policy') || '当前策略'}</Text>
+              <div style={{ marginTop: 8 }}>
+                <Tag color={joinCodeInfo?.join_policy === 'global' ? 'blue' : 'gold'} style={{ fontSize: 14, padding: '4px 12px' }}>
+                  {joinCodeInfo?.join_policy === 'global'
+                    ? (t('join_policy_global') || '全局可见')
+                    : (t('join_policy_access_code') || '邀请码加入')}
+                </Tag>
+              </div>
+            </div>
+
+            {/* Access code mode: show join code */}
+            {joinCodeInfo?.join_policy === 'access_code' && joinCodeInfo.join_code && (
+              <div>
+                <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('join_code') || '加入码'}</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <Input
+                    readOnly
+                    value={joinCodeInfo.join_code}
+                    style={{ flex: 1, borderRadius: 10, fontFamily: 'var(--font-family-mono)' }}
+                  />
+                  <Button
+                    icon={<CopyOutlined />}
+                    onClick={copyJoinCode}
+                    style={{ borderRadius: 10 }}
+                  >
+                    {t('copy') || '复制'}
+                  </Button>
+                  {canManageJoinPolicy && (
+                    <Button
+                      icon={<SyncOutlined />}
+                      onClick={() => setCustomCodeModalOpen(true)}
+                      loading={regeneratingCode}
+                      style={{ borderRadius: 10 }}
+                    >
+                      {t('regenerate') || '重新生成'}
+                    </Button>
+                  )}
+                </div>
+                {joinCodeInfo.join_code_updated_at && (
+                  <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                    {t('updated_at') || '更新于'}: {new Date(joinCodeInfo.join_code_updated_at).toLocaleString()}
+                  </Text>
+                )}
+              </div>
+            )}
+
+            {/* Global mode: show info */}
+            {joinCodeInfo?.join_policy === 'global' && (
+              <Alert
+                type="info"
+                showIcon
+                message={t('global_join_hint') || '该空间在发现页可见，用户可直接加入'}
+                style={{ borderRadius: 10 }}
+              />
+            )}
+
+            {/* Policy switch (owner/admin only) */}
+            {canManageJoinPolicy && (
+              <div>
+                <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('switch_join_policy') || '切换策略'}</Text>
+                <div style={{ marginTop: 8 }}>
+                  <Radio.Group
+                    value={joinCodeInfo?.join_policy ?? 'access_code'}
+                    onChange={(e) => void handleSwitchPolicy(e.target.value as JoinPolicy)}
+                    disabled={switchingPolicy}
+                  >
+                    <Space direction="vertical">
+                      <Radio value="access_code">{t('join_policy_access_code') || '邀请码加入 — 空间隐藏，凭加入码加入'}</Radio>
+                      <Radio value="global">{t('join_policy_global') || '全局可见 — 在发现页展示，用户可直接加入'}</Radio>
+                    </Space>
+                  </Radio.Group>
+                </div>
+              </div>
+            )}
+
+            {/* Allow member invite toggle (owner/admin only) */}
+            {canManageJoinPolicy && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderTop: '1px solid var(--color-border-secondary)' }}>
+                <div>
+                  <Text strong style={{ fontSize: 14 }}>{t('allow_member_invite') || '允许成员邀请'}</Text>
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+                    {t('allow_member_invite_hint') || '开启后，所有成员均可发起邀请；关闭后仅所有者可邀请'}
+                  </Text>
+                </div>
+                <Switch
+                  checked={joinCodeInfo?.allow_member_invite ?? true}
+                  loading={togglingInvite}
+                  onChange={(checked) => void handleToggleMemberInvite(checked)}
+                />
+              </div>
+            )}
+          </Space>
+        </Card>
+        )}
+
+        {showMembers && (
         <Card
           title={
             <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -346,6 +656,7 @@ export default function SpaceManagementPage() {
                 onPressEnter={addMember}
                 style={{ flex: 1, minWidth: 220, borderRadius: 10 }}
                 allowClear
+                disabled={!(joinCodeInfo?.allow_member_invite ?? true)}
               />
               <Select
                 value={memberRole}
@@ -379,7 +690,7 @@ export default function SpaceManagementPage() {
                       <Tag color={rec.status === 'active' ? 'green' : 'default'}>{rec.status}</Tag>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      {canManageMembers && rec.status === 'active' ? (
+                      {isOwner && canManageMembers && rec.status === 'active' ? (
                         <Select
                           size="small"
                           value={rec.role}
@@ -407,8 +718,9 @@ export default function SpaceManagementPage() {
             locale={{ emptyText: <div style={{ padding: 40 }}><div style={{ fontSize: 40, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div><div style={{ marginTop: 12, color: 'var(--color-text-tertiary)' }}>{t('no_members') || '暂无成员'}</div></div> }}
           />
         </Card>
+        )}
 
-        {canManageInvites && (
+        {showInvites && canManageInvites && (
           <Card
             title={
               <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16 }}>
@@ -460,6 +772,104 @@ export default function SpaceManagementPage() {
             />
           </Card>
         )}
+        </div>
+
+        {isOwner && (
+          <Card
+            title={
+              <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <SwapOutlined /> {t('ownership_continuity') || 'Ownership Transfer'}
+              </span>
+            }
+            styles={{ body: { padding: '28px' } }}
+            className="glass-panel hover-lift"
+            style={{ marginBottom: 24, borderRadius: 'var(--radius-lg)' }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size="large">
+              {/* Single Transfer */}
+              <div>
+                <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('transfer_owner') || 'Transfer Ownership'}</Text>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
+                  {ownership?.owner
+                    ? (t('current_owner_name', { name: ownership.owner.display_name }) || `Current owner: ${ownership.owner.display_name}`)
+                    : (t('current_owner_loading') || 'Loading owner…')}
+                </Text>
+                {ownership?.pending_transfer ? (
+                  <Alert type="info" showIcon message={t('ownership_transfer_pending') || 'Transfer pending'} description={t('ownership_transfer_pending_description') || 'A transfer is already in progress.'} style={{ borderRadius: 10 }} />
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Select
+                      showSearch
+                      filterOption={false}
+                      value={ownerUser}
+                      onChange={setOwnerUser}
+                      placeholder={t('select_eligible_member') || 'Select eligible member'}
+                      style={{ flex: 1, minWidth: 220 }}
+                      classNames={{ popup: { root: 'menu-pop-dropdown' } }}
+                      options={ownerCandidates.map((c) => ({ value: c.id, label: c.display_name }))}
+                    />
+                    <Popconfirm title={t('ownership_transfer_confirm') || 'Confirm ownership transfer?'} onConfirm={handleSingleTransfer}>
+                      <Button danger loading={transferring} disabled={!ownerUser || !ownership} style={{ borderRadius: 10 }}>
+                        {t('transfer_owner') || 'Transfer'}
+                      </Button>
+                    </Popconfirm>
+                  </div>
+                )}
+              </div>
+
+              {/* Batch Transfer */}
+              <div style={{ borderTop: '1px solid var(--color-border-secondary)', paddingTop: 16 }}>
+                <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('batch_transfer') || 'Batch Transfer'}</Text>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+                  {t('batch_transfer_select') || 'Select multiple spaces to transfer ownership'}
+                </Text>
+                <Table
+                  size="small"
+                  rowSelection={{
+                    selectedRowKeys: batchSelectedSpaceIds,
+                    onChange: (keys) => setBatchSelectedSpaceIds(keys as string[]),
+                  }}
+                  columns={[
+                    { title: t('space_name') || 'Space', dataIndex: 'name', key: 'name', ellipsis: true },
+                    { title: t('kb_status') || 'Status', dataIndex: 'status', key: 'status', width: 100 },
+                  ]}
+                  dataSource={allSpaces.filter((s) => s.my_role === 'owner' && s.status === 'active')}
+                  rowKey="id"
+                  pagination={false}
+                  style={{ marginBottom: 12 }}
+                  locale={{ emptyText: t('no_spaces_selected') || 'No owned spaces available' }}
+                />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Select
+                    showSearch
+                    filterOption={false}
+                    value={batchTargetUser}
+                    onChange={setBatchTargetUser}
+                    placeholder={t('select_eligible_member') || 'Select new owner'}
+                    style={{ flex: 1, minWidth: 220 }}
+                    classNames={{ popup: { root: 'menu-pop-dropdown' } }}
+                    options={ownerCandidates.map((c) => ({ value: c.id, label: c.display_name }))}
+                  />
+                  <Popconfirm
+                    title={t('batch_transfer_confirm') || 'Confirm batch ownership transfer?'}
+                    onConfirm={handleBatchTransfer}
+                    disabled={batchSelectedSpaceIds.length === 0 || !batchTargetUser}
+                  >
+                    <Button
+                      type="primary"
+                      danger
+                      loading={batchTransferring}
+                      disabled={batchSelectedSpaceIds.length === 0 || !batchTargetUser}
+                      style={{ borderRadius: 10 }}
+                    >
+                      {t('batch_transfer') || 'Batch Transfer'} ({batchSelectedSpaceIds.length})
+                    </Button>
+                  </Popconfirm>
+                </div>
+              </div>
+            </Space>
+          </Card>
+        )}
 
         <Modal
           title={t('generate_code') || 'Generate access code'}
@@ -483,7 +893,6 @@ export default function SpaceManagementPage() {
                 classNames={{ popup: { root: 'menu-pop-dropdown' } }}
                 options={[
                   { value: 'member', label: 'member' },
-                  { value: 'guest', label: 'guest' },
                   { value: 'reviewer', label: 'reviewer' },
                   { value: 'knowledge_admin', label: 'knowledge_admin' },
                 ]}
@@ -521,6 +930,38 @@ export default function SpaceManagementPage() {
               {t('code_generated_hint') || 'Copy this code now — it is shown only once.'}
             </Paragraph>
             <Input.TextArea readOnly value={generatedCode ?? ''} autoSize style={{ borderRadius: 10, fontFamily: 'var(--font-family-mono)', padding: 12 }} />
+          </div>
+        </Modal>
+
+        <Modal
+          title={t('regenerate_join_code') || '重新生成加入码'}
+          open={customCodeModalOpen}
+          onOk={handleRegenerateCode}
+          confirmLoading={regeneratingCode}
+          onCancel={() => { setCustomCodeModalOpen(false); setCustomCode(''); }}
+          okText={t('regenerate') || '重新生成'}
+          styles={{ mask: { backdropFilter: 'blur(6px)' } }}
+          transitionName="fade"
+          style={{ top: 120 }}
+        >
+          <div style={{ padding: '16px 0' }}>
+            <Alert
+              type="warning"
+              showIcon
+              message={t('regenerate_warning') || '重新生成后，旧加入码将立即失效'}
+              style={{ marginBottom: 16, borderRadius: 10 }}
+            />
+            <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>
+              {t('custom_code_hint') || '自定义加入码（留空则系统自动生成）'}
+            </Text>
+            <Input
+              size="large"
+              value={customCode}
+              onChange={(e) => setCustomCode(e.target.value)}
+              placeholder="留空自动生成，如 KP-MYTEAM"
+              style={{ marginTop: 8, borderRadius: 10, fontFamily: 'var(--font-family-mono)' }}
+              autoComplete="off"
+            />
           </div>
         </Modal>
       </div>

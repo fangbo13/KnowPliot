@@ -179,10 +179,12 @@ export function useAuthorization(): AuthorizationAdapter {
 
   return useMemo(
     () => {
-      const identityMatches =
-        !capabilityState.enabled ||
-        (capabilityState.resolvedUserId === (user?.id ?? null) &&
-          capabilityState.resolvedSpaceId === activeSpaceId);
+      // Bug #17 fix: Always check that resolvedSpaceId matches activeSpaceId,
+      // even when capability navigation is disabled, to prevent stale
+      // capabilities from the previous space leaking through during a switch.
+      const spaceIdMatches = capabilityState.resolvedSpaceId === activeSpaceId;
+      const userMatches = capabilityState.resolvedUserId === (user?.id ?? null);
+      const identityMatches = spaceIdMatches && (capabilityState.enabled ? userMatches : true);
       return createAuthorizationAdapter({
         capabilityNavigationEnabled: capabilityState.enabled,
         status: identityMatches ? capabilityState.status : 'loading',

@@ -57,6 +57,10 @@ const space: KnowledgeSpace = {
   business_line_name: null,
   my_role: 'owner',
   member_count: 1,
+  join_policy: 'access_code',
+  join_code: null,
+  allow_member_invite: false,
+  join_code_updated_at: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-07-18T00:00:00Z',
 };

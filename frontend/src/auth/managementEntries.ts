@@ -15,24 +15,28 @@ export interface ManagementEntry {
 export function buildManagementEntries(
   access: AuthorizationAdapter,
   activeSpaceId: string | null,
+  t?: (key: string) => string,
 ): ManagementEntry[] {
   const entries: ManagementEntry[] = [];
   if (access.hasAny(['platform.access', 'governance.access'])) {
-    entries.push({ id: 'console', label: 'Management console', to: access.defaultConsole });
+    entries.push({ id: 'console', label: t?.('management_console') || 'Management console', to: access.defaultConsole });
   }
   if (activeSpaceId && access.has('workspace.manage')) {
     entries.push({
       id: 'workspace',
-      label: 'Workspace management',
+      label: t?.('workspace_management') || 'Workspace management',
       to: access.enabled
         ? `/workspace/${activeSpaceId}/manage`
         : '/spaces/manage',
     });
   }
+  // In capability mode the knowledge base lives under the workspace-scoped
+  // route; in legacy mode it falls back to the admin knowledge page so the
+  // link does not redirect to /spaces/manage.
   if (activeSpaceId && access.has('knowledge.read')) {
     entries.push({
       id: 'knowledge',
-      label: 'Knowledge base',
+      label: t?.('knowledge_base') || 'Knowledge base',
       to: access.enabled
         ? `/workspace/${activeSpaceId}/manage/knowledge`
         : '/admin/knowledge',

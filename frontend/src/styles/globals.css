@@ -73,7 +73,7 @@ h1, h2, h3, h4, h5 {
   background: var(--accent-soft-strong);
   color: var(--accent-text);
 }
-[data-theme="dark"] ::selection { color: var(--color-text); }
+/* G2: [data-theme="dark"] ::selection removed — same var as baseline, redundant */
 
 /* ============================================================================
    Keyframes (names kept stable — referenced across components)
@@ -148,11 +148,7 @@ h1, h2, h3, h4, h5 {
   border: 1px solid var(--color-border-secondary);
   box-shadow: var(--shadow-sm);
 }
-
-[data-theme="dark"] .glass-panel {
-  background: var(--color-bg-container);
-  border-color: var(--color-border-secondary);
-}
+/* G2: [data-theme="dark"] .glass-panel removed — same CSS vars as baseline, redundant */
 
 /* ============================================================================
    Markdown content (assistant messages render as a clean typeset document)
@@ -197,7 +193,7 @@ h1, h2, h3, h4, h5 {
   border-radius: 6px;
   word-break: break-word;
 }
-[data-theme="dark"] .markdown-content code { color: var(--accent-text); }
+/* G2: [data-theme="dark"] .markdown-content code removed — same var as baseline, redundant */
 .markdown-content pre {
   position: relative;
   overflow-x: auto;
@@ -266,14 +262,47 @@ h1, h2, h3, h4, h5 {
   .code-block-copy-btn { opacity: 0.7; }
 }
 
-/* hljs dark token palette (warm-friendly) */
+/* hljs dark token palette (warm-friendly, via design tokens) */
 [data-theme="dark"] .hljs { background: transparent; color: var(--color-text); }
-[data-theme="dark"] .hljs-keyword, [data-theme="dark"] .hljs-selector-tag, [data-theme="dark"] .hljs-built_in { color: #E0A07C; }
-[data-theme="dark"] .hljs-string, [data-theme="dark"] .hljs-attr { color: #9ECE8E; }
-[data-theme="dark"] .hljs-comment, [data-theme="dark"] .hljs-doctag { color: #847D6E; font-style: italic; }
-[data-theme="dark"] .hljs-number, [data-theme="dark"] .hljs-literal { color: #E5B567; }
-[data-theme="dark"] .hljs-title, [data-theme="dark"] .hljs-section { color: #7FB0D8; }
-[data-theme="dark"] .hljs-variable, [data-theme="dark"] .hljs-params { color: #E08B7C; }
+[data-theme="dark"] .hljs-keyword, [data-theme="dark"] .hljs-selector-tag, [data-theme="dark"] .hljs-built_in { color: var(--hljs-keyword); }
+[data-theme="dark"] .hljs-string, [data-theme="dark"] .hljs-attr { color: var(--hljs-string); }
+[data-theme="dark"] .hljs-comment, [data-theme="dark"] .hljs-doctag { color: var(--hljs-comment); font-style: italic; }
+[data-theme="dark"] .hljs-number, [data-theme="dark"] .hljs-literal { color: var(--hljs-number); }
+[data-theme="dark"] .hljs-title, [data-theme="dark"] .hljs-section { color: var(--hljs-title); }
+[data-theme="dark"] .hljs-variable, [data-theme="dark"] .hljs-params { color: var(--hljs-variable); }
+
+/* ============================================================================
+   Dark-mode Ant Design component overrides (UI-01)
+   ========================================================================= */
+/* Badge: hardcoded rgba(0,0,0,0.88) text invisible on dark backgrounds */
+[data-theme="dark"] .ant-badge-count {
+  color: var(--color-text-on-accent) !important;
+}
+[data-theme="dark"] .ant-badge-dot {
+  background: var(--accent) !important;
+}
+/* Tag: ensure readable text in dark mode */
+[data-theme="dark"] .ant-tag {
+  color: var(--color-text) !important;
+  border-color: var(--color-border-secondary) !important;
+}
+/* Alert: fix low-contrast text in dark mode */
+[data-theme="dark"] .ant-alert-message,
+[data-theme="dark"] .ant-alert-description {
+  color: var(--color-text) !important;
+}
+/* Tabs: ensure tab text is visible in dark mode */
+[data-theme="dark"] .ant-tabs-tab {
+  color: var(--color-text-secondary) !important;
+}
+[data-theme="dark"] .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--color-text) !important;
+}
+/* Modal: ensure title and body text are visible in dark mode */
+[data-theme="dark"] .ant-modal-title,
+[data-theme="dark"] .ant-modal-content {
+  color: var(--color-text) !important;
+}
 
 /* ============================================================================
    Utility / a11y
@@ -324,35 +353,38 @@ h1, h2, h3, h4, h5 {
   box-shadow: none;
   transition: opacity var(--motion-fast) var(--motion-ease);
 }
-.ant-table {
-  background: transparent !important;
+/* G1: Use #root prefix for specificity instead of !important */
+#root .ant-table {
+  background: transparent;
 }
-.ant-table-thead > tr > th {
-  background: var(--color-bg-sunken) !important;
-  color: var(--color-text-secondary) !important;
+#root .ant-table-thead > tr > th {
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
   font-weight: 600;
-  border-bottom: 1px solid var(--color-border) !important;
+  border-bottom: 1px solid var(--color-border);
 }
-.ant-table-thead > tr > th:first-child { border-top-left-radius: var(--radius-md) !important; }
-.ant-table-thead > tr > th:last-child { border-top-right-radius: var(--radius-md) !important; }
-.ant-table-tbody > tr > td {
-  border-bottom: 1px solid var(--color-border) !important;
+#root .ant-table-thead > tr > th:first-child { border-top-left-radius: var(--radius-md); }
+#root .ant-table-thead > tr > th:last-child { border-top-right-radius: var(--radius-md); }
+#root .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--color-border);
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.ant-table-tbody > tr:hover > td {
-  background: var(--color-bg-section) !important;
+#root .ant-table-tbody > tr:hover > td {
+  background: var(--color-bg-section);
 }
-.ant-modal-content {
-  border-radius: var(--radius-xl) !important;
-  padding: 24px !important;
-  box-shadow: var(--shadow-md) !important;
+/* G1: Modal renders in portal — use doubled class for specificity instead of !important */
+.ant-modal-content.ant-modal-content {
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  box-shadow: var(--shadow-md);
 }
-.ant-tag {
-  border-radius: 999px !important;
+/* G1: Use #root prefix for specificity instead of !important */
+#root .ant-tag {
+  border-radius: 999px;
   padding: 0 10px;
 }
 
-/* Popconfirm / popover above in-app floating menus */
+/* Popconfirm / popover above in-app floating menus (portal z-index needs !important) */
 .ant-popover, .ant-popconfirm { z-index: 10500 !important; }
 
 /* AntD message/notification spacing nicety */
@@ -390,32 +422,33 @@ h1, h2, h3, h4, h5 {
   animation: featureSlideIn var(--dur-slow) var(--ease-out) forwards;
 }
 
-.login-input-wrapper .ant-input-affix-wrapper {
-  transition: opacity var(--motion-fast) var(--motion-ease) !important;
-  border-radius: var(--radius-md) !important;
-  padding: 10px 14px !important;
+/* G1: Use #root prefix for specificity instead of !important */
+#root .login-input-wrapper .ant-input-affix-wrapper {
+  transition: opacity var(--motion-fast) var(--motion-ease);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
 }
 
-.login-input-wrapper .ant-input-affix-wrapper-focused {
-  box-shadow: 0 0 0 3.5px var(--accent-soft-strong), var(--shadow-sm) !important;
-  border-color: var(--accent) !important;
+#root .login-input-wrapper .ant-input-affix-wrapper-focused {
+  box-shadow: 0 0 0 3.5px var(--accent-soft-strong), var(--shadow-sm);
+  border-color: var(--accent);
 }
-.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: var(--accent-text) !important;
-}
-
-.login-btn-premium {
-  background: var(--accent-active) !important;
-  border-color: var(--accent-active) !important;
-  transition: opacity var(--motion-fast) var(--motion-ease) !important;
-  box-shadow: var(--shadow-sm) !important;
+#root .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--accent-text);
 }
 
-.login-btn-premium:hover:not(:disabled) {
-  background: var(--accent-hover) !important;
-  border-color: var(--accent-hover) !important;
+#root .login-btn-premium {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+  box-shadow: var(--shadow-sm);
+}
+
+#root .login-btn-premium:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
   opacity: 0.94;
-  box-shadow: var(--shadow-sm) !important;
+  box-shadow: var(--shadow-sm);
 }
 
 .login-btn-premium:active:not(:disabled) {
@@ -466,6 +499,78 @@ h1, h2, h3, h4, h5 {
   border: 2px solid var(--accent-soft-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
+}
+
+/* ============================================================================
+   Responsive breakpoints
+   ============================================================================ */
+@media (max-width: 1024px) {
+  .ant-card .ant-card-body { padding: 20px 20px 24px; }
+  .ant-modal { max-width: calc(100vw - 32px); }
+  .ant-form-item { margin-bottom: 14px; }
+  .page-inner { max-width: 100% !important; }
+  .stat-card { padding: 16px; }
+  :root { --sidebar-width-expanded: 240px; }
+}
+
+@media (max-width: 768px) {
+  .ant-card .ant-card-body { padding: 16px 16px 20px; }
+  .ant-modal { max-width: calc(100vw - 24px); }
+  .ant-form-item { margin-bottom: 12px; }
+  .ant-btn-lg { height: 40px; padding: 0 16px; }
+  .page-inner { max-width: 100% !important; padding: 0 12px; }
+  .page-title { font-size: 20px; }
+  .page-subtitle { font-size: 13px; }
+  .composer { padding: 8px 12px; }
+  .stat-card { padding: 12px; }
+  :root { --sidebar-width-expanded: 0px; --sidebar-width-collapsed: 0px; }
+
+  /* C1: Prevent table overflow on mobile — horizontal scroll instead of layout break */
+  .ant-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ant-table { min-width: 500px; }
+
+  /* C1: Multi-column grids collapse to single column on mobile */
+  .ant-row { flex-direction: column !important; }
+  .ant-col { max-width: 100% !important; flex: 0 0 100% !important; }
+
+  /* C1: Descriptions/Stats grids become single column */
+  .ant-descriptions-row { display: flex; flex-wrap: wrap; }
+  .ant-descriptions-item { flex: 1 1 100%; }
+
+  /* C1: Card-based grids (stat cards, dashboard widgets) → single column */
+  [class*="stat-grid"],
+  [class*="card-grid"],
+  [style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* C1: Fixed bottom action bar for primary actions on mobile */
+  .mobile-action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px env(safe-area-inset-bottom, 12px);
+    background: var(--color-bg-container);
+    border-top: 1px solid var(--color-border);
+    box-shadow: var(--shadow-lg);
+  }
+  .mobile-action-bar .ant-btn { flex: 1; }
+
+  /* C1: Ensure page content has bottom padding when action bar is visible */
+  .has-mobile-action-bar { padding-bottom: 72px !important; }
+}
+
+@media (max-width: 480px) {
+  .ant-card .ant-card-body { padding: 14px 14px 18px; }
+  .ant-modal-content { padding: 16px; }
+  .ant-form-item-label > label { font-size: 13px; }
+  .page-inner { padding: 0 8px; }
+  .page-head { margin-bottom: 12px !important; }
+  .ant-card { border-radius: 12px !important; }
 }
 
 /* ============================================================================

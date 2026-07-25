@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { Alert, Card, Table, Button, Space, Typography, Spin, message, Descriptions } from 'antd';
+import { Alert, Card, Table, Button, Space, Typography, Skeleton, message, Descriptions } from 'antd';
 import {
   ReloadOutlined, TeamOutlined,
   DashboardOutlined, SafetyCertificateOutlined,
@@ -96,17 +96,32 @@ export default function AdminDashboardPage() {
     setStatusLoading(true);
     setStatusError(null);
     try {
-      const [health, metrics, jobs, quality] = await Promise.all([
+      const results = await Promise.allSettled([
         withRequestSignal(controller.signal, () => adminApi.health()),
         withRequestSignal(controller.signal, () => adminApi.metrics()),
         withRequestSignal(controller.signal, () => adminApi.ingestionJobs()),
         withRequestSignal(controller.signal, () => adminApi.documentQuality()),
       ]);
       if (controller.signal.aborted || sequence !== statusSequenceRef.current) return;
-      setSystemHealth(health);
-      setSystemMetrics(metrics);
-      setIngestionJobs(jobs);
-      setDocumentQuality(quality);
+      // With allSettled, each API loads independently — one failure no longer
+      // prevents the others from rendering. Only show a full error when ALL
+      // four requests rejected.
+      let healthOk = false, metricsOk = false, jobsOk = false, qualityOk = false;
+      if (results[0].status === 'fulfilled') { setSystemHealth(results[0].value); healthOk = true; }
+      if (results[1].status === 'fulfilled') { setSystemMetrics(results[1].value); metricsOk = true; }
+      if (results[2].status === 'fulfilled') { setIngestionJobs(results[2].value); jobsOk = true; }
+      if (results[3].status === 'fulfilled') { setDocumentQuality(results[3].value); qualityOk = true; }
+      // Only set error if every request failed
+      if (!healthOk && !metricsOk && !jobsOk && !qualityOk) {
+        const firstError = results.find(r => r.status === 'rejected');
+        const rateLimit = firstError ? getRateLimitDetails(firstError.reason) : null;
+        setStatusError(rateLimit
+          ? { code: 'rate_limited', retryAfterSeconds: rateLimit.retryAfterSeconds }
+          : { code: 'load', retryAfterSeconds: null });
+      } else if (!healthOk || !metricsOk || !jobsOk || !qualityOk) {
+        // Partial failure — show a non-blocking warning instead of blocking the entire page
+        setStatusError({ code: 'load', retryAfterSeconds: null });
+      }
     } catch (error: unknown) {
       if (isAbortError(error) || controller.signal.aborted || sequence !== statusSequenceRef.current) return;
       const rateLimit = getRateLimitDetails(error);
@@ -143,25 +158,25 @@ export default function AdminDashboardPage() {
   }, []);
 
   const roleStyleMap: Record<string, { bg: string; text: string; border: string }> = {
-    admin: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
-    hr: { bg: '#EAF2FD', text: '#1A56DB', border: '#D0E1FD' },
-    employee: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
+    admin: { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' },
+    hr: { bg: 'rgba(var(--color-warning-rgb), 0.10)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.20)' },
+    employee: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' },
   };
 
   const healthStyleMap: Record<string, { bg: string; text: string; border: string }> = {
-    running: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    connected: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    up: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    configured: { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' },
-    not_configured: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
-    degraded: { bg: '#FFF8EB', text: '#B85B35', border: '#FFEBD3' },
-    unknown: { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' },
-    down: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
-    disconnected: { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' },
+    running: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    connected: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    up: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    configured: { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' },
+    not_configured: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' },
+    degraded: { bg: 'rgba(var(--color-warning-rgb), 0.10)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.20)' },
+    unknown: { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' },
+    down: { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' },
+    disconnected: { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' },
   };
 
   const renderHealthTag = (status: string) => {
-    const style = healthStyleMap[status] || { bg: '#F3F4F6', text: '#4B5563', border: '#E5E7EB' };
+    const style = healthStyleMap[status] || { bg: 'var(--color-fill)', text: 'var(--color-text-secondary)', border: 'var(--color-border-secondary)' };
     const isGood = ['running', 'connected', 'up', 'configured'].includes(status);
     return (
       <span style={{
@@ -293,7 +308,7 @@ export default function AdminDashboardPage() {
       key: 'is_active',
       width: 100,
       render: (isActive: boolean) => {
-        const style = isActive ? { bg: '#EBF6ED', text: '#2E6930', border: '#D3ECDB' } : { bg: '#FDF2F2', text: '#C81E1E', border: '#FDE8E8' };
+        const style = isActive ? { bg: 'rgba(var(--color-success-rgb), 0.10)', text: 'var(--color-success)', border: 'rgba(var(--color-success-rgb), 0.20)' } : { bg: 'rgba(var(--color-error-rgb), 0.10)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.20)' };
         return (
           <span style={{
             display: 'inline-flex',
@@ -408,8 +423,8 @@ export default function AdminDashboardPage() {
             />
           )}
           {statusLoading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}>
-              <Spin />
+            <div style={{ padding: 24 }}>
+              <Skeleton active paragraph={{ rows: 3 }} />
             </div>
           ) : systemHealth && systemMetrics ? (
             <Descriptions column={1} size="small" bordered={false} style={{ marginBottom: 12 }}>

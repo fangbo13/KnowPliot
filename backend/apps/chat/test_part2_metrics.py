@@ -142,3 +142,34 @@ class MergeTurnMetricsPart2Test(SimpleTestCase):
         self.assertEqual(turn.metrics["retrieval_result_count"], 2)
         self.assertEqual(turn.metrics["routing_decision"], "retrieve")
         self.assertIs(turn.metrics["cache_hit"], False)
+
+
+class GenerationWorkerMetricsTest(SimpleTestCase):
+    def test_accepts_bounded_worker_metrics(self):
+        sanitized = sanitize_turn_metrics(
+            {
+                "queue_wait_ms": 125,
+                "task_attempt": 2,
+                "worker_recovered": True,
+                "delta_batch_count": 17,
+            }
+        )
+
+        self.assertEqual(
+            sanitized,
+            {
+                "queue_wait_ms": 125,
+                "task_attempt": 2,
+                "worker_recovered": True,
+                "delta_batch_count": 17,
+            },
+        )
+
+    def test_numeric_worker_metrics_reject_booleans(self):
+        for key in ("queue_wait_ms", "task_attempt", "delta_batch_count"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                sanitize_turn_metrics({key: True})
+
+    def test_worker_recovered_rejects_arbitrary_labels(self):
+        with self.assertRaises(ValueError):
+            sanitize_turn_metrics({"worker_recovered": "yes"})

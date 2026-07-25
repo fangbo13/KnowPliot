@@ -23,6 +23,10 @@ const activeSpace = {
   business_line_name: null,
   my_role: 'owner' as const,
   member_count: 1,
+  join_policy: 'access_code' as const,
+  join_code: null,
+  allow_member_invite: false,
+  join_code_updated_at: null,
   created_at: '',
   updated_at: '',
 };

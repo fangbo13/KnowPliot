@@ -1,3 +1,10 @@
+/* The app shell sets overflow:hidden on <main> for chat-style fixed layouts.
+   This page is a long form and needs vertical scrolling instead. */
+main#main-content {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
 .kp-creation-page {
   width: min(1040px, calc(100% - 40px));
   margin: 0 auto;
@@ -59,7 +66,7 @@
   border: 1px solid var(--color-border-secondary) !important;
   border-radius: 20px !important;
   background: color-mix(in srgb, var(--color-bg-container) 94%, var(--accent-bg) 6%) !important;
-  box-shadow: 0 18px 55px rgba(55, 42, 30, .06);
+  box-shadow: var(--shadow-md);
 }
 
 .kp-creation-form-card {
@@ -86,6 +93,16 @@
 .kp-creation-list {
   display: grid;
   gap: 14px;
+}
+
+.kp-creation-filter {
+  margin-bottom: 18px;
+}
+
+.kp-creation-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--color-text-secondary);
 }
 
 .kp-creation-request p {

@@ -23,8 +23,13 @@ from django.core.cache import caches
 from django.test import SimpleTestCase
 from rest_framework.test import APIRequestFactory
 
+from apps.chat.capacity import (
+    GENERATION_CAPACITY_KEY,
+    GenerationCapacityController,
+)
 from apps.chat.coordination import RedisSessionLease, create_redis_client
 from apps.chat.stream_events import EVENT_TTL_SECONDS, RedisTurnEventStore
+from apps.chat.stream_events_v3 import RedisTurnStreamV3
 from apps.core.throttling import AuthenticatedReadBurstThrottle
 
 
@@ -170,4 +175,146 @@ class RedisMultiWorkerIntegrationTests(SimpleTestCase):
         fresh_worker.cache = caches["default"]
         fresh_worker.timer = lambda: 1_000.0
         self.assertFalse(fresh_worker.allow_request(request, None))
+
+
+@unittest.skipUnless(
+    os.environ.get("KNOWPILOT_REDIS_INTEGRATION") == "1",
+    "requires explicit real Redis integration profile",
+)
+class GenerationCapacityRedisTest(SimpleTestCase):
+    def setUp(self):
+        self.clients = [create_redis_client() for _ in range(32)]
+        for client in self.clients:
+            self.assertTrue(client.ping())
+        self.clients[0].delete(GENERATION_CAPACITY_KEY)
+
+    def tearDown(self):
+        self.clients[0].delete(GENERATION_CAPACITY_KEY)
+        for client in self.clients:
+            close = getattr(client, "close", None)
+            if close:
+                close()
+
+    def test_32_clients_atomically_contend_for_eight_generation_slots(self):
+        barrier = threading.Barrier(len(self.clients))
+        outcomes: queue.Queue[tuple[str, bool]] = queue.Queue()
+        turn_ids = [str(uuid.uuid4()) for _ in self.clients]
+        gates = [
+            GenerationCapacityController(
+                client,
+                max_outstanding=8,
+                ttl_seconds=180,
+            )
+            for client in self.clients
+        ]
+
+        def reserve(index):
+            barrier.wait(timeout=10)
+            reservation = gates[index].reserve(turn_ids[index])
+            outcomes.put((turn_ids[index], reservation.accepted))
+
+        threads = [
+            threading.Thread(target=reserve, args=(index,))
+            for index in range(len(self.clients))
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+            self.assertFalse(thread.is_alive(), "capacity contention did not finish")
+
+        results = [outcomes.get_nowait() for _ in self.clients]
+        accepted_ids = [turn_id for turn_id, accepted in results if accepted]
+        self.assertEqual(len(accepted_ids), 8)
+        self.assertEqual(gates[0].outstanding(), 8)
+
+        for turn_id in accepted_ids:
+            self.assertTrue(gates[0].renew(turn_id))
+        self.assertEqual(gates[0].outstanding(), 8)
+
+        for turn_id in accepted_ids:
+            self.assertTrue(gates[0].release(turn_id))
+        self.assertEqual(gates[0].outstanding(), 0)
+
+
+@unittest.skipUnless(
+    os.environ.get("KNOWPILOT_REDIS_INTEGRATION") == "1",
+    "requires explicit real Redis integration profile",
+)
+class RedisTurnStreamV3IntegrationTest(SimpleTestCase):
+    def setUp(self):
+        self.clients = [create_redis_client() for _ in range(20)]
+        for client in self.clients:
+            self.assertTrue(client.ping())
+        self.turn_id = uuid.uuid4()
+        self.v3_sequence_key = f"chat:v3:turn:{self.turn_id}:seq"
+        self.v3_events_key = f"chat:v3:turn:{self.turn_id}:events"
+        self.v2_sequence_key = f"chat:turn:{self.turn_id}:seq"
+        self.v2_events_key = f"chat:turn:{self.turn_id}:events"
+        self.clients[0].delete(
+            self.v3_sequence_key,
+            self.v3_events_key,
+            self.v2_sequence_key,
+            self.v2_events_key,
+        )
+
+    def tearDown(self):
+        self.clients[0].delete(
+            self.v3_sequence_key,
+            self.v3_events_key,
+            self.v2_sequence_key,
+            self.v2_events_key,
+        )
+        for client in self.clients:
+            close = getattr(client, "close", None)
+            if close:
+                close()
+
+    def test_concurrent_writers_preserve_one_ordered_integer_sequence(self):
+        barrier = threading.Barrier(len(self.clients))
+        sequences: queue.Queue[int] = queue.Queue()
+
+        def append(index):
+            store = RedisTurnStreamV3(
+                self.clients[index],
+                self.turn_id,
+                ttl_seconds=900,
+                max_length=4096,
+            )
+            barrier.wait(timeout=10)
+            for item in range(10):
+                event = store.append(
+                    "answer_delta",
+                    {"text": f"worker-{index}-{item}"},
+                )
+                sequences.put(event.sequence)
+
+        threads = [
+            threading.Thread(target=append, args=(index,))
+            for index in range(len(self.clients))
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+            self.assertFalse(thread.is_alive(), "v3 stream append did not finish")
+
+        observed = sorted(sequences.get_nowait() for _ in range(200))
+        self.assertEqual(observed, list(range(1, 201)))
+
+        reader = RedisTurnStreamV3(
+            self.clients[0],
+            self.turn_id,
+            ttl_seconds=900,
+            max_length=4096,
+        )
+        replayed = reader.replay()
+        self.assertEqual(
+            [event.sequence for event in replayed],
+            list(range(1, 201)),
+        )
+        self.assertGreater(self.clients[0].ttl(reader.sequence_key), 0)
+        self.assertGreater(self.clients[0].ttl(reader.events_key), 0)
+        self.assertEqual(self.clients[0].exists(self.v2_sequence_key), 0)
+        self.assertEqual(self.clients[0].exists(self.v2_events_key), 0)
 

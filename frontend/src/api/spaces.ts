@@ -44,6 +44,8 @@ export type SpaceRole =
   | 'member'
   | 'guest';
 
+export type JoinPolicy = 'access_code' | 'global';
+
 export interface KnowledgeSpace {
   id: string;
   name: string;
@@ -52,6 +54,10 @@ export interface KnowledgeSpace {
   icon: string;
   language: string;
   visibility: 'private' | 'business_line' | 'organization' | 'public_demo';
+  join_policy: JoinPolicy;
+  join_code: string | null;
+  allow_member_invite: boolean;
+  join_code_updated_at: string | null;
   status: 'active' | 'archived';
   organization: string;
   organization_name: string;
@@ -68,6 +74,50 @@ export interface KnowledgeSpace {
   };
   created_at: string;
   updated_at: string;
+}
+
+export interface JoinResult {
+  space_id: string;
+  space_name: string;
+  membership_id: string;
+  role: SpaceRole;
+  source: string;
+}
+
+export interface JoinCodeInfo {
+  space_id: string;
+  join_policy: JoinPolicy;
+  join_code: string | null;
+  allow_member_invite: boolean;
+  join_code_updated_at: string | null;
+}
+
+export interface JoinCodeRegenerateResult {
+  space_id: string;
+  join_code: string;
+  join_policy: JoinPolicy;
+  join_code_updated_at: string;
+}
+
+export interface JoinPolicySwitchResult {
+  space_id: string;
+  join_policy: JoinPolicy;
+  join_code: string | null;
+}
+
+export interface AllowMemberInviteResult {
+  space_id: string;
+  allow_member_invite: boolean;
+}
+
+export interface DiscoverableSpaceCard {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  join_policy: JoinPolicy;
+  status: 'active' | 'archived';
+  is_member?: boolean;
 }
 
 export interface InviteCode {
@@ -402,9 +452,14 @@ export const spacesApi = {
     return data;
   },
 
-  async discoverable(signal?: AbortSignal): Promise<KnowledgeSpace[]> {
-    const { data } = await coalescedGet<KnowledgeSpace[]>('/spaces/discoverable/', readConfig(signal));
-    return listPayload<KnowledgeSpace>(data, 'discoverable_spaces');
+  async discoverable(signal?: AbortSignal): Promise<DiscoverableSpaceCard[]> {
+    const { data } = await coalescedGet<DiscoverableSpaceCard[] | { results: DiscoverableSpaceCard[] }>(
+      '/spaces/discoverable/', readConfig(signal));
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === 'object' && Array.isArray((data as { results?: unknown }).results)) {
+      return (data as { results: DiscoverableSpaceCard[] }).results;
+    }
+    return [];
   },
 
   async requestAccess(
@@ -432,16 +487,73 @@ export const spacesApi = {
     return data;
   },
 
-  async join(code: string, signal?: AbortSignal): Promise<SpaceAccessRequestRecord> {
+  async join(code: string, signal?: AbortSignal): Promise<JoinResult> {
     const response = signal
-      ? await apiClient.post('/spaces/access-code-requests/', { code, reason: '' }, {
+      ? await apiClient.post('/spaces/join-by-code/', { join_code: code }, {
           signal,
           headers: { 'Idempotency-Key': crypto.randomUUID() },
         })
-      : await apiClient.post('/spaces/access-code-requests/', { code, reason: '' }, {
+      : await apiClient.post('/spaces/join-by-code/', { join_code: code }, {
           headers: { 'Idempotency-Key': crypto.randomUUID() },
         });
     const { data } = response;
+    return data;
+  },
+
+  async joinByCode(code: string, signal?: AbortSignal): Promise<JoinResult> {
+    const response = signal
+      ? await apiClient.post('/spaces/join-by-code/', { join_code: code }, {
+          signal,
+          headers: { 'Idempotency-Key': crypto.randomUUID() },
+        })
+      : await apiClient.post('/spaces/join-by-code/', { join_code: code }, {
+          headers: { 'Idempotency-Key': crypto.randomUUID() },
+        });
+    const { data } = response;
+    return data;
+  },
+
+  async getJoinCode(spaceId: string, signal?: AbortSignal): Promise<JoinCodeInfo> {
+    const { data } = await coalescedGet<JoinCodeInfo>(
+      `/spaces/${spaceId}/join-code/`, readConfig(signal));
+    return data;
+  },
+
+  async regenerateJoinCode(
+    spaceId: string,
+    customCode?: string,
+  ): Promise<JoinCodeRegenerateResult> {
+    const { data } = await apiClient.post(
+      `/spaces/${spaceId}/join-code/regenerate/`,
+      { custom_code: customCode ?? null },
+      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+    );
+    return data;
+  },
+
+  async globalJoin(spaceId: string): Promise<JoinResult> {
+    const { data } = await apiClient.post(
+      `/spaces/${spaceId}/join/`, {},
+      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+    );
+    return data;
+  },
+
+  async switchJoinPolicy(spaceId: string, joinPolicy: JoinPolicy): Promise<JoinPolicySwitchResult> {
+    const { data } = await apiClient.post(
+      `/spaces/${spaceId}/join-policy/switch/`,
+      { join_policy: joinPolicy },
+      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+    );
+    return data;
+  },
+
+  async toggleAllowMemberInvite(spaceId: string, allow: boolean): Promise<AllowMemberInviteResult> {
+    const { data } = await apiClient.post(
+      `/spaces/${spaceId}/allow-member-invite/`,
+      { allow_member_invite: allow },
+      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+    );
     return data;
   },
 

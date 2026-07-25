@@ -14,7 +14,7 @@ import {
 import { useEffect, useRef, useState, memo } from 'react';
 import { motion } from 'framer-motion';
 import { designTokens } from '../../design/tokens';
-import type { Message, Citation, ChatExecutionSnapshot } from '../../store/chatStore';
+import type { Message, Citation } from '../../store/chatStore';
 import { chatApi } from '../../api/chat';
 import ErrorBoundary from '../ErrorBoundary';
 import { MarkdownView } from './markdown';
@@ -31,54 +31,6 @@ function getRelevanceColor(score: number): string {
   if (score > 0.8) return 'var(--color-success)';
   if (score > 0.5) return 'var(--color-warning)';
   return 'var(--color-text-tertiary)';
-}
-
-const SAFE_SNAPSHOT_FALLBACKS = new Set([
-  'deep_mode_disabled', 'thinking_mode_disabled', 'deep_policy_unavailable',
-  'thinking_not_allowed', 'thinking_budget_invalid', 'model_policy_not_ready',
-  'legacy_thinking_unknown',
-]);
-
-function SnapshotDetails({ snapshot, t }: {
-  snapshot: ChatExecutionSnapshot;
-  t: (key: string, options?: Record<string, unknown>) => string;
-}) {
-  const known = (snapshot.thinking_snapshot_known ?? snapshot.thinkingSnapshotKnown) !== false;
-  const requestedMode = snapshot.requested_answer_mode || snapshot.requestedAnswerMode || 'fast';
-  const effectiveMode = snapshot.answer_mode || snapshot.effectiveAnswerMode || requestedMode;
-  const requestedThinking = snapshot.requested_thinking_enabled ?? snapshot.requestedThinkingEnabled ?? false;
-  const effectiveThinking = snapshot.thinking_enabled ?? snapshot.thinkingEnabled ?? false;
-  const budget = snapshot.thinking_budget ?? snapshot.thinkingBudget;
-  const modelId = snapshot.model_id || snapshot.modelId || '';
-  const rawFallback = snapshot.policy_fallback_code || snapshot.policyFallbackCode || '';
-  const fallbackCode = rawFallback || (!known ? 'legacy_thinking_unknown' : '');
-  const fallbackKey = fallbackCode
-    ? (SAFE_SNAPSHOT_FALLBACKS.has(fallbackCode)
-      ? fallbackCode
-      : 'policy_fallback')
-    : null;
-  return (
-    <details className="message-execution-snapshot">
-      <summary>{t('processing_effective_snapshot')}</summary>
-      <dl>
-        <div><dt>{t('processing_requested_mode')}</dt><dd>{t(`answer_mode_${requestedMode}`)}</dd></div>
-        <div><dt>{t('processing_effective_mode')}</dt><dd>{t(`answer_mode_${effectiveMode}`)}</dd></div>
-        <div><dt>{t('processing_model')}</dt><dd>{modelId || t('processing_legacy_unknown')}</dd></div>
-        <div><dt>{t('processing_requested_thinking')}</dt><dd>{known ? (requestedThinking ? t('thinking_mode_on') : t('thinking_mode_off')) : t('processing_legacy_unknown')}</dd></div>
-        <div><dt>{t('processing_effective_thinking')}</dt><dd>{known ? (effectiveThinking ? t('thinking_mode_on') : t('thinking_mode_off')) : t('processing_legacy_unknown')}</dd></div>
-        <div><dt>{t('processing_budget')}</dt><dd>{known && effectiveThinking && budget != null ? budget : (known ? t('processing_budget_not_applicable') : t('processing_legacy_unknown'))}</dd></div>
-        {fallbackKey ? (
-          <div>
-            <dt>{t('processing_fallback')}</dt>
-            <dd>
-              <span>{t(`processing_fallback_${fallbackKey}`)}</span>
-              <code>{fallbackKey}</code>
-            </dd>
-          </div>
-        ) : null}
-      </dl>
-    </details>
-  );
 }
 
 interface Props {
@@ -109,7 +61,6 @@ function isPersistedUuid(id: string): boolean {
 function MessageBubble({ message, isStreaming = false, disableActions = false, canShare = false, onRegenerate, onBranch, onShare }: Props) {
   const { t } = useTranslation('chat');
   const isUser = message.role === 'user';
-  const executionSnapshot = message.executionSnapshot ?? message.execution_snapshot;
   const [copied, setCopied] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
@@ -287,9 +238,7 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
         )}
       </div>
 
-      {!isStreaming && executionSnapshot ? (
-        <SnapshotDetails snapshot={executionSnapshot} t={t} />
-      ) : null}
+      {/* Bug #10: Effective answer settings (technical snapshot details) should not be displayed to end users */}
 
       {!isStreaming && (
         <div className="msg-actions">

@@ -116,6 +116,23 @@ class User(AbstractUser):
 
         raise PermissionDenied("User hard deletion is disabled; use the offboarding workflow.")
 
+    def save(self, *args, **kwargs):
+        """Enforce superuser uniqueness: at most one is_superuser=True account may exist.
+
+        If a second user is set to is_superuser=True, the save will raise ValueError.
+        This guarantees the platform always has exactly one super admin.
+        """
+        if self.is_superuser:
+            qs = User.objects.filter(is_superuser=True)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValueError(
+                    "A superuser already exists. Only one super admin is allowed. "
+                    "Set the existing superuser's is_superuser=False before creating a new one."
+                )
+        super().save(*args, **kwargs)
+
     # ── V4.0 RBAC methods ──────────────────────────────────────────────
 
     # V4.2 SYS-V4.2-006: Request-level RBAC cache — avoids N+1 queries.

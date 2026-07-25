@@ -1,0 +1,154 @@
+/*
+ * DiffPreview styles — all colors via CSS variables (light/dark auto).
+ * KB-12-Features §6
+ */
+
+.diff-preview__container {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg-container);
+}
+
+.diff-preview__loading,
+.diff-preview__error,
+.diff-preview__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  min-height: 120px;
+}
+
+.diff-preview__stats {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-sunken);
+}
+
+.diff-preview__line-counts {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.diff-preview__blocks {
+  max-height: 500px;
+  overflow-y: auto;
+  font-family: var(--font-family-mono, 'JetBrains Mono', 'SF Mono', monospace);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Individual diff block */
+.diff-block {
+  display: flex;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.diff-block:last-child {
+  border-bottom: none;
+}
+
+.diff-block__tag {
+  flex-shrink: 0;
+  width: 80px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-right: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-sunken);
+}
+
+.diff-block__lines {
+  flex: 1;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+/* Diff line styles */
+.diff-line {
+  display: flex;
+  padding: 0 8px;
+  min-height: 20px;
+}
+
+.diff-line__marker {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-weight: 600;
+  user-select: none;
+}
+
+.diff-line__text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Equal (unchanged) lines */
+.diff-line--equal {
+  color: var(--color-text-secondary);
+}
+
+.diff-line--equal .diff-line__marker {
+  color: var(--color-text-tertiary);
+}
+
+/* Deleted lines (old content) */
+.diff-line--old {
+  color: var(--color-error);
+  background: rgba(var(--color-error-rgb), 0.06);
+}
+
+.diff-line--old .diff-line__marker {
+  color: var(--color-error);
+}
+
+/* Inserted lines (new content) */
+.diff-line--new {
+  color: var(--color-success);
+  background: rgba(var(--color-success-rgb), 0.06);
+}
+
+.diff-line--new .diff-line__marker {
+  color: var(--color-success);
+}
+
+/* Block type backgrounds */
+.diff-block--delete {
+  background: rgba(var(--color-error-rgb), 0.03);
+}
+
+.diff-block--insert {
+  background: rgba(var(--color-success-rgb), 0.03);
+}
+
+.diff-block--replace {
+  background: rgba(var(--color-warning-rgb), 0.03);
+}
+
+/* Dark mode: increase background intensity for better visibility */
+[data-theme='dark'] .diff-line--old {
+  background: rgba(var(--color-error-rgb), 0.12);
+}
+
+[data-theme='dark'] .diff-line--new {
+  background: rgba(var(--color-success-rgb), 0.12);
+}
+
+[data-theme='dark'] .diff-block--delete {
+  background: rgba(var(--color-error-rgb), 0.06);
+}
+
+[data-theme='dark'] .diff-block--insert {
+  background: rgba(var(--color-success-rgb), 0.06);
+}
+
+[data-theme='dark'] .diff-block--replace {
+  background: rgba(var(--color-warning-rgb), 0.06);
+}

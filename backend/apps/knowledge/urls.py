@@ -18,6 +18,8 @@ from .views import (
     DocumentPreviewDiffView,
     DocumentVersionCreateView,
     DocumentRollbackView,
+    DocumentTemplateView,
+    DocumentConvertView,
 )
 from .batch_views import BatchDocumentUploadView, BatchImportResultDetailView
 
@@ -38,4 +40,9 @@ urlpatterns = [
     path("<uuid:pk>/preview-diff/", DocumentPreviewDiffView.as_view(), name="document-preview-diff"),
     path("<uuid:pk>/versions/", DocumentVersionCreateView.as_view(), name="document-versions"),
     path("<uuid:pk>/rollback/", DocumentRollbackView.as_view(), name="document-rollback"),
+    # KB-12-Features §8: Markdown document templates (list + detail by slug)
+    path("document-templates/", DocumentTemplateView.as_view(), name="document-template-list"),
+    path("document-templates/<slug:slug>/", DocumentTemplateView.as_view(), name="document-template-detail"),
+    # KB-12-Features §9: Synchronous Word/PDF→Markdown conversion
+    path("convert/", DocumentConvertView.as_view(), name="document-convert"),
 ]

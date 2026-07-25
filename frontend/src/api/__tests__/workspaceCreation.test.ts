@@ -13,6 +13,7 @@ const submission: WorkspaceCreationSubmission = {
   code: 'assurance-methodology',
   purpose: 'Bounded methodology knowledge',
   visibility: 'private',
+  join_policy: 'access_code',
   business_line_id: 'line-1',
   work_group_id: 'group-1',
   office_location_ids: ['office-1'],

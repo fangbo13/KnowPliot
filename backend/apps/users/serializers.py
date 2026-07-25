@@ -129,6 +129,7 @@ class UserPreferenceSerializer(serializers.ModelSerializer):
             "theme_preference",
             "default_space",
             "notification_preferences",
+            "office_location",
         ]
 
     def validate_default_space(self, value):

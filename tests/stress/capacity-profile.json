@@ -1,0 +1,7 @@
+{
+  "smoke": {"users": 10, "streams": 2, "durationSeconds": 120},
+  "stairs": {"streams": [50, 100, 200, 300, 400, 500], "secondsPerStage": 300},
+  "steady": {"users": 500, "streams": 500, "rampSeconds": 60, "durationSeconds": 1800},
+  "spike": {"from": 500, "to": 1000, "durationSeconds": 120},
+  "realProvider": {"users": 20, "turnsPerUser": 1, "maxInputChars": 300, "maxOutputTokens": 512}
+}

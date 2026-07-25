@@ -7,7 +7,7 @@ import os
 import warnings
 from pathlib import Path
 
-from .parsing import env_bool
+from .parsing import env_bool, validate_capacity_settings
 
 # Load .env file
 try:
@@ -85,6 +85,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.core.prometheus.PrometheusRequestMiddleware",
     "apps.core.middleware.SafeErrorResponseMiddleware",  # V4.1 SYS-V4.1-002: intercept ALL 500 errors
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -136,6 +137,10 @@ DATABASES = {
         # CONN_HEALTH_CHECKS=True → Django validates stale connections before use
         "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "60")),
         "CONN_HEALTH_CHECKS": True,
+        "DISABLE_SERVER_SIDE_CURSORS": env_bool(
+            "DISABLE_SERVER_SIDE_CURSORS",
+            default=False,
+        ),
     }
 }
 
@@ -240,8 +245,11 @@ PASSWORD_RESET_TIMEOUT = 30 * 60
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
 # Celery — V4.1 SYS-V4.1-010: Redis now requires password
-CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0")
-CELERY_RESULT_BACKEND = "django-db"
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    os.environ.get("REDIS_URL", "redis://:sys_redis_pass_2026@redis:6379/0"),
+)
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "django-db")
 CELERY_BEAT_SCHEDULE = {
     "notification-action-outbox-sweep": {
         "task": "apps.notifications.tasks.sweep_action_outbox",
@@ -253,6 +261,14 @@ ACTION_OUTBOX_DELIVERY_ADAPTER = os.environ.get(
     "",
 )
 CHAT_COORDINATION_REDIS_URL = os.environ.get("CHAT_COORDINATION_REDIS_URL", CELERY_BROKER_URL)
+CHAT_EVENTS_REDIS_URL = os.environ.get(
+    "CHAT_EVENTS_REDIS_URL",
+    CHAT_COORDINATION_REDIS_URL,
+)
+CHAT_CAPACITY_REDIS_URL = os.environ.get(
+    "CHAT_CAPACITY_REDIS_URL",
+    CHAT_EVENTS_REDIS_URL,
+)
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
@@ -267,6 +283,49 @@ CHAT_STREAM_V2 = os.environ.get("CHAT_STREAM_V2", "false").strip().lower() in {
     "yes",
     "on",
 }
+
+PROMETHEUS_METRICS_TOKEN = os.environ.get("PROMETHEUS_METRICS_TOKEN", "")
+CAPACITY_SEED_ALLOWED = env_bool("CAPACITY_SEED_ALLOWED", default=False)
+CHAT_STREAM_V3 = env_bool("CHAT_STREAM_V3", default=False)
+CHAT_GENERATION_TARGET_ACTIVE = int(
+    os.environ.get("CHAT_GENERATION_TARGET_ACTIVE", "500")
+)
+CHAT_GENERATION_MAX_OUTSTANDING = int(
+    os.environ.get("CHAT_GENERATION_MAX_OUTSTANDING", "625")
+)
+CHAT_GENERATION_RESERVATION_TTL_SECONDS = int(
+    os.environ.get("CHAT_GENERATION_RESERVATION_TTL_SECONDS", "180")
+)
+CHAT_GENERATION_RETRY_AFTER_SECONDS = int(
+    os.environ.get("CHAT_GENERATION_RETRY_AFTER_SECONDS", "5")
+)
+CHAT_GENERATION_WORKER_CONCURRENCY = int(
+    os.environ.get("CHAT_GENERATION_WORKER_CONCURRENCY", "25")
+)
+CHAT_EVENT_V3_TTL_SECONDS = int(
+    os.environ.get("CHAT_EVENT_V3_TTL_SECONDS", "900")
+)
+CHAT_EVENT_V3_MAXLEN = int(os.environ.get("CHAT_EVENT_V3_MAXLEN", "4096"))
+PROVIDER_HTTP_MAX_CONNECTIONS = int(
+    os.environ.get("PROVIDER_HTTP_MAX_CONNECTIONS", "32")
+)
+PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS = int(
+    os.environ.get("PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS", "16")
+)
+PROVIDER_MAX_OUTPUT_TOKENS = int(
+    os.environ.get("PROVIDER_MAX_OUTPUT_TOKENS", "2000")
+)
+validate_capacity_settings(
+    target_active=CHAT_GENERATION_TARGET_ACTIVE,
+    max_outstanding=CHAT_GENERATION_MAX_OUTSTANDING,
+    reservation_ttl_seconds=CHAT_GENERATION_RESERVATION_TTL_SECONDS,
+    retry_after_seconds=CHAT_GENERATION_RETRY_AFTER_SECONDS,
+    worker_concurrency=CHAT_GENERATION_WORKER_CONCURRENCY,
+    event_ttl_seconds=CHAT_EVENT_V3_TTL_SECONDS,
+    event_max_length=CHAT_EVENT_V3_MAXLEN,
+    provider_max_connections=PROVIDER_HTTP_MAX_CONNECTIONS,
+    provider_max_keepalive_connections=PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS,
+)
 CAPABILITY_NAV = env_bool("CAPABILITY_NAV", default=False)
 DEEP_ANSWER_MODE = env_bool("DEEP_ANSWER_MODE", default=False)
 THINKING_MODE = env_bool("THINKING_MODE", default=False)
@@ -276,7 +335,7 @@ WORKSPACE_CREATION_APPROVAL = env_bool("WORKSPACE_CREATION_APPROVAL", default=Fa
 # creation both fail closed.
 TEMPLATE_ASSET_COPY_ENABLED = env_bool("TEMPLATE_ASSET_COPY_ENABLED", default=False)
 WORKSPACE_JOIN_V2 = env_bool("WORKSPACE_JOIN_V2", default=False)
-WORKSPACE_PERMANENT_DELETE = env_bool("WORKSPACE_PERMANENT_DELETE", default=False)
+WORKSPACE_PERMANENT_DELETE = env_bool("WORKSPACE_PERMANENT_DELETE", default=True)
 SPACE_CREDENTIAL_PEPPER_VERSION = int(
     os.environ.get("SPACE_CREDENTIAL_PEPPER_VERSION", "1")
 )
@@ -302,9 +361,14 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TIME_LIMIT = 1800  # 30 min hard timeout (was 300/5min) — batch docs need more time
 CELERY_TASK_SOFT_TIME_LIMIT = 1500  # 25 min soft timeout (was 240/4min)
 CELERY_TASK_MAX_RETRIES = 3
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": 180,
+}
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # V4.2 SYS-V4.2-013: Queue routing — critical tasks get dedicated slots
 # Previous: all tasks in single default queue, competing for 4 slots equally.
 CELERY_TASK_ROUTES = {
+    "apps.chat.tasks.generate_chat_turn_v3": {"queue": "chat_generation"},
     "apps.knowledge.tasks.*": {"queue": "default"},
     "apps.rag.tasks.*": {"queue": "default"},
 }
@@ -344,7 +408,10 @@ RAG_EMBEDDING_DIM = 1024
 # DashScope / LiteLLM
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 LITELLM_API_KEY = DASHSCOPE_API_KEY
-LITELLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LITELLM_BASE_URL = os.environ.get(
+    "LITELLM_BASE_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+).rstrip("/")
 TEST_PRINCIPAL_LEGACY_ALLOWLIST = tuple(
     value.strip()
     for value in os.environ.get("TEST_PRINCIPAL_LEGACY_ALLOWLIST", "").split(",")

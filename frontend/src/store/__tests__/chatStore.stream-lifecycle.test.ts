@@ -102,11 +102,64 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
 describe('sendMessage stream lifecycle', () => {
+  it('uses the v3 acceptance contract and commits its terminal stream', async () => {
+    vi.stubEnv('VITE_CHAT_STREAM_V3', 'true');
+    const turnId = '33333333-3333-4333-8333-333333333333';
+    const clientId = '22222222-2222-4222-8222-222222222222';
+    const messageId = '55555555-5555-4555-8555-555555555555';
+    const accepted = {
+      turn_id: turnId,
+      session_id: SESSION_ID,
+      client_request_id: clientId,
+      status: 'accepted',
+      events_url: `/api/v1/chat/turns/${turnId}/events/`,
+      status_url: `/api/v1/chat/turns/${turnId}/`,
+      cancel_url: `/api/v1/chat/turns/${turnId}/cancel/`,
+    };
+    mocks.fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(accepted), { status: 202 }))
+      .mockResolvedValueOnce(new Response(
+        `id: 1\nevent: meta\ndata: ${JSON.stringify({ protocol_version: 3, turn_id: turnId, session_id: SESSION_ID, client_request_id: clientId })}\n\n`
+          + `id: 2\nevent: answer_delta\ndata: {"text":"v3 answer"}\n\n`
+          + `id: 3\nevent: done\ndata: ${JSON.stringify({ message_id: messageId, session_id: SESSION_ID, turn_id: turnId, client_request_id: clientId })}\n\n`,
+        { headers: { 'X-Chat-Turn-Id': turnId, 'X-Chat-Client-Request-Id': clientId } },
+      ));
+
+    await useChatStore.getState().sendMessage('hello v3');
+
+    const postBody = JSON.parse(String(mocks.fetch.mock.calls[0][1]?.body));
+    expect(postBody.protocol_version).toBe(3);
+    expect(useChatStore.getState().messages[useChatStore.getState().messages.length - 1]).toMatchObject({
+      id: messageId,
+      content: 'v3 answer',
+    });
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'idle', isLocked: false, protocolVersion: 3,
+    });
+  });
+
+  it('holds the send lock for the server-provided v3 capacity cooldown', async () => {
+    vi.stubEnv('VITE_CHAT_STREAM_V3', 'true');
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      code: 'generation_capacity_reached', retryable: true, retry_after_seconds: 5,
+    }), { status: 429, headers: { 'Retry-After': '5' } }));
+
+    await useChatStore.getState().sendMessage('over capacity');
+
+    expect(useChatStore.getState().turnsBySession[SESSION_ID]).toMatchObject({
+      phase: 'error', isLocked: true, error: 'error_capacity', capacityRetryAfterSeconds: 5,
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(useChatStore.getState().turnsBySession[SESSION_ID].isLocked).toBe(false);
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
+
   it('uses a shorter connection budget than the event-idle budget', async () => {
     let pendingSignal!: AbortSignal;
     mocks.fetch.mockImplementation((_url, init?: RequestInit) => {

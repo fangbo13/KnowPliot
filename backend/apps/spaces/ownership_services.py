@@ -134,9 +134,23 @@ class OwnershipTransferService:
             target_membership = SpaceMembership.objects.select_for_update(of=("self",)).filter(
                 space=space, user_id=to_owner_id
             ).order_by("pk").first()
-            if not target_membership or target_membership.role == SpaceMembership.ROLE_GUEST or not effective_space_membership(target_membership):
-                raise OwnershipConflict("invalid_successor")
-            if target_membership.user_id == locked_actor.id:
+            if target_membership is not None:
+                # Already a space member — must be effective and not a guest.
+                if target_membership.role == SpaceMembership.ROLE_GUEST or not effective_space_membership(target_membership):
+                    raise OwnershipConflict("invalid_successor")
+            else:
+                # Not a space member — verify the target belongs to the same
+                # organization so ownership can be granted on acceptance.
+                target_org_memberships = list(
+                    SpaceMembership.objects.select_for_update(of=("self",)).filter(
+                        user_id=to_owner_id,
+                        space__organization=space.organization,
+                        status="active",
+                    ).order_by("pk")
+                )
+                if not target_org_memberships:
+                    raise OwnershipConflict("invalid_successor")
+            if to_owner_id == locked_actor.id:
                 raise OwnershipConflict("invalid_successor")
             try:
                 transfer = OwnershipTransfer.objects.create(
@@ -207,20 +221,36 @@ class OwnershipTransferService:
             else:
                 target = memberships.get(transfer.to_owner_id)
                 current = memberships.get(transfer.from_owner_id)
-                if target is None or current is None:
+                if current is None:
                     conflict = "transfer_invalidated"
-                if space.owner_id != transfer.from_owner_id or space.ownership_version != transfer.expected_ownership_version:
+                elif space.owner_id != transfer.from_owner_id or space.ownership_version != transfer.expected_ownership_version:
                     conflict = "transfer_invalidated"
-                elif target is None or target.role == SpaceMembership.ROLE_GUEST or not effective_user(locked_actor) or not effective_space_membership(target):
+                elif not effective_user(locked_actor):
+                    conflict = "transfer_invalidated"
+                elif target is not None and (target.role == SpaceMembership.ROLE_GUEST or not effective_space_membership(target)):
                     conflict = "transfer_invalidated"
                 if conflict:
                     transfer.status = OwnershipTransfer.STATUS_INVALIDATED
                     transfer.save(update_fields=["status"])
                 else:
+                    # Downgrade the current owner to a regular member first
+                    # so the single-active-owner-membership constraint is
+                    # not violated when creating or updating the new owner.
                     current.role = SpaceMembership.ROLE_MEMBER
                     current.save(update_fields=["role", "updated_at"])
-                    target.role = SpaceMembership.ROLE_OWNER
-                    target.save(update_fields=["role", "updated_at"])
+                    if target is None:
+                        # Successor is not yet a space member — create the
+                        # membership as part of accepting the ownership transfer.
+                        target = SpaceMembership.objects.create(
+                            space=space,
+                            user_id=transfer.to_owner_id,
+                            role=SpaceMembership.ROLE_OWNER,
+                            status="active",
+                            source_kind=SpaceMembership.SOURCE_OWNERSHIP,
+                        )
+                    else:
+                        target.role = SpaceMembership.ROLE_OWNER
+                        target.save(update_fields=["role", "updated_at"])
                     space.owner_id = locked_actor.id
                     space.ownership_version += 1
                     space.save(update_fields=["owner", "ownership_version", "updated_at"])

@@ -5,8 +5,8 @@
  */
 
 // V7.0 admin console — users & global roles (reuses rbac endpoints).
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Alert, Card, Divider, Modal, Table, Button, Tag, Select, Space, Popconfirm, message as antdMessage } from 'antd';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { Alert, Card, Divider, Modal, Table, Button, Tag, Select, Space, Popconfirm, Input, message as antdMessage } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type AdminUser, type OffboardingImpact } from '../../api/admin';
@@ -32,6 +32,11 @@ export default function AdminUsersPage() {
   const [impactLoading, setImpactLoading] = useState(false);
   const [offboarding, setOffboarding] = useState(false);
   const [loadError, setLoadError] = useState<{ code: 'load' | 'rate_limited'; retryAfterSeconds: number | null } | null>(null);
+
+  // Filter state
+  const [roleFilter, setRoleFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [emailSearch, setEmailSearch] = useState('');
   const sequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const canOffboard = access.has('platform.users.offboard');
@@ -203,6 +208,30 @@ export default function AdminUsersPage() {
     catch { antdMessage.error(t('member_update_failed') || 'Failed'); }
   };
 
+  const roleOptions = useMemo(() => {
+    const roles = new Set<string>();
+    users.forEach((u) => { u.roles.forEach((r) => roles.add(r)); if (u.is_hr_admin) roles.add('hr'); });
+    if (!roles.has('employee')) roles.add('employee');
+    return [...roles].sort().map((r) => ({ value: r, label: r }));
+  }, [users]);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      if (roleFilter) {
+        const effectiveRoles = [...user.roles];
+        if (user.is_hr_admin && !effectiveRoles.includes('hr')) effectiveRoles.push('hr');
+        if (roleFilter === 'employee') {
+          if (effectiveRoles.length > 0) return false;
+        } else {
+          if (!effectiveRoles.includes(roleFilter)) return false;
+        }
+      }
+      if (statusFilter && (user.is_active ? 'active' : 'inactive') !== statusFilter) return false;
+      if (emailSearch && !user.email.toLowerCase().includes(emailSearch.toLowerCase())) return false;
+      return true;
+    });
+  }, [users, roleFilter, statusFilter, emailSearch]);
+
   const columns = [
     { title: t('email_label') || 'Email', dataIndex: 'email', key: 'email', ellipsis: true },
     { title: t('service_line_label'), dataIndex: 'service_line', key: 'service_line', render: (v: string | null) => v || '-' },
@@ -264,7 +293,37 @@ export default function AdminUsersPage() {
               action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
             />
           )}
-          <Table rowKey="id" loading={loading} dataSource={users} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
+          <Space wrap style={{ marginBottom: 16 }}>
+            <Input.Search
+              placeholder={t('email_label') || 'Search email'}
+              value={emailSearch}
+              onChange={(e) => setEmailSearch(e.target.value)}
+              allowClear
+              style={{ width: 200 }}
+            />
+            <Select
+              showSearch
+              allowClear
+              placeholder="Role"
+              value={roleFilter}
+              onChange={(value) => setRoleFilter(value ?? undefined)}
+              options={roleOptions}
+              optionFilterProp="label"
+              style={{ width: 160 }}
+            />
+            <Select
+              allowClear
+              placeholder="Status"
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value ?? undefined)}
+              options={[
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+              ]}
+              style={{ width: 120 }}
+            />
+          </Space>
+          <Table rowKey="id" loading={loading} dataSource={filteredUsers} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
         </Card>
         <Modal
           title={offboardingUser ? `${t('offboard')} ${offboardingUser.email}` : t('offboard_account')}

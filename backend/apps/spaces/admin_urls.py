@@ -19,6 +19,9 @@ from .admin_views import (
     SystemHealthView,
     SystemMetricsView,
     admin_code_revoke,
+    admin_space_archive,
+    admin_space_list,
+    admin_space_restore,
     organization_archive,
     organization_restore,
     space_access_request_approve,
@@ -136,4 +139,8 @@ urlpatterns = [
     path("reports/export-jobs/<uuid:pk>/", ComplianceExportJobDetailView.as_view(), name="admin-report-export-job-detail"),
     path("reports/export-jobs/<uuid:pk>/download/", ComplianceExportJobDownloadView.as_view(), name="admin-report-export-job-download"),
     path("reports/export-jobs/<uuid:pk>/retry/", ComplianceExportJobRetryView.as_view(), name="admin-report-export-job-retry"),
+    # V7.5 Admin workspace overview
+    path("spaces/", admin_space_list, name="admin-space-list"),
+    path("spaces/<uuid:pk>/archive/", admin_space_archive, name="admin-space-archive"),
+    path("spaces/<uuid:pk>/restore/", admin_space_restore, name="admin-space-restore"),
 ]

@@ -15,28 +15,10 @@ import WelcomeScreen from '../components/chat/WelcomeScreen';
 import ChatComposer from '../components/chat/ChatComposer';
 import { chatApi } from '../api/chat';
 import { useAuthorization } from '../auth/CapabilityProvider';
-import { DEEP_ANSWER_MODE_ENABLED } from '../auth/authorization';
-import * as authorizationFlags from '../auth/authorization';
 import { notify } from '../utils/notifications';
 
 const VirtualizedMessageList = lazy(() => import('../components/chat/VirtualizedMessageList'));
 const ProcessingPanel = lazy(() => import('../components/chat/ProcessingPanel'));
-
-function isThinkingBuildEnabled(): boolean {
-  const envFlag = (import.meta as ImportMeta & {
-    env?: Record<string, string | undefined>;
-  }).env?.VITE_THINKING_MODE === 'true';
-  if (envFlag) return true;
-  // Prefer the shared build-time constant when available.  The guarded access
-  // keeps older compatibility mocks (which predate Thinking) fail-closed.
-  try {
-    const configured = (authorizationFlags as { THINKING_MODE_ENABLED?: unknown }).THINKING_MODE_ENABLED;
-    if (typeof configured === 'boolean') return configured;
-  } catch {
-    // A partial module adapter may throw for an unknown named export.
-  }
-  return false;
-}
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -65,13 +47,10 @@ export default function ChatPageContainer() {
   const { t } = useTranslation('chat');
   const authorization = useAuthorization();
   const canShare = authorization.has('chat.share');
-  const canUseDeep = DEEP_ANSWER_MODE_ENABLED
-    && authorization.enabled
-    && authorization.has('chat.deep');
-  const thinkingBuildEnabled = isThinkingBuildEnabled();
-  const canUseThinking = thinkingBuildEnabled
-    && authorization.snapshot?.feature_availability?.thinking === true
-    && authorization.has('chat.thinking');
+  // Always show DEEP and Thinking buttons — the server gracefully falls back
+  // to a safe policy if a mode is unavailable, so users can always try.
+  const canUseDeep = true;
+  const canUseThinking = true;
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const {
@@ -101,6 +80,7 @@ export default function ChatPageContainer() {
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [showScrollFab, setShowScrollFab] = useState(false);
+  const [capacityClockMs, setCapacityClockMs] = useState(Date.now());
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -111,6 +91,16 @@ export default function ChatPageContainer() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
   const activeSessionTitle = activeSession?.title || t('session_title_new');
+  const capacityRetrySeconds = activeTurn?.capacityRetryAtMs
+    ? Math.max(0, Math.ceil((activeTurn.capacityRetryAtMs - capacityClockMs) / 1000))
+    : 0;
+
+  useEffect(() => {
+    if (!activeTurn?.capacityRetryAtMs || activeTurn.capacityRetryAtMs <= Date.now()) return;
+    setCapacityClockMs(Date.now());
+    const timer = window.setInterval(() => setCapacityClockMs(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [activeTurn?.capacityRetryAtMs]);
 
   useEffect(() => {
     if (!isRenamingTitle) return;
@@ -297,7 +287,7 @@ export default function ChatPageContainer() {
       <div className="chat-view">
         <WelcomeScreen
           onQuickAction={handleQuickAction}
-          onSendMessage={(m) => sendMessage(m)}
+          onSendMessage={(m, opts) => sendMessage(m, { answerMode: opts?.answerMode ?? 'fast', ...(opts?.thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}), canUseDeep: true })}
           templateQuickQuestions={templateQuickQuestions}
         />
         <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
@@ -321,6 +311,9 @@ export default function ChatPageContainer() {
   }
 
   const getErrorDescription = (error: string) => {
+    if (error === 'error_capacity') {
+      return t('error_capacity', { seconds: capacityRetrySeconds });
+    }
     const map: Record<string, string> = {
       error_auth: 'error_auth', error_server: 'error_server', error_network: 'error_network',
       error_generic: 'error_generic', error_session: 'error_session', error_timeout: 'error_timeout',
@@ -402,7 +395,12 @@ export default function ChatPageContainer() {
               <div className="chat-error-title">{t('error_title') || 'Error'}</div>
               <div className="chat-error-desc">{getErrorDescription(sendError)}</div>
               <div className="chat-error-actions">
-                <button className="msg-action-btn" onClick={() => handleRetry()}><ReloadOutlined />{t('error_retry')}</button>
+                <button className="msg-action-btn" disabled={capacityRetrySeconds > 0} onClick={() => handleRetry()}>
+                  <ReloadOutlined />
+                  {capacityRetrySeconds > 0
+                    ? t('capacity_retry_countdown', { seconds: capacityRetrySeconds })
+                    : t('error_retry')}
+                </button>
                 <button className="msg-action-btn" onClick={() => setSendError(null)}>{t('cancel') || 'Dismiss'}</button>
               </div>
             </div>
@@ -418,7 +416,20 @@ export default function ChatPageContainer() {
         ) : null}
 
         <div style={{ opacity: isTransitioning ? 0 : 1, transition: 'opacity var(--dur) var(--ease-out)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <Suspense fallback={<div className="chat-route-loading" role="status">{t('loading_messages')}</div>}>
+          <Suspense fallback={
+            <div className="chat-route-loading skeleton-active" role="status" style={{ padding: 24 }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+                <div className="skeleton-card skeleton-active" style={{ width: 40, height: 40, borderRadius: '50%' }} />
+                <div style={{ flex: 1 }}>
+                  <div className="skeleton-card skeleton-active" style={{ height: 12, width: '40%', marginBottom: 8 }} />
+                  <div className="skeleton-card skeleton-active" style={{ height: 12, width: '60%' }} />
+                </div>
+              </div>
+              <div className="skeleton-card skeleton-active" style={{ height: 12, marginBottom: 8, width: '90%' }} />
+              <div className="skeleton-card skeleton-active" style={{ height: 12, marginBottom: 8, width: '75%' }} />
+              <div className="skeleton-card skeleton-active" style={{ height: 12, width: '50%' }} />
+            </div>
+          }>
             <VirtualizedMessageList
               virtuosoRef={virtuosoRef}
               messages={messages}
@@ -474,6 +485,7 @@ export default function ChatPageContainer() {
             multiline
             maxRows={6}
             showHint
+            retryAfterSeconds={capacityRetrySeconds}
             answerMode={answerMode}
             canUseDeep={canUseDeep}
             thinkingEnabled={thinkingEnabled}

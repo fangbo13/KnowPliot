@@ -21,6 +21,7 @@ import i18n from './i18n';
 
 const AppLayout = lazy(() => import('./layout/AppLayout'));
 const LoginPage = lazy(() => import('./auth/LoginPage'));
+const AdminLoginPage = lazy(() => import('./auth/AdminLoginPage'));
 const ResetPasswordPage = lazy(() => import('./auth/ResetPasswordPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const AdminLayout = lazy(() => import('./layout/AdminLayout'));
@@ -52,6 +53,7 @@ const WorkspaceLifecyclePage = lazy(() => import('./pages/console/WorkspaceLifec
 const WorkspaceCreationPage = lazy(() => import('./pages/WorkspaceCreationPage'));
 const WorkspaceCreationReviewPage = lazy(() => import('./pages/console/WorkspaceCreationReviewPage'));
 const PlatformKnowledgePage = lazy(() => import('./pages/console/PlatformKnowledgePage'));
+const AdminSpacesPage = lazy(() => import('./pages/admin/AdminSpacesPage'));
 
 function RouteLoading() {
   return (
@@ -82,20 +84,10 @@ function App({
   const expectedNavigationMode = capabilityNavigationEnabled ? 'capability' : 'legacy';
 
   useEffect(() => {
-    const syncLanguage = () => {
-      try {
-        const authStr = localStorage.getItem('ey-auth');
-        if (authStr) {
-          const auth = JSON.parse(authStr);
-          if (auth?.user?.language_preference && auth.user.language_preference !== i18n.language) {
-            i18n.changeLanguage(auth.user.language_preference);
-          }
-        }
-      } catch {
-        // Ignore corrupt compatibility state.
-      }
-    };
-    syncLanguage();
+    // F-01 fix: language persistence is now handled by AuthProvider's useEffect,
+    // which syncs user.language_preference to i18n + ey-language localStorage on
+    // login / profile update.  On page reload, i18n initialises from ey-language
+    // (set in i18n/index.ts getInitialLanguage).  We no longer override it here.
 
     const langHandler = () => {
       const lang = i18n.language || 'en';
@@ -116,6 +108,10 @@ function App({
         <Route
           path="/login"
           element={isAuthenticated ? <AuthenticatedEntryRedirect /> : <SuspendedRoute><LoginPage /></SuspendedRoute>}
+        />
+        <Route
+          path="/admintest"
+          element={isAuthenticated ? <Navigate to="/platform-admin/dashboard" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
         />
         <Route path="/reset-password" element={<SuspendedRoute><ResetPasswordPage /></SuspendedRoute>} />
         <Route
@@ -204,6 +200,7 @@ function App({
           <Route path="knowledge" element={<CapabilityGate required="platform.knowledge.read"><SuspendedRoute><PlatformKnowledgePage /></SuspendedRoute></CapabilityGate>} />
           <Route path="metrics" element={<CapabilityGate required="platform.metrics.read"><SuspendedRoute><ScopedMetricsPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="audit" element={<CapabilityGate required="platform.audit.read"><SuspendedRoute><ScopedAuditPage /></SuspendedRoute></CapabilityGate>} />
+          <Route path="spaces" element={<CapabilityGate required="platform.access"><SuspendedRoute><AdminSpacesPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="model" element={<CapabilityGate required="platform.models.manage"><SuspendedRoute><ModelProfilesPage /></SuspendedRoute></CapabilityGate>} />
         </Route>
 

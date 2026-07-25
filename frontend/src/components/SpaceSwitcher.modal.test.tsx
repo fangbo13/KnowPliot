@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => {
     joinByCode: vi.fn(),
     createSpace: vi.fn(),
   };
-  return { spaceState };
+  const mockNavigate = vi.fn();
+  return { spaceState, mockNavigate };
 });
 
 vi.mock('react-i18next', () => ({
@@ -29,6 +30,10 @@ vi.mock('../auth/CapabilityProvider', () => ({
   useCapabilities: () => ({
     snapshot: { feature_availability: { workspace_join_v2: true } },
   }),
+}));
+
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => mocks.mockNavigate,
 }));
 
 vi.mock('../store/spaceStore', () => ({
@@ -82,6 +87,7 @@ describe('SpaceSwitcher modal lifecycle', () => {
     mocks.spaceState.setActiveSpace.mockReset();
     mocks.spaceState.joinByCode.mockReset();
     mocks.spaceState.createSpace.mockReset();
+    mocks.mockNavigate.mockReset();
   });
 
   afterEach(() => {
@@ -144,7 +150,7 @@ describe('SpaceSwitcher modal lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: 'switch_space' }));
     fireEvent.click(await screen.findByText('create_space'));
 
-    expect(window.location.pathname).toBe('/spaces/create');
+    expect(mocks.mockNavigate).toHaveBeenCalledWith('/spaces/create');
     expect(mocks.spaceState.createSpace).not.toHaveBeenCalled();
     expect(screen.queryByPlaceholderText('space_name')).toBeNull();
   });

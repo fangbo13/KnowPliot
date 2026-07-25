@@ -74,6 +74,12 @@ export const documentApi = {
     return data;
   },
 
+  // KB-12-Features §7: Create document from text (JSON body, no file upload)
+  async createFromText(body: { title: string; text_content: string; category?: string }): Promise<any> {
+    const { data } = await apiClient.post('/documents/', body);
+    return data;
+  },
+
   async getDocument(id: string): Promise<any> {
     const { data } = await apiClient.get(`/documents/${id}/`);
     return data;
@@ -85,7 +91,7 @@ export const documentApi = {
   },
 
   async deleteDocument(id: string): Promise<void> {
-    await apiClient.delete(`/documents/${id}/`);
+    await apiClient.delete(`/documents/${id}/?hard=true`);
   },
 
   async archiveDocument(id: string): Promise<void> {
@@ -125,6 +131,82 @@ export const documentApi = {
 
   async createCategory(body: { name: string; slug: string; description?: string }): Promise<any> {
     const { data } = await apiClient.post('/documents/categories/', body);
+    return data;
+  },
+
+  // KB-12-Features §1: Version endpoint methods
+
+  async editTextContent(id: string, text: string): Promise<any> {
+    const { data } = await apiClient.patch(`/documents/${id}/text/`, {
+      text_content: text,
+    });
+    return data;
+  },
+
+  async previewDiff(id: string, text: string): Promise<any> {
+    const { data } = await apiClient.post(`/documents/${id}/preview-diff/`, {
+      text_content: text,
+    });
+    return data;
+  },
+
+  async createVersion(
+    id: string,
+    body: { text_content: string; effective_from?: string; reason?: string },
+  ): Promise<any> {
+    const { data } = await apiClient.post(`/documents/${id}/versions/`, body, {
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    return data;
+  },
+
+  async rollbackVersion(
+    id: string,
+    body: { target_version_id?: string; effective_from?: string; reason?: string },
+  ): Promise<any> {
+    const { data } = await apiClient.post(`/documents/${id}/rollback/`, body, {
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    return data;
+  },
+
+  async getVersions(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/${id}/versions/`);
+    return data;
+  },
+
+  // KB-12-Features §8: Document template methods
+
+  async getDocumentTemplates(): Promise<any> {
+    const { data } = await apiClient.get('/documents/document-templates/');
+    return data;
+  },
+
+  async getDocumentTemplate(slug: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/document-templates/${slug}/`);
+    return data;
+  },
+
+  // KB-12-Features §9: Word/PDF→Markdown conversion
+
+  async convertToMarkdown(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await apiClient.post('/documents/convert/', formData);
+    return data;
+  },
+
+  // KB-12-Features §11: Batch upload methods
+
+  async batchUpload(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('zip_file', file);
+    const { data } = await apiClient.post('/documents/batch/upload/', formData);
+    return data;
+  },
+
+  async getBatchResult(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/batch/result/${id}/`);
     return data;
   },
 };

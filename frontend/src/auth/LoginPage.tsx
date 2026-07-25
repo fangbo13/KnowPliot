@@ -5,9 +5,10 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Form, Input, Button, Alert, Tabs, Select, Modal } from 'antd';
 import {
-  MailOutlined, LockOutlined, LoginOutlined, UserSwitchOutlined, GlobalOutlined,
+  MailOutlined, LockOutlined, LoginOutlined, GlobalOutlined,
   SunOutlined, MoonOutlined, UserAddOutlined, SafetyCertificateOutlined, TeamOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -32,9 +33,51 @@ function firstError(data: any): string {
   return '';
 }
 
+/** Calculate password strength: weak / medium / strong. */
+function passwordStrength(pwd: string): 'weak' | 'medium' | 'strong' {
+  if (!pwd) return 'weak';
+  let score = 0;
+  if (pwd.length >= 8) score++;
+  if (pwd.length >= 12) score++;
+  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score++;
+  if (/\d/.test(pwd)) score++;
+  if (/[^a-zA-Z0-9]/.test(pwd)) score++;
+  if (score <= 2) return 'weak';
+  if (score <= 3) return 'medium';
+  return 'strong';
+}
+
+/** Visual password-strength indicator using CSS variables (light/dark aware). */
+function PasswordStrengthBar({ pwd, t }: { pwd: string; t: (k: string) => string }) {
+  const strength = passwordStrength(pwd);
+  if (!pwd) return null;
+  const colors: Record<string, string> = {
+    weak: 'var(--color-error)',
+    medium: 'var(--color-warning)',
+    strong: 'var(--color-success)',
+  };
+  const widths: Record<string, string> = { weak: '33%', medium: '66%', strong: '100%' };
+  return (
+    <div style={{ marginBottom: 8, marginTop: -8, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--color-border-secondary)', overflow: 'hidden' }}>
+        <div style={{
+          width: widths[strength],
+          height: '100%',
+          background: colors[strength],
+          transition: 'width 0.3s ease, background 0.3s ease',
+        }} />
+      </div>
+      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap' }}>
+        {t(`password_strength_${strength}`)}
+      </span>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const { t, i18n } = useTranslation('common');
   const { login } = useAuth();
+  const navigate = useNavigate();
   const bp = useBreakpoint();
   const isNarrow = bp.sm;
   const { effective, setThemeMode } = useTheme();
@@ -48,6 +91,7 @@ export default function LoginPage() {
   const [mfaCode, setMfaCode] = useState('');
   const [resetOpen, setResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
 
   // Admin registration entry is hidden by default; shown only via ?admin=1 query param
   // to keep the public login page clean for regular users.
@@ -60,7 +104,10 @@ export default function LoginPage() {
   };
 
   const syncLanguage = (pref?: string) => {
-    if (pref && pref !== i18n.language) i18n.changeLanguage(pref);
+    if (pref && pref !== i18n.language) {
+      i18n.changeLanguage(pref);
+      localStorage.setItem('ey-language', pref);
+    }
   };
 
   // NOTE: login auth data-flow preserved verbatim from the hardened V4.3 implementation.
@@ -71,9 +118,16 @@ export default function LoginPage() {
       const response = await fetch('/api/v1/auth/token/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: values.email, password: values.password }),
+        body: JSON.stringify({ email: values.email, password: values.password, login_type: 'regular' }),
       });
-      if (!response.ok) throw new Error('login_failed');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        if (errData.code === 'super_admin_blocked') {
+          setError(t('login_super_admin_blocked'));
+          return;
+        }
+        throw new Error('login_failed');
+      }
       const tokenData = await response.json();
       if (tokenData.mfa_required) {
         setMfaChallenge(tokenData.challenge);
@@ -150,6 +204,10 @@ export default function LoginPage() {
       }
       login({ token: data.access, user: data.user });
       syncLanguage(data.user?.language_preference);
+      // A1: redirect spaceless users to space discovery instead of landing on a 403.
+      if (!data.user?.default_space) {
+        navigate('/spaces/discover', { replace: true });
+      }
     } catch {
       setError(t('register_failed'));
     } finally {
@@ -212,20 +270,6 @@ export default function LoginPage() {
       label: <span><LoginOutlined /> {t('auth_tab_signin')}</span>,
       children: (
         <div className="login-input-wrapper">
-          <div
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-              marginBottom: 24, padding: '10px 14px', background: 'var(--accent-soft)',
-              border: '1px solid var(--color-border-secondary)', borderRadius: 12,
-            }}
-          >
-            <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{t('demo_hint')}</span>
-            <Button type="text" size="small" icon={<UserSwitchOutlined />}
-              onClick={() => form.setFieldsValue({ email: 'admin@test.ey.com', password: 'admin123' })}
-              style={{ color: 'var(--accent-text)', fontWeight: 600, flexShrink: 0 }}>
-              {t('demo_fill_btn')}
-            </Button>
-          </div>
           <Form form={form} layout="vertical" size="large" onFinish={handleLogin} requiredMark={false} validateTrigger="onChange">
             <Form.Item name="email" label={t('email_label')} rules={[{ required: true, message: t('validation_email_required') }, { type: 'email', message: t('validation_email_invalid') }]}>
               <Input prefix={<MailOutlined />} placeholder={t('email_placeholder')} autoComplete="email" className="input-focus-float" />
@@ -265,8 +309,14 @@ export default function LoginPage() {
               />
             </Form.Item>
             <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" onChange={(e) => setRegPassword(e.target.value)} />
             </Form.Item>
+            <PasswordStrengthBar pwd={regPassword} t={t} />
+            {!regPassword && (
+              <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: -4, marginBottom: 8 }}>
+                {t('password_strength_hint')}
+              </p>
+            )}
             {confirmPasswordField}
             <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
               <div>
@@ -293,8 +343,14 @@ export default function LoginPage() {
               <Input prefix={<SafetyCertificateOutlined />} placeholder={t('admin_code_placeholder')} autoComplete="off" className="input-focus-float" />
             </Form.Item>
             <Form.Item name="password" label={t('password_label')} rules={passwordRules}>
-              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" />
+              <Input.Password prefix={<LockOutlined />} placeholder={t('password_placeholder')} autoComplete="new-password" className="input-focus-float" onChange={(e) => setRegPassword(e.target.value)} />
             </Form.Item>
+            <PasswordStrengthBar pwd={regPassword} t={t} />
+            {!regPassword && (
+              <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: -4, marginBottom: 8 }}>
+                {t('password_strength_hint')}
+              </p>
+            )}
             {confirmPasswordField}
             <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
               <div>

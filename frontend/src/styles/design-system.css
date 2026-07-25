@@ -397,9 +397,59 @@
 .kp-history-surface { padding: 20px; }
 .kp-history-empty { min-height: 280px; align-content: center; }
 
+/* ---- Space discovery ---- */
+.space-discovery__surface { padding: 28px clamp(20px, 4vw, 32px); }
+.space-discovery__join-bar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.space-discovery__feedback { margin-top: 12px; }
+.space-discovery__divider {
+  height: 1px;
+  margin: 24px 0;
+  border: 0;
+  background: var(--color-border-secondary);
+}
+.space-discovery__status { color: var(--color-text-secondary); padding: 8px 0; }
+.space-discovery__empty { padding: 40px 16px; }
+.space-discovery__empty .kp-empty-state__icon { margin-bottom: 20px; }
+.space-discovery__badge {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-family: var(--font-family-display);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 @keyframes kp-enter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 1024px) {
+  .kp-app-shell { padding: 28px 20px 56px; }
+  .kp-console-sidebar { width: 200px; padding: 16px 14px; }
+  .kp-console-content { padding: 24px 20px 48px; }
+  .kp-lifecycle-section { padding: 24px; }
+  .kp-quality-review { padding: 16px; }
+  .kp-console-overview-surface { padding: 24px; }
+  .kp-history-surface { padding: 16px; }
+}
+
+@media (max-width: 768px) {
+  .kp-app-shell { padding: 24px 16px 48px; }
+  .kp-console-sidebar { width: 180px; padding: 14px 12px; }
+  .kp-console-content { padding: 20px 16px 40px; }
+  .kp-page-header { flex-wrap: wrap; }
+  .kp-action-bar { flex-wrap: wrap; gap: 12px; }
 }
 
 @media (max-width: 900px) {

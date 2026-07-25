@@ -46,6 +46,8 @@ dependencies = [
     # whole duration), causing slow first-token + timeouts when several conversations
     # stream at once. gunicorn with gthread workers serves many concurrent streams.
     "gunicorn>=22.0",
+    "uvicorn[standard]>=0.30,<1",
+    "prometheus-client>=0.20,<1",
 ]
 
 [project.optional-dependencies]

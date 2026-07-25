@@ -1,0 +1,97 @@
+/*
+ * MarkdownEditor styles — all colors via CSS variables (light/dark auto).
+ * KB-12-Features §5
+ */
+
+.md-editor__container {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg-container);
+}
+
+.md-editor__container--readonly {
+  border: none;
+  background: transparent;
+}
+
+.md-editor__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-sunken);
+  min-height: 36px;
+}
+
+.md-editor__toolbar .ant-btn-text {
+  color: var(--color-text-secondary);
+}
+
+.md-editor__toolbar .ant-btn-text:hover {
+  color: var(--color-text);
+  background: var(--color-fill);
+}
+
+.md-editor__body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.md-editor__textarea {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-right: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-container);
+  color: var(--color-text);
+  font-family: var(--font-family-mono, 'JetBrains Mono', 'SF Mono', monospace);
+  font-size: 13.5px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+  tab-size: 2;
+}
+
+.md-editor__textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.md-editor__textarea:focus {
+  background: var(--color-bg-elevated);
+}
+
+.md-editor__preview {
+  flex: 1;
+  padding: 12px 16px;
+  overflow-y: auto;
+  background: var(--color-bg-sunken);
+}
+
+.md-editor__preview .markdown-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+/* Responsive: stack vertically on narrow screens */
+@media (max-width: 768px) {
+  .md-editor__body {
+    flex-direction: column;
+  }
+
+  .md-editor__textarea {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-secondary);
+    min-height: 200px;
+  }
+
+  .md-editor__preview {
+    min-height: 200px;
+  }
+}

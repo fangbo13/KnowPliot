@@ -144,4 +144,9 @@ def join_default_space(user):
             "last_accessed_at": timezone.now(),
         },
     )
+    # Persist the joined space as the user's default so the frontend
+    # ProtectedRoute knows the user already belongs to a workspace.
+    if not user.default_space_id:
+        user.default_space = space
+        user.save(update_fields=["default_space"])
     return space

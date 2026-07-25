@@ -640,6 +640,79 @@ class DocumentVersionCreateView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    def get(self, request, pk):
+        """KB-12-Features §3: List the version chain for a document.
+
+        Walks up the ``parent_document`` chain to find all ancestors, then
+        recursively finds all descendants from the root to capture rollback
+        branches. Returns versions sorted by version number descending
+        (newest first).
+        """
+        document = _resolve_doc_for_edit(request, pk)
+
+        # Collect all versions connected via the parent_document chain.
+        versions_by_id: dict = {}
+
+        # Walk up the parent chain to collect ancestors (including the doc itself).
+        current = document
+        while current is not None:
+            versions_by_id[current.id] = current
+            current = current.parent_document
+
+        # Find the root (oldest version) — follow already-loaded parent chain.
+        root = document
+        while root.parent_document_id is not None:
+            root = root.parent_document
+
+        # Recursively find ALL descendants from root to capture rollback branches.
+        processed: set = set()
+        to_process = [root]
+        while to_process:
+            doc = to_process.pop()
+            if doc.id in processed:
+                continue
+            processed.add(doc.id)
+            if doc.id not in versions_by_id:
+                versions_by_id[doc.id] = doc
+            children = Document.objects.filter(parent_document=doc)
+            for child in children:
+                to_process.append(child)
+
+        # Sort by version number descending (newest first).
+        all_versions = sorted(
+            versions_by_id.values(), key=lambda d: d.version, reverse=True
+        )
+
+        versions_data = [
+            {
+                "id": str(v.id),
+                "version": v.version,
+                "status": v.status,
+                "title": v.title,
+                "effective_from": v.effective_from.isoformat()
+                if v.effective_from
+                else None,
+                "effective_to": v.effective_to.isoformat()
+                if v.effective_to
+                else None,
+                "created_at": v.created_at.isoformat(),
+                "updated_at": v.updated_at.isoformat(),
+                "parent_document": str(v.parent_document_id)
+                if v.parent_document_id
+                else None,
+                "chunk_count": v.chunk_count,
+            }
+            for v in all_versions
+        ]
+
+        return Response(
+            {
+                "document_id": str(document.id),
+                "versions": versions_data,
+                "count": len(versions_data),
+            }
+        )
+
     def post(self, request, pk):
         # Pre-check: resolve document + permissions BEFORE idempotency
         document = _resolve_doc_for_edit(request, pk)
@@ -784,3 +857,264 @@ class DocumentRollbackView(APIView):
                     result_reference=response_body["id"],
                 )
                 return Response(response_body, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# KB-12-Features §8: Markdown document templates
+# ---------------------------------------------------------------------------
+
+DOCUMENT_TEMPLATES: list[dict] = [
+    {
+        "slug": "policy",
+        "name": "Policy Document",
+        "description": "For company policies, regulations, and rules.",
+        "content": (
+            "# Policy Title\n\n"
+            "## 1. Purpose\n\n"
+            "Briefly describe the purpose of this policy.\n\n"
+            "## 2. Scope\n\n"
+            "Who and what this policy applies to.\n\n"
+            "## 3. Policy\n\n"
+            "### 3.1 General Provisions\n\n"
+            "### 3.2 Specific Requirements\n\n"
+            "### 3.3 Exceptions\n\n"
+            "## 4. Roles and Responsibilities\n\n"
+            "| Role | Responsibility |\n"
+            "|------|---------------|\n"
+            "|      |               |\n\n"
+            "## 5. Enforcement\n\n"
+            "Describe enforcement and consequences of non-compliance.\n\n"
+            "## 6. Effective Date and Review\n\n"
+            "- **Effective Date:**\n"
+            "- **Next Review Date:**\n"
+            "- **Approved By:**\n\n"
+            "---\n"
+            "*Version: v1.0*\n"
+        ),
+    },
+    {
+        "slug": "faq",
+        "name": "FAQ Document",
+        "description": "For frequently asked questions and answers.",
+        "content": (
+            "# FAQ: Topic Name\n\n"
+            "## General Questions\n\n"
+            "### Q1: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "### Q2: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "## Technical Questions\n\n"
+            "### Q3: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "### Q4: Question text?\n\n"
+            "**A:** Answer text.\n\n"
+            "---\n\n"
+            "> If your question is not listed here, "
+            "please contact support.\n"
+        ),
+    },
+    {
+        "slug": "technical-doc",
+        "name": "Technical Document",
+        "description": "For technical specifications and design documents.",
+        "content": (
+            "# Technical Document Title\n\n"
+            "## Overview\n\n"
+            "Brief description of the system or feature.\n\n"
+            "## Architecture\n\n"
+            "### Components\n\n"
+            "1. **Component A** - description\n"
+            "2. **Component B** - description\n\n"
+            "### Data Flow\n\n"
+            "```\n"
+            "Input -> Processing -> Output\n"
+            "```\n\n"
+            "## API Specification\n\n"
+            "### Endpoint: GET /api/v1/resource/\n\n"
+            "| Parameter | Type | Required | Description |\n"
+            "|-----------|------|----------|-------------|\n"
+            "|           |      |          |             |\n\n"
+            "## Configuration\n\n"
+            "| Key | Default | Description |\n"
+            "|-----|---------|-------------|\n"
+            "|     |         |             |\n\n"
+            "## Testing\n\n"
+            "### Unit Tests\n\n"
+            "### Integration Tests\n\n"
+            "## Changelog\n\n"
+            "| Version | Date | Changes |\n"
+            "|---------|------|---------|\n"
+            "| v1.0    |      | Initial |\n"
+        ),
+    },
+    {
+        "slug": "meeting-minutes",
+        "name": "Meeting Minutes",
+        "description": "For meeting records and action items.",
+        "content": (
+            "# Meeting Minutes: Meeting Title\n\n"
+            "- **Date:**\n"
+            "- **Time:**\n"
+            "- **Location / Link:**\n"
+            "- **Attendees:**\n"
+            "- **Recorder:**\n\n"
+            "## Agenda\n\n"
+            "1. Item 1\n"
+            "2. Item 2\n"
+            "3. Item 3\n\n"
+            "## Discussion\n\n"
+            "### Item 1\n\n"
+            "### Item 2\n\n"
+            "## Action Items\n\n"
+            "| # | Action | Owner | Due Date | Status |\n"
+            "|---|--------|-------|----------|--------|\n"
+            "| 1 |        |       |          | Open   |\n"
+            "| 2 |        |       |          | Open   |\n\n"
+            "## Next Meeting\n\n"
+            "- **Date:**\n"
+            "- **Agenda:**\n"
+        ),
+    },
+    {
+        "slug": "blank",
+        "name": "Blank Document",
+        "description": "Start from scratch with an empty Markdown document.",
+        "content": "# Untitled Document\n\n",
+    },
+]
+
+
+class DocumentTemplateView(APIView):
+    """KB-12-Features Section 8: Return predefined Markdown document templates.
+
+    GET /documents/document-templates/         - list all templates
+    GET /documents/document-templates/<slug>/  - get a single template by slug
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, slug=None):
+        if slug is not None:
+            for template in DOCUMENT_TEMPLATES:
+                if template["slug"] == slug:
+                    return Response(template)
+            raise NotFound("Document template not found.")
+
+        return Response(
+            {
+                "templates": [
+                    {
+                        "slug": t["slug"],
+                        "name": t["name"],
+                        "description": t["description"],
+                    }
+                    for t in DOCUMENT_TEMPLATES
+                ],
+                "count": len(DOCUMENT_TEMPLATES),
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# KB-12-Features §9: Synchronous Word/PDF→Markdown conversion
+# ---------------------------------------------------------------------------
+
+MAX_INLINE_CONVERT_SIZE_MB = 10
+
+
+class DocumentConvertView(APIView):
+    """KB-12-Features Section 9: Synchronous Word/PDF to Markdown conversion.
+
+    Accepts a file upload, converts to Markdown text using DocumentParser,
+    and returns the text. No database writes, no side effects.
+    Temp files are always cleaned up.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        import tempfile
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from .file_policy import derive_document_type, validate_document_size
+
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"error": "No file provided. Use 'file' field in multipart form data."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 1. Conservative size limit for inline conversion
+        max_size = MAX_INLINE_CONVERT_SIZE_MB * 1024 * 1024
+        if file_obj.size > max_size:
+            return Response(
+                {
+                    "error": (
+                        f"File too large for inline conversion "
+                        f"({file_obj.size} bytes). "
+                        f"Maximum is {MAX_INLINE_CONVERT_SIZE_MB}MB."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 2. Basic size validation (min 1KB)
+        try:
+            validate_document_size(file_obj.size)
+        except DjangoValidationError as exc:
+            return Response(
+                {"error": "; ".join(exc.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3. Derive file type from filename
+        try:
+            file_type = derive_document_type(file_obj.name)
+        except DjangoValidationError as exc:
+            return Response(
+                {"error": "; ".join(exc.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4. Only PDF and DOCX need conversion to Markdown
+        if file_type not in ("pdf", "docx"):
+            return Response(
+                {
+                    "error": (
+                        f"Unsupported file type '{file_type}' for conversion. "
+                        f"Only PDF and DOCX files are supported."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 5. Save to temp file, parse, clean up
+        fd, temp_path = tempfile.mkstemp(suffix=f".{file_type}")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                for chunk in file_obj.chunks():
+                    f.write(chunk)
+
+            from apps.rag.pipeline import DocumentParser
+
+            parser = DocumentParser()
+            markdown_text, _page_metadata = parser.parse(temp_path, file_type)
+
+            return Response(
+                {
+                    "filename": file_obj.name,
+                    "file_type": file_type,
+                    "markdown": markdown_text,
+                    "char_count": len(markdown_text),
+                }
+            )
+        except Exception as exc:
+            return Response(
+                {"error": f"Conversion failed: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)

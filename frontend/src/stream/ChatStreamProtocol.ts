@@ -1,6 +1,6 @@
 import type { SSEMessage } from './SSEParser';
 
-export type ChatProtocolVersion = 1 | 2;
+export type ChatProtocolVersion = 1 | 2 | 3;
 
 export interface ChatStreamValidationContext {
   protocolVersion: ChatProtocolVersion | null;
@@ -41,6 +41,7 @@ const V1_EVENTS = new Set(['token', 'citations', 'quality', 'done', 'error']);
 const V2_EVENTS = new Set(['meta', 'phase', 'answer_delta', 'citations', 'quality', 'usage', 'done', 'error']);
 const SAFE_PHASES = new Set([
   'accepted',
+  'queued',
   'retrieving',
   'reasoning',
   'answering',
@@ -171,11 +172,16 @@ function validateV1(name: string, data: any, context: ChatStreamValidationContex
   }
 }
 
-function validateV2(name: string, data: any, context: ChatStreamValidationContext): void {
+function validateV2(
+  name: string,
+  data: any,
+  context: ChatStreamValidationContext,
+  expectedProtocol: 2 | 3 = 2,
+): void {
   if (!V2_EVENTS.has(name)) invalid();
   if (name === 'meta') {
     if (!isRecord(data)
-      || data.protocol_version !== 2
+      || data.protocol_version !== expectedProtocol
       || !isUuid(data.turn_id)
       || !isUuid(data.session_id)
       || !isUuid(data.client_request_id)
@@ -216,12 +222,14 @@ export function validateChatStreamMessage(
 ): ValidatedChatStreamEvent {
   const protocolVersion = context.protocolVersion
     ?? (message.event === 'meta' ? 2 : message.id === null ? 1 : invalid());
-  if (protocolVersion === 2 && !message.hasExplicitId) invalid();
-  const sequence = protocolVersion === 2
+  if (protocolVersion >= 2 && !message.hasExplicitId) invalid();
+  const sequence = protocolVersion >= 2
     ? sequenceOf(message.id)
     : message.id === null ? null : sequenceOf(message.id);
   const data = parseData(message.data);
-  if (protocolVersion === 2) validateV2(message.event, data, context);
+  if (protocolVersion === 2 || protocolVersion === 3) {
+    validateV2(message.event, data, context, protocolVersion);
+  }
   else validateV1(message.event, data, context);
   return { name: message.event, data, sequence, protocolVersion };
 }

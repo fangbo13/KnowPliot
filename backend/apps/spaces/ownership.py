@@ -81,19 +81,45 @@ def effective_business_admin(user, business_line: BusinessLine) -> bool:
     ).exists()
 
 
-def create_space_with_owner(*, organization, owner, **space_fields):
-    """Create a space with its canonical owner and one owner mirror atomically."""
+def create_space_with_owner(
+    *,
+    organization,
+    owner,
+    join_policy="access_code",
+    join_code=None,
+    **space_fields,
+):
+    """Create a space with its canonical owner and one owner mirror atomically.
+
+    When *join_policy* is ``access_code`` a *join_code* must be present.  If
+    the caller does not supply one, a system code is auto-generated.  When
+    *join_policy* is ``global`` the *join_code* is cleared (the space is
+    publicly discoverable instead).
+    """
 
     if not effective_user(owner):
         raise ValueError("eligible_owner_required")
+    # Auto-generate a join_code for access_code policy when not supplied
+    # (backward-compatible with callers that predate the join_policy field).
+    if join_policy == "access_code" and not join_code:
+        from .join_services import _generate_unique_join_code
+
+        join_code = _generate_unique_join_code()
     with transaction.atomic():
-        space = KnowledgeSpace.objects.create(
-            organization=organization,
-            created_by=owner,
-            owner=owner,
-            ownership_version=1,
-            **space_fields,
-        )
+        create_kwargs = {
+            "organization": organization,
+            "created_by": owner,
+            "owner": owner,
+            "ownership_version": 1,
+            "join_policy": join_policy,
+        }
+        if join_policy == "access_code" and join_code:
+            create_kwargs["join_code"] = join_code
+            create_kwargs["join_code_updated_at"] = timezone.now()
+        elif join_policy == "global":
+            create_kwargs["join_code"] = None
+        create_kwargs.update(space_fields)
+        space = KnowledgeSpace.objects.create(**create_kwargs)
         SpaceMembership.objects.create(
             space=space,
             user=owner,

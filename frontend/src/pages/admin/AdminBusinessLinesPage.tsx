@@ -5,7 +5,7 @@
  */
 
 // V7.0 admin console — organizations & business lines.
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Alert, Card, Table, Button, Tag, Modal, Input, Select, Space, message as antdMessage } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -26,6 +26,12 @@ export default function AdminBusinessLinesPage() {
   const [orgId, setOrgId] = useState('');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+
+  // Filter state
+  const [orgFilter, setOrgFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [nameSearch, setNameSearch] = useState('');
+  const [orgStatusFilter, setOrgStatusFilter] = useState<string | undefined>();
 
   const refresh = useCallback(async () => {
     const sequence = ++sequenceRef.current;
@@ -73,6 +79,22 @@ export default function AdminBusinessLinesPage() {
       antdMessage.error(t('register_failed') || 'Failed');
     } finally { setCreating(false); }
   };
+
+  const filteredLines = useMemo(() => {
+    return lines.filter((line) => {
+      if (orgFilter && line.organization !== orgFilter) return false;
+      if (statusFilter && line.status !== statusFilter) return false;
+      if (nameSearch && !line.name.toLowerCase().includes(nameSearch.toLowerCase())) return false;
+      return true;
+    });
+  }, [lines, orgFilter, statusFilter, nameSearch]);
+
+  const filteredOrgs = useMemo(() => {
+    return orgs.filter((org) => {
+      if (orgStatusFilter && org.status !== orgStatusFilter) return false;
+      return true;
+    });
+  }, [orgs, orgStatusFilter]);
 
   const orgName = (id: string) => orgs.find((o) => o.id === id)?.name || id;
 
@@ -134,14 +156,57 @@ export default function AdminBusinessLinesPage() {
             action={<Button onClick={() => void refresh()}>{t('error_retry')}</Button>}
           />
         )}
-        <Table rowKey="id" loading={loading} dataSource={lines} columns={columns} pagination={false} size="middle" scroll={{ x: 'max-content' }} />
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Input.Search
+            placeholder={t('kb_title') || 'Search name'}
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+            allowClear
+            style={{ width: 180 }}
+          />
+          <Select
+            showSearch
+            allowClear
+            placeholder="Organization"
+            value={orgFilter}
+            onChange={(value) => setOrgFilter(value ?? undefined)}
+            options={orgs.map((o) => ({ value: o.id, label: o.name }))}
+            optionFilterProp="label"
+            style={{ width: 200 }}
+          />
+          <Select
+            allowClear
+            placeholder="Status"
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value ?? undefined)}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'inactive', label: 'Inactive' },
+            ]}
+            style={{ width: 120 }}
+          />
+        </Space>
+        <Table rowKey="id" loading={loading} dataSource={filteredLines} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 
       <Card title="Organizations" className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ marginTop: 24, borderRadius: 'var(--radius-lg)' }}>
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Select
+            allowClear
+            placeholder="Status"
+            value={orgStatusFilter}
+            onChange={(value) => setOrgStatusFilter(value ?? undefined)}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'inactive', label: 'Inactive' },
+            ]}
+            style={{ width: 120 }}
+          />
+        </Space>
         <Table
           rowKey="id"
           loading={loading}
-          dataSource={orgs}
+          dataSource={filteredOrgs}
           pagination={false}
           size="small"
           columns={[

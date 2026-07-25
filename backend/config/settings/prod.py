@@ -22,3 +22,6 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
 
 # CORS - production origins only
 CORS_ALLOW_ALL_ORIGINS = False
+
+# C-08: Enable chat turn idempotency in production to prevent duplicate submissions
+CHAT_TURN_IDEMPOTENCY = True

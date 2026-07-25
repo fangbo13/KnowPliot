@@ -25,6 +25,7 @@ type Props = {
   showCharacterCount?: boolean;
   showHint?: boolean;
   hintText?: string;
+  retryAfterSeconds?: number;
   answerMode?: AnswerMode;
   canUseDeep?: boolean;
   onAnswerModeChange?: (mode: AnswerMode) => void;
@@ -53,6 +54,7 @@ export default function ChatComposer({
   showCharacterCount = true,
   showHint = false,
   hintText,
+  retryAfterSeconds = 0,
   answerMode = 'fast',
   canUseDeep = false,
   onAnswerModeChange,
@@ -98,27 +100,22 @@ export default function ChatComposer({
       <div className="composer-mode" role="group" aria-label={t('answer_mode_label')}>
         <button
           type="button"
-          className="composer-mode-btn"
-          aria-label={t('answer_mode_fast')}
-          aria-pressed={answerMode === 'fast'}
-          disabled={disabled || isStreaming}
-          onClick={() => onAnswerModeChange?.('fast')}
+          className="composer-mode-toggle"
+          role="switch"
+          aria-label={t('answer_mode_label')}
+          aria-checked={answerMode === 'deep'}
+          disabled={disabled || isStreaming || !canUseDeep}
+          title={!canUseDeep ? t('deep_mode_unavailable') || 'Deep mode is not available' : undefined}
+          onClick={() => onAnswerModeChange?.(answerMode === 'fast' ? 'deep' : 'fast')}
         >
-          {t('answer_mode_fast')}
+          <span className="composer-mode-toggle-track">
+            <span className="composer-mode-toggle-thumb" />
+          </span>
+          <span className="composer-mode-toggle-label">
+            {answerMode === 'deep' ? t('answer_mode_deep') : t('answer_mode_fast')}
+          </span>
         </button>
-        {canUseDeep ? (
-          <button
-            type="button"
-            className="composer-mode-btn"
-            aria-label={t('answer_mode_deep')}
-            aria-pressed={answerMode === 'deep'}
-            disabled={disabled || isStreaming}
-            onClick={() => onAnswerModeChange?.('deep')}
-          >
-            {t('answer_mode_deep')}
-          </button>
-        ) : null}
-        {canUseThinking ? (
+        {canUseThinking && (
           <button
             type="button"
             className={`composer-mode-btn composer-thinking-btn${thinkingEnabled ? ' is-enabled' : ''}`}
@@ -133,7 +130,7 @@ export default function ChatComposer({
               {thinkingEnabled ? t('thinking_mode_on') : t('thinking_mode_off')}
             </span>
           </button>
-        ) : null}
+        )}
       </div>
       <div className={`composer${focused ? ' is-focused' : ''}${disabled ? ' is-disabled' : ''}`}>
         <div className="composer-inner">
@@ -171,7 +168,7 @@ export default function ChatComposer({
               className="composer-send"
               onClick={onSubmit}
               disabled={!canSend}
-              aria-label="Send message"
+              aria-label={t('send')}
             >
               {multiline ? <ArrowUpOutlined /> : <SendOutlined />}
             </button>
@@ -181,10 +178,10 @@ export default function ChatComposer({
 
       {showHint && (
         <div className="composer-hint">
-          {hintText ?? (
+          {retryAfterSeconds > 0 ? t('capacity_retry_countdown', { seconds: retryAfterSeconds }) : hintText ?? (
             <>
-              <span><span className="kbd">↵</span> send</span>
-              <span><span className="kbd">⇧</span><span className="kbd">↵</span> newline</span>
+              <span><span className="kbd">↵</span> {t('hint_send', 'send')}</span>
+              <span><span className="kbd">⇧</span><span className="kbd">↵</span> {t('hint_newline', 'newline')}</span>
             </>
           )}
         </div>

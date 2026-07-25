@@ -13,7 +13,6 @@ from .views import (
     branch_from_message,
     citation_source,
     conversation_share_collection,
-    chat_turn_events,
     chat_turn_status,
     export_session,
     quick_actions,
@@ -22,6 +21,7 @@ from .views import (
     submit_feedback,
     view_conversation_share,
 )
+from .v3_views import cancel_chat_turn_v3, chat_turn_events_dispatch
 
 urlpatterns = [
     path("sessions/", ChatSessionListCreateView.as_view(), name="chat-session-list"),
@@ -35,7 +35,16 @@ urlpatterns = [
     path("sessions/<uuid:session_id>/send/", send_message, name="chat-send-message"),
     path("messages/<uuid:message_id>/regenerate/", send_message, name="chat-message-regenerate"),
     path("turns/<uuid:turn_id>/", chat_turn_status, name="chat-turn-status"),
-    path("turns/<uuid:turn_id>/events/", chat_turn_events, name="chat-turn-events"),
+    path(
+        "turns/<uuid:turn_id>/events/",
+        chat_turn_events_dispatch,
+        name="chat-turn-events",
+    ),
+    path(
+        "turns/<uuid:turn_id>/cancel/",
+        cancel_chat_turn_v3,
+        name="chat-turn-cancel",
+    ),
     path("sessions/<uuid:session_id>/export/", export_session, name="chat-session-export"),
     path("messages/<uuid:message_id>/feedback/", submit_feedback, name="chat-feedback"),
     path("quick-actions/", quick_actions, name="chat-quick-actions"),

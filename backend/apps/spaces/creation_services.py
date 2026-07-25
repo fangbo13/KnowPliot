@@ -11,6 +11,8 @@ idempotency, and the single-transaction approval result.
 
 from __future__ import annotations
 
+import random
+import string
 import uuid
 from datetime import timedelta
 
@@ -41,6 +43,10 @@ from .models import (
     WorkspaceCreationPolicy,
     WorkspaceLocatorReservation,
 )
+from .join_services import (
+    _generate_unique_join_code,
+    validate_custom_join_code,
+)
 
 
 CREATE_ALLOWED_FIELDS = {
@@ -48,6 +54,8 @@ CREATE_ALLOWED_FIELDS = {
     "code",
     "purpose",
     "visibility",
+    "join_policy",
+    "join_code",
     "business_line_id",
     "work_group_id",
     "office_location_ids",
@@ -112,14 +120,50 @@ def _resolve_template_revision(template_version_id, *, business_line):
     return revision
 
 
+def _generate_unique_locator_code(organization) -> str:
+    """Generate a unique workspace locator code when the client omits one.
+
+    The code matches ``_CODE_RE`` (lower-case alphanumeric + hyphens) and is
+    checked against existing ``WorkspaceLocatorReservation`` rows to avoid
+    collisions within the organization.
+    """
+    alphabet = string.ascii_lowercase + string.digits
+    for _ in range(5):
+        body = "".join(random.choices(alphabet, k=8))
+        candidate = f"ws-{body}"
+        if not WorkspaceLocatorReservation.objects.filter(
+            organization=organization,
+            normalized_code=candidate,
+        ).exists():
+            return candidate
+    raise GovernedWorkflowError("locator_code_generation_failed", status_code=500)
+
+
 def _normalize_creation_payload(payload: dict, *, actor):
     _reject_unknown(payload)
     name = normalize_text(payload.get("name"), max_length=200, field="name")
-    code = normalize_code(payload.get("code"))
+    supplied_code = payload.get("code")
     purpose = normalize_text(payload.get("purpose"), max_length=1000, field="purpose")
     visibility = payload.get("visibility", "private")
     if visibility not in {choice[0] for choice in KnowledgeSpace.VISIBILITY_CHOICES}:
         raise ValidationError({"visibility": "Unsupported visibility."})
+    # Join policy validation (spec §2.1): two-choice model.
+    join_policy = payload.get("join_policy", KnowledgeSpace.JOIN_POLICY_ACCESS_CODE)
+    if join_policy not in {choice[0] for choice in KnowledgeSpace.JOIN_POLICY_CHOICES}:
+        raise ValidationError({"join_policy": "Unsupported join policy."})
+    # Resolve join_code based on policy.
+    if join_policy == KnowledgeSpace.JOIN_POLICY_ACCESS_CODE:
+        raw_code = payload.get("join_code")
+        if raw_code:
+            join_code = validate_custom_join_code(raw_code)
+            # Uniqueness pre-check (DB constraint is the final guard).
+            if KnowledgeSpace.objects.filter(join_code__iexact=join_code).exists():
+                raise ValidationError({"join_code": "This join code is already in use."})
+        else:
+            join_code = _generate_unique_join_code()
+    else:
+        # global policy: no join_code needed.
+        join_code = None
     business_line_id = _uuid(payload.get("business_line_id"), "business_line_id")
     work_group_id = _uuid(payload.get("work_group_id"), "work_group_id")
     office_values = payload.get("office_location_ids", [])
@@ -136,6 +180,10 @@ def _normalize_creation_payload(payload: dict, *, actor):
     )
     if business_line is None:
         raise ValidationError({"business_line_id": "Business line is not selectable."})
+    if supplied_code:
+        code = normalize_code(supplied_code)
+    else:
+        code = _generate_unique_locator_code(business_line.organization)
     work_group = (
         WorkGroup.objects.filter(
             pk=work_group_id,
@@ -179,6 +227,8 @@ def _normalize_creation_payload(payload: dict, *, actor):
         "code": code,
         "purpose": purpose,
         "visibility": visibility,
+        "join_policy": join_policy,
+        "join_code": join_code,
         "business_line_id": business_line.id,
         "work_group_id": work_group.id,
         "office_location_ids": [location.id for location in locations],
@@ -237,6 +287,8 @@ def _request_body(request: GovernedActionRequest):
             "code": detail.normalized_code,
             "purpose": detail.purpose,
             "visibility": detail.requested_visibility,
+            "join_policy": detail.requested_join_policy,
+            "join_code": detail.requested_join_code,
             "business_line_id": str(detail.business_line_id),
             "work_group_id": str(detail.work_group_id),
             "office_location_ids": [str(value) for value in detail.office_location_ids],
@@ -341,6 +393,8 @@ def submit_creation_request(*, actor, payload: dict, idempotency_key: uuid.UUID)
                 normalized_code=normalized["code"],
                 purpose=normalized["purpose"],
                 requested_visibility=normalized["visibility"],
+                requested_join_policy=normalized["join_policy"],
+                requested_join_code=normalized["join_code"],
                 business_line=business_line,
                 work_group_id=work_group.id,
                 office_location_ids=[str(location.id) for location in locations],
@@ -367,13 +421,51 @@ def submit_creation_request(*, actor, payload: dict, idempotency_key: uuid.UUID)
 
 def get_creation_request(*, actor, request_id, reviewer=False):
     try:
-        row = GovernedActionRequest.objects.select_related("create_detail", "requester", "organization", "business_line").get(
+        row = GovernedActionRequest.objects.select_related(
+            "create_detail", "create_detail__business_line", "requester", "organization", "business_line",
+        ).get(
             pk=request_id, action_type=GovernedActionRequest.ACTION_WORKSPACE_CREATE
         )
     except GovernedActionRequest.DoesNotExist as exc:
         raise NotFound("Request not found.") from exc
     if not reviewer and row.requester_uuid != actor.id:
         raise NotFound("Request not found.")
+    return row
+
+
+def refresh_creation_impact(*, actor, request_id, reviewer=True):
+    """Refresh an expired impact snapshot for a pending creation request.
+
+    Called by the admin impact endpoint when the stored impact has expired,
+    so the reviewer always sees a current snapshot before approving.
+    """
+    row = get_creation_request(actor=actor, request_id=request_id, reviewer=reviewer)
+    if row.status != GovernedActionRequest.STATUS_PENDING:
+        raise GovernedWorkflowError("request_not_pending")
+    detail = getattr(row, "create_detail", None)
+    if detail is None:
+        raise GovernedWorkflowError("impact_changed")
+    normalized, _business_line, _work_group, _locations, _policy, _template_revision = _normalize_creation_payload(
+        {
+            "name": detail.normalized_name,
+            "code": detail.normalized_code,
+            "purpose": detail.purpose,
+            "visibility": detail.requested_visibility,
+            "join_policy": detail.requested_join_policy,
+            "join_code": detail.requested_join_code,
+            "business_line_id": str(detail.business_line_id),
+            "work_group_id": str(detail.work_group_id),
+            "office_location_ids": detail.office_location_ids,
+            "template_version_id": str(detail.template_version_id) if detail.template_version_id else None,
+        },
+        actor=row.requester,
+    )
+    impact_version, impact_snapshot = _impact_for(normalized)
+    row.impact_version = impact_version
+    row.impact_snapshot = impact_snapshot
+    row.impact_revision = (row.impact_revision or 0) + 1
+    row.impact_expires_at = timezone.now() + timedelta(minutes=10)
+    row.save(update_fields=["impact_version", "impact_snapshot", "impact_revision", "impact_expires_at", "updated_at"])
     return row
 
 
@@ -442,9 +534,9 @@ def reject_creation_request(*, reviewer, request_id, expected_version: int, reas
             return body
 
 
-def approve_creation_request(*, reviewer, request_id, expected_version: int, impact_version: str, acknowledge_requester_becomes_owner: bool, idempotency_key: uuid.UUID):
+def approve_creation_request(*, reviewer, request_id, expected_version: int, impact_version: str, acknowledge_requester_becomes_owner: bool, idempotency_key: uuid.UUID, bypass_separation: bool = False):
     row = get_creation_request(actor=reviewer, request_id=request_id, reviewer=True)
-    digest = digest_payload({"request_id": request_id, "expected_request_version": expected_version, "impact_version": impact_version, "acknowledge_requester_becomes_owner": acknowledge_requester_becomes_owner, "action": "approve"})
+    digest = digest_payload({"request_id": request_id, "expected_request_version": expected_version, "impact_version": impact_version, "acknowledge_requester_becomes_owner": acknowledge_requester_becomes_owner, "bypass_separation": bypass_separation, "action": "approve"})
     with durable_governed_transaction():
         with operation_record(actor=reviewer, operation_code="workspace_create.approve", key=idempotency_key, request_digest=digest, request_uuid=row.id) as (operation, replay):
             if replay:
@@ -452,7 +544,10 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
             row = GovernedActionRequest.objects.select_for_update(of=("self",)).select_related("create_detail", "organization", "business_line", "requester").get(pk=row.id)
             if row.status != GovernedActionRequest.STATUS_PENDING:
                 raise GovernedWorkflowError("request_already_resolved")
-            if row.requester_uuid == reviewer.id:
+            # Separation-of-duties bypass: only a Django superuser may waive
+            # the self-approval and two-reviewer gate for their own request.
+            can_bypass = bypass_separation and bool(getattr(reviewer, "is_superuser", False))
+            if row.requester_uuid == reviewer.id and not can_bypass:
                 raise GovernedWorkflowError("self_approval_forbidden")
             if not acknowledge_requester_becomes_owner:
                 raise ValidationError({"acknowledge_requester_becomes_owner": "Must be true."})
@@ -460,7 +555,8 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                 raise GovernedWorkflowError("stale_request_version", details={"current_version": row.request_version})
             if not impact_version or impact_version != row.impact_version or not row.impact_expires_at or row.impact_expires_at <= timezone.now():
                 raise GovernedWorkflowError("impact_changed", details={"current_version": row.request_version, "impact_version": row.impact_version, "impact_expires_at": row.impact_expires_at.isoformat() if row.impact_expires_at else None})
-            ensure_two_reviewer_gate(requester_id=row.requester_uuid)
+            if not can_bypass:
+                ensure_two_reviewer_gate(requester_id=row.requester_uuid)
             detail = row.create_detail
             # Revalidate all pinned taxonomy rows under the transaction before
             # creating any space.  No client-selected owner/scope is accepted.
@@ -470,6 +566,8 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                     "code": detail.normalized_code,
                     "purpose": detail.purpose,
                     "visibility": detail.requested_visibility,
+                    "join_policy": detail.requested_join_policy,
+                    "join_code": detail.requested_join_code,
                     "business_line_id": str(detail.business_line_id),
                     "work_group_id": str(detail.work_group_id),
                     "office_location_ids": detail.office_location_ids,
@@ -500,6 +598,8 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                     code=detail.normalized_code,
                     description=detail.purpose,
                     visibility=detail.requested_visibility,
+                    join_policy=normalized["join_policy"],
+                    join_code=normalized["join_code"],
                 )
                 space.office_locations.set(locations)
             except IntegrityError as exc:
@@ -544,7 +644,10 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                         "revision_hash": template_revision.snapshot_hash,
                     },
                 )
-            record_transition_audit(actor=reviewer, request=row, event="workspace_create_approved", old_status=old, new_status=row.status, details={"space_id": str(space.id)})
+            audit_details = {"space_id": str(space.id)}
+            if can_bypass:
+                audit_details["bypass_separation"] = True
+            record_transition_audit(actor=reviewer, request=row, event="workspace_create_approved", old_status=old, new_status=row.status, details=audit_details)
             enqueue_transition_outbox(request=row, event_type="workspace_create_approved", transition_version=row.request_version, recipient=row.requester, payload={"request_id": str(row.id), "status": row.status, "space_id": str(space.id)})
             body = _request_body(row)
             body["status"] = "completed"
@@ -556,6 +659,7 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
 __all__ = [
     "submit_creation_request",
     "get_creation_request",
+    "refresh_creation_impact",
     "cancel_creation_request",
     "reject_creation_request",
     "approve_creation_request",

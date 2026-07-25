@@ -41,7 +41,7 @@
     "@vitejs/plugin-react": "^4.0.0",
     "jsdom": "^24.0.0",
     "puppeteer": "^25.1.0",
-    "typescript": "^5.4.0",
+    "typescript": "^5.9.3",
     "vite": "^5.0.0",
     "vitest": "^2.0.0"
   }

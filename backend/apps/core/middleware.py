@@ -46,8 +46,14 @@ class SafeErrorResponseMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        response = self.get_response(request)
-        return response
+        try:
+            response = self.get_response(request)
+            return response
+        except Exception as e:
+            import traceback
+            print(f'[SafeErrorResponseMiddleware] Exception in __call__: {e}')
+            traceback.print_exc()
+            return JsonResponse({"error": "Internal server error", "detail": str(e)}, status=500)
 
     def process_exception(self, request, exception):
         """Catch ALL unhandled exceptions and return generic JSON.

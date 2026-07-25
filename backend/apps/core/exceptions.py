@@ -23,6 +23,12 @@ def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
     if response is None:
+        import traceback as _tb
+        import os as _os
+        _log_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), 'debug_exception.log')
+        with open(_log_path, 'a') as _f:
+            _f.write(f'[{_os.path.basename(__file__)}] Unhandled exception: {exc}\n')
+            _f.write(_tb.format_exc() + '\n')
         logger.error("Unhandled exception: %s", exc, exc_info=True)
         return Response(
             {

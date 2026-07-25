@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -18,6 +19,7 @@ from .creation_services import (
     approve_creation_request,
     cancel_creation_request,
     get_creation_request,
+    refresh_creation_impact,
     reject_creation_request,
     submit_creation_request,
 )
@@ -59,6 +61,22 @@ def _strict_body(data, allowed: set[str]):
         raise ValidationError({"unknown_fields": unknown})
 
 
+def _resolve_work_group_name(work_group_id):
+    from .models import WorkGroup
+
+    wg = WorkGroup.objects.filter(pk=work_group_id).first()
+    return wg.display_name if wg else None
+
+
+def _resolve_office_location_names(office_location_ids):
+    from .models import OfficeLocation
+
+    if not office_location_ids:
+        return []
+    locs = OfficeLocation.objects.filter(pk__in=office_location_ids).order_by("sort_order", "display_name")
+    return [loc.display_name for loc in locs]
+
+
 def _request_payload(row):
     body = {
         "request_id": str(row.id),
@@ -79,8 +97,11 @@ def _request_payload(row):
             "purpose": detail.purpose,
             "visibility": detail.requested_visibility,
             "business_line_id": str(detail.business_line_id),
+            "business_line_name": detail.business_line.name if detail.business_line_id else None,
             "work_group_id": str(detail.work_group_id),
+            "work_group_name": _resolve_work_group_name(detail.work_group_id),
             "office_location_ids": [str(value) for value in detail.office_location_ids],
+            "office_location_names": _resolve_office_location_names(detail.office_location_ids),
             "template_version_id": str(detail.template_version_id) if detail.template_version_id else None,
         }
     if row.result_uuid:
@@ -110,7 +131,7 @@ def creation_request_mine(request):
             requester_uuid=request.user.id,
             action_type=GovernedActionRequest.ACTION_WORKSPACE_CREATE,
         )
-        .select_related("create_detail")
+        .select_related("create_detail", "create_detail__business_line")
         .order_by("-created_at")
     )
     limit = min(max(int(request.query_params.get("limit", "50")), 1), 100)
@@ -143,7 +164,9 @@ def admin_governed_requests(request):
     statuses = request.query_params.get("status")
     if action not in {choice[0] for choice in GovernedActionRequest.ACTION_CHOICES}:
         raise ValidationError({"action": "Unsupported action."})
-    rows = GovernedActionRequest.objects.filter(action_type=action).select_related("create_detail").order_by("created_at")
+    rows = GovernedActionRequest.objects.filter(action_type=action).select_related(
+        "create_detail", "create_detail__business_line",
+    ).order_by("created_at")
     if statuses:
         values = {value.strip() for value in statuses.split(",") if value.strip()}
         allowed = {choice[0] for choice in GovernedActionRequest.STATUS_CHOICES}
@@ -160,6 +183,10 @@ def admin_governed_request_impact(request, request_id):
     row = get_creation_request(actor=request.user, request_id=request_id, reviewer=True)
     if row.status != GovernedActionRequest.STATUS_PENDING:
         raise GovernedWorkflowError("request_not_pending")
+    # Refresh the impact snapshot when it has expired so the reviewer
+    # always sees a current snapshot before approving.
+    if not row.impact_expires_at or row.impact_expires_at <= timezone.now():
+        row = refresh_creation_impact(actor=request.user, request_id=request_id, reviewer=True)
     return Response({
         "request_id": str(row.id),
         "impact_version": row.impact_version,
@@ -173,7 +200,7 @@ def admin_governed_request_impact(request, request_id):
 @permission_classes([IsAuthenticated])
 def admin_governed_request_approve(request, request_id):
     _require_reviewer(request.user)
-    _strict_body(request.data, {"expected_request_version", "impact_version", "acknowledge_requester_becomes_owner"})
+    _strict_body(request.data, {"expected_request_version", "impact_version", "acknowledge_requester_becomes_owner", "bypass_separation"})
     try:
         expected = int(request.data.get("expected_request_version"))
     except (TypeError, ValueError) as exc:
@@ -188,6 +215,7 @@ def admin_governed_request_approve(request, request_id):
         impact_version=request.data.get("impact_version", ""),
         acknowledge_requester_becomes_owner=True,
         idempotency_key=key,
+        bypass_separation=bool(request.data.get("bypass_separation", False)),
     )
     if isinstance(body, Response):
         return body

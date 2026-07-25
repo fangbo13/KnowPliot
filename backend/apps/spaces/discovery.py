@@ -91,6 +91,7 @@ def authorized_discovery_queryset(user):
         | Q(id__in=pending_ids)
         | Q(id__in=invited_ids)
         | Q(visibility="public_demo")
+        | Q(join_policy="global")
     )
     if organization_ids:
         visible |= Q(visibility="organization", organization_id__in=organization_ids)
@@ -129,6 +130,7 @@ def _card(space, access_state, *, popularity_bucket=None):
         "code": space.code,
         "purpose": (space.description or "")[:280],
         "visibility": space.visibility,
+        "join_policy": space.join_policy,
         "classification_state": space.classification_state,
         "business_line": (
             {"id": str(space.business_line_id), "code": space.business_line.code, "display_name": space.business_line.name}
@@ -146,7 +148,7 @@ def _card(space, access_state, *, popularity_bucket=None):
             "member": "open",
             "invited": "review_invitation",
             "pending": "view_request",
-            "requestable": "request_access",
+            "requestable": "global_join" if space.join_policy == "global" else "request_access",
         }[access_state],
     }
     if popularity_bucket is not None:

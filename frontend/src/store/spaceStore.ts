@@ -5,7 +5,7 @@
  */
 
 import { create } from 'zustand';
-import { spacesApi, type KnowledgeSpace, type SpaceAccessRequestRecord } from '../api/spaces';
+import { spacesApi, type KnowledgeSpace, type JoinResult } from '../api/spaces';
 import { ACTIVE_SPACE_KEY, isAbortError } from '../api/client';
 import { useChatStore } from './chatStore';
 
@@ -16,7 +16,7 @@ interface SpaceState {
   error: string | null;
   loadSpaces: (signal?: AbortSignal) => Promise<void>;
   setActiveSpace: (id: string, signal?: AbortSignal) => Promise<void>;
-  joinByCode: (code: string, signal?: AbortSignal) => Promise<SpaceAccessRequestRecord>;
+  joinByCode: (code: string, signal?: AbortSignal) => Promise<JoinResult>;
   createSpace: (body: Partial<KnowledgeSpace>, signal?: AbortSignal) => Promise<KnowledgeSpace>;
   getActiveSpace: () => KnowledgeSpace | null;
 }
