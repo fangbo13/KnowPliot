@@ -43,7 +43,6 @@ const DEFINITIONS: Record<ConsoleKind, Array<Omit<ConsoleNavigationItem, 'to'>>>
     { segment: 'members', label: 'Members', capability: 'workspace.members.manage' },
     { segment: 'invites', label: 'Invitations', capability: 'workspace.invites.manage' },
     { segment: 'access', label: 'Access requests', capability: 'workspace.access_requests.manage' },
-    { segment: 'knowledge', label: 'Knowledge', capability: 'knowledge.read' },
     { segment: 'quality', label: 'Quality', capability: 'quality.read' },
     { segment: 'audit', label: 'Audit', capability: 'audit.read' },
     { segment: 'settings', label: 'Settings', capability: 'workspace.settings.manage' },

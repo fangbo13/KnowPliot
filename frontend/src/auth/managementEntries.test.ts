@@ -23,7 +23,7 @@ describe('active management surface entries', () => {
     expect(entries).toEqual([
       { id: 'console', label: 'Management console', to: '/governance' },
       { id: 'workspace', label: 'Workspace management', to: '/workspace/space-1/manage' },
-      { id: 'knowledge', label: 'Knowledge base', to: '/workspace/space-1/manage/knowledge' },
+      { id: 'knowledge', label: 'Knowledge base', to: '/workspace/space-1/knowledge' },
     ]);
   });
 

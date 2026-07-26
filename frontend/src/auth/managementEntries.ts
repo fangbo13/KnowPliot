@@ -30,15 +30,15 @@ export function buildManagementEntries(
         : '/spaces/manage',
     });
   }
-  // In capability mode the knowledge base lives under the workspace-scoped
-  // route; in legacy mode it falls back to the admin knowledge page so the
-  // link does not redirect to /spaces/manage.
+  // The knowledge base is a standalone workspace-scoped route, separated
+  // from the workspace management console. In legacy mode it falls back to
+  // the admin knowledge page.
   if (activeSpaceId && access.has('knowledge.read')) {
     entries.push({
       id: 'knowledge',
       label: t?.('knowledge_base') || 'Knowledge base',
       to: access.enabled
-        ? `/workspace/${activeSpaceId}/manage/knowledge`
+        ? `/workspace/${activeSpaceId}/knowledge`
         : '/admin/knowledge',
     });
   }

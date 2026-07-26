@@ -131,6 +131,20 @@ function App({
           <Route path="profile" element={<SuspendedRoute><ProfilePage /></SuspendedRoute>} />
           <Route path="ownership-transfers" element={<SuspendedRoute><OwnershipTransfersPage /></SuspendedRoute>} />
           <Route
+            path="workspace/:spaceId/knowledge"
+            element={(
+              <NavigationModeBoundary expected={expectedNavigationMode}>
+                {capabilityNavigationEnabled ? (
+                  <WorkspaceCapabilityBoundary>
+                    <CapabilityGate required="knowledge.read">
+                      <SuspendedRoute><KnowledgeBasePage /></SuspendedRoute>
+                    </CapabilityGate>
+                  </WorkspaceCapabilityBoundary>
+                ) : <Navigate to="/spaces/manage" replace />}
+              </NavigationModeBoundary>
+            )}
+          />
+          <Route
             path="spaces/manage"
             element={(
               <NavigationModeBoundary expected={expectedNavigationMode}>
@@ -247,7 +261,6 @@ function App({
           <Route path="members" element={<CapabilityGate required="workspace.members.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="invites" element={<CapabilityGate required="workspace.invites.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="access" element={<CapabilityGate required="workspace.access_requests.manage"><SuspendedRoute><AccessRequestsPage /></SuspendedRoute></CapabilityGate>} />
-          <Route path="knowledge" element={<CapabilityGate required="knowledge.read"><SuspendedRoute><KnowledgeBasePage /></SuspendedRoute></CapabilityGate>} />
           <Route path="quality" element={<CapabilityGate required="quality.read"><SuspendedRoute><ScopedQualityPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="audit" element={<CapabilityGate required="audit.read"><SuspendedRoute><WorkspaceAuditRoute /></SuspendedRoute></CapabilityGate>} />
           <Route path="settings" element={<CapabilityGate required="workspace.settings.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />

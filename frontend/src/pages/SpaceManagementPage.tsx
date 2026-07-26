@@ -690,7 +690,7 @@ export default function SpaceManagementPage() {
                       <Tag color={rec.status === 'active' ? 'green' : 'default'}>{rec.status}</Tag>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      {isOwner && canManageMembers && rec.status === 'active' ? (
+                      {isOwner && canManageMembers && rec.status === 'active' && rec.role !== 'owner' ? (
                         <Select
                           size="small"
                           value={rec.role}
@@ -774,7 +774,7 @@ export default function SpaceManagementPage() {
         )}
         </div>
 
-        {isOwner && (
+        {isOwner && showMembers && (
           <Card
             title={
               <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
