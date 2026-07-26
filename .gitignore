@@ -75,3 +75,5 @@ backend/C?/
 output/
 never
 
+# Local isolated feature worktrees
+.worktrees/
