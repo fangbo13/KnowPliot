@@ -53,6 +53,17 @@ class User(AbstractUser):
     service_line = models.CharField(
         max_length=30, choices=SERVICE_LINE_CHOICES, null=True, blank=True
     )
+    # Knowledge iteration spec §1.2: FK to spaces.BusinessLine drives the
+    # discovery-layer isolation (which spaces a user can see/join).
+    # service_line CharField is kept for transitional compatibility;
+    # reads prefer this FK. Backfilled from service_line by data migration.
+    business_line = models.ForeignKey(
+        "spaces.BusinessLine",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="users",
+    )
     office_location = models.CharField(max_length=100, null=True, blank=True)
     role_level = models.CharField(
         max_length=20, choices=ROLE_LEVEL_CHOICES, null=True, blank=True

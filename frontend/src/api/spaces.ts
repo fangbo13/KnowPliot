@@ -55,6 +55,8 @@ export interface KnowledgeSpace {
   language: string;
   visibility: 'private' | 'business_line' | 'organization' | 'public_demo';
   join_policy: JoinPolicy;
+    // Spec §3: space-level review gate (default require_review)
+    review_policy?: 'direct_publish' | 'require_review';
   join_code: string | null;
   allow_member_invite: boolean;
   join_code_updated_at: string | null;

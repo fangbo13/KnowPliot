@@ -22,6 +22,7 @@ from .views import (
     DocumentConvertView,
 )
 from .batch_views import BatchDocumentUploadView, BatchImportResultDetailView
+from . import review_views, taxonomy_views, viz_views
 
 urlpatterns = [
     path("", DocumentListCreateView.as_view(), name="document-list"),
@@ -45,4 +46,21 @@ urlpatterns = [
     path("document-templates/<slug:slug>/", DocumentTemplateView.as_view(), name="document-template-detail"),
     # KB-12-Features §9: Synchronous Word/PDF→Markdown conversion
     path("convert/", DocumentConvertView.as_view(), name="document-convert"),
+    # Knowledge iteration spec §2: taxonomy (dimensions/terms/tags/ownership)
+    path("taxonomy/dimensions/", taxonomy_views.taxonomy_dimensions, name="taxonomy-dimensions"),
+    path("taxonomy/terms/", taxonomy_views.taxonomy_terms, name="taxonomy-terms"),
+    path("<uuid:pk>/tags/", taxonomy_views.document_tags, name="document-tags"),
+    path("term-owners/", taxonomy_views.term_owners, name="term-owners"),
+    path("term-owners/<uuid:pk>/", taxonomy_views.term_owner_delete, name="term-owner-delete"),
+    path("my-terms/", taxonomy_views.my_terms, name="my-terms"),
+    path("<uuid:pk>/confirm-fresh/", taxonomy_views.confirm_fresh, name="document-confirm-fresh"),
+    # Knowledge iteration spec §3: review gate
+    path("<uuid:pk>/submit-review/", review_views.submit_review, name="document-submit-review"),
+    path("review-queue/", review_views.review_queue, name="review-queue"),
+    path("reviews/<uuid:pk>/approve/", review_views.review_approve, name="review-approve"),
+    path("reviews/<uuid:pk>/reject/", review_views.review_reject, name="review-reject"),
+    # Knowledge iteration spec §5: visualization
+    path("graph/", viz_views.knowledge_graph, name="knowledge-graph"),
+    path("timeline/", viz_views.knowledge_timeline, name="knowledge-timeline"),
+    path("dashboard/", viz_views.knowledge_dashboard, name="knowledge-dashboard"),
 ]

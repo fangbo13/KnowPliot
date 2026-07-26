@@ -47,7 +47,7 @@ class KnowledgeSpaceSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "description", "icon", "language",
             "visibility", "status", "organization", "organization_name",
-            "business_line", "business_line_name",
+            "business_line", "business_line_name", "review_policy",
             "my_role", "member_count", "settings", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -71,13 +71,14 @@ class SpaceCreateSerializer(serializers.ModelSerializer):
         model = KnowledgeSpace
         fields = [
             "id", "name", "code", "description", "icon", "language",
-            "visibility", "organization", "business_line",
+            "visibility", "organization", "business_line", "review_policy",
         ]
         read_only_fields = ["id"]
         extra_kwargs = {
             "organization": {"required": False},
             "business_line": {"required": False},
             "visibility": {"required": False},
+            "review_policy": {"required": False},
         }
 
     def validate_code(self, value):

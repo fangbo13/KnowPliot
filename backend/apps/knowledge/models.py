@@ -70,6 +70,11 @@ class Document(models.Model):
         # Retrieval excludes superseded documents so stale/contradictory content
         # never pollutes answers (SPEC §1.5 key invariant).
         ("superseded", "Superseded"),
+        # Knowledge iteration spec §3.2: review gate states. Documents in
+        # pending_review / rejected NEVER have retrievable chunks — approval
+        # is the only transition that triggers chunk+embed indexing.
+        ("pending_review", "Pending Review"),
+        ("rejected", "Rejected"),
     ]
 
     FILE_TYPE_CHOICES = [
@@ -117,6 +122,19 @@ class Document(models.Model):
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT
     )
+    # Knowledge iteration spec §3.5: watermark — the author of THIS version row.
+    # uploaded_by keeps its historical semantics (uploader of this version);
+    # updated_by is set on every version creation for contributor tracing.
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_documents",
+    )
+    # Knowledge iteration spec §4 L3: owner "confirm still fresh" resets this
+    # timestamp; the stale sweep uses max(updated_at, last_reviewed_at).
+    last_reviewed_at = models.DateTimeField(null=True, blank=True)
     processing_error = models.TextField(blank=True, default="")
     # V4.2 KB-V4.2-BATCH-010: Content hash for deduplication — SHA256 of file content
     # Prevents duplicate documents from being uploaded (manual + batch uploads)
@@ -437,3 +455,267 @@ class IngestionJob(models.Model):
 
     def __str__(self):
         return f"{self.document_id}: {self.status}"
+
+
+# ---------------------------------------------------------------------------
+# Knowledge iteration spec §2 — controlled metadata taxonomy (tag dimensions,
+# not a folder tree: one document can be FY26 + accounts_receivable + scot).
+# ---------------------------------------------------------------------------
+
+
+class TaxonomyDimension(models.Model):
+    """A controlled metadata dimension (account / fiscal_year / audit_phase / scot)."""
+
+    STATUS_CHOICES = [("active", "Active"), ("archived", "Archived")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        "spaces.Organization",
+        on_delete=models.CASCADE,
+        related_name="taxonomy_dimensions",
+    )
+    # Null business_line = organization-wide dimension (e.g. fiscal_year).
+    business_line = models.ForeignKey(
+        "spaces.BusinessLine",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="taxonomy_dimensions",
+    )
+    code = models.SlugField(max_length=50)
+    name = models.CharField(max_length=100)
+    is_hierarchical = models.BooleanField(default=False)
+    required = models.BooleanField(
+        default=False, help_text="If true, uploads must carry at least one term."
+    )
+    sort_order = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_taxonomydimension"
+        ordering = ["sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "code"],
+                name="knowledge_taxdim_org_code_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.code} ({self.name})"
+
+
+class TaxonomyTerm(models.Model):
+    """A controlled vocabulary term within a dimension (e.g. fy26, accounts_receivable)."""
+
+    STATUS_CHOICES = [("active", "Active"), ("archived", "Archived")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dimension = models.ForeignKey(
+        TaxonomyDimension, on_delete=models.CASCADE, related_name="terms"
+    )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
+    )
+    code = models.SlugField(max_length=80)
+    label = models.CharField(max_length=200)
+    sort_order = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_taxonomyterm"
+        ordering = ["sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dimension", "code"],
+                name="knowledge_taxterm_dim_code_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.dimension.code}:{self.code}"
+
+
+class DocumentTag(models.Model):
+    """Document ↔ TaxonomyTerm many-to-many with attribution."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="taxonomy_tags"
+    )
+    term = models.ForeignKey(
+        TaxonomyTerm, on_delete=models.CASCADE, related_name="document_tags"
+    )
+    tagged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tagged_documents",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "knowledge_documenttag"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "term"],
+                name="knowledge_doctag_doc_term_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.document_id} → {self.term_id}"
+
+
+class TermOwnership(models.Model):
+    """Account/term owner within a space — receives stale/review notifications."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="term_ownerships",
+    )
+    term = models.ForeignKey(
+        TaxonomyTerm, on_delete=models.CASCADE, related_name="ownerships"
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="owned_terms",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "knowledge_termownership"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["space", "term", "owner"],
+                name="knowledge_termown_space_term_owner_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.term_id} → {self.owner_id} @ {self.space_id}"
+
+
+# ---------------------------------------------------------------------------
+# Knowledge iteration spec §3.3 — review gate.
+# ---------------------------------------------------------------------------
+
+
+class ReviewRequest(models.Model):
+    """One review request for a pending document version.
+
+    Approval is the only transition that indexes the version (chunk+embed)
+    and supersedes the previous active version.
+    """
+
+    DECISION_PENDING = "pending"
+    DECISION_APPROVED = "approved"
+    DECISION_REJECTED = "rejected"
+    DECISION_CHOICES = [
+        (DECISION_PENDING, "Pending"),
+        (DECISION_APPROVED, "Approved"),
+        (DECISION_REJECTED, "Rejected"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Denormalized space FK so the review queue filters per-space cheaply.
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="review_requests",
+    )
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="review_requests"
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="submitted_reviews",
+    )
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assigned_reviews",
+    )
+    # Line-level diff snapshot captured at submit time (reuses preview-diff).
+    diff_summary = models.JSONField(default=dict, blank=True)
+    # L1 conflict detection output: [{document_id, title, score, chunk_index}].
+    conflict_hints = models.JSONField(default=list, blank=True)
+    decision = models.CharField(
+        max_length=20, choices=DECISION_CHOICES, default=DECISION_PENDING
+    )
+    comment = models.TextField(blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_reviewrequest"
+        ordering = ["-created_at"]
+        constraints = [
+            # Separation of duties: submitter can never approve their own work.
+            models.CheckConstraint(
+                check=~models.Q(reviewer=models.F("submitted_by")),
+                name="knowledge_review_reviewer_ne_submitter",
+            ),
+            # At most one pending request per document version.
+            models.UniqueConstraint(
+                fields=["document"],
+                condition=models.Q(decision="pending"),
+                name="knowledge_review_one_pending_per_doc",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Review {self.document_id}: {self.decision}"
+
+
+# ---------------------------------------------------------------------------
+# Knowledge iteration spec §5.1 — explicit markdown links between documents
+# (parsed at ingest; feeds the Local Graph "link" edges).
+# ---------------------------------------------------------------------------
+
+
+class DocumentLink(models.Model):
+    """Explicit link from one document's markdown to another ([[wiki]] or md link)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="document_links",
+    )
+    source = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="outgoing_links"
+    )
+    target = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="incoming_links"
+    )
+    anchor_text = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "knowledge_documentlink"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "target"],
+                name="knowledge_doclink_src_tgt_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.source_id} → {self.target_id}"

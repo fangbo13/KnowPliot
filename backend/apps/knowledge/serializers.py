@@ -40,6 +40,33 @@ class DocumentSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     category_name = serializers.CharField(source="category.name", read_only=True)
+    # Knowledge iteration spec §3: watermark — "v{N} · {更新人} · {日期}".
+    updated_by_name = serializers.SerializerMethodField(read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField(read_only=True)
+    # Knowledge iteration spec §2: controlled taxonomy term codes/labels.
+    taxonomy_terms = serializers.SerializerMethodField(read_only=True)
+
+    def get_updated_by_name(self, obj):
+        user = obj.updated_by or obj.uploaded_by
+        if user is None:
+            return None
+        return user.username or user.email
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by is None:
+            return None
+        return obj.uploaded_by.username or obj.uploaded_by.email
+
+    def get_taxonomy_terms(self, obj):
+        return [
+            {
+                "id": str(tag.term.id),
+                "code": tag.term.code,
+                "label": tag.term.label,
+                "dimension": tag.term.dimension.code,
+            }
+            for tag in obj.taxonomy_tags.select_related("term", "term__dimension")
+        ]
 
     def validate_file(self, value):
         """Validate upload size before cross-field content checks."""
@@ -118,6 +145,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "category", "category_name", "tags", "status",
             "version", "effective_from", "effective_to",
             "chunk_count", "processing_error", "content_hash", "created_at", "updated_at",
+            "updated_by_name", "uploaded_by_name", "taxonomy_terms",
         ]
         read_only_fields = [
             "id", "status", "version", "chunk_count",
@@ -128,9 +156,27 @@ class DocumentSerializer(serializers.ModelSerializer):
 class DocumentDetailSerializer(DocumentSerializer):
     """Extended serializer with chunks info."""
     chunk_count = serializers.IntegerField(read_only=True)
+    # Knowledge iteration spec §3: deduplicated contributor roll-up over the version chain.
+    contributors = serializers.SerializerMethodField(read_only=True)
+
+    def get_contributors(self, obj):
+        contributors = []
+        seen = set()
+        current = obj
+        visited = set()
+        while current is not None and current.id not in visited:
+            visited.add(current.id)
+            for user in (current.updated_by, current.uploaded_by):
+                if user is not None and user.id not in seen:
+                    seen.add(user.id)
+                    contributors.append(
+                        {"id": str(user.id), "name": user.username or user.email}
+                    )
+            current = current.parent_document
+        return contributors
 
     class Meta(DocumentSerializer.Meta):
-        fields = DocumentSerializer.Meta.fields + ["uploaded_by"]
+        fields = DocumentSerializer.Meta.fields + ["uploaded_by", "contributors"]
 
 
 class DocumentChunkSerializer(serializers.ModelSerializer):

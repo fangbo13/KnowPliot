@@ -295,6 +295,10 @@ class DocumentUploadPolicyIntegrationTest(APITestCase):
             status="active",
             visibility="private",
         )
+        # This suite exercises upload metadata/ingestion mechanics; the
+        # review-gate flow is covered separately, so publish directly here.
+        cls.space.review_policy = "direct_publish"
+        cls.space.save(update_fields=["review_policy"])
         cls.knowledge_admin = User.objects.create_user(
             username="upload-policy-admin",
             email="upload-policy-admin@example.com",

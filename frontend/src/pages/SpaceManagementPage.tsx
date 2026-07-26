@@ -113,6 +113,8 @@ export default function SpaceManagementPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState('private');
+  // Spec §3: space-level review gate (direct_publish | require_review)
+  const [reviewPolicy, setReviewPolicy] = useState('require_review');
   const [savingSettings, setSavingSettings] = useState(false);
 
   // Invite creation
@@ -184,6 +186,7 @@ export default function SpaceManagementPage() {
     setName(active.name);
     setDescription(active.description);
     setVisibility(active.visibility);
+        setReviewPolicy(active.review_policy || 'require_review');
     setJoinCodeInfo({
       space_id: active.id,
       join_policy: active.join_policy,
@@ -208,7 +211,7 @@ export default function SpaceManagementPage() {
     if (!spaceId) return;
     setSavingSettings(true);
     try {
-      await spacesApi.update(spaceId, { name, description, visibility: visibility as any });
+      await spacesApi.update(spaceId, { name, description, visibility: visibility as any, review_policy: reviewPolicy as any });
       await loadSpaces();
       antdMessage.success(t('space_settings_saved') || 'Settings saved');
     } catch {
@@ -516,6 +519,24 @@ export default function SpaceManagementPage() {
                   { value: 'public_demo', label: t('visibility_public_demo') || 'Public demo' },
                 ]}
               />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>{t('space_review_policy') || 'Review policy'}</Text>
+              <Select
+                size="large"
+                value={reviewPolicy}
+                onChange={setReviewPolicy}
+                disabled={!canManageSettings}
+                style={{ width: 260, display: 'block', marginTop: 6 }}
+                classNames={{ popup: { root: 'menu-pop-dropdown' } }}
+                options={[
+                  { value: 'require_review', label: t('review_policy_require') || 'Require review' },
+                  { value: 'direct_publish', label: t('review_policy_direct') || 'Direct publish' },
+                ]}
+              />
+              <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                {t('space_review_policy_hint')}
+              </Text>
             </div>
             {canManageSettings && (
               <Button type="primary" loading={savingSettings} onClick={saveSettings} size="large" style={{ height: 44, borderRadius: 12, fontWeight: 600, padding: '0 24px', marginTop: 8 }}>

@@ -282,6 +282,21 @@ class KnowledgeSpace(models.Model):
         help_text="Whether non-owner members can invite new users.",
     )
     join_code_updated_at = models.DateTimeField(null=True, blank=True)
+    # Knowledge iteration spec §3.1: space-level review gate. New spaces
+    # default to require_review; existing rows are backfilled to
+    # direct_publish by the migration so live spaces keep current behavior.
+    REVIEW_POLICY_DIRECT = "direct_publish"
+    REVIEW_POLICY_REQUIRE = "require_review"
+    REVIEW_POLICY_CHOICES = [
+        (REVIEW_POLICY_DIRECT, "Direct Publish"),
+        (REVIEW_POLICY_REQUIRE, "Require Review"),
+    ]
+    review_policy = models.CharField(
+        max_length=20,
+        choices=REVIEW_POLICY_CHOICES,
+        default=REVIEW_POLICY_REQUIRE,
+        help_text="Whether new document versions need reviewer approval before indexing.",
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     provisioning_status = models.CharField(
         max_length=20,

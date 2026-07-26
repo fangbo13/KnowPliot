@@ -139,9 +139,12 @@ class RetrievalSafetyTest(TestCase):
 
         sql, params = cursor.execute.call_args.args
         self.assertIn("dc.space_id = %s", sql)
-        self.assertIn("d.status = %s", sql)
+        # Spec §4 L3: stale documents stay retrievable (down-weighted), so the
+        # status filter is now an IN over (active, stale).
+        self.assertIn("d.status IN (%s, %s)", sql)
         self.assertIn("dc.document_id IN (%s)", sql)
         self.assertIn("d.category_id IN (%s)", sql)
         self.assertNotIn(str(self.space_a.id), sql)
         self.assertIn(str(self.space_a.id), params)
         self.assertIn("active", params)
+        self.assertIn("stale", params)

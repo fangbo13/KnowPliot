@@ -101,7 +101,11 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         # V6.0: uploads land in the active space (header) or default 'general'.
         space = _active_doc_space(self.request)
         ensure_workspace_writable(space)
-        doc = serializer.save(uploaded_by=self.request.user, space=space)
+        doc = serializer.save(
+            uploaded_by=self.request.user,
+            updated_by=self.request.user,  # spec §3.5 watermark
+            space=space,
+        )
         create_audit_log(
             user=self.request.user,
             action="document_upload",
@@ -111,7 +115,20 @@ class DocumentListCreateView(generics.ListCreateAPIView):
                      "space": str(space.id) if space else None},
             request=self.request,
         )
-        # Trigger async ingestion
+        # Knowledge iteration spec §3.2: in a require_review space, uploads
+        # stop at pending_review — approval is the only path into the index.
+        from apps.knowledge.review_views import (
+            create_review_request,
+            space_requires_review,
+        )
+        if space_requires_review(space):
+            doc.status = "pending_review"
+            doc.save(update_fields=["status", "updated_at"])
+            create_review_request(
+                document=doc, submitted_by=self.request.user, request=self.request
+            )
+            return
+        # Trigger async ingestion (direct_publish spaces)
         from apps.knowledge.ingestion import enqueue_document_ingestion
         enqueue_document_ingestion(
             doc,
@@ -566,11 +583,22 @@ def _create_version_atomically(
         tags=current_doc.tags,
         space=current_doc.space,
         uploaded_by=actor,
+        updated_by=actor,  # spec §3.5 watermark — author of THIS version
         status="active",
         version=current_doc.version + 1,
         parent_document=current_doc,
         effective_from=effective_from,
         content_hash="",
+    )
+
+    # Spec §2: carry taxonomy tags forward across versions.
+    from apps.knowledge.models import DocumentTag
+    DocumentTag.objects.bulk_create(
+        [
+            DocumentTag(document=new_doc, term_id=tag.term_id, tagged_by=tag.tagged_by)
+            for tag in DocumentTag.objects.filter(document=current_doc)
+        ],
+        ignore_conflicts=True,
     )
 
     is_immediate = effective_from <= timezone.now()
@@ -595,6 +623,13 @@ def _create_version_atomically(
         new_doc.chunk_count = len(chunks)
         new_doc.status = "active"
         new_doc.save(update_fields=["chunk_count", "status"])
+
+    # Spec §2.4 / §5.1: denormalize term codes into chunk metadata and
+    # refresh explicit markdown links for the graph.
+    from apps.knowledge.links import sync_document_links
+    from apps.knowledge.taxonomy_views import sync_chunk_term_metadata
+    sync_chunk_term_metadata(new_doc)
+    sync_document_links(new_doc)
 
     create_audit_log(
         user=actor,
@@ -727,6 +762,29 @@ class DocumentVersionCreateView(APIView):
         effective_from_raw = request.data.get("effective_from")
         effective_from = _parse_effective_from(effective_from_raw)
         reason = request.data.get("reason", "")
+
+        # Knowledge iteration spec §3.2: require_review spaces stage the new
+        # version as pending_review instead of publishing it — the approval
+        # endpoint later runs the same atomic switch.
+        from apps.knowledge.review_views import (
+            create_pending_version,
+            space_requires_review,
+        )
+        if document.space is not None and space_requires_review(document.space):
+            with transaction.atomic():
+                current_doc = (
+                    Document.objects
+                    .select_for_update(of=("self",))
+                    .get(id=pk)
+                )
+                _, response_body = create_pending_version(
+                    current_doc=current_doc,
+                    new_text=new_text,
+                    reason=reason,
+                    actor=request.user,
+                    request=request,
+                )
+            return Response(response_body, status=status.HTTP_202_ACCEPTED)
 
         # Idempotency (§1.13)
         idem_key = require_idempotency_key(request)

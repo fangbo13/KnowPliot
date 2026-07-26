@@ -65,6 +65,7 @@
   "welcome_greeting": "How can I help with your onboarding?",
   "welcome_suggest_hint": "Ask anything, or pick a topic below",
   "page_label": "Page {{n}}",
+    "citation_stale_badge": "May be outdated",
   "load_older_messages": "Load earlier messages",
   "feedback_saved": "Feedback saved",
   "feedback_failed": "Could not save feedback. Please try again.",

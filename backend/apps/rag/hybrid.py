@@ -11,12 +11,18 @@ from uuid import UUID
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.db import connection
 from django.db.models import Q
-from apps.knowledge.models import DocumentChunk
+from apps.knowledge.models import Document, DocumentChunk
 
 from .retriever import PgVectorRetriever, RetrievalFilters
 
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+# Spec §4: FY-shaped term codes (fy26) — used for cross-FY downweighting.
+FY_CODE_PATTERN = re.compile(r"^fy\d{2}$")
+# Spec §4 L3/L4 tuning constants.
+STALE_PENALTY = 0.7
+CROSS_FY_PENALTY = 0.6
+TERM_MATCH_BOOST = 0.1
 ENGLISH_STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
     "how", "in", "is", "it", "of", "on", "or", "that", "the", "this",
@@ -183,11 +189,74 @@ class HybridRetriever:
             filters=normalized_filters,
         )
         fused = reciprocal_rank_fusion(vector_results, lexical_results)
+        self._annotate_document_signals(fused, space_id=normalized_space_id)
+        reranked = rerank_results(fused)
+        reranked = self._apply_query_signals(
+            reranked, query=query, space_id=normalized_space_id
+        )
         return diversify_results(
-            rerank_results(fused),
+            reranked,
             top_k=top_k,
             max_per_document=2,
         )
+
+    def _annotate_document_signals(self, rows: list[dict], *, space_id: str) -> None:
+        """Spec §4 L3: real freshness (exponential decay) replaces the 1.0 stub."""
+        if not rows:
+            return
+        from apps.knowledge.freshness import compute_freshness, space_half_life_days
+
+        doc_ids = {str(row["document_id"]) for row in rows}
+        docs = {
+            str(d.id): d
+            for d in Document.objects.filter(id__in=doc_ids).select_related("space")
+        }
+        half_life = None
+        for row in rows:
+            doc = docs.get(str(row["document_id"]))
+            if doc is None:
+                row.setdefault("freshness_score", 1.0)
+                continue
+            if half_life is None:
+                half_life = space_half_life_days(doc.space)
+            row["freshness_score"] = compute_freshness(doc, half_life_days=half_life)
+            row["document_status"] = doc.status
+            row["document_version"] = doc.version
+
+    def _apply_query_signals(
+        self, rows: list[dict], *, query: str, space_id: str
+    ) -> list[dict]:
+        """Spec §4 L4: query understanding — term boost, cross-FY + stale penalties."""
+        if not rows:
+            return rows
+        try:
+            from .query_understanding import analyze_query
+
+            signals = analyze_query(query, space_id=space_id)
+        except Exception:
+            signals = None
+        query_terms = set(signals.term_codes) if signals else set()
+        query_fys = set(signals.fiscal_year_codes) if signals else set()
+
+        adjusted = []
+        for row in rows:
+            score = float(row["score"])
+            doc_terms = set((row.get("metadata") or {}).get("terms") or [])
+            doc_fys = {code for code in doc_terms if FY_CODE_PATTERN.match(code)}
+            matched = sorted(query_terms & doc_terms)
+            if matched:
+                score += TERM_MATCH_BOOST
+            # Query pins a fiscal year the document does not carry → downweight
+            # (history stays retrievable, never hard-excluded).
+            if query_fys and doc_fys and not (query_fys & doc_fys):
+                score *= CROSS_FY_PENALTY
+            if row.get("document_status") == "stale":
+                score *= STALE_PENALTY
+            row = {**row, "score": round(score, 4), "rerank_score": round(score, 4)}
+            if matched:
+                row["matched_terms"] = matched
+            adjusted.append(row)
+        return sorted(adjusted, key=lambda r: (-r["score"], str(r["id"])))
 
     def _lexical_search(
         self,
@@ -209,7 +278,7 @@ class HybridRetriever:
             )
         qs = DocumentChunk.objects.filter(
             space_id=space_id,
-            document__status="active",
+            document__status__in=["active", "stale"],
         ).filter(*_effective_date_filter()).select_related("document")
         if filters.document_ids:
             qs = qs.filter(document_id__in=filters.document_ids)
@@ -238,7 +307,7 @@ class HybridRetriever:
                 "score": round(score, 4),
                 "page_number": chunk.page_number,
                 "metadata": chunk.metadata,
-                "freshness_score": 1.0,
+                "document_status": chunk.document.status,
             }
             for score, chunk in scored[:top_k]
         ]
@@ -264,7 +333,7 @@ class HybridRetriever:
         qs = (
             DocumentChunk.objects.filter(
                 space_id=space_id,
-                document__status="active",
+                document__status__in=["active", "stale"],
             )
             .filter(*_effective_date_filter())
             .select_related("document")
@@ -288,7 +357,7 @@ class HybridRetriever:
                 "score": min(1.0, round(float(chunk.lexical_rank), 4)),
                 "page_number": chunk.page_number,
                 "metadata": chunk.metadata,
-                "freshness_score": 1.0,
+                "document_status": chunk.document.status,
             }
             for chunk in qs[:top_k]
         ]

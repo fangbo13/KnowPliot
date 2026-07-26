@@ -255,6 +255,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.sweep_action_outbox",
         "schedule": 60.0,
     },
+    # Knowledge iteration spec §4 L3: nightly stale-document scan.
+    "knowledge-stale-document-scan": {
+        "task": "apps.knowledge.tasks.scan_stale_documents",
+        "schedule": 60.0 * 60 * 24,
+    },
 }
 ACTION_OUTBOX_DELIVERY_ADAPTER = os.environ.get(
     "ACTION_OUTBOX_DELIVERY_ADAPTER",

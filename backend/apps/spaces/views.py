@@ -327,9 +327,14 @@ def discoverable_spaces(request):
 
     memberships = SpaceMembership.objects.filter(user=request.user, status="active")
     organization_ids = memberships.values_list("space__organization_id", flat=True)
-    business_line_ids = memberships.exclude(space__business_line_id=None).values_list(
-        "space__business_line_id", flat=True
+    business_line_ids = set(
+        memberships.exclude(space__business_line_id=None).values_list(
+            "space__business_line_id", flat=True
+        )
     )
+    # Spec §1: the registered business line also unlocks that line's spaces.
+    if getattr(request.user, "business_line_id", None):
+        business_line_ids.add(request.user.business_line_id)
     joined_ids = memberships.values_list("space_id", flat=True)
     spaces = KnowledgeSpace.objects.filter(
         status="active",

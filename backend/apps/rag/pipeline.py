@@ -34,6 +34,21 @@ from .retriever import PgVectorRetriever
 logger = logging.getLogger(__name__)
 
 
+def _document_term_codes(document) -> list[str]:
+    """Spec §2: sorted controlled-term codes for chunk metadata (best-effort)."""
+    try:
+        from apps.knowledge.models import DocumentTag
+
+        return sorted(
+            DocumentTag.objects.filter(
+                document=document, term__status="active"
+            ).values_list("term__code", flat=True)
+        )
+    except Exception:
+        logger.warning("document_term_codes_lookup_failed", exc_info=True)
+        return []
+
+
 @dataclass(frozen=True)
 class _SharedChatServices:
     embedder: EmbeddingService
@@ -165,10 +180,15 @@ class RAGPipeline:
 
         # Store chunks with sanitized metadata
         document_chunks = []
+        # Spec §2: redundantly write controlled term codes onto every chunk so
+        # retrieval can filter/boost without extra joins.
+        document_term_codes = _document_term_codes(document)
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             # V4.2 KB-V4.2-BATCH-009: Sanitize metadata before storing
             raw_metadata = chunk.get("metadata", {})
             clean_metadata = sanitize_metadata(raw_metadata)
+            if document_term_codes:
+                clean_metadata["terms"] = document_term_codes
 
             # V4.2 KB-V4.2-BATCH-012: Mark individual failed embeddings
             if is_zero_vector(embedding):
@@ -284,9 +304,13 @@ class RAGPipeline:
 
         # Store chunks with sanitized metadata + pgvector sync
         document_chunks = []
+        # Spec §2: redundantly write controlled term codes onto every chunk.
+        document_term_codes = _document_term_codes(document)
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             raw_metadata = chunk.get("metadata", {})
             clean_metadata = sanitize_metadata(raw_metadata)
+            if document_term_codes:
+                clean_metadata["terms"] = document_term_codes
             if is_zero_vector(embedding):
                 clean_metadata["embedding_failed"] = True
                 logger.warning(
@@ -514,7 +538,29 @@ class RAGPipeline:
         yield {"event": "done", "data": {}}
 
     def _build_citations(self, chunks):
-        """Build citation data from retrieved chunks."""
+        """Build citation data from retrieved chunks.
+
+        Spec §3/§4 L5: citations carry version + updated_by + updated_at so the
+        frontend renders the "v{N} · {更新人} · {日期}" watermark, and a stale
+        flag drives the "内容可能过期" badge.
+        """
+        doc_meta: dict[str, dict] = {}
+        try:
+            from apps.knowledge.models import Document
+
+            doc_ids = {str(chunk["document_id"]) for chunk in chunks}
+            for doc in Document.objects.filter(id__in=doc_ids).select_related(
+                "updated_by", "uploaded_by"
+            ):
+                editor = doc.updated_by or doc.uploaded_by
+                doc_meta[str(doc.id)] = {
+                    "version": doc.version,
+                    "updated_by": (editor.username or editor.email) if editor else None,
+                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                    "stale": doc.status == "stale",
+                }
+        except Exception:
+            logger.warning("citation_version_lookup_failed", exc_info=True)
         return [
             {
                 "document_id": chunk["document_id"],
@@ -523,6 +569,10 @@ class RAGPipeline:
                 "score": round(chunk["score"], 3),
                 "quoted_text": chunk["content"][:200],
                 "chunk_id": chunk["id"],
+                **doc_meta.get(
+                    str(chunk["document_id"]),
+                    {"version": None, "updated_by": None, "updated_at": None, "stale": False},
+                ),
             }
             for chunk in chunks
         ]

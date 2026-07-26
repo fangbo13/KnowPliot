@@ -61,6 +61,11 @@ export interface Citation {
   score: number;
   snippet?: string;
   quoted_text: string;
+  // Spec §3/§4 L5: version watermark + stale badge on citation cards
+  version?: number;
+  updated_by?: string | null;
+  updated_at?: string | null;
+  stale?: boolean;
 }
 
 export interface ChatSession {

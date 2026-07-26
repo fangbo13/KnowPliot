@@ -272,3 +272,93 @@ class WorkspaceDeletionApiTests(TestCase):
         self.assertEqual(visible.status_code, 200, visible.data)
         self.assertEqual(visible.data["request_id"], submitted.data["request_id"])
         self.assertEqual(visible.data["status"], "pending")
+
+    def _install_drifting_retained_manifest(self):
+        """Swap the stable manifest mock for one whose retained-evidence
+        resources drift on every call while the frozen ``manifest_digest``
+        stays constant.
+
+        This mirrors production, where append-only audit / outbox / notification
+        lineage (all ``retained_evidence``) legitimately grows between impact
+        issuance and submit/confirm. Such growth must NOT invalidate a still
+        valid impact, exactly as ``build_deletion_manifest`` already guarantees
+        for ``manifest_digest`` by excluding retained resources.
+        """
+
+        stable_digest = hashlib.sha256(f"manifest:{self.space.id}".encode()).hexdigest()
+        registry_digest = hashlib.sha256(b"test-registry-v1").hexdigest()
+        counter = {"n": 0}
+
+        def _manifest(*, space):
+            counter["n"] += 1
+            return {
+                "ready": True,
+                "version": 1,
+                "registry_digest": registry_digest,
+                "manifest_digest": stable_digest,
+                "resources": [
+                    {
+                        "model": "chat.modelinvocation",
+                        "space_field": "space",
+                        "disposition": "retained_evidence",
+                        "schema_revision": 13,
+                        "count": counter["n"],
+                        "rows_digest": hashlib.sha256(
+                            str(counter["n"]).encode()
+                        ).hexdigest(),
+                    }
+                ],
+                "blockers": [],
+                "counts": {"eligible_content": 0, "retained_evidence": counter["n"]},
+                "retention_dates": [],
+            }
+
+        drift = patch(
+            "apps.spaces.deletion_services.build_deletion_manifest",
+            side_effect=_manifest,
+        )
+        drift.start()
+        self.addCleanup(drift.stop)
+
+    def test_retained_evidence_growth_does_not_block_submit(self):
+        # Regression: archiving an (empty) workspace and then submitting the
+        # permanent-delete request must not fail with ``impact_changed`` merely
+        # because retained-evidence lineage grew between the impact read and the
+        # submit. The frozen ``manifest_digest`` is unchanged, so the impact is
+        # still valid.
+        self._install_drifting_retained_manifest()
+        archived = self.archive()
+        self.assertEqual(archived.status_code, 200, archived.data)
+        impact = self.impact()
+        self.assertEqual(impact.status_code, 200, impact.data)
+        submitted = self.submit_request(impact)
+        self.assertEqual(submitted.status_code, 202, submitted.data)
+        self.assertEqual(submitted.data["status"], "pending")
+
+    def test_retained_evidence_growth_does_not_block_confirm(self):
+        # Regression: the confirm step recomputes the impact after the submit
+        # itself enqueued outbox lineage (retained evidence). That growth must
+        # not spuriously trip ``impact_changed`` on confirm.
+        self._install_drifting_retained_manifest()
+        archived = self.archive()
+        self.assertEqual(archived.status_code, 200, archived.data)
+        impact = self.impact()
+        self.assertEqual(impact.status_code, 200, impact.data)
+        submitted = self.submit_request(impact)
+        self.assertEqual(submitted.status_code, 202, submitted.data)
+        request_id = submitted.data["request_id"]
+        confirmed = self.client.post(
+            f"/api/v1/spaces/{self.space.id}/deletion-requests/{request_id}/confirm/",
+            {
+                "expected_request_version": 1,
+                "impact_version": impact.data["impact_version"],
+                "expected_lifecycle_version": impact.data["expected_lifecycle_version"],
+                "expected_ownership_version": impact.data["expected_ownership_version"],
+                "confirmation_phrase": "assurance/deletion-target",
+                "acknowledge_permanent": True,
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(confirmed.status_code, 202, confirmed.data)
+        self.assertEqual(confirmed.data["status"], "scheduled")

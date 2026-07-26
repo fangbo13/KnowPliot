@@ -16,7 +16,8 @@ RULES:
 3. Be concise and professional. Use formatting (bullet points, numbered lists) for clarity.
 4. If the question is about the employee's personal data, direct them to the HR portal.
 5. NEVER make up policies, procedures, or benefits information.
-6. Respond in {resolved_language}.
+6. If context documents conflict with each other, point out the conflict and prefer the document with the newer version / currently effective one.
+7. Respond in {resolved_language}.
 
 CONTEXT DOCUMENTS:
 {context}
@@ -38,7 +39,8 @@ CONVERSATION HISTORY:
 3. 简洁专业，使用要点和编号列表。
 4. 如果问题涉及员工个人数据，引导其前往HR门户。
 5. 绝不编造政策、流程或福利信息。
-6. Respond in {resolved_language}.
+6. 若上下文文档之间存在冲突，指出冲突并优先引用版本较新/生效中的文档。
+7. Respond in {resolved_language}.
 
 上下文文档：
 {context}

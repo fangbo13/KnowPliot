@@ -90,6 +90,10 @@ class AuditLog(models.Model):
         ("knowledge_gap_assign", "Knowledge Gap Assign"),
         ("knowledge_gap_resolve", "Knowledge Gap Resolve"),
         ("knowledge_gap_reopen", "Knowledge Gap Reopen"),
+        # Knowledge iteration spec §3.4: document review gate actions.
+        ("document_review_submit", "Document Review Submit"),
+        ("document_review_approve", "Document Review Approve"),
+        ("document_review_reject", "Document Review Reject"),
         # Phase 6B / V8.1 async operations and SLA actions.
         ("export_job_create", "Export Job Create"),
         ("export_job_complete", "Export Job Complete"),

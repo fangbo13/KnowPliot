@@ -46,13 +46,19 @@ def _normalized_query(value):
 
 def _scope_sets(user):
     memberships = effective_space_memberships(user)
+    business_line_ids = set(
+        memberships.exclude(space__business_line_id=None).values_list(
+            "space__business_line_id", flat=True
+        )
+    )
+    # Spec §1: the user's registered business line grants discovery of that
+    # line's spaces even before joining any of them.
+    registered_bl_id = getattr(user, "business_line_id", None)
+    if registered_bl_id:
+        business_line_ids.add(registered_bl_id)
     return (
         set(memberships.values_list("space__organization_id", flat=True)),
-        set(
-            memberships.exclude(space__business_line_id=None).values_list(
-                "space__business_line_id", flat=True
-            )
-        ),
+        business_line_ids,
         set(memberships.values_list("space_id", flat=True)),
     )
 
@@ -86,12 +92,22 @@ def authorized_discovery_queryset(user):
         )
     )
     invited_ids = _invited_space_ids(user)
+    # Spec §1 discovery-layer isolation: globally joinable spaces that declare
+    # business_line visibility are only discoverable by same-line users.
+    # Memberships/invitations/access codes remain the cross-line escape hatch.
+    global_visible = Q(join_policy="global") & ~Q(visibility="business_line")
+    if business_line_ids:
+        global_visible |= Q(
+            join_policy="global",
+            visibility="business_line",
+            business_line_id__in=business_line_ids,
+        )
     visible = (
         Q(id__in=member_ids)
         | Q(id__in=pending_ids)
         | Q(id__in=invited_ids)
         | Q(visibility="public_demo")
-        | Q(join_policy="global")
+        | global_visible
     )
     if organization_ids:
         visible |= Q(visibility="organization", organization_id__in=organization_ids)

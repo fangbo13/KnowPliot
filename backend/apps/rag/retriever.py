@@ -12,6 +12,7 @@ V3.7 P0.2: Added retrieval timing logs for pgvector performance verification.
 import time
 import math
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
@@ -35,12 +36,26 @@ def _validated_uuid(value, *, field_name: str) -> str:
         raise ValueError(f"{field_name} must contain valid UUID values") from exc
 
 
+_TERM_CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_\-.]{0,63}$")
+
+
+def _validated_term_code(value) -> str:
+    """Spec §4 L4: term codes are slugs from the controlled vocabulary."""
+    code = str(value).strip().lower()
+    if not _TERM_CODE_PATTERN.match(code):
+        raise ValueError("term_codes must contain valid taxonomy term codes")
+    return code
+
+
 @dataclass(frozen=True)
 class RetrievalFilters:
     """The complete allowlist of caller-controlled retrieval filters."""
 
     document_ids: tuple[str, ...] = ()
     category_ids: tuple[str, ...] = ()
+    # Spec §4 L4: restrict to chunks whose document carries any of these
+    # controlled taxonomy terms (metadata["terms"] written at ingest time).
+    term_codes: tuple[str, ...] = ()
 
     def normalized(self) -> "RetrievalFilters":
         return RetrievalFilters(
@@ -51,6 +66,9 @@ class RetrievalFilters:
             category_ids=tuple(
                 _validated_uuid(value, field_name="category_ids")
                 for value in self.category_ids
+            ),
+            term_codes=tuple(
+                _validated_term_code(value) for value in self.term_codes
             ),
         )
 
@@ -149,11 +167,12 @@ class PgVectorRetriever:
 
         normalized_filters = (filters or RetrievalFilters()).normalized()
         # Part 1 (§1.5): Only retrieve from currently effective documents.
+        # Spec §4 L3: stale documents stay retrievable (downweighted at rerank).
         today = date.today()
         qs = DocumentChunk.objects.filter(
             embedding__isnull=False,
             space_id=space_id,
-            document__status="active",
+            document__status__in=["active", "stale"],
         ).filter(
             Q(document__effective_from__isnull=True) | Q(document__effective_from__lte=today),
             Q(document__effective_to__isnull=True) | Q(document__effective_to__gte=today),
@@ -168,6 +187,10 @@ class PgVectorRetriever:
         for chunk in qs.select_related("document"):
             if chunk.embedding is None:
                 continue
+            if normalized_filters.term_codes:
+                chunk_terms = set((chunk.metadata or {}).get("terms") or [])
+                if not chunk_terms.intersection(normalized_filters.term_codes):
+                    continue
             sim = cosine_similarity(query_embedding, chunk.embedding)
             if sim >= threshold:
                 scored.append((sim, chunk))
@@ -185,6 +208,7 @@ class PgVectorRetriever:
                 "score": round(sim, 4),
                 "page_number": chunk.page_number,
                 "metadata": chunk.metadata,
+                "document_status": chunk.document.status,
             }
             for sim, chunk in results
         ]
@@ -211,14 +235,15 @@ class PgVectorRetriever:
             # Only allow known column names that are safe to interpolate into raw SQL.
             normalized_filters = (filters or RetrievalFilters()).normalized()
             # Part 1 (§1.5): Only retrieve from currently effective documents —
-            # excludes superseded (status != 'active') and future/expired versions.
+            # excludes superseded and future/expired versions. Spec §4 L3: stale
+            # documents stay retrievable (rerank downweights them instead).
             today = date.today()
             filter_parts = [
-                "dc.space_id = %s", "d.status = %s",
+                "dc.space_id = %s", "d.status IN (%s, %s)",
                 "(d.effective_from IS NULL OR d.effective_from <= %s)",
                 "(d.effective_to IS NULL OR d.effective_to >= %s)",
             ]
-            filter_params: list = [space_id, "active", today, today]
+            filter_params: list = [space_id, "active", "stale", today, today]
             if normalized_filters.document_ids:
                 placeholders = ", ".join(["%s"] * len(normalized_filters.document_ids))
                 filter_parts.append(f"dc.document_id IN ({placeholders})")
@@ -227,6 +252,12 @@ class PgVectorRetriever:
                 placeholders = ", ".join(["%s"] * len(normalized_filters.category_ids))
                 filter_parts.append(f"d.category_id IN ({placeholders})")
                 filter_params.extend(normalized_filters.category_ids)
+            if normalized_filters.term_codes:
+                # Spec §4 L4: any-of match against metadata["terms"].
+                # jsonb_exists_any == the ?| operator, spelled as a function so the
+                # raw SQL stays free of driver-sensitive '?' characters.
+                filter_parts.append("jsonb_exists_any(dc.metadata->'terms', %s)")
+                filter_params.append(list(normalized_filters.term_codes))
             filter_sql = " AND " + " AND ".join(filter_parts)
 
             # V6.0 space isolation — qualified column (dc.space_id) avoids ambiguity
@@ -243,7 +274,7 @@ class PgVectorRetriever:
             cursor.execute(
                 f"""
                 SELECT dc.id, dc.content, dc.page_number, dc.metadata,
-                       dc.document_id, d.title AS document_title,
+                       dc.document_id, d.title AS document_title, d.status AS document_status,
                        (dc.embedding_vector <=> %s) AS distance
                 FROM knowledge_documentchunk dc
                 JOIN knowledge_document d ON dc.document_id = d.id
@@ -270,9 +301,10 @@ class PgVectorRetriever:
                 "content": row[1],
                 "document_id": str(row[4]),
                 "document_title": row[5],
-                "score": round(1 - float(row[6]), 4),
+                "score": round(1 - float(row[7]), 4),
                 "page_number": row[2],
                 "metadata": row[3],
+                "document_status": row[6],
             }
             for row in rows
         ]

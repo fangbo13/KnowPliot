@@ -406,6 +406,20 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
                       {cit.snippet && <div className="citation-snippet">{cit.snippet}</div>}
                       <div className="citation-meta">
                         {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
+                        {/* Spec §3: updater watermark "v{N} · {name} · {date}" on citation cards */}
+                        {cit.version != null && (
+                          <span className="citation-watermark" style={{ color: 'var(--color-text-tertiary)' }}>
+                            v{cit.version}
+                            {cit.updated_by ? ` · ${cit.updated_by}` : ''}
+                            {cit.updated_at ? ` · ${new Date(cit.updated_at).toLocaleDateString()}` : ''}
+                          </span>
+                        )}
+                        {/* Spec §4 L3: stale documents carry a "may be outdated" badge */}
+                        {cit.stale && (
+                          <span style={{ color: 'var(--color-warning)' }}>
+                            {t('citation_stale_badge', { defaultValue: 'May be outdated' })}
+                          </span>
+                        )}
                         <span className="relevance-badge" style={{ color: getRelevanceColor(cit.score) }}>
                           {getRelevanceLabel(cit.score, t)}
                         </span>
