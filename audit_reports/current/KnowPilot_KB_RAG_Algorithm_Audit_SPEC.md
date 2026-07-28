@@ -38,10 +38,10 @@ retrieve_and_generate (rag/pipeline.py)
 | A2 | 置信度尺度失准：signal boost/penalty 改写 rerank_score，0.75/0.55 阈值按原尺度校准 | hybrid.py `_apply_query_signals` | 术语命中虚高置信；惩罚导致误拒答 | **P0 已修复** |
 | A3 | 参考库新鲜度语义错误：半衰期只取首文档空间；准则文档吃时间衰减+stale 惩罚 | hybrid.py `_annotate_document_signals` | IFRS 等标准文档被系统性降权 | **P0 已修复** |
 | A4 | 查询理解原始：正则财年 + 全量词表 Python 包含匹配；无同义词/改写/多查询 | rag/query_understanding.py | 同义术语召回漏（坏账准备 vs 信用减值损失） | P2 |
-| A5 | 假批量 embedding：embed_batch 逐条串行 + 每 5 条 sleep 0.5s | rag/embedding.py L270-299 | 500 chunk 文档 500 次调用 + 50s 空等 | P1 |
-| A6 | 中文词法检索差：FTS simple 配置，汉字逐字成 token | hybrid.py L19、L336-343 | 中文关键词召回质量低 | P1 |
+| A5 | 假批量 embedding：embed_batch 逐条串行 + 每 5 条 sleep 0.5s | rag/embedding.py L270-299 | 500 chunk 文档 500 次调用 + 50s 空等 | **P1 已修复** |
+| A6 | 中文词法检索差：FTS simple 配置，汉字逐字成 token | hybrid.py L19、L336-343 | 中文关键词召回质量低 | **P1 已修复（CJK bigram）** |
 | A7 | 切块非结构感知：不按 Markdown 标题分块 | rag/chunker.py | 章节语义丢失，无法做标题级引用 | P2 |
-| A8 | 无模型级 rerank；查询 embedding 缓存为进程内 5min TTL 不跨 worker | hybrid.py / embedding.py L115 | 排序上限受限；缓存命中率低 | P1/P2 |
+| A8 | 无模型级 rerank；查询 embedding 缓存为进程内 5min TTL 不跨 worker | hybrid.py / embedding.py L115 | 排序上限受限；缓存命中率低 | 缓存 **P1 已修复（Redis L2）**；rerank P2 |
 | A9 | 拒答兜底文案为 HR 领域残留 | pipeline.py、prompt_builder.py | 与审计定位不符 | **P0 已修复** |
 
 ### B. 迭代更新机制
@@ -49,9 +49,9 @@ retrieve_and_generate (rag/pipeline.py)
 | # | 问题 | 证据位置 | 影响 | 状态 |
 |---|------|----------|------|------|
 | B1 | 双链缺 Obsidian 核心能力：无 unresolved link、无重命名传播、无补全端点、不跨库 | knowledge/links.py | 断链静默发生；编辑体验不闭环 | P3 |
-| B2 | 图谱相似度边请求时 O(n²) Python 现算（300 节点 ≈ 4.5 万次 1024 维余弦），且仅取首块向量 | knowledge/viz_views.py L136-152 | 图谱 Tab 卡顿；相似度失真 | P1 |
+| B2 | 图谱相似度边请求时 O(n²) Python 现算（300 节点 ≈ 4.5 万次 1024 维余弦），且仅取首块向量 | knowledge/viz_views.py L136-152 | 图谱 Tab 卡顿；相似度失真 | **P1 已修复（DocumentSimilarity 预计算 + 池化向量）** |
 | B3 | 质量信号无闭环：拒答/负反馈不自动生成知识缺口工单、不回流排序 | viz_views.knowledge_dashboard | 迭代靠人工盯看板 | P2 |
-| B4 | 工程性：版本历史无 GET 列表；stale 扫描逐条 save+notify；superseded chunk 无清理；ingest 每 chunk 单独 UPDATE 同步向量 | knowledge/views.py、tasks.py、rag/pipeline.py L146-160 | 运维成本随规模上升 | P1/P3 |
+| B4 | 工程性：版本历史无 GET 列表；stale 扫描逐条 save+notify；superseded chunk 无清理；ingest 每 chunk 单独 UPDATE 同步向量 | knowledge/views.py、tasks.py、rag/pipeline.py L146-160 | 运维成本随规模上升 | stale 扫描 **P1 已修复（批量+修复 updated_at 重置 bug）**；其余 P3 |
 
 ### C. 做对了的部分（不要动）
 - 空间隔离：检索强制 space_id 白名单 + UUID 校验 + 过滤键白名单防注入；chunk 反规范化 space FK
@@ -70,12 +70,12 @@ retrieve_and_generate (rag/pipeline.py)
 
 ## 4. 后续路线图
 
-### P1 — 性能（建议下一迭代）
-1. 真批量 embedding：DashScope 批量接口一次 ≤10 条，取消固定 sleep，失败重试单条降级。验收：500 chunk 文档入库时间下降 ≥80%
-2. 查询 embedding 缓存迁移 Redis（跨 worker 共享，TTL 30min）。验收：多 worker 下相同查询二次命中
-3. 图谱相似度预计算：ingest 完成时计算文档级向量（chunk 池化或首块），写 DocumentSimilarity 边表；viz 端点只读表。验收：graph 接口 P95 < 200ms
-4. 中文分词：FTS 改 zhparser/pg_jieba，或 ingest 时 jieba 预分词存 tsvector 列
-5. stale 扫描批量化：bulk_update + 通知合并
+### P1 — 性能（已实施，见 test_p1_perf.py）
+1. 真批量 embedding：每请求 ≤10 条（EMBED_BATCH_SIZE），取消固定 sleep，批失败降级单条、单条失败落零向量
+2. 查询 embedding 缓存增加 Django/Redis L2（TTL 30min，跨 worker 共享，后端故障自动降级）
+3. 图谱相似度预计算：Document.pooled_embedding（chunk 均值池化）+ DocumentSimilarity 边表（ingest 时刷新）；viz 端点只读，未回填空间回退现算；存量数据由 backfill_document_similarities 任务回填（已执行：10 docs / 1 edge / 12 chunk tokens）
+4. 中文检索：无新依赖的 CJK bigram 方案 —— chunk 新增 content_tokens 列（分词后标题+正文），查询侧同构扩展，旧行保持兼容
+5. stale 扫描批量化：bulk update + 按负责人合并通知；同时修复旧实现 save 刷新 updated_at 导致新鲜度时钟被重置的 bug
 
 ### P2 — 算法升级
 1. 轻量库路由：按查询信号（术语命中、准则关键词表）与库 category 匹配决定检索哪些库；无信号时默认仅本空间 + 显式提及的库；保留"全库"降级开关
