@@ -5,6 +5,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from 'antd';
+import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
 import { adminApi, type FeedbackReview } from '../../api/admin';
@@ -12,6 +14,7 @@ import { useAuthorization } from '../../auth/CapabilityProvider';
 import { EmptyState, PageHeader, Status, Surface } from '../../design/primitives';
 
 export default function ScopedQualityPage() {
+  const { t } = useTranslation('common');
   const { spaceId } = useParams<{ spaceId: string }>();
   const access = useAuthorization();
   const [reviews, setReviews] = useState<FeedbackReview[]>([]);
@@ -42,13 +45,13 @@ export default function ScopedQualityPage() {
   return (
     <div>
       <PageHeader
-        title="Workspace quality"
-        description="Feedback is restricted to the selected workspace. Global reports and exports are not loaded here."
+        title={t('scoped_quality_title')}
+        description={t('scoped_quality_description')}
       />
-      {loading && <Status role="status" tone="info">Loading feedback...</Status>}
-      {error && <Status role="alert" tone="error">Feedback is temporarily unavailable.</Status>}
+      {loading && <Status role="status" tone="info">{t('loading')}</Status>}
+      {error && <Status role="alert" tone="error">{t('scoped_quality_unavailable')}</Status>}
       {!loading && !error && reviews.length === 0 && (
-        <Surface><EmptyState title="No feedback awaiting review" /></Surface>
+        <Surface><EmptyState title={t('scoped_quality_empty')} /></Surface>
       )}
       <div className="kp-quality-list">
         {reviews.map((review) => (
@@ -56,20 +59,21 @@ export default function ScopedQualityPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
                 <div>
                   <strong>{review.feedback_type}</strong>
-                  <p style={{ color: 'var(--color-text-secondary)' }}>{review.comment || 'No comment'}</p>
+                  <p style={{ color: 'var(--color-text-secondary)' }}>{review.comment || t('scoped_quality_no_comment')}</p>
                   <Status tone="neutral">{review.status}</Status>
                 </div>
                 {canReview && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <button type="button" onClick={() => void mutate(() => adminApi.claimFeedback(review.id))}>
-                      Claim
-                    </button>
-                    <button
-                      type="button"
+                    <Button size="small" onClick={() => void mutate(() => adminApi.claimFeedback(review.id))}>
+                      {t('quality_claim')}
+                    </Button>
+                    <Button
+                      size="small"
+                      type="primary"
                       onClick={() => void mutate(() => adminApi.resolveFeedback(review.id, { resolution_code: 'resolved' }))}
                     >
-                      Resolve
-                    </button>
+                      {t('quality_resolve')}
+                    </Button>
                   </div>
                 )}
               </div>

@@ -4,12 +4,18 @@
  * See LICENSE file in the project root for full license details.
  */
 
+// Dark/i18n/Layout spec §B2/§C: i18n-driven, migrated to PageHeader +
+// shared StatCard primitive (was inline glass-panel markup).
+
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { scopedConsoleApi } from '../../api/scopedConsole';
 import type { SystemMetrics } from '../../api/admin';
+import { PageHeader, StatCard, Status } from '../../design/primitives';
 
 export default function ScopedMetricsPage() {
+  const { t } = useTranslation('common');
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [error, setError] = useState(false);
 
@@ -23,27 +29,18 @@ export default function ScopedMetricsPage() {
   }, []);
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-head"><h1 className="page-title">Scoped metrics</h1></header>
-        {error && <p role="alert">Metrics are temporarily unavailable.</p>}
-        {!metrics && !error && <p role="status">Loading metrics…</p>}
-        {metrics && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginTop: 24 }}>
-            {[
-              ['Users', metrics.users.total],
-              ['Active users', metrics.users.active],
-              ['Questions', metrics.usage.questions],
-              ['Documents', metrics.documents.total],
-            ].map(([label, value]) => (
-              <section key={String(label)} className="glass-panel" style={{ padding: 22, borderRadius: 14 }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>{label}</div>
-                <div style={{ marginTop: 8, fontSize: 28, fontWeight: 600 }}>{value}</div>
-              </section>
-            ))}
-          </div>
-        )}
-      </div>
+    <div className="page section-enter">
+      <PageHeader title={t('scoped_metrics_title')} description={t('scoped_metrics_description')} />
+      {error && <Status role="alert" tone="error">{t('scoped_metrics_unavailable')}</Status>}
+      {!metrics && !error && <Status role="status" tone="info">{t('loading')}</Status>}
+      {metrics && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+          <StatCard label={t('metric_users')} value={metrics.users.total} />
+          <StatCard label={t('metric_active_users')} value={metrics.users.active} />
+          <StatCard label={t('metric_questions')} value={metrics.usage.questions} />
+          <StatCard label={t('metric_documents')} value={metrics.documents.total} />
+        </div>
+      )}
     </div>
   );
 }

@@ -233,7 +233,7 @@ function App({
           )}
         >
           <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<CapabilityGate required="governance.access"><SuspendedRoute><ConsoleOverviewPage title="Governance" description="Organization and business-line work is limited to your assigned scope." /></SuspendedRoute></CapabilityGate>} />
+          <Route path="dashboard" element={<CapabilityGate required="governance.access"><SuspendedRoute><ConsoleOverviewPage title="console_title_governance" description="console_overview_governance_desc" /></SuspendedRoute></CapabilityGate>} />
           <Route path="users" element={<CapabilityGate required="governance.users.manage"><SuspendedRoute><ScopedUsersPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="business-lines" element={<CapabilityGate required="governance.business_lines.manage"><SuspendedRoute><AdminBusinessLinesPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="templates" element={<CapabilityGate required="governance.templates.manage"><SuspendedRoute><AdminTemplatesPage /></SuspendedRoute></CapabilityGate>} />
@@ -257,7 +257,7 @@ function App({
           )}
         >
           <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<CapabilityGate required="workspace.manage"><SuspendedRoute><ConsoleOverviewPage title="Workspace" description="Manage only the selected workspace and its governed resources." /></SuspendedRoute></CapabilityGate>} />
+          <Route path="dashboard" element={<CapabilityGate required="workspace.manage"><SuspendedRoute><ConsoleOverviewPage title="console_title_workspace" description="console_overview_workspace_desc" /></SuspendedRoute></CapabilityGate>} />
           <Route path="members" element={<CapabilityGate required="workspace.members.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="invites" element={<CapabilityGate required="workspace.invites.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="access" element={<CapabilityGate required="workspace.access_requests.manage"><SuspendedRoute><AccessRequestsPage /></SuspendedRoute></CapabilityGate>} />

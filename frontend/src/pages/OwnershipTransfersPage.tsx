@@ -56,7 +56,7 @@ export default function OwnershipTransfersPage() {
       if (!isAbortError(error)) {
         const rateLimit = getRateLimitDetails(error);
         message.error(rateLimit
-          ? `${t('rate_limited') || 'Too many requests'}${rateLimit.retryAfterSeconds == null ? '' : ` — retry in ${rateLimit.retryAfterSeconds}s`}`
+          ? `${t('rate_limited')}${rateLimit.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: rateLimit.retryAfterSeconds })}`}`
           : t('ownership_transfer_response_failed'));
       }
       if (!isAbortError(error)) await load();
@@ -78,16 +78,16 @@ export default function OwnershipTransfersPage() {
             type="error"
             showIcon
             message={loadError.code === 'rate_limited'
-              ? `${t('rate_limited') || 'Too many requests'}${loadError.retryAfterSeconds == null ? '' : ` — retry in ${loadError.retryAfterSeconds}s`}`
+              ? `${t('rate_limited')}${loadError.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: loadError.retryAfterSeconds })}`}`
               : t('ownership_transfers_load_failed')}
-            action={<Button onClick={() => void load()}>{t('error_retry') || 'Retry'}</Button>}
+            action={<Button onClick={() => void load()}>{t('error_retry')}</Button>}
           />
         )}
         <Card className="glass-panel" loading={loading} styles={{ body: { padding: 20 } }}>
           {transfers.length === 0 ? <Empty description={t('ownership_transfers_empty')} /> : (
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               {transfers.map((transfer) => (
-                <Card key={transfer.id} size="small" style={{ borderRadius: 12 }}>
+                <Card key={transfer.id} size="small" style={{ borderRadius: 'var(--radius-lg)' }}>
                   <Space direction="vertical" size="small" style={{ width: '100%' }}>
                     <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
                       <Typography.Text strong>{transfer.space.display_name}</Typography.Text>

@@ -185,7 +185,7 @@ export default function AdminSpacesPage() {
   const handleConfirmDelete = async () => {
     if (!deleteTarget || !deletionImpact) return;
     if (confirmInput.trim() !== deletionImpact.confirmation_phrase) {
-      message.error('Confirmation phrase does not match');
+      message.error(t('deletion_phrase_mismatch'));
       return;
     }
     setDeleting(true);
@@ -363,7 +363,7 @@ export default function AdminSpacesPage() {
         <Alert
           type="error"
           showIcon
-          message="Failed to load deletion impact data"
+          message={t('deletion_impact_load_failed')}
         />
       );
     }
@@ -466,7 +466,7 @@ export default function AdminSpacesPage() {
     !deletionImpact.blockers?.length;
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-head" style={{ marginBottom: 24 }}>
         <h1 className="page-title">
           {isEn ? 'Workspace Management' : '工作空间管理'}

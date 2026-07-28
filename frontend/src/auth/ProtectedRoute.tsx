@@ -37,12 +37,13 @@ function SpaceGuidancePage() {
 }
 
 function SpaceCheckingLoader() {
+  const { t } = useTranslation('common');
   return (
     <div
       role="status"
       style={{ display: 'grid', minHeight: '100dvh', placeItems: 'center', color: 'var(--color-text-secondary)' }}
     >
-      Loading workspace…
+      {t('loading_workspace')}
     </div>
   );
 }

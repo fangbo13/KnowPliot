@@ -693,13 +693,13 @@ export default function AdminTemplatesPage() {
             placeholder={t('admin_template_filter_type') || 'Scenario type'}
             onChange={(value) => setScenarioFilter(value)}
             options={[
-              { value: 'onboarding', label: 'Onboarding' },
-              { value: 'audit', label: 'Audit' },
-              { value: 'tax', label: 'Tax' },
-              { value: 'consulting', label: 'Consulting' },
-              { value: 'core_services', label: 'Core Business Services' },
-              { value: 'standards_qa', label: 'Standards QA' },
-              { value: 'project_ai', label: 'Project AI' },
+              { value: 'onboarding', label: t('tpl_cat_onboarding') },
+              { value: 'audit', label: t('tpl_cat_audit') },
+              { value: 'tax', label: t('tpl_cat_tax') },
+              { value: 'consulting', label: t('tpl_cat_consulting') },
+              { value: 'core_services', label: t('tpl_cat_core_services') },
+              { value: 'standards_qa', label: t('tpl_cat_standards_qa') },
+              { value: 'project_ai', label: t('tpl_cat_project_ai') },
             ]}
             style={{ width: 190 }}
           />
@@ -939,13 +939,13 @@ export default function AdminTemplatesPage() {
             >
               <Select
                 options={[
-                  { value: 'onboarding', label: 'Onboarding' },
-                  { value: 'audit', label: 'Audit' },
-                  { value: 'tax', label: 'Tax' },
-                  { value: 'consulting', label: 'Consulting' },
-                  { value: 'core_services', label: 'Core Business Services' },
-                  { value: 'standards_qa', label: 'Standards QA' },
-                  { value: 'project_ai', label: 'Project AI' },
+                  { value: 'onboarding', label: t('tpl_cat_onboarding') },
+                  { value: 'audit', label: t('tpl_cat_audit') },
+                  { value: 'tax', label: t('tpl_cat_tax') },
+                  { value: 'consulting', label: t('tpl_cat_consulting') },
+                  { value: 'core_services', label: t('tpl_cat_core_services') },
+                  { value: 'standards_qa', label: t('tpl_cat_standards_qa') },
+                  { value: 'project_ai', label: t('tpl_cat_project_ai') },
                 ]}
                 style={{ borderRadius: 8 }}
               />
@@ -958,8 +958,8 @@ export default function AdminTemplatesPage() {
             >
               <Select
                 options={[
-                  { value: 'en', label: 'English' },
-                  { value: 'zh', label: 'Chinese' },
+                  { value: 'en', label: t('lang_english') },
+                  { value: 'zh', label: t('lang_chinese') },
                 ]}
                 style={{ borderRadius: 8 }}
               />
@@ -969,7 +969,7 @@ export default function AdminTemplatesPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Form.Item
               name="icon"
-              label="Icon"
+              label={t('tpl_icon_label')}
             >
               <Input placeholder="e.g. book, project, user" style={{ borderRadius: 8 }} />
             </Form.Item>

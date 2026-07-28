@@ -806,7 +806,7 @@ export default function KnowledgeBasePage() {
   }
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24 }}>
           <h1 className="page-title">{t('nav_knowledge')}</h1>

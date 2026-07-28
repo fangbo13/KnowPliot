@@ -88,7 +88,7 @@ export default function AccessRequestsPage() {
             type="error"
             showIcon
             message={error.code === 'rate_limited'
-              ? `${t('rate_limited') || 'Too many requests'}${error.retryAfterSeconds == null ? '' : ` — retry in ${error.retryAfterSeconds}s`}`
+              ? `${t('rate_limited')}${error.retryAfterSeconds == null ? '' : ` — ${t('retry_after_seconds', { seconds: error.retryAfterSeconds })}`}`
               : t('load_error')}
             action={<Button onClick={() => void load()}>{t('error_retry')}</Button>}
           />

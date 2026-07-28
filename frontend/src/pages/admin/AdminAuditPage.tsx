@@ -129,7 +129,7 @@ export default function AdminAuditPage() {
         ...(dateTo ? { date_to: dateTo } : {}),
       }));
     } catch {
-      message.error('Failed to load audit logs');
+      message.error(t('admin_audit_load_failed'));
     } finally {
       setLoading(false);
     }
@@ -156,16 +156,16 @@ export default function AdminAuditPage() {
   const DENY = 'permission_denied';
   const columns = [
     { title: t('kb_created') || 'Time', dataIndex: 'created_at', key: 'created_at', width: 180, render: (d: string) => new Date(d).toLocaleString() },
-    { title: 'User', dataIndex: 'user_email', key: 'user_email', render: (v: string) => v || '-' },
-    { title: 'Action', dataIndex: 'action', key: 'action', render: (a: string) => <Tag color={a === DENY ? 'red' : a.includes('register') || a.includes('code') ? 'gold' : 'blue'}>{a}</Tag> },
-    { title: 'Result', dataIndex: 'result', key: 'result', render: (v: string) => <Tag color={v === 'denied' || v === 'failure' ? 'red' : 'green'}>{v}</Tag> },
-    { title: 'Target', dataIndex: 'target_type', key: 'target_type' },
-    { title: 'Space', dataIndex: 'space_id', key: 'space_id', render: (v: string | null) => v ? (spaceNameMap.get(v) ?? v.slice(0, 8)) : '-' },
-    { title: 'Role', dataIndex: 'role_used', key: 'role_used', render: (v: string) => v ? <Tag>{v}</Tag> : '-' },
+    { title: t('audit_col_user'), dataIndex: 'user_email', key: 'user_email', render: (v: string) => v || '-' },
+    { title: t('audit_col_action'), dataIndex: 'action', key: 'action', render: (a: string) => <Tag color={a === DENY ? 'red' : a.includes('register') || a.includes('code') ? 'gold' : 'blue'}>{a}</Tag> },
+    { title: t('audit_col_result'), dataIndex: 'result', key: 'result', render: (v: string) => <Tag color={v === 'denied' || v === 'failure' ? 'red' : 'green'}>{v}</Tag> },
+    { title: t('audit_col_target'), dataIndex: 'target_type', key: 'target_type' },
+    { title: t('kb_col_space'), dataIndex: 'space_id', key: 'space_id', render: (v: string | null) => v ? (spaceNameMap.get(v) ?? v.slice(0, 8)) : '-' },
+    { title: t('admin_col_role'), dataIndex: 'role_used', key: 'role_used', render: (v: string) => v ? <Tag>{v}</Tag> : '-' },
   ];
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -178,7 +178,7 @@ export default function AdminAuditPage() {
             <Select
               showSearch
               allowClear
-              placeholder="User"
+              placeholder={t('audit_col_user')}
               value={userFilter}
               onChange={(value) => setUserFilter(value ?? undefined)}
               options={users.map((u) => ({ value: u.id, label: u.email }))}
@@ -188,7 +188,7 @@ export default function AdminAuditPage() {
             <Select
               showSearch
               allowClear
-              placeholder="Action"
+              placeholder={t('audit_col_action')}
               value={actionFilter}
               onChange={(value) => setActionFilter(value ?? undefined)}
               options={AUDIT_ACTION_OPTIONS}
@@ -197,20 +197,20 @@ export default function AdminAuditPage() {
             />
             <Select
               allowClear
-              placeholder="Result"
+              placeholder={t('audit_col_result')}
               value={resultFilter}
               onChange={(value) => setResultFilter(value ?? undefined)}
               options={[
-                { value: 'success', label: 'Success' },
-                { value: 'denied', label: 'Denied' },
-                { value: 'failure', label: 'Failure' },
+                { value: 'success', label: t('audit_result_success') },
+                { value: 'denied', label: t('audit_result_denied') },
+                { value: 'failure', label: t('audit_result_failure') },
               ]}
               style={{ width: 120 }}
             />
             <Select
               showSearch
               allowClear
-              placeholder="Organization"
+              placeholder={t('filter_organization')}
               value={organizationFilter}
               onChange={(value) => { setOrganizationFilter(value ?? undefined); }}
               options={organizations.map((o) => ({ value: o.id, label: o.name }))}
@@ -220,7 +220,7 @@ export default function AdminAuditPage() {
             <Select
               showSearch
               allowClear
-              placeholder="Business Line"
+              placeholder={t('admin_nav_business_lines')}
               value={businessLineFilter}
               onChange={(value) => setBusinessLineFilter(value ?? undefined)}
               options={businessLines.map((b) => ({ value: b.id, label: b.name }))}
@@ -230,7 +230,7 @@ export default function AdminAuditPage() {
             <Select
               showSearch
               allowClear
-              placeholder="Space"
+              placeholder={t('kb_col_space')}
               value={spaceFilter}
               onChange={(value) => setSpaceFilter(value ?? undefined)}
               options={spaces.map((s) => ({ value: s.id, label: s.name }))}
@@ -238,14 +238,14 @@ export default function AdminAuditPage() {
               style={{ width: 200 }}
             />
             <Input
-              aria-label="Audit date from"
+              aria-label={t('audit_date_from_aria')}
               type="date"
               value={dateFrom}
               onChange={(event) => setDateFrom(event.target.value)}
               style={{ width: 145 }}
             />
             <Input
-              aria-label="Audit date to"
+              aria-label={t('audit_date_to_aria')}
               type="date"
               value={dateTo}
               onChange={(event) => setDateTo(event.target.value)}

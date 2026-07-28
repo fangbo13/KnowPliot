@@ -114,7 +114,7 @@ export default function AdminAnnouncementsPage() {
 
   const columns = [
     { title: t('kb_title') || 'Title', dataIndex: 'title', key: 'title' },
-    { title: 'Version', dataIndex: 'version', key: 'version', render: (v: string) => v ? <Tag color="blue">{v}</Tag> : '-' },
+    { title: t('announcement_col_version'), dataIndex: 'version', key: 'version', render: (v: string) => v ? <Tag color="blue">{v}</Tag> : '-' },
     { title: t('admin_audience'), dataIndex: 'audience', key: 'audience', render: (a: string) => <Tag>{a}</Tag> },
     { title: t('kb_status') || 'Status', dataIndex: 'is_active', key: 'is_active', render: (v: boolean) => <Tag color={v ? 'green' : 'default'}>{v ? t('admin_active') : t('admin_inactive')}</Tag> },
     { title: t('kb_created') || 'Published', dataIndex: 'published_at', key: 'published_at', render: (d: string | null) => d ? new Date(d).toLocaleString() : '-' },
@@ -135,7 +135,7 @@ export default function AdminAnnouncementsPage() {
           : [];
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -171,7 +171,7 @@ export default function AdminAnnouncementsPage() {
           <Select
             showSearch
             allowClear
-            placeholder="Audience"
+            placeholder={t('announcement_audience')}
             value={audienceFilter}
             onChange={(value) => setAudienceFilter(value ?? undefined)}
             options={[
@@ -185,19 +185,19 @@ export default function AdminAnnouncementsPage() {
           />
           <Select
             allowClear
-            placeholder="Status"
+            placeholder={t('filter_status')}
             value={statusFilter}
             onChange={(value) => setStatusFilter(value ?? undefined)}
             options={[
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
+              { value: 'active', label: t('status_active') },
+              { value: 'inactive', label: t('status_inactive') },
             ]}
             style={{ width: 120 }}
           />
           <Select
             showSearch
             allowClear
-            placeholder="Version"
+            placeholder={t('announcement_col_version')}
             value={versionFilter}
             onChange={(value) => setVersionFilter(value ?? undefined)}
             options={versionOptions}
@@ -211,9 +211,9 @@ export default function AdminAnnouncementsPage() {
       <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_publish')} open={open} onOk={publish} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('admin_publish')}>
         <Space direction="vertical" style={{ width: '100%', padding: '12px 0' }} size="middle">
           <Input placeholder={t('kb_title') || 'Title'} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <Input.TextArea rows={4} placeholder="Body" value={body} onChange={(e) => setBody(e.target.value)} />
+          <Input.TextArea rows={4} placeholder={t('announcement_body')} value={body} onChange={(e) => setBody(e.target.value)} />
           <Space style={{ width: '100%' }}>
-            <Input placeholder="Version e.g. V7.0" value={version} onChange={(e) => setVersion(e.target.value)} style={{ width: 180 }} />
+            <Input placeholder={t('announcement_version_placeholder')} value={version} onChange={(e) => setVersion(e.target.value)} style={{ width: 180 }} />
             <Select value={audience} onChange={(v) => { setAudience(v); setAudienceRef(''); }} style={{ width: 200 }}
               options={[
                 { value: 'all', label: 'all' },

@@ -456,7 +456,7 @@ export default function SpaceManagementPage() {
 
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 32 }}>
           <h1 className="page-title">

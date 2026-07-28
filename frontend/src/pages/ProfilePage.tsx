@@ -84,7 +84,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner" style={{ maxWidth: 820 }}>
         <div className="page-head" style={{ marginBottom: 20 }}>
           <h1 className="page-title">{t('account_info')}</h1>

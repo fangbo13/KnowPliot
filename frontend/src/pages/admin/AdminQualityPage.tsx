@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Drawer, Empty, Input, Select, Space, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
-import { PageHeader } from '../../design/primitives';
+import { PageHeader, StatCard } from '../../design/primitives';
 import { adminApi, type FeedbackReview, type KnowledgeGap } from '../../api/admin';
 import type { ComplianceExportJob, KnowledgeQualityReport, QualityExportDataset } from '../../api/admin';
 
@@ -222,28 +222,16 @@ export default function AdminQualityPage() {
   ], [t, reviews]);
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <PageHeader title={t('admin_nav_quality')} description={t('quality_page_subtitle')} />
 
         {report && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_feedback_total')}</div>
-              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{report.feedback.total}</div>
-            </Card>
-            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_negative_rate')}</div>
-              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{Math.round(report.feedback.negative_rate * 100)}%</div>
-            </Card>
-            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_open_reviews')}</div>
-              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{report.reviews.pending + report.reviews.in_review}</div>
-            </Card>
-            <Card className="kp-surface kp-surface--paper" styles={{ body: { padding: '20px' } }}>
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('quality_open_gaps')}</div>
-              <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-warning)' }}>{report.knowledge_gaps.open + report.knowledge_gaps.in_progress}</div>
-            </Card>
+            <StatCard label={t('quality_feedback_total')} value={report.feedback.total} />
+            <StatCard label={t('quality_negative_rate')} value={`${Math.round(report.feedback.negative_rate * 100)}%`} />
+            <StatCard label={t('quality_open_reviews')} value={report.reviews.pending + report.reviews.in_review} valueColor="var(--color-success)" />
+            <StatCard label={t('quality_open_gaps')} value={report.knowledge_gaps.open + report.knowledge_gaps.in_progress} valueColor="var(--color-warning)" />
           </div>
         )}
 
