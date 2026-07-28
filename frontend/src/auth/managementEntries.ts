@@ -7,7 +7,7 @@
 import type { AuthorizationAdapter } from './authorization';
 
 export interface ManagementEntry {
-  id: 'console' | 'workspace' | 'knowledge';
+  id: 'hub' | 'console' | 'workspace' | 'knowledge';
   label: string;
   to: string;
 }
@@ -18,21 +18,28 @@ export function buildManagementEntries(
   t?: (key: string) => string,
 ): ManagementEntry[] {
   const entries: ManagementEntry[] = [];
-  if (access.hasAny(['platform.access', 'governance.access'])) {
-    entries.push({ id: 'console', label: t?.('management_console') || 'Management console', to: access.defaultConsole });
+  if (access.enabled) {
+    // Console Entry Hub spec §2.5: capability mode collapses all management
+    // destinations into the single /console hub entry; per-console and
+    // workspace-management items moved into the hub and console switcher.
+    if (access.hasAny(['platform.access', 'governance.access', 'workspace.manage'])) {
+      entries.push({ id: 'hub', label: t?.('management_hub') || 'Management hub', to: '/console' });
+    }
+  } else {
+    // Legacy mode keeps the pre-hub menu behaviour (spec §2.7).
+    if (access.hasAny(['platform.access', 'governance.access'])) {
+      entries.push({ id: 'console', label: t?.('management_console') || 'Management console', to: access.defaultConsole });
+    }
+    if (activeSpaceId && access.has('workspace.manage')) {
+      entries.push({
+        id: 'workspace',
+        label: t?.('workspace_management') || 'Workspace management',
+        to: '/spaces/manage',
+      });
+    }
   }
-  if (activeSpaceId && access.has('workspace.manage')) {
-    entries.push({
-      id: 'workspace',
-      label: t?.('workspace_management') || 'Workspace management',
-      to: access.enabled
-        ? `/workspace/${activeSpaceId}/manage`
-        : '/spaces/manage',
-    });
-  }
-  // The knowledge base is a standalone workspace-scoped route, separated
-  // from the workspace management console. In legacy mode it falls back to
-  // the admin knowledge page.
+  // The knowledge base stays as a standalone high-frequency shortcut. In
+  // legacy mode it falls back to the admin knowledge page.
   if (activeSpaceId && access.has('knowledge.read')) {
     entries.push({
       id: 'knowledge',

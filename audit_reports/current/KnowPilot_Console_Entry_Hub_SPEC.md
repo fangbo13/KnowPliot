@@ -1,6 +1,7 @@
 # KnowPilot 统一管理入口（Console Hub）布局优化 SPEC
 
 - 版本：V1.0（2026-07-28）
+- 状态：**已实施并通过验证**（单测 58/58、构建通过、浏览器 E2E：Hub 四卡渲染/菜单收敛/控制台互切/无权限 Forbidden 均验证，截图存 audit_reports/screenshots/hub_*.png）
 - 分支：`feature/console-entry-hub`（自 `V1.76.6` 迁出）
 - 风格基线：Anthropic Claude（陶土橙 accent、纸感底色、Fraunces 衬线标题、8px 圆角体系、克制留白）
 - 范围：纯前端；不改后端能力契约（CapabilitySnapshot 保持 contract_version=2 不变）

@@ -152,7 +152,7 @@ export default function AppLayout() {
   const userMenu = useMemo(() => {
     const items: any[] = [];
     for (const entry of managementEntries) {
-      const icon = entry.id === 'console'
+      const icon = entry.id === 'hub' || entry.id === 'console'
         ? <AppstoreOutlined />
         : entry.id === 'workspace'
           ? <TeamOutlined />

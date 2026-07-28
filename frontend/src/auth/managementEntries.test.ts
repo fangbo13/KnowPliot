@@ -14,16 +14,22 @@ const access = (allowed: string[], enabled = true): AuthorizationAdapter => ({
 });
 
 describe('active management surface entries', () => {
-  it('builds command and shell destinations only from capabilities', () => {
+  it('collapses capability-mode management into the single hub entry', () => {
     const entries = buildManagementEntries(
       access(['governance.access', 'workspace.manage', 'knowledge.read']),
       'space-1',
     );
 
     expect(entries).toEqual([
-      { id: 'console', label: 'Management console', to: '/governance' },
-      { id: 'workspace', label: 'Workspace management', to: '/workspace/space-1/manage' },
+      { id: 'hub', label: 'Management hub', to: '/console' },
       { id: 'knowledge', label: 'Knowledge base', to: '/workspace/space-1/knowledge' },
+    ]);
+  });
+
+  it('offers the hub to workspace-only managers as well', () => {
+    const entries = buildManagementEntries(access(['workspace.manage']), 'space-1');
+    expect(entries).toEqual([
+      { id: 'hub', label: 'Management hub', to: '/console' },
     ]);
   });
 

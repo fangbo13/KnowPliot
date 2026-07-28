@@ -71,15 +71,15 @@ describe('ScopedQualityPage', () => {
     renderPage();
 
     await waitFor(() => expect(adminApi.feedbackReviews).toHaveBeenCalledWith({ space: 'space-1' }));
-    expect(screen.queryByRole('button', { name: 'Claim' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'quality_claim' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'quality_resolve' })).toBeNull();
   });
 
   it('shows review mutations only with quality.review', async () => {
     vi.mocked(useAuthorization).mockReturnValue(makeAccess(true));
     renderPage();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Claim' })).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Resolve' })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'quality_claim' })).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'quality_resolve' })).toBeTruthy();
   });
 });

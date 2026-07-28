@@ -87,7 +87,8 @@ describe('CapabilityGate', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('heading', { name: 'Access denied' })).toBeTruthy();
+    // ForbiddenPage renders i18n keys in the test environment (no i18next instance).
+    expect(screen.getByRole('heading', { name: 'forbidden_title' })).toBeTruthy();
     expect(screen.queryByText('Platform secrets')).toBeNull();
   });
 
