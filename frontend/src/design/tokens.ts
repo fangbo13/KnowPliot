@@ -4,6 +4,40 @@ const fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pin
 const displayFamily = "'Fraunces', 'Calistoga', Georgia, 'Songti SC', serif";
 const monoFamily = "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace";
 
+// Local Graph palette — deep-space blue/violet + neon cyan (tech accent zone,
+// intentionally decoupled from the warm Claude palette).
+const graphLight = {
+  bgStart: '#F5F7FC',
+  bgEnd: '#E9EDF7',
+  nodeFresh: '#0E7490',
+  nodeMid: '#2563EB',
+  nodeStale: '#B45309',
+  nodeInactive: '#64748B',
+  nodeStroke: '#FFFFFF',
+  edgeLink: '#0E7490',
+  edgeTerm: '#94A3B8',
+  edgeSimilar: '#6366F1',
+  halo: '#0E7490',
+  haloRgb: '14, 116, 144',
+  label: '#475569',
+} as const;
+
+const graphDark = {
+  bgStart: '#0E1220',
+  bgEnd: '#161A2E',
+  nodeFresh: '#22D3EE',
+  nodeMid: '#60A5FA',
+  nodeStale: '#F59E0B',
+  nodeInactive: '#5B6B84',
+  nodeStroke: '#0E1220',
+  edgeLink: '#22D3EE',
+  edgeTerm: '#3B4863',
+  edgeSimilar: '#818CF8',
+  halo: '#22D3EE',
+  haloRgb: '34, 211, 238',
+  label: '#9FB0C9',
+} as const;
+
 const light = {
   accent: '#B85B35',
   accentHover: '#A04A27',
@@ -47,8 +81,8 @@ const dark = {
   sunken: '#100F0E',
   surface: '#1C1B19',
   elevated: '#252320',
-  border: '#756B60',
-  borderSecondary: '#6B6259',
+  border: '#3D3A35',
+  borderSecondary: '#302D29',
   success: '#86B875',
   successRgb: '134, 184, 117',
   warning: '#E0B05C',
@@ -64,6 +98,7 @@ const dark = {
 
 export const designTokens = {
   color: { light, dark },
+  graph: { light: graphLight, dark: graphDark },
   typography: {
     body: fontFamily,
     display: displayFamily,
@@ -105,6 +140,7 @@ export const designTokens = {
 
 export function getCssVariables(theme: DesignTheme): Record<`--${string}`, string> {
   const color = designTokens.color[theme];
+  const graph = designTokens.graph[theme];
   const shadow = theme === 'dark'
     ? { xs: designTokens.shadow.darkXs, sm: designTokens.shadow.darkSm, md: designTokens.shadow.darkMd }
     : designTokens.shadow;
@@ -131,6 +167,8 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--border-secondary': color.borderSecondary,
     '--color-primary': color.accent,
     '--color-primary-rgb': color.accentRgb,
+    '--color-accent': color.accent,
+    '--color-accent-rgb': color.accentRgb,
     '--color-text': color.text,
     '--color-text-secondary': color.textSecondary,
     '--color-text-tertiary': color.textTertiary,
@@ -221,6 +259,21 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--header-blur': 'none',
     '--shadow-subtle-glow': 'none',
     '--gemini-gradient': 'none',
+    // Local Graph palette (deep-space blue/violet + neon cyan)
+    '--graph-bg': graph.bgEnd,
+    '--graph-bg-start': graph.bgStart,
+    '--graph-bg-end': graph.bgEnd,
+    '--graph-node-fresh': graph.nodeFresh,
+    '--graph-node-mid': graph.nodeMid,
+    '--graph-node-stale': graph.nodeStale,
+    '--graph-node-inactive': graph.nodeInactive,
+    '--graph-node-stroke': graph.nodeStroke,
+    '--graph-edge-link': graph.edgeLink,
+    '--graph-edge-term': graph.edgeTerm,
+    '--graph-edge-similar': graph.edgeSimilar,
+    '--graph-halo': graph.halo,
+    '--graph-halo-rgb': graph.haloRgb,
+    '--graph-label': graph.label,
     // hljs syntax highlighting token colors (managed centrally for both themes)
     '--hljs-keyword': theme === 'dark' ? '#E0A07C' : '#d73a49',
     '--hljs-string': theme === 'dark' ? '#9ECE8E' : '#032f62',
