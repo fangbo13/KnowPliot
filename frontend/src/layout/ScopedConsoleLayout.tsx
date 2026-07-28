@@ -10,7 +10,7 @@
 // switch theme or language at all.
 
 import {
-  GlobalOutlined, MoonOutlined, SunOutlined,
+  DownOutlined, GlobalOutlined, HomeOutlined, MoonOutlined, SunOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
@@ -19,6 +19,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import NotificationBell from '../components/NotificationBell';
 import { useTheme } from '../hooks/useTheme';
+import { useSpaceStore } from '../store/spaceStore';
 import {
   type ConsoleKind,
   visibleConsoleNavigation,
@@ -49,6 +50,20 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
       : '/governance';
   const navigation = visibleConsoleNavigation(kind, access, basePath);
   const title = t(TITLE_KEYS[kind]);
+  const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
+
+  // Console Entry Hub spec §2.4: cross-console switcher targets, filtered by
+  // capability and excluding the console currently shown.
+  const switchTargets: Array<{ key: string; label: string; to: string }> = [];
+  if (kind !== 'platform' && access.has('platform.access')) {
+    switchTargets.push({ key: 'platform', label: t('console_title_platform'), to: '/platform-admin' });
+  }
+  if (kind !== 'governance' && access.has('governance.access')) {
+    switchTargets.push({ key: 'governance', label: t('console_title_governance'), to: '/governance' });
+  }
+  if (kind !== 'workspace' && activeSpaceId && access.has('workspace.manage')) {
+    switchTargets.push({ key: 'workspace', label: t('console_title_workspace'), to: `/workspace/${activeSpaceId}/manage` });
+  }
 
   const toggleLanguage = () => {
     const next = i18n.language.startsWith('zh') ? 'en' : 'zh';
@@ -60,20 +75,33 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
     <div className="kp-console-layout">
       <aside className="kp-console-sidebar">
         <div className="kp-console-brand">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span
-              aria-hidden="true"
-              style={{
-                width: 30, height: 30, borderRadius: 9, flexShrink: 0,
-                background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontFamily: 'var(--font-family-display)', fontWeight: 600, fontSize: 16,
-              }}
-            >
-              K
-            </span>
-            <div className="kp-console-title">{title}</div>
-          </div>
+          <details className="kp-console-switcher">
+            <summary aria-label={t('console_switcher_aria')}>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 30, height: 30, borderRadius: 9, flexShrink: 0,
+                  background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: 'var(--font-family-display)', fontWeight: 600, fontSize: 16,
+                }}
+              >
+                K
+              </span>
+              <span className="kp-console-title">{title}</span>
+              <DownOutlined className="kp-console-switcher__caret" />
+            </summary>
+            <div className="kp-console-switcher__pop">
+              <Link className="kp-console-switcher__item" to="/console">
+                <HomeOutlined /> {t('management_hub')}
+              </Link>
+              {switchTargets.map((target) => (
+                <Link key={target.key} className="kp-console-switcher__item" to={target.to}>
+                  {target.label}
+                </Link>
+              ))}
+            </div>
+          </details>
           <div className="kp-console-scope">
             {t('console_scope_hint')}
           </div>
@@ -92,6 +120,9 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
         </nav>
 
         <div className="kp-console-sidebar__spacer" />
+        <Link to="/console" className="kp-console-back">
+          <HomeOutlined /> {t('management_hub')}
+        </Link>
         <Link to="/chat" className="kp-console-back">
           {t('back_to_app')}
         </Link>

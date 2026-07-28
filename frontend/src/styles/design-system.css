@@ -255,6 +255,55 @@
   background: var(--color-bg-sunken);
 }
 .kp-console-brand { padding: 0 8px 24px; }
+/* Console Entry Hub spec §2.4: console switcher dropdown in the brand area. */
+.kp-console-switcher { position: relative; }
+.kp-console-switcher > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--radius-control);
+  padding: 4px;
+  margin: -4px;
+}
+.kp-console-switcher > summary::-webkit-details-marker { display: none; }
+.kp-console-switcher > summary:hover { background: var(--color-fill); }
+.kp-console-switcher__caret {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.kp-console-switcher[open] .kp-console-switcher__caret { transform: rotate(180deg); }
+.kp-console-switcher__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  min-width: 210px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+.kp-console-switcher__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.kp-console-switcher__item:hover {
+  background: var(--color-fill);
+  color: var(--color-text);
+}
 .kp-console-title {
   color: var(--color-text);
   font-family: var(--font-family-display);
@@ -316,6 +365,119 @@
   font-family: var(--font-family-display);
   color: var(--color-text);
 }
+/* Console Entry Hub spec §2.2/§3: settings-hub card grid. */
+.kp-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+.kp-hub-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: box-shadow var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+.kp-hub-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--color-border);
+}
+.kp-hub-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.kp-hub-card__badge {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 16px;
+}
+.kp-hub-card__title {
+  margin: 0;
+  flex: 1;
+  font-family: var(--font-family-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.kp-hub-card__enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.kp-hub-card__enter:hover { color: var(--accent-hover); }
+.kp-hub-card__desc {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.kp-hub-card__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kp-hub-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-fill);
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.kp-hub-chip:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.kp-hub-card__spaces {
+  display: grid;
+  gap: 4px;
+}
+.kp-hub-space-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+}
+.kp-hub-space-row:hover { background: var(--color-fill); }
+.kp-hub-space-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  color: var(--color-text);
+}
+.kp-hub-space-row__manage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.kp-hub-space-row__manage:hover { color: var(--accent-hover); }
 .kp-console-content {
   width: 100%;
   max-width: calc(var(--management-max) + 64px);
