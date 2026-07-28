@@ -414,6 +414,11 @@ def space_join(request):
             membership.save(update_fields=["status", "last_accessed_at", "updated_at"])
         # Count the use.
         InviteCode.objects.filter(pk=invite.pk).update(used_count=invite.used_count + 1)
+        # Bug fix: first joined space becomes the user's default so the
+        # frontend no longer treats the new member as spaceless.
+        from .services import ensure_default_space
+
+        ensure_default_space(request.user, space)
 
     _audit(request.user, "space_join", target_id=space.id,
            details={"code_prefix": invite.code_prefix, "role": invite.role, "new_member": created},

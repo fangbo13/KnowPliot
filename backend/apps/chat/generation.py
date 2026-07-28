@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from django.db import close_old_connections, transaction
+from django.db import close_old_connections, connection, transaction
 from django.db.models import Max
 from django.utils import timezone
 
@@ -110,6 +110,20 @@ def _load_turn(turn_id):
 
 def _make_lease(turn):
     return RedisSessionLease(create_redis_client(), turn.session_id)
+
+
+def _refresh_db_connections() -> None:
+    """close_old_connections, but never inside an atomic block.
+
+    Long-lived SSE generators recycle stale connections between phases. In
+    tests, however, the whole request runs inside the TestCase transaction —
+    closing the shared connection there kills the test's own transaction
+    (psycopg "the connection is closed"). Django's request signals skip this
+    for the same reason; our explicit calls must too.
+    """
+    if connection.in_atomic_block:
+        return
+    close_old_connections()
 
 
 def _maybe_open_knowledge_gap(turn, message) -> None:
@@ -491,7 +505,7 @@ def iter_chat_turn(
         language = _language
         if language is None:
             language = resolve_reply_language(query, turn.user, turn.space)
-        close_old_connections()
+        _refresh_db_connections()
         raw_events = pipeline.retrieve_and_generate(
             query=query,
             user_profile=turn.user,
@@ -662,4 +676,4 @@ def iter_chat_turn(
                 "cancel_probe_clear_failed turn_id=%s code=coordination_unavailable",
                 turn.id,
             )
-        close_old_connections()
+        _refresh_db_connections()

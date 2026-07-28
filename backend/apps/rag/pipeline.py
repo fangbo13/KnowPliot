@@ -62,6 +62,30 @@ _shared_chat_services = None
 _shared_chat_services_lock = threading.Lock()
 
 
+def _sync_pgvector_column(pairs: list[tuple[str, list[float]]]) -> None:
+    """Batch-sync JSON embeddings into the pgvector ``embedding_vector`` column.
+
+    V4.3 UAT FIX kept the retriever's HNSW index in sync but issued one raw
+    UPDATE per chunk (N round-trips). P1 §B4: a single ``executemany`` batch
+    (psycopg3 pipelines it) replaces the loop. No-op on SQLite, where the
+    vector column does not exist.
+    """
+    if not pairs:
+        return
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
+            [
+                ("[" + ",".join(str(v) for v in embedding) + "]", chunk_id)
+                for chunk_id, embedding in pairs
+            ],
+        )
+
+
 def get_shared_chat_services() -> _SharedChatServices:
     """Reuse immutable/stateless chat services across concurrent requests."""
 
@@ -184,6 +208,7 @@ class RAGPipeline:
 
         # Store chunks with sanitized metadata
         document_chunks = []
+        vector_sync_pairs: list[tuple[str, list[float]]] = []
         # Spec §2: redundantly write controlled term codes onto every chunk so
         # retrieval can filter/boost without extra joins.
         document_term_codes = _document_term_codes(document)
@@ -214,21 +239,13 @@ class RAGPipeline:
                 metadata=clean_metadata,
                 embedding=embedding,
             )
-            # V4.3 UAT FIX: Sync JSON embedding to pgvector embedding_vector column.
-            # The ingest creates chunks with the JSON embedding field, but the retriever's
-            # _search_pgvector() queries the embedding_vector (VectorField) column which
-            # has an HNSW index. Without this sync, newly ingested chunks are invisible
-            # to the retriever — it returns 0 results even when chunks exist.
-            # Migration 0004 handles existing data, but new ingests need this immediate sync.
             if embedding and not is_zero_vector(embedding):
-                from django.db import connection
-                with connection.cursor() as cursor:
-                    vector_str = '[' + ','.join(str(v) for v in embedding) + ']'
-                    cursor.execute(
-                        "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
-                        [vector_str, str(doc_chunk.id)]
-                    )
+                vector_sync_pairs.append((str(doc_chunk.id), embedding))
             document_chunks.append(doc_chunk)
+
+        # V4.3 UAT FIX + P1 §B4: sync JSON embeddings to the pgvector column in
+        # ONE batched round-trip (was one raw UPDATE per chunk).
+        _sync_pgvector_column(vector_sync_pairs)
 
         logger.info(f"Ingested {len(document_chunks)} chunks from {document.title}")
         self._refresh_similarity(document)
@@ -311,6 +328,7 @@ class RAGPipeline:
 
         # Store chunks with sanitized metadata + pgvector sync
         document_chunks = []
+        vector_sync_pairs: list[tuple[str, list[float]]] = []
         # Spec §2: redundantly write controlled term codes onto every chunk.
         document_term_codes = _document_term_codes(document)
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
@@ -335,14 +353,11 @@ class RAGPipeline:
                 embedding=embedding,
             )
             if embedding and not is_zero_vector(embedding):
-                from django.db import connection
-                with connection.cursor() as cursor:
-                    vector_str = '[' + ','.join(str(v) for v in embedding) + ']'
-                    cursor.execute(
-                        "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
-                        [vector_str, str(doc_chunk.id)]
-                    )
+                vector_sync_pairs.append((str(doc_chunk.id), embedding))
             document_chunks.append(doc_chunk)
+
+        # P1 §B4: one batched pgvector sync instead of per-chunk UPDATEs.
+        _sync_pgvector_column(vector_sync_pairs)
 
         logger.info(
             f"Ingested {len(document_chunks)} chunks from text_content of {document.title}"
@@ -611,7 +626,12 @@ class RAGPipeline:
         try:
             from apps.knowledge.models import Document
 
-            doc_ids = {str(chunk["document_id"]) for chunk in chunks}
+            from .hybrid import _valid_uuid_subset
+
+            # Guard: synthetic/legacy chunk ids must not break the UUID query.
+            doc_ids = _valid_uuid_subset(
+                str(chunk["document_id"]) for chunk in chunks
+            )
             for doc in Document.objects.filter(id__in=doc_ids).select_related(
                 "updated_by", "uploaded_by"
             ):

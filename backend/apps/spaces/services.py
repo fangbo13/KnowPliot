@@ -122,6 +122,20 @@ def redeem_email_invites(user):
     return granted
 
 
+def ensure_default_space(user, space) -> None:
+    """Persist the first joined space as the user's default.
+
+    Bug fix (注册/加入后 default_space 同步缺陷): join endpoints previously never
+    wrote ``default_space``, so the frontend treated members as spaceless
+    until they manually switched. Only fills an EMPTY default — an explicit
+    choice made via space_switch is never overridden.
+    """
+    if space is None or user.default_space_id:
+        return
+    user.default_space = space
+    user.save(update_fields=["default_space"])
+
+
 def join_default_space(user):
     """Place a new user in their Service Line's default space (or 'general').
 

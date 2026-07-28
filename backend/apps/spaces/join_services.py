@@ -1437,6 +1437,11 @@ def join_by_code(*, actor, join_code, idempotency_key):
                 resource=membership,
                 details={"join_policy": space.join_policy},
             )
+            # Bug fix: first joined space becomes the user's default so the
+            # frontend no longer treats the new member as spaceless.
+            from .services import ensure_default_space
+
+            ensure_default_space(actor, space)
             body = {
                 "space_id": str(space.id),
                 "space_name": space.name,
@@ -1522,6 +1527,11 @@ def global_join(*, actor, space_id, idempotency_key):
                 resource=membership,
                 details={"join_policy": space.join_policy},
             )
+            # Bug fix: first joined space becomes the user's default so the
+            # frontend no longer treats the new member as spaceless.
+            from .services import ensure_default_space
+
+            ensure_default_space(actor, space)
             body = {
                 "space_id": str(space.id),
                 "space_name": space.name,

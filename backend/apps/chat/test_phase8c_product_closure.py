@@ -221,7 +221,16 @@ class SessionProductClosureTest(APITestCase):
         status_response = self.client.get(f"/api/v1/chat/turns/{turn.id}/")
         self.assertEqual(status_response.status_code, 404)
 
-        events = self.client.get(f"/api/v1/chat/turns/{turn.id}/events/")
+        # The events endpoint is an async plain-Django view with its own JWT
+        # authentication (force_authenticate only covers DRF views), so call
+        # it with a real access token — the guest must still get 404.
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        access = str(RefreshToken.for_user(self.user).access_token)
+        events = self.client.get(
+            f"/api/v1/chat/turns/{turn.id}/events/",
+            HTTP_AUTHORIZATION=f"Bearer {access}",
+        )
         branch = self.client.post(
             f"/api/v1/chat/messages/{assistant.id}/branch/",
             {"client_request_id": str(uuid.uuid4())},

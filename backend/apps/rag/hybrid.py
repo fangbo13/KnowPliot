@@ -33,6 +33,22 @@ ENGLISH_STOP_WORDS = {
 MIN_POSTGRES_FTS_RANK = 1e-6
 
 
+def _valid_uuid_subset(values) -> set[str]:
+    """Keep only well-formed UUID strings (drops synthetic test/legacy ids).
+
+    Passing a non-UUID into ``id__in`` on a UUIDField raises ValidationError
+    mid-query; pre-filtering keeps metadata enrichment best-effort instead of
+    silently losing everything (or crashing the retrieval path).
+    """
+    subset = set()
+    for value in values:
+        try:
+            subset.add(str(UUID(str(value))))
+        except (TypeError, ValueError):
+            continue
+    return subset
+
+
 def _effective_date_filter():
     """Part 1 (§1.5): Only retrieve chunks from currently effective documents.
 
@@ -286,7 +302,9 @@ class HybridRetriever:
         from apps.knowledge.freshness import compute_freshness, space_half_life_days
         from apps.knowledge.models import ReferenceLibrary
 
-        doc_ids = {str(row["document_id"]) for row in rows}
+        doc_ids = _valid_uuid_subset(
+            str(row["document_id"]) for row in rows
+        )
         docs = {
             str(d.id): d
             for d in Document.objects.filter(id__in=doc_ids).select_related("space")
