@@ -168,7 +168,10 @@ export default function AdminAuditPage() {
     <div className="page" style={{ background: 'transparent' }}>
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 className="page-title">{t('admin_audit_title')}</h1>
+          <div>
+            <h1 className="page-title">{t('admin_audit_title')}</h1>
+            <p className="page-sub">{t('admin_audit_subtitle')}</p>
+          </div>
         </div>
         <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
           <Space wrap style={{ marginBottom: 16 }}>

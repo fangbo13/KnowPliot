@@ -798,6 +798,7 @@ export default function KnowledgeBasePage() {
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24 }}>
           <h1 className="page-title">{t('nav_knowledge')}</h1>
+          <p className="page-sub">{t('admin_knowledge_subtitle')}</p>
         </div>
         {/* Spec §2/§3/§5: documents / review queue / graph / timeline / dashboard */}
         <Tabs

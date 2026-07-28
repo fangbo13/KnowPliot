@@ -333,6 +333,7 @@ export default function AdminDashboardPage() {
     <div className="page" style={{ background: 'transparent' }}>
       <div className="page-head" style={{ marginBottom: 24 }}>
         <h1 className="page-title">{t('admin_dashboard') || 'Admin Dashboard'}</h1>
+        <p className="page-sub">{t('admin_dashboard_subtitle')}</p>
       </div>
       
       {systemMetrics && (

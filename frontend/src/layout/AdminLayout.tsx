@@ -84,13 +84,14 @@ export default function AdminLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              className="admin-nav-link"
               style={({ isActive }) => ({
                 position: 'relative',
                 display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px',
                 borderRadius: 10, fontSize: 14, textDecoration: 'none',
                 fontWeight: isActive ? 600 : 500,
                 color: isActive ? 'var(--accent-text)' : 'var(--color-text-secondary)',
-                background: isActive ? 'var(--accent-soft)' : 'transparent',
+                background: isActive ? 'var(--accent-soft)' : undefined,
                 transition: 'background var(--dur) var(--ease-out), color var(--dur) var(--ease-out)',
               })}
             >
@@ -136,8 +137,12 @@ export default function AdminLayout() {
           <button className="icon-btn" onClick={toggleLanguage} aria-label={t('language_switch') || 'Switch language'}>
             <GlobalOutlined />
           </button>
-          <button className="icon-btn" style={{ width: 'auto', gap: 8, padding: '0 8px' }} aria-label={t('user_menu') || 'User'}>
-            <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>
+          <button
+            className="icon-btn"
+            style={{ width: 'auto', gap: 8, padding: '2px 12px 2px 4px', borderRadius: 999, border: '1px solid var(--color-border-secondary)', marginLeft: 6 }}
+            aria-label={t('user_menu') || 'User'}
+          >
+            <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12, background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)' }}>{initials(user?.email)}</span>
             <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>
           </button>
         </header>
