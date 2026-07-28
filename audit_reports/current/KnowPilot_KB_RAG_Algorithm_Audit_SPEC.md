@@ -1,0 +1,100 @@
+# KnowPilot 知识库检索算法与迭代机制审计 SPEC
+
+版本：v1.0 ｜ 日期：2026-07-28 ｜ 范围：backend/apps/rag、backend/apps/knowledge ｜ 目标：对齐 Obsidian 级知识库体验 + 跨库 Agent 调用下的检索质量
+
+## 1. 现状架构
+
+### 1.1 检索链路（chat 提问）
+```
+retrieve_and_generate (rag/pipeline.py)
+  └─ resolve_reference_space_ids (knowledge/library_views.py)   # 跨库白名单
+  └─ HybridRetriever.search (rag/hybrid.py)
+       ├─ PgVectorRetriever (rag/retriever.py)   # pgvector HNSW 余弦，space 白名单硬过滤
+       ├─ _postgres_lexical_search               # PostgreSQL FTS（simple 配置）
+       ├─ reciprocal_rank_fusion (rrf_k=60)
+       ├─ _annotate_document_signals             # 新鲜度指数衰减
+       ├─ rerank_results                         # 0.55×融合 + 0.35×单路证据 + 0.10×新鲜度
+       ├─ _apply_query_signals                   # 术语+0.1 / 跨财年×0.6 / stale×0.7
+       └─ diversify_results                      # 每文档≤2块
+  └─ classify_confidence → low/insufficient 拒答
+  └─ _build_citations → LLM 流式生成（熔断器保护）
+```
+
+### 1.2 迭代更新链路
+```
+上传/编辑 → enqueue_document_ingestion (knowledge/ingestion.py, 持久化Job)
+  → Celery ingest_document → LangChainChunker → EmbeddingService → chunk落库 + pgvector同步
+  → sync_document_links (knowledge/links.py, wikilink全删重建)
+夜间 → scan_stale_documents (knowledge/tasks.py, 超期置stale+通知术语负责人)
+```
+
+## 2. 问题清单
+
+### A. 检索/资源调用算法
+
+| # | 问题 | 证据位置 | 影响 | 状态 |
+|---|------|----------|------|------|
+| A1 | 跨库无路由无配额：所有启用参考库每问全量检索，RRF 池统一排序，大库可挤占本空间结果 | pipeline.py L382-400、hybrid.py diversify_results | 相关性下降、成本线性放大 | **P0 已修复（配额）**；路由属 P2 |
+| A2 | 置信度尺度失准：signal boost/penalty 改写 rerank_score，0.75/0.55 阈值按原尺度校准 | hybrid.py `_apply_query_signals` | 术语命中虚高置信；惩罚导致误拒答 | **P0 已修复** |
+| A3 | 参考库新鲜度语义错误：半衰期只取首文档空间；准则文档吃时间衰减+stale 惩罚 | hybrid.py `_annotate_document_signals` | IFRS 等标准文档被系统性降权 | **P0 已修复** |
+| A4 | 查询理解原始：正则财年 + 全量词表 Python 包含匹配；无同义词/改写/多查询 | rag/query_understanding.py | 同义术语召回漏（坏账准备 vs 信用减值损失） | P2 |
+| A5 | 假批量 embedding：embed_batch 逐条串行 + 每 5 条 sleep 0.5s | rag/embedding.py L270-299 | 500 chunk 文档 500 次调用 + 50s 空等 | P1 |
+| A6 | 中文词法检索差：FTS simple 配置，汉字逐字成 token | hybrid.py L19、L336-343 | 中文关键词召回质量低 | P1 |
+| A7 | 切块非结构感知：不按 Markdown 标题分块 | rag/chunker.py | 章节语义丢失，无法做标题级引用 | P2 |
+| A8 | 无模型级 rerank；查询 embedding 缓存为进程内 5min TTL 不跨 worker | hybrid.py / embedding.py L115 | 排序上限受限；缓存命中率低 | P1/P2 |
+| A9 | 拒答兜底文案为 HR 领域残留 | pipeline.py、prompt_builder.py | 与审计定位不符 | **P0 已修复** |
+
+### B. 迭代更新机制
+
+| # | 问题 | 证据位置 | 影响 | 状态 |
+|---|------|----------|------|------|
+| B1 | 双链缺 Obsidian 核心能力：无 unresolved link、无重命名传播、无补全端点、不跨库 | knowledge/links.py | 断链静默发生；编辑体验不闭环 | P3 |
+| B2 | 图谱相似度边请求时 O(n²) Python 现算（300 节点 ≈ 4.5 万次 1024 维余弦），且仅取首块向量 | knowledge/viz_views.py L136-152 | 图谱 Tab 卡顿；相似度失真 | P1 |
+| B3 | 质量信号无闭环：拒答/负反馈不自动生成知识缺口工单、不回流排序 | viz_views.knowledge_dashboard | 迭代靠人工盯看板 | P2 |
+| B4 | 工程性：版本历史无 GET 列表；stale 扫描逐条 save+notify；superseded chunk 无清理；ingest 每 chunk 单独 UPDATE 同步向量 | knowledge/views.py、tasks.py、rag/pipeline.py L146-160 | 运维成本随规模上升 | P1/P3 |
+
+### C. 做对了的部分（不要动）
+- 空间隔离：检索强制 space_id 白名单 + UUID 校验 + 过滤键白名单防注入；chunk 反规范化 space FK
+- RRF 融合避免了跨路分数直接比较；持久化 IngestionJob + Celery 异步索引；chunk 注入检测清洗
+
+## 3. P0 修复实施记录（本次已完成）
+
+| 修复 | 文件 | 方案 |
+|------|------|------|
+| A2 置信度尺度 | `rag/hybrid.py` | boost/penalty 只写入 `score`/`signal_adjusted_score` 驱动排序；`rerank_score` 保持纯净供 `classify_confidence` 使用 |
+| A3 新鲜度豁免 | `rag/hybrid.py` | 按各文档所在空间取半衰期；published ReferenceLibrary 空间文档 freshness=1.0、标记 `is_reference_library`、跳过 stale 惩罚 |
+| A1 来源配额 | `rag/hybrid.py` | `diversify_results` 新增 `primary_space_id` + `max_reference_ratio=0.5`：参考库结果最多占 top_k 一半，本空间不足时才回填 |
+| A9 兜底文案 | `rag/pipeline.py`、`rag/prompt_builder.py` | 中英文案改为"补充相关知识文档或联系知识库管理员" |
+
+测试：`backend/apps/rag/test_p0_audit_fixes.py`（6 例全过）；`apps.rag` 全量 66 例仅 1 个存量 SSE 用例失败（基线复测同样失败，与本次无关）。
+
+## 4. 后续路线图
+
+### P1 — 性能（建议下一迭代）
+1. 真批量 embedding：DashScope 批量接口一次 ≤10 条，取消固定 sleep，失败重试单条降级。验收：500 chunk 文档入库时间下降 ≥80%
+2. 查询 embedding 缓存迁移 Redis（跨 worker 共享，TTL 30min）。验收：多 worker 下相同查询二次命中
+3. 图谱相似度预计算：ingest 完成时计算文档级向量（chunk 池化或首块），写 DocumentSimilarity 边表；viz 端点只读表。验收：graph 接口 P95 < 200ms
+4. 中文分词：FTS 改 zhparser/pg_jieba，或 ingest 时 jieba 预分词存 tsvector 列
+5. stale 扫描批量化：bulk_update + 通知合并
+
+### P2 — 算法升级
+1. 轻量库路由：按查询信号（术语命中、准则关键词表）与库 category 匹配决定检索哪些库；无信号时默认仅本空间 + 显式提及的库；保留"全库"降级开关
+2. 结构感知切块：MarkdownHeaderTextSplitter 按标题层级分块，chunk metadata 记录 heading path，citation 展示章节路径
+3. 查询扩展：受控同义词表（TaxonomyTerm 增 synonyms 字段）→ 词法查询扩展
+4. 可选 LLM rerank：对 top-3×k 候选做一次轻量模型重排（延迟预算内开关控制）
+5. 质量闭环：insufficient 回答自动创建 KnowledgeGapTicket 并关联命中术语
+
+### P3 — Obsidian 体验
+1. 版本历史 GET /versions/ 列表（版本链 + diff 入口）
+2. wikilink 补全端点：GET /documents/link-suggest/?q= 标题前缀/模糊匹配（限本空间+已启用库）
+3. Unresolved links：DocumentLink 增 `unresolved_title` 行，前端灰链 + 点击创建
+4. 标题重命名传播：改名时扫描引用方 text_content 更新 [[旧标题]] → [[新标题]]（事务内，审计留痕）
+5. 跨库双链：链接解析范围扩展到已启用参考库（只读引用）
+6. superseded chunk 归档清理任务
+
+## 5. 验收标准（P0）
+- classify_confidence 输入不受 signal 调整污染（单测覆盖）
+- published 参考库文档 freshness=1.0 且免 stale 惩罚（单测覆盖）
+- top_k 中参考库来源 ≤ 50%，本空间不足时回填（单测覆盖）
+- 拒答文案无 HR 字样（单测覆盖 + 浏览器验证）
+- 现有 apps.rag 测试无新增失败
