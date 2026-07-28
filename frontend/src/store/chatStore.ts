@@ -58,6 +58,8 @@ export interface Citation {
   document_id: string;
   document_title: string;
   page_number?: number;
+  // KB/RAG audit spec P2 §A7: heading path from structure-aware chunking.
+  section?: string | null;
   score: number;
   snippet?: string;
   quoted_text: string;

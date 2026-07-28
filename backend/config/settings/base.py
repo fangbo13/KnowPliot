@@ -260,7 +260,22 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.knowledge.tasks.scan_stale_documents",
         "schedule": 60.0 * 60 * 24,
     },
+    # KB/RAG audit spec P3 §B4: reclaim chunks of superseded/archived versions.
+    "knowledge-superseded-chunk-purge": {
+        "task": "apps.knowledge.tasks.purge_superseded_chunks",
+        "schedule": 60.0 * 60 * 24,
+    },
 }
+
+# ── KB/RAG audit spec P2/P3 knobs ──
+# §A1: route reference libraries by query signals (False = search all).
+RAG_LIBRARY_ROUTING_ENABLED = env_bool("RAG_LIBRARY_ROUTING_ENABLED", default=True)
+# §A8: optional LLM rerank of the final top-k (adds one LLM call per question).
+RAG_LLM_RERANK_ENABLED = env_bool("RAG_LLM_RERANK_ENABLED", default=False)
+# §B4: how long superseded/archived versions keep their chunks.
+KNOWLEDGE_SUPERSEDED_CHUNK_RETENTION_DAYS = int(
+    os.environ.get("KNOWLEDGE_SUPERSEDED_CHUNK_RETENTION_DAYS", "30")
+)
 ACTION_OUTBOX_DELIVERY_ADAPTER = os.environ.get(
     "ACTION_OUTBOX_DELIVERY_ADAPTER",
     "",

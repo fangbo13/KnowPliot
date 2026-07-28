@@ -33,6 +33,9 @@ class QuerySignals:
     term_codes: tuple[str, ...] = ()
     fiscal_year_codes: tuple[str, ...] = ()
     matched_labels: tuple[str, ...] = field(default=())
+    # P2 §A4: labels + controlled synonyms of matched terms — used to expand
+    # the lexical query (e.g. 坏账准备 ↔ 信用减值损失).
+    expansion_terms: tuple[str, ...] = field(default=())
 
     @property
     def has_signals(self) -> bool:
@@ -63,20 +66,28 @@ def analyze_query(query: str, *, space_id: str) -> QuerySignals:
 
         matched_codes: list[str] = []
         matched_labels: list[str] = []
+        expansion_terms: list[str] = []
         terms = TaxonomyTerm.objects.filter(
             dimension__organization_id=space.organization_id,
             status="active",
         ).select_related("dimension").only(
-            "code", "label", "dimension__code"
+            "code", "label", "synonyms", "dimension__code"
         )
         for term in terms:
             label = (term.label or "").lower()
             code_text = term.code.replace("_", " ").replace("-", " ")
+            # P2 §A4: controlled synonyms count as matches too.
+            synonyms = [
+                s for s in (term.synonyms or []) if isinstance(s, str) and s.strip()
+            ]
+            synonym_hit = any(s.lower() in query_lower for s in synonyms)
             if (label and label in query_lower) or (
                 len(code_text) >= 4 and code_text in query_lower
-            ):
+            ) or synonym_hit:
                 matched_codes.append(term.code)
                 matched_labels.append(term.label)
+                expansion_terms.append(term.label)
+                expansion_terms.extend(synonyms)
                 if term.dimension.code == "fiscal_year" and term.code not in fy_codes:
                     fy_codes.append(term.code)
 
@@ -89,6 +100,7 @@ def analyze_query(query: str, *, space_id: str) -> QuerySignals:
             term_codes=tuple(dict.fromkeys(matched_codes)),
             fiscal_year_codes=tuple(dict.fromkeys(fy_codes)),
             matched_labels=tuple(dict.fromkeys(matched_labels)),
+            expansion_terms=tuple(dict.fromkeys(expansion_terms)),
         )
     except Exception as exc:  # pragma: no cover — QU is a soft enhancement
         logger.warning("analyze_query failed: %s", exc)

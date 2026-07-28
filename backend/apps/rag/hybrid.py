@@ -233,6 +233,18 @@ class HybridRetriever:
             normalized_space_ids = [normalized_space_id]
         normalized_filters = (filters or RetrievalFilters()).normalized()
         candidate_k = max(top_k * 3, top_k)
+        # P2 §A4: analyze query signals ONCE — reused for lexical expansion
+        # here and for boost/penalty adjustments after fusion.
+        signals = None
+        try:
+            from .query_understanding import analyze_query
+
+            signals = analyze_query(query, space_id=normalized_space_id)
+        except Exception:
+            signals = None
+        lexical_query = query
+        if signals and signals.expansion_terms:
+            lexical_query = f"{query} {' '.join(signals.expansion_terms)}"
         vector_results = self.vector_retriever.search(
             query,
             space_id=normalized_space_id,
@@ -242,7 +254,7 @@ class HybridRetriever:
             filters=normalized_filters,
         )
         lexical_results = self._lexical_search(
-            query,
+            lexical_query,
             space_ids=normalized_space_ids,
             top_k=candidate_k,
             filters=normalized_filters,
@@ -251,7 +263,7 @@ class HybridRetriever:
         self._annotate_document_signals(fused, space_id=normalized_space_id)
         reranked = rerank_results(fused)
         reranked = self._apply_query_signals(
-            reranked, query=query, space_id=normalized_space_id
+            reranked, query=query, space_id=normalized_space_id, signals=signals
         )
         return diversify_results(
             reranked,
@@ -307,17 +319,23 @@ class HybridRetriever:
             row["document_version"] = doc.version
 
     def _apply_query_signals(
-        self, rows: list[dict], *, query: str, space_id: str
+        self, rows: list[dict], *, query: str, space_id: str, signals=None
     ) -> list[dict]:
-        """Spec §4 L4: query understanding — term boost, cross-FY + stale penalties."""
+        """Spec §4 L4: query understanding — term boost, cross-FY + stale penalties.
+
+        P2 §A4: accepts pre-computed ``signals`` from ``search()`` to avoid a
+        second vocabulary scan; falls back to analyzing here when called
+        directly (kept for backwards compatibility).
+        """
         if not rows:
             return rows
-        try:
-            from .query_understanding import analyze_query
+        if signals is None:
+            try:
+                from .query_understanding import analyze_query
 
-            signals = analyze_query(query, space_id=space_id)
-        except Exception:
-            signals = None
+                signals = analyze_query(query, space_id=space_id)
+            except Exception:
+                signals = None
         query_terms = set(signals.term_codes) if signals else set()
         query_fys = set(signals.fiscal_year_codes) if signals else set()
 

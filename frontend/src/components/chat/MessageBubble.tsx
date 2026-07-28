@@ -421,6 +421,10 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
                           </span>
                         )}
                         {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
+                        {/* P2 §A7: heading path from structure-aware chunking */}
+                        {cit.section && (
+                          <span style={{ color: 'var(--color-text-tertiary)' }}>§ {cit.section}</span>
+                        )}
                         {/* Spec §3: updater watermark "v{N} · {name} · {date}" on citation cards */}
                         {cit.version != null && (
                           <span className="citation-watermark" style={{ color: 'var(--color-text-tertiary)' }}>

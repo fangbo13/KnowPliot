@@ -112,6 +112,61 @@ def _make_lease(turn):
     return RedisSessionLease(create_redis_client(), turn.session_id)
 
 
+def _maybe_open_knowledge_gap(turn, message) -> None:
+    """KB/RAG audit spec P2 §B3: auto-open a gap ticket for insufficient answers.
+
+    Idempotent per (space, normalized question) while a ticket is still in an
+    open lifecycle. Matched taxonomy terms are recorded in suggested_source so
+    term owners know where the gap sits. Best-effort — never breaks the turn.
+    """
+    try:
+        if message.confidence_label != "insufficient" or turn.space_id is None:
+            return
+        from .models import KnowledgeGapTicket
+
+        question = (turn.question_message.content or "").strip()[:2000]
+        if not question:
+            return
+        question_hash = KnowledgeGapTicket.hash_question(question)
+        if KnowledgeGapTicket.objects.filter(
+            space_id=turn.space_id,
+            normalized_question_hash=question_hash,
+            status__in=[
+                KnowledgeGapTicket.STATUS_OPEN,
+                KnowledgeGapTicket.STATUS_IN_PROGRESS,
+            ],
+        ).exists():
+            return
+        suggested = "auto-created from an insufficient-confidence answer"
+        try:
+            from apps.rag.query_understanding import analyze_query
+
+            signals = analyze_query(question, space_id=str(turn.space_id))
+            if signals and signals.term_codes:
+                suggested += " · matched terms: " + ", ".join(signals.term_codes)
+        except Exception:
+            pass
+        ticket = KnowledgeGapTicket.objects.create(
+            space=turn.space,
+            question_snapshot=question,
+            normalized_question_hash=question_hash,
+            priority="medium",
+            suggested_source=suggested,
+        )
+        from apps.audit.views import create_audit_log
+
+        create_audit_log(
+            user=turn.user,
+            action="knowledge_gap_create",
+            target_type="KnowledgeGapTicket",
+            target_id=str(ticket.id),
+            details={"auto": True, "space_id": str(turn.space_id)},
+            space_id=turn.space_id,
+        )
+    except Exception:  # pragma: no cover — quality loop must not break chat
+        logger.warning("auto_knowledge_gap_failed", exc_info=True)
+
+
 def _conversation_history(session, question_message, window_rounds=10):
     history = list(
         Message.objects.filter(session=session)
@@ -333,6 +388,9 @@ def _persist_completed_turn(
             **version_values,
         )
         citation_saver(assistant_message, citations_data, locked_turn.space)
+        # KB/RAG audit spec P2 §B3: quality loop — insufficient answers
+        # automatically open a knowledge-gap ticket (idempotent, best-effort).
+        _maybe_open_knowledge_gap(locked_turn, assistant_message)
         _record_invocation(
             locked_turn,
             pipeline,

@@ -63,7 +63,7 @@ class TaxonomyTermSerializer(serializers.ModelSerializer):
         model = TaxonomyTerm
         fields = [
             "id", "dimension", "dimension_code", "parent", "code", "label",
-            "sort_order", "status", "created_at",
+            "synonyms", "sort_order", "status", "created_at",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -329,12 +329,20 @@ def taxonomy_term_detail(request, pk):
     except TaxonomyTerm.DoesNotExist:
         raise NotFound("Term not found.")
     _require_dimension_admin(request, space, term.dimension)
-    allowed = {"label", "sort_order", "status"}
+    allowed = {"label", "sort_order", "status", "synonyms"}
     updates = {k: v for k, v in request.data.items() if k in allowed}
     if not updates:
         raise ValidationError({"detail": "No editable fields supplied."})
     if "status" in updates and updates["status"] not in {"active", "archived"}:
         raise ValidationError({"status": "Must be 'active' or 'archived'."})
+    # P2 §A4: synonyms must be a list of non-empty strings.
+    if "synonyms" in updates:
+        synonyms = updates["synonyms"]
+        if not isinstance(synonyms, list) or any(
+            not isinstance(s, str) or not s.strip() for s in synonyms
+        ):
+            raise ValidationError({"synonyms": "Must be a list of non-empty strings."})
+        updates["synonyms"] = [s.strip()[:200] for s in synonyms][:20]
     for field, value in updates.items():
         setattr(term, field, value)
     term.save(update_fields=[*updates.keys(), "updated_at"])

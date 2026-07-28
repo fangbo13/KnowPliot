@@ -137,8 +137,11 @@ class RAGPipeline:
             document.processing_error = "Extracted text exceeds size limit — truncated."
             document.save(update_fields=["processing_error"])
 
-        # Chunk
-        chunks = self.chunker.split(raw_text, page_metadata)
+        # Chunk — P2 §A7: markdown files use structure-aware heading splits.
+        if (document.file_type or "").lower() in ("md", "markdown"):
+            chunks = self.chunker.split_markdown(raw_text)
+        else:
+            chunks = self.chunker.split(raw_text, page_metadata)
 
         # V4.2 KB-V4.2-BATCH-006: Chunk count limit per document
         max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
@@ -258,7 +261,6 @@ class RAGPipeline:
             raise RuntimeError("ingestion_pipeline_required")
 
         raw_text = document.text_content or ""
-        page_metadata: dict = {}  # Inline text has no page boundaries.
 
         # V4.2 KB-V4.2-BATCH-006: Extracted text size limit
         max_text_size = getattr(settings, "MAX_EXTRACTED_TEXT_SIZE", 10_000_000)
@@ -272,8 +274,9 @@ class RAGPipeline:
             document.processing_error = "text_content exceeds size limit — truncated."
             document.save(update_fields=["processing_error"])
 
-        # Chunk (no parser — text_content is already canonical markdown)
-        chunks = self.chunker.split(raw_text, page_metadata)
+        # Chunk — P2 §A7: text_content is canonical markdown, use
+        # structure-aware heading splits (falls back when no headings).
+        chunks = self.chunker.split_markdown(raw_text)
 
         max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
         if len(chunks) > max_chunks:
@@ -353,6 +356,8 @@ class RAGPipeline:
 
         Best-effort — the helper swallows its own errors, and this wrapper
         guards against import-time failures so ingest never breaks.
+        P3 §B1: also resolves other documents' gray links pointing at this
+        document's title now that it exists in the index.
         """
         try:
             from apps.knowledge.similarity import refresh_document_similarity
@@ -360,6 +365,12 @@ class RAGPipeline:
             refresh_document_similarity(document)
         except Exception:
             logger.warning("similarity_refresh_failed", exc_info=True)
+        try:
+            from apps.knowledge.links import resolve_unresolved_links_to
+
+            resolve_unresolved_links_to(document)
+        except Exception:
+            logger.warning("unresolved_link_resolution_failed", exc_info=True)
 
     def retrieve_and_generate(
         self,
@@ -398,26 +409,26 @@ class RAGPipeline:
         # return graceful degraded response instead of uncaught exception that
         # causes SSE "error" event → frontend shows "当前无法获取响应".
         retrieval_started = time.monotonic()
-        # KB optimization spec §3.3: expand retrieval to opted-in, still-published
-        # reference libraries. Build a space_id → library name map for provenance.
+        # KB optimization spec §3.3 + P2 §A1: expand retrieval to opted-in
+        # reference libraries, ROUTED by query signals (library name /
+        # category keywords) instead of unconditionally searching every
+        # library. RAG_LIBRARY_ROUTING_ENABLED=False restores full fan-out.
         reference_space_ids: list[str] = []
         library_name_by_space: dict[str, str] = {}
         try:
-            from apps.knowledge.library_views import resolve_reference_space_ids
-            from apps.knowledge.models import ReferenceLibrary
             from apps.spaces.models import KnowledgeSpace
+
+            from .library_routing import route_reference_libraries
 
             active_space = KnowledgeSpace.objects.filter(pk=space_id).first()
             if active_space is not None:
-                reference_space_ids = resolve_reference_space_ids(active_space)
-                if reference_space_ids:
-                    for lib in ReferenceLibrary.objects.filter(
-                        space_id__in=reference_space_ids
-                    ).only("space_id", "name"):
-                        library_name_by_space[str(lib.space_id)] = lib.name
+                reference_space_ids, library_name_by_space = route_reference_libraries(
+                    query, active_space
+                )
         except Exception:
             logger.warning("reference_library_resolve_failed", exc_info=True)
             reference_space_ids = []
+            library_name_by_space = {}
         space_ids = [space_id, *reference_space_ids]
         try:
             chunks = self.retriever.search(
@@ -477,6 +488,11 @@ class RAGPipeline:
             source_library = library_name_by_space.get(str(chunk.get("space_id")))
             sanitized_chunks.append({**chunk, "content": content, "source_library": source_library})
         chunks = sanitized_chunks
+        # P2 §A8: optional LLM rerank of the final top-k (default off).
+        if getattr(settings, "RAG_LLM_RERANK_ENABLED", False) and chunks:
+            from .llm_rerank import llm_rerank
+
+            chunks = llm_rerank(query, chunks, self.llm)
         retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
         quality = classify_confidence(chunks)
         yield {
@@ -613,6 +629,8 @@ class RAGPipeline:
                 "document_id": chunk["document_id"],
                 "document_title": chunk["document_title"],
                 "page_number": chunk.get("page_number"),
+                # P2 §A7: heading path for structure-aware chunks ("H1 > H2").
+                "section": (chunk.get("metadata") or {}).get("section"),
                 "score": round(chunk["score"], 3),
                 "quoted_text": chunk["content"][:200],
                 "chunk_id": chunk["id"],
