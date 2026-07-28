@@ -81,6 +81,15 @@ function capabilityRouteAllowed(pathname: string, snapshot: CapabilitySnapshot):
   if (path === '/platform-admin' || path === '/platform-admin/dashboard') {
     return has(snapshot, 'platform.access');
   }
+  // Console Entry Hub spec §2.6: hub is reachable with any management capability.
+  if (path === '/console') {
+    return hasAny(snapshot, [
+      'platform.access',
+      'governance.access',
+      'workspace.manage',
+      'knowledge.read',
+    ]);
+  }
   if (path === '/platform-admin/users') return has(snapshot, 'platform.users.manage');
   if (path === '/platform-admin/business-lines') {
     return has(snapshot, 'platform.organizations.manage');

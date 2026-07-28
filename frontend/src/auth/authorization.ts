@@ -99,6 +99,8 @@ export function safeConsolePath(
     if (path === '/admin' || path === '/spaces/manage') return path;
     return '/chat';
   }
+  // Console Entry Hub spec §2.6: the hub is a legal console destination.
+  if (path === '/console') return path;
   if (path === '/platform-admin' || path === '/governance') return path;
   if (/^\/workspace\/[^/]+\/manage$/.test(path)) return path;
   return '/chat';

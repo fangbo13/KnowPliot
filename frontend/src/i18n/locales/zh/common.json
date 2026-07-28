@@ -1153,5 +1153,17 @@
   "session_renamed_failed": "重命名失败",
   "welcome_greeting": "需要我如何协助你的入职之旅？",
   "welcome_tip": "欢迎使用 KnowPilot！在下方输入问题，或从常见问题中快速选择。",
-  "welcome_suggest_hint": "随便问点什么，或从下方选择一个主题"
+  "welcome_suggest_hint": "随便问点什么，或从下方选择一个主题",
+  "management_hub": "管理中心",
+  "console_hub_title": "管理中心",
+  "console_hub_subtitle": "按你的权限展示可用的管理区域",
+  "console_hub_enter": "进入",
+  "console_hub_manage": "管理",
+  "console_hub_my_spaces": "我管理的空间",
+  "console_hub_view_all": "查看全部",
+  "console_hub_card_platform_desc": "平台级的用户、工作空间、审计与模型运维。",
+  "console_hub_card_governance_desc": "在你所辖范围内进行组织与业务线治理。",
+  "console_hub_card_workspace_desc": "管理你负责空间的成员、邀请、质量与生命周期。",
+  "console_hub_card_knowledge_desc": "当前工作空间的文档、审核队列与知识图谱。",
+  "console_switcher_aria": "切换控制台"
 }

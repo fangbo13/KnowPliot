@@ -1153,5 +1153,17 @@
   "session_renamed_failed": "Failed to rename conversation",
   "welcome_greeting": "How can I help with your onboarding?",
   "welcome_tip": "Welcome to KnowPilot! Type your question below or choose a quick question from Common Questions.",
-  "welcome_suggest_hint": "Ask anything, or pick a topic below"
+  "welcome_suggest_hint": "Ask anything, or pick a topic below",
+  "management_hub": "Management hub",
+  "console_hub_title": "Management hub",
+  "console_hub_subtitle": "Management areas available to you, based on your permissions",
+  "console_hub_enter": "Enter",
+  "console_hub_manage": "Manage",
+  "console_hub_my_spaces": "Spaces I manage",
+  "console_hub_view_all": "View all",
+  "console_hub_card_platform_desc": "Platform-wide users, workspaces, audit and model operations.",
+  "console_hub_card_governance_desc": "Organization and business-line governance within your assigned scope.",
+  "console_hub_card_workspace_desc": "Members, invitations, quality and lifecycle for spaces you manage.",
+  "console_hub_card_knowledge_desc": "Documents, review queue and knowledge graph of the active workspace.",
+  "console_switcher_aria": "Switch console"
 }

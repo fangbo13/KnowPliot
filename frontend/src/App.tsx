@@ -43,6 +43,7 @@ const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage'));
 const KnowledgeBasePage = lazy(() => import('./pages/admin/KnowledgeBasePage'));
 const AccessRequestsPage = lazy(() => import('./pages/console/AccessRequestsPage'));
 const ConsoleOverviewPage = lazy(() => import('./pages/console/ConsoleOverviewPage'));
+const ConsoleHubPage = lazy(() => import('./pages/console/ConsoleHubPage'));
 const ScopedAuditPage = lazy(() => import('./pages/console/ScopedAuditPage'));
 const ScopedMetricsPage = lazy(() => import('./pages/console/ScopedMetricsPage'));
 const ScopedQualityPage = lazy(() => import('./pages/console/ScopedQualityPage'));
@@ -130,6 +131,17 @@ function App({
           <Route path="spaces/create" element={<CapabilityGate required="workspace.creation.request"><SuspendedRoute><WorkspaceCreationPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="profile" element={<SuspendedRoute><ProfilePage /></SuspendedRoute>} />
           <Route path="ownership-transfers" element={<SuspendedRoute><OwnershipTransfersPage /></SuspendedRoute>} />
+          {/* Console Entry Hub spec §2.6: single management entry, capability mode only. */}
+          <Route
+            path="console"
+            element={(
+              <NavigationModeBoundary expected={expectedNavigationMode}>
+                {capabilityNavigationEnabled
+                  ? <SuspendedRoute><ConsoleHubPage /></SuspendedRoute>
+                  : <Navigate to="/admin" replace />}
+              </NavigationModeBoundary>
+            )}
+          />
           <Route
             path="workspace/:spaceId/knowledge"
             element={(
