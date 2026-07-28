@@ -106,6 +106,25 @@ export function EmptyState({
   );
 }
 
+export interface StatCardProps extends HTMLAttributes<HTMLDivElement> {
+  label: ReactNode;
+  value: ReactNode;
+  /** Optional CSS color for the value (e.g. var(--color-success)). */
+  valueColor?: string;
+}
+
+/** Dark/i18n/Layout spec §C: shared metric card — uppercase label + serif value.
+ *  Replaces the inline stat-card markup previously duplicated across
+ *  AdminDashboardPage / AdminQualityPage / ScopedMetricsPage. */
+export function StatCard({ label, value, valueColor, className = '', ...props }: StatCardProps) {
+  return (
+    <div className={`kp-surface kp-surface--paper kp-stat-card glass-panel ${className}`.trim()} {...props}>
+      <div className="kp-stat-card__label">{label}</div>
+      <div className="kp-stat-card__value" style={valueColor ? { color: valueColor } : undefined}>{value}</div>
+    </div>
+  );
+}
+
 export interface StatusProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: 'neutral' | 'info' | 'success' | 'warning' | 'error';
 }

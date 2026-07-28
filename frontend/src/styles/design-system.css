@@ -273,14 +273,49 @@
   transition: color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
 }
 .kp-console-nav__item:hover,
-.kp-console-back:hover { color: var(--color-text); }
+.kp-console-back:hover { color: var(--color-text); background: var(--color-fill); }
 .kp-console-nav__item.is-active {
   background: var(--accent-soft);
   color: var(--accent-text);
   font-weight: 600;
 }
 .kp-console-sidebar__spacer { flex: 1; }
-.kp-console-main { flex: 1; min-width: 0; overflow: auto; }
+.kp-console-main { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
+/* Dark/i18n/Layout spec §C: console top bar — mirrors the AdminLayout header
+   (notifications / theme / language / user pill). */
+.kp-console-topbar {
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 24px;
+  background: var(--color-bg-container);
+  border-bottom: 1px solid var(--color-border-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+/* Dark/i18n/Layout spec §C: shared stat card (uppercase label + serif value). */
+.kp-stat-card {
+  padding: 20px;
+  border-radius: var(--radius-lg);
+}
+.kp-stat-card__label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.kp-stat-card__value {
+  font-size: 28px;
+  font-weight: 600;
+  font-family: var(--font-family-display);
+  color: var(--color-text);
+}
 .kp-console-content {
   width: 100%;
   max-width: calc(var(--management-max) + 64px);
