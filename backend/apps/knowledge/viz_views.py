@@ -133,23 +133,45 @@ def knowledge_graph(request):
             for j in range(i + 1, len(members)):
                 _add_edge(members[i], members[j], "term", term=code)
 
-    # 3) Embedding similarity (first-chunk vectors, cosine > threshold).
-    lead_embeddings: dict[str, list[float]] = {}
-    for chunk in DocumentChunk.objects.filter(
-        document_id__in=doc_ids, chunk_index=0, embedding__isnull=False
-    ).only("document_id", "embedding"):
-        if isinstance(chunk.embedding, list) and chunk.embedding:
-            lead_embeddings[str(chunk.document_id)] = chunk.embedding
-    emb_ids = list(lead_embeddings)
-    for i, src in enumerate(emb_ids):
-        scored = []
-        for tgt in emb_ids[i + 1:]:
-            sim = _cosine(lead_embeddings[src], lead_embeddings[tgt])
-            if sim >= SIMILAR_EDGE_THRESHOLD:
-                scored.append((sim, tgt))
-        scored.sort(reverse=True)
-        for sim, tgt in scored[:SIMILAR_EDGES_PER_NODE]:
-            _add_edge(src, tgt, "similar", score=round(sim, 4))
+    # 3) Embedding similarity — P1 §B2: read precomputed DocumentSimilarity
+    # edges (refreshed at ingest from pooled document embeddings) instead of
+    # O(n²) request-time cosine. Spaces without precomputed rows fall back to
+    # the legacy on-the-fly path until their documents are re-ingested.
+    from .models import DocumentSimilarity
+
+    sim_rows = list(
+        DocumentSimilarity.objects.filter(
+            space=space, source_id__in=doc_ids, target_id__in=doc_ids
+        )
+        .order_by("-score")
+        .values_list("source_id", "target_id", "score")
+    )
+    if sim_rows:
+        per_node: dict[str, int] = defaultdict(int)
+        for source_id, target_id, score in sim_rows:
+            src, tgt = str(source_id), str(target_id)
+            if per_node[src] >= SIMILAR_EDGES_PER_NODE or per_node[tgt] >= SIMILAR_EDGES_PER_NODE:
+                continue
+            _add_edge(src, tgt, "similar", score=round(score, 4))
+            per_node[src] += 1
+            per_node[tgt] += 1
+    else:
+        lead_embeddings: dict[str, list[float]] = {}
+        for chunk in DocumentChunk.objects.filter(
+            document_id__in=doc_ids, chunk_index=0, embedding__isnull=False
+        ).only("document_id", "embedding"):
+            if isinstance(chunk.embedding, list) and chunk.embedding:
+                lead_embeddings[str(chunk.document_id)] = chunk.embedding
+        emb_ids = list(lead_embeddings)
+        for i, src in enumerate(emb_ids):
+            scored = []
+            for tgt in emb_ids[i + 1:]:
+                sim = _cosine(lead_embeddings[src], lead_embeddings[tgt])
+                if sim >= SIMILAR_EDGE_THRESHOLD:
+                    scored.append((sim, tgt))
+            scored.sort(reverse=True)
+            for sim, tgt in scored[:SIMILAR_EDGES_PER_NODE]:
+                _add_edge(src, tgt, "similar", score=round(sim, 4))
 
     return Response(_maybe_localize_graph(request, nodes, edges, term_filter))
 

@@ -24,7 +24,16 @@ logger = logging.getLogger(__name__)
 
 @shared_task(name="apps.knowledge.tasks.scan_stale_documents")
 def scan_stale_documents() -> dict:
-    """Mark overdue active documents stale + notify term owners."""
+    """Mark overdue active documents stale + notify term owners.
+
+    P1 §B4: batched — one filtered query + bulk ``update()`` per space and
+    one merged notification per owner, replacing the per-document
+    ``save()``/``notify()`` loop. The bulk update also fixes a freshness bug:
+    the old ``save(update_fields=[..., "updated_at"])`` refreshed the
+    auto_now clock, making just-marked stale documents look newly edited.
+    """
+    from django.db.models import Q
+
     from apps.notifications.services import notify
     from apps.spaces.models import KnowledgeSpace
 
@@ -37,43 +46,97 @@ def scan_stale_documents() -> dict:
     for space in KnowledgeSpace.objects.filter(status="active"):
         stale_after = space_stale_after_days(space)
         cutoff = now - timedelta(days=stale_after)
-        overdue = Document.objects.filter(
+        overdue_qs = Document.objects.filter(
             space=space, status="active", updated_at__lt=cutoff
-        )
-        for doc in overdue:
-            scanned += 1
+        ).filter(
             # last_reviewed_at (confirm-fresh) resets the clock without a new version.
-            reviewed = getattr(doc, "last_reviewed_at", None)
-            if reviewed is not None and reviewed >= cutoff:
-                continue
-            doc.status = "stale"
-            doc.save(update_fields=["status", "updated_at"])
-            marked += 1
-            term_ids = list(
-                DocumentTag.objects.filter(document=doc).values_list(
-                    "term_id", flat=True
-                )
+            Q(last_reviewed_at__isnull=True) | Q(last_reviewed_at__lt=cutoff)
+        )
+        overdue = list(overdue_qs.only("id", "title"))
+        scanned += len(overdue)
+        if not overdue:
+            continue
+        overdue_ids = [doc.id for doc in overdue]
+        marked += Document.objects.filter(id__in=overdue_ids).update(status="stale")
+
+        # Merge notifications: one message per owner covering all their docs.
+        titles_by_id = {doc.id: doc.title for doc in overdue}
+        docs_by_owner: dict = {}
+        owner_by_id: dict = {}
+        tag_rows = DocumentTag.objects.filter(
+            document_id__in=overdue_ids
+        ).values_list("document_id", "term_id")
+        term_ids = {term_id for _, term_id in tag_rows}
+        owners_by_term: dict = {}
+        for ownership in TermOwnership.objects.filter(
+            space=space, term_id__in=term_ids
+        ).select_related("owner"):
+            owners_by_term.setdefault(ownership.term_id, []).append(ownership.owner)
+        for document_id, term_id in tag_rows:
+            for owner in owners_by_term.get(term_id, []):
+                owner_by_id[owner.id] = owner
+                docs_by_owner.setdefault(owner.id, set()).add(document_id)
+        for owner_id, doc_ids in docs_by_owner.items():
+            titles = [titles_by_id[d] for d in list(doc_ids)[:5]]
+            listed = "、".join(f"《{t}》" for t in titles)
+            extra = f" 等 {len(doc_ids)} 篇" if len(doc_ids) > len(titles) else ""
+            notify(
+                owner_by_id[owner_id],
+                "document_stale",
+                f"{len(doc_ids)} 篇文档已标记为陈旧",
+                body=(
+                    f"{listed}{extra}超过 {stale_after} 天未复核，已自动标记为 stale。"
+                    "检索中将被降权，请复核内容或提交新版本。"
+                ),
+                level="warning",
+                link="/knowledge?status=stale",
+                metadata={"document_ids": [str(d) for d in doc_ids]},
             )
-            owners = {
-                o.owner.id: o.owner
-                for o in TermOwnership.objects.filter(
-                    space=space, term_id__in=term_ids
-                ).select_related("owner")
-            }
-            for owner in owners.values():
-                notify(
-                    owner,
-                    "document_stale",
-                    f"文档已标记为陈旧：《{doc.title}》",
-                    body=(
-                        f"超过 {stale_after} 天未复核，已自动标记为 stale。"
-                        "检索中将被降权，请复核内容或提交新版本。"
-                    ),
-                    level="warning",
-                    link=f"/knowledge?document={doc.id}",
-                    metadata={"document_id": str(doc.id)},
-                )
     logger.info(
         "[stale-scan] scanned=%d marked_stale=%d at=%s", scanned, marked, now
     )
     return {"scanned": scanned, "marked_stale": marked}
+
+
+@shared_task(name="apps.knowledge.tasks.backfill_document_similarities")
+def backfill_document_similarities(space_id: str | None = None) -> dict:
+    """P1 §B2: backfill pooled embeddings + similarity edges for existing docs.
+
+    Newly ingested documents refresh their own edges; this task covers the
+    stock of documents ingested before the DocumentSimilarity table existed.
+    Also backfills the CJK ``content_tokens`` column (P1 §A6) for old chunks.
+    """
+    from apps.rag.cjk import cjk_token_text
+
+    from .models import Document, DocumentChunk
+    from .similarity import refresh_document_similarity
+
+    docs = Document.objects.filter(status__in=["active", "stale"])
+    if space_id:
+        docs = docs.filter(space_id=space_id)
+    refreshed = 0
+    edges = 0
+    tokens_backfilled = 0
+    for doc in docs.iterator():
+        edges += refresh_document_similarity(doc)
+        refreshed += 1
+        pending_chunks = list(
+            DocumentChunk.objects.filter(document=doc, content_tokens="")
+            .only("id", "content")
+        )
+        for chunk in pending_chunks:
+            chunk.content_tokens = cjk_token_text(f"{doc.title}\n{chunk.content}")
+        if pending_chunks:
+            DocumentChunk.objects.bulk_update(
+                pending_chunks, ["content_tokens"], batch_size=200
+            )
+            tokens_backfilled += len(pending_chunks)
+    logger.info(
+        "[similarity-backfill] documents=%d edges=%d chunk_tokens=%d",
+        refreshed, edges, tokens_backfilled,
+    )
+    return {
+        "documents": refreshed,
+        "edges": edges,
+        "chunk_tokens": tokens_backfilled,
+    }

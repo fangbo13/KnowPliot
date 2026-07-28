@@ -143,6 +143,9 @@ class Document(models.Model):
         help_text="SHA256 hash of file content for deduplication",
     )
     chunk_count = models.IntegerField(default=0)
+    # KB/RAG audit spec P1 §B2: mean of the document's chunk embeddings,
+    # refreshed on ingest. Powers precomputed graph similarity edges.
+    pooled_embedding = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -176,6 +179,9 @@ class DocumentChunk(models.Model):
         related_name="chunks",
     )
     content = models.TextField()
+    # KB/RAG audit spec P1 §A6: CJK-bigram token text (title + content) so
+    # PostgreSQL FTS with the simple config can match unspaced Chinese.
+    content_tokens = models.TextField(blank=True, default="")
     chunk_index = models.IntegerField()
     page_number = models.IntegerField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
@@ -738,6 +744,46 @@ class DocumentLink(models.Model):
 
     def __str__(self):
         return f"{self.source_id} → {self.target_id}"
+
+
+class DocumentSimilarity(models.Model):
+    """Precomputed embedding-similarity edge between two documents.
+
+    KB/RAG audit spec P1 §B2: the knowledge graph previously computed
+    O(n²) cosine similarity per request. Edges are now refreshed at ingest
+    time from pooled document embeddings; the graph endpoint only reads.
+    ``source``/``target`` are ordered by id string so each pair is stored once.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="document_similarities",
+    )
+    source = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="similarity_edges_out"
+    )
+    target = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="similarity_edges_in"
+    )
+    score = models.FloatField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_documentsimilarity"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "target"],
+                name="knowledge_docsim_src_tgt_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["space", "-score"]),
+        ]
+
+    def __str__(self):
+        return f"{self.source_id} ~ {self.target_id} ({self.score})"
 
 
 # ---------------------------------------------------------------------------

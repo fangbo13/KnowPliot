@@ -13,6 +13,7 @@ from django.db import connection
 from django.db.models import Q
 from apps.knowledge.models import Document, DocumentChunk
 
+from .cjk import cjk_tokens
 from .retriever import PgVectorRetriever, RetrievalFilters
 
 
@@ -60,6 +61,17 @@ def _tokens(value: str) -> set[str]:
 
 def _normalized_lexical_query(value: str) -> str:
     return " ".join(sorted(_tokens(value)))
+
+
+def _cjk_expanded_lexical_query(value: str) -> str:
+    """P1 §A6: plain tokens + CJK bigrams so the query matches BOTH legacy
+    rows (raw title/content vectors) and new rows (content_tokens bigrams)."""
+    plain = _tokens(value)
+    bigrams = {
+        token for token in cjk_tokens(value)
+        if token not in ENGLISH_STOP_WORDS
+    }
+    return " ".join(sorted(plain | bigrams))
 
 
 def reciprocal_rank_fusion(
@@ -402,13 +414,20 @@ class HybridRetriever:
         top_k: int,
         filters: RetrievalFilters,
     ) -> list[dict]:
-        """Use parameterized PostgreSQL FTS while preserving active-space scope."""
+        """Use parameterized PostgreSQL FTS while preserving active-space scope.
+
+        P1 §A6: the vector now includes the CJK-bigram ``content_tokens``
+        column (weight A, carries tokenized title + content) alongside the
+        legacy raw title/content vectors, so pre-backfill rows keep matching
+        while new rows gain proper unspaced-Chinese recall.
+        """
         vector = (
-            SearchVector("document__title", weight="A", config="simple")
+            SearchVector("content_tokens", weight="A", config="simple")
+            + SearchVector("document__title", weight="A", config="simple")
             + SearchVector("content", weight="B", config="simple")
         )
         search_query = SearchQuery(
-            _normalized_lexical_query(query),
+            _cjk_expanded_lexical_query(query),
             search_type="plain",
             config="simple",
         )

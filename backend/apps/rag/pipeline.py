@@ -24,6 +24,7 @@ from apps.core.circuit_breaker import dashscope_breaker  # V4.2 SYS-V4.2-014
 from apps.knowledge.batch import is_zero_vector, sanitize_metadata  # V4.2 BATCH-009/012
 
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, SIMILARITY_THRESHOLD, TOP_K
+from .cjk import cjk_token_text
 from .embedding import EmbeddingService
 from .errors import ProviderGenerationError
 from .guardrails import GuardrailsService, get_llm_service
@@ -203,6 +204,8 @@ class RAGPipeline:
                 # retriever can filter by space_id directly (isolation).
                 space_id=document.space_id,
                 content=chunk["text"],
+                # P1 §A6: CJK-bigram token text for Chinese-capable FTS.
+                content_tokens=cjk_token_text(f"{document.title}\n{chunk['text']}"),
                 chunk_index=i,
                 page_number=clean_metadata.get("page"),
                 metadata=clean_metadata,
@@ -225,6 +228,7 @@ class RAGPipeline:
             document_chunks.append(doc_chunk)
 
         logger.info(f"Ingested {len(document_chunks)} chunks from {document.title}")
+        self._refresh_similarity(document)
         return document_chunks
 
     # ── Part 1 (KB version化): text_content-based ingest ──────────────
@@ -320,6 +324,8 @@ class RAGPipeline:
                 document=document,
                 space_id=document.space_id,
                 content=chunk["text"],
+                # P1 §A6: CJK-bigram token text for Chinese-capable FTS.
+                content_tokens=cjk_token_text(f"{document.title}\n{chunk['text']}"),
                 chunk_index=i,
                 page_number=clean_metadata.get("page"),
                 metadata=clean_metadata,
@@ -338,7 +344,22 @@ class RAGPipeline:
         logger.info(
             f"Ingested {len(document_chunks)} chunks from text_content of {document.title}"
         )
+        self._refresh_similarity(document)
         return document_chunks
+
+    @staticmethod
+    def _refresh_similarity(document) -> None:
+        """P1 §B2: refresh pooled embedding + precomputed graph similarity edges.
+
+        Best-effort — the helper swallows its own errors, and this wrapper
+        guards against import-time failures so ingest never breaks.
+        """
+        try:
+            from apps.knowledge.similarity import refresh_document_similarity
+
+            refresh_document_similarity(document)
+        except Exception:
+            logger.warning("similarity_refresh_failed", exc_info=True)
 
     def retrieve_and_generate(
         self,
