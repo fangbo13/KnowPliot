@@ -550,6 +550,9 @@ class TaxonomyTerm(models.Model):
     )
     code = models.SlugField(max_length=80)
     label = models.CharField(max_length=200)
+    # KB/RAG audit spec P2 §A4: controlled synonym list — query understanding
+    # matches these and expands the lexical query (e.g. 坏账准备 ↔ 信用减值损失).
+    synonyms = models.JSONField(default=list, blank=True)
     sort_order = models.IntegerField(default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -716,7 +719,13 @@ class ReviewRequest(models.Model):
 
 
 class DocumentLink(models.Model):
-    """Explicit link from one document's markdown to another ([[wiki]] or md link)."""
+    """Explicit link from one document's markdown to another ([[wiki]] or md link).
+
+    KB/RAG audit spec P3 §B1: a row with ``target=None`` records an
+    *unresolved* wikilink (Obsidian semantics — the linked note does not
+    exist yet). ``unresolved_title`` keeps the raw title so the link resolves
+    automatically once a matching document appears.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     space = models.ForeignKey(
@@ -728,8 +737,13 @@ class DocumentLink(models.Model):
         Document, on_delete=models.CASCADE, related_name="outgoing_links"
     )
     target = models.ForeignKey(
-        Document, on_delete=models.CASCADE, related_name="incoming_links"
+        Document,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="incoming_links",
     )
+    unresolved_title = models.CharField(max_length=255, blank=True, default="")
     anchor_text = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -740,9 +754,16 @@ class DocumentLink(models.Model):
                 fields=["source", "target"],
                 name="knowledge_doclink_src_tgt_uniq",
             ),
+            models.UniqueConstraint(
+                fields=["source", "unresolved_title"],
+                condition=models.Q(target__isnull=True),
+                name="knowledge_doclink_src_unres_uniq",
+            ),
         ]
 
     def __str__(self):
+        if self.target_id is None:
+            return f"{self.source_id} → [[{self.unresolved_title}]] (unresolved)"
         return f"{self.source_id} → {self.target_id}"
 
 

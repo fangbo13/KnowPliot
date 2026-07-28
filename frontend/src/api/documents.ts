@@ -175,6 +175,18 @@ export const documentApi = {
     return data;
   },
 
+  // KB/RAG audit spec P3 §B1: Obsidian-style link tooling
+
+  async getLinkSuggestions(q = ''): Promise<any> {
+    const { data } = await apiClient.get('/documents/link-suggest/', { params: { q } });
+    return data;
+  },
+
+  async getDocumentLinks(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/documents/${id}/links/`);
+    return data;
+  },
+
   // KB-12-Features §8: Document template methods
 
   async getDocumentTemplates(): Promise<any> {

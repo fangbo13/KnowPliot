@@ -314,6 +314,8 @@
   "admin_audit_subtitle": "追溯平台内的特权操作记录",
   "admin_dashboard_subtitle": "平台健康度、用量与服务状态一览",
   "admin_knowledge_subtitle": "文档、审核流、图谱与质量信号",
+  "kb_unresolved_links_title": "未解析链接（{{count}}）",
+  "kb_unresolved_link_hint": "尚无匹配文档",
   "admin_issue_code": "签发管理码",
   "admin_publish": "发布",
   "admin_grants_role": "授予角色",

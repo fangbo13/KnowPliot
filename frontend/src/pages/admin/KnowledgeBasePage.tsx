@@ -136,6 +136,8 @@ export default function KnowledgeBasePage() {
   const [versionReason, setVersionReason] = useState('');
   const [rollbackSaving, setRollbackSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('content');
+  // KB/RAG audit spec P3 §B1: wikilink candidates incl. reference-library titles.
+  const [linkTitles, setLinkTitles] = useState<string[]>([]);
   // KB-12-Features §7: Create from text state
   const [createTextOpen, setCreateTextOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState('');
@@ -193,6 +195,16 @@ export default function KnowledgeBasePage() {
   useEffect(() => {
     loadDimensions();
   }, [loadDimensions]);
+
+  // P3 §B1: seed wikilink autocomplete with space + reference-library titles.
+  useEffect(() => {
+    if (!canRead) return;
+    documentApi.getLinkSuggestions('')
+      .then((data) => setLinkTitles(
+        ((data?.suggestions || []) as Array<{ title: string }>).map((s) => s.title),
+      ))
+      .catch(() => setLinkTitles([]));
+  }, [canRead]);
 
   // Spec §2: pivot filter — a document must carry every selected term (AND).
   const filteredDocuments = useMemo(() => {
@@ -1053,9 +1065,12 @@ export default function KnowledgeBasePage() {
                         readOnly={!canManage}
                         placeholder={t('kb_editor_placeholder')}
                         minHeight={280}
-                        linkCandidates={documents
-                          .filter((d) => d.id !== versionDrawer?.id)
-                          .map((d) => d.title)}
+                        linkCandidates={Array.from(new Set([
+                          ...documents
+                            .filter((d) => d.id !== versionDrawer?.id)
+                            .map((d) => d.title),
+                          ...linkTitles,
+                        ]))}
                       />
                       {/* KB optimization spec §5.4: Obsidian-style backlinks */}
                       {versionDrawer && (
@@ -1202,7 +1217,7 @@ export default function KnowledgeBasePage() {
                   onChange={setCreateText}
                   placeholder={t('kb_editor_placeholder')}
                   minHeight={300}
-                  linkCandidates={documents.map((d) => d.title)}
+                  linkCandidates={Array.from(new Set([...documents.map((d) => d.title), ...linkTitles]))}
                 />
               </div>
             </Spin>

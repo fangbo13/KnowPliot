@@ -20,6 +20,8 @@ from .views import (
     DocumentRollbackView,
     DocumentTemplateView,
     DocumentConvertView,
+    document_links,
+    link_suggest,
 )
 from .batch_views import BatchDocumentUploadView, BatchImportResultDetailView
 from . import review_views, taxonomy_views, viz_views, library_views
@@ -70,6 +72,9 @@ urlpatterns = [
     path("dashboard/", viz_views.knowledge_dashboard, name="knowledge-dashboard"),
     # KB optimization spec §3.4: Obsidian-style backlinks
     path("<uuid:pk>/backlinks/", viz_views.document_backlinks, name="document-backlinks"),
+    # KB/RAG audit spec P3 §B1: link tooling (autocomplete + outgoing links)
+    path("link-suggest/", link_suggest, name="document-link-suggest"),
+    path("<uuid:pk>/links/", document_links, name="document-links"),
     # KB optimization spec §3.2: platform-official reference libraries
     path("libraries/", library_views.libraries, name="reference-libraries"),
     path("libraries/catalog/", library_views.libraries_catalog, name="reference-libraries-catalog"),

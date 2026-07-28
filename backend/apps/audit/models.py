@@ -90,6 +90,8 @@ class AuditLog(models.Model):
         ("knowledge_gap_assign", "Knowledge Gap Assign"),
         ("knowledge_gap_resolve", "Knowledge Gap Resolve"),
         ("knowledge_gap_reopen", "Knowledge Gap Reopen"),
+        # KB/RAG audit spec P3 §B1: wikilink rename propagation.
+        ("document_rename_propagate", "Document Rename Propagate"),
         # Knowledge iteration spec §3.4: document review gate actions.
         ("document_review_submit", "Document Review Submit"),
         ("document_review_approve", "Document Review Approve"),

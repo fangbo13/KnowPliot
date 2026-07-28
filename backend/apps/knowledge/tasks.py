@@ -98,6 +98,38 @@ def scan_stale_documents() -> dict:
     return {"scanned": scanned, "marked_stale": marked}
 
 
+@shared_task(name="apps.knowledge.tasks.purge_superseded_chunks")
+def purge_superseded_chunks() -> dict:
+    """KB/RAG audit spec P3 §B4: reclaim chunks of long-dead document versions.
+
+    Superseded/archived documents are excluded from retrieval but their
+    chunks (and pgvector rows) linger forever. Rollback re-chunks from
+    ``text_content``, so chunks of versions past the retention window can be
+    dropped safely.
+    """
+    from django.conf import settings
+
+    from .models import Document, DocumentChunk
+
+    retention_days = int(
+        getattr(settings, "KNOWLEDGE_SUPERSEDED_CHUNK_RETENTION_DAYS", 30)
+    )
+    cutoff = timezone.now() - timedelta(days=retention_days)
+    doc_ids = list(
+        Document.objects.filter(
+            status__in=["superseded", "archived"], updated_at__lt=cutoff
+        ).values_list("id", flat=True)
+    )
+    deleted = 0
+    if doc_ids:
+        deleted, _ = DocumentChunk.objects.filter(document_id__in=doc_ids).delete()
+    logger.info(
+        "[chunk-purge] documents=%d chunks_deleted=%d retention_days=%d",
+        len(doc_ids), deleted, retention_days,
+    )
+    return {"documents": len(doc_ids), "chunks_deleted": deleted}
+
+
 @shared_task(name="apps.knowledge.tasks.backfill_document_similarities")
 def backfill_document_similarities(space_id: str | None = None) -> dict:
     """P1 §B2: backfill pooled embeddings + similarity edges for existing docs.

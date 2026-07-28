@@ -151,6 +151,29 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
             qs = qs.filter(space=space)
         return qs
 
+    def perform_update(self, serializer):
+        # P3 §B1: propagate title renames into referencing [[wikilinks]].
+        instance = serializer.instance
+        old_title = instance.title
+        document = serializer.save()
+        new_title = document.title
+        if old_title and new_title and old_title != new_title:
+            from apps.knowledge.links import propagate_title_rename
+
+            updated = propagate_title_rename(document, old_title, new_title)
+            create_audit_log(
+                user=self.request.user,
+                action="document_rename_propagate",
+                target_type="Document",
+                target_id=str(document.id),
+                details={
+                    "old_title": old_title,
+                    "new_title": new_title,
+                    "updated_documents": updated,
+                },
+                request=self.request,
+            )
+
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.space_id is not None:
@@ -1181,3 +1204,90 @@ class DocumentConvertView(APIView):
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
+
+
+# ── KB/RAG audit spec P3 §B1: Obsidian-style link tooling ──
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def link_suggest(request):
+    """Wikilink autocomplete: titles from this space + enabled libraries.
+
+    GET /documents/link-suggest/?q=<fragment>  — empty ``q`` returns the most
+    recently updated titles so editors can seed their candidate list.
+    """
+    space = resolve_request_space(request)
+    query = (request.query_params.get("q") or "").strip()
+
+    space_ids = [space.id]
+    library_name_by_space: dict[str, str] = {}
+    try:
+        from .library_views import resolve_reference_space_ids
+        from .models import ReferenceLibrary
+
+        reference_ids = resolve_reference_space_ids(space)
+        space_ids.extend(reference_ids)
+        for lib in ReferenceLibrary.objects.filter(space_id__in=reference_ids).only(
+            "space_id", "name"
+        ):
+            library_name_by_space[str(lib.space_id)] = lib.name
+    except Exception:
+        pass
+
+    qs = Document.objects.filter(
+        space_id__in=space_ids,
+        status__in=["active", "pending_review", "stale"],
+    )
+    if query:
+        qs = qs.filter(title__icontains=query)
+    qs = qs.order_by("-updated_at")[:50]
+    return Response(
+        {
+            "suggestions": [
+                {
+                    "id": str(doc.id),
+                    "title": doc.title,
+                    "space_id": str(doc.space_id),
+                    "source_library": library_name_by_space.get(str(doc.space_id)),
+                }
+                for doc in qs
+            ]
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def document_links(request, pk):
+    """Outgoing links of a document — resolved edges + unresolved gray links."""
+    space = resolve_request_space(request)
+    try:
+        document = Document.objects.get(pk=pk, space=space)
+    except Document.DoesNotExist:
+        raise NotFound("Document not found in this space.")
+    from .models import DocumentLink
+
+    links = DocumentLink.objects.filter(source=document).select_related("target")
+    resolved = []
+    unresolved = []
+    for link in links:
+        if link.target_id is None:
+            unresolved.append(link.unresolved_title)
+        else:
+            resolved.append(
+                {
+                    "id": str(link.target_id),
+                    "title": link.target.title,
+                    "status": link.target.status,
+                    "anchor_text": link.anchor_text,
+                    "space_id": str(link.target.space_id),
+                }
+            )
+    return Response(
+        {
+            "document_id": str(document.id),
+            "links": resolved,
+            "unresolved": sorted(unresolved),
+        }
+    )

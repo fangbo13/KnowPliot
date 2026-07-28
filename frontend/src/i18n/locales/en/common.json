@@ -314,6 +314,8 @@
   "admin_audit_subtitle": "Trace privileged operations across the platform",
   "admin_dashboard_subtitle": "Platform health, usage and service status at a glance",
   "admin_knowledge_subtitle": "Documents, review flow, graph and quality signals",
+  "kb_unresolved_links_title": "Unresolved links ({{count}})",
+  "kb_unresolved_link_hint": "No matching document yet",
   "admin_issue_code": "Issue code",
   "admin_publish": "Publish",
   "admin_grants_role": "Grants role",
