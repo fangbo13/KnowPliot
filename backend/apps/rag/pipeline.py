@@ -472,10 +472,12 @@ class RAGPipeline:
         # Step 2b: Refuse when evidence is absent or too weak. Low-confidence
         # retrieval must never be promoted into an uncited deterministic claim.
         if not chunks or quality.label in {"low", "insufficient"}:
+            # P0 fix (KB/RAG audit spec §C): domain-neutral refusal copy — the
+            # legacy HR wording predates the audit/accounting positioning.
             fallback = (
-                "我没有足够的信息来回答此问题，请联系您的人力资源伙伴或HR团队。"
+                "我没有足够的信息来回答此问题，请补充相关知识文档或联系知识库管理员。"
                 if language == "zh"
-                else "I don't have enough information to answer this question. Please contact your HR buddy or HR team."
+                else "I don't have enough information to answer this question. Please add the relevant knowledge documents or contact your knowledge base administrator."
             )
             yield {"event": "token", "data": {"token": fallback}}
             yield {

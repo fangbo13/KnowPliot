@@ -120,18 +120,53 @@ def diversify_results(
     *,
     top_k: int,
     max_per_document: int = 2,
+    primary_space_id: str | None = None,
+    max_reference_ratio: float = 0.5,
 ) -> list[dict]:
-    """Bound repeated chunks from one source document."""
+    """Bound repeated chunks from one source document.
+
+    P0 fix (KB/RAG audit spec §A1): when ``primary_space_id`` is given, results
+    coming from other spaces (opted-in reference libraries) are capped at
+    ``max_reference_ratio`` of ``top_k`` so a large shared library cannot crowd
+    out the workspace's own documents. Deferred reference rows backfill only
+    when the primary space cannot fill the remaining slots.
+    """
+    max_reference = (
+        top_k
+        if primary_space_id is None
+        else max(1, int(top_k * max_reference_ratio))
+    )
     selected = []
+    deferred_references = []
+    reference_count = 0
     per_document: defaultdict[str, int] = defaultdict(int)
     for row in results:
         document_id = str(row["document_id"])
         if per_document[document_id] >= max_per_document:
             continue
+        is_reference = (
+            primary_space_id is not None
+            and str(row.get("space_id") or primary_space_id) != primary_space_id
+        )
+        if is_reference and reference_count >= max_reference:
+            deferred_references.append(row)
+            continue
         selected.append(row)
         per_document[document_id] += 1
+        if is_reference:
+            reference_count += 1
         if len(selected) >= top_k:
             break
+    # Backfill with over-quota reference rows only when the primary space
+    # cannot fill top_k on its own.
+    for row in deferred_references:
+        if len(selected) >= top_k:
+            break
+        document_id = str(row["document_id"])
+        if per_document[document_id] >= max_per_document:
+            continue
+        selected.append(row)
+        per_document[document_id] += 1
     return selected
 
 
@@ -210,28 +245,52 @@ class HybridRetriever:
             reranked,
             top_k=top_k,
             max_per_document=2,
+            # P0 fix (§A1): reference-library results are quota-bounded.
+            primary_space_id=normalized_space_id,
         )
 
     def _annotate_document_signals(self, rows: list[dict], *, space_id: str) -> None:
-        """Spec §4 L3: real freshness (exponential decay) replaces the 1.0 stub."""
+        """Spec §4 L3: real freshness (exponential decay) replaces the 1.0 stub.
+
+        P0 fix (KB/RAG audit spec §A3): each document uses its own space's
+        half-life, and documents living in a published reference library are
+        exempt from time decay — standards (IFRS/CAS) expire by revision, not
+        by age. They are flagged so stale penalties skip them too.
+        """
         if not rows:
             return
         from apps.knowledge.freshness import compute_freshness, space_half_life_days
+        from apps.knowledge.models import ReferenceLibrary
 
         doc_ids = {str(row["document_id"]) for row in rows}
         docs = {
             str(d.id): d
             for d in Document.objects.filter(id__in=doc_ids).select_related("space")
         }
-        half_life = None
+        library_space_ids = {
+            str(value)
+            for value in ReferenceLibrary.objects.filter(
+                space_id__in={str(d.space_id) for d in docs.values()},
+                status=ReferenceLibrary.STATUS_PUBLISHED,
+            ).values_list("space_id", flat=True)
+        }
+        half_life_by_space: dict[str, int] = {}
         for row in rows:
             doc = docs.get(str(row["document_id"]))
             if doc is None:
                 row.setdefault("freshness_score", 1.0)
                 continue
-            if half_life is None:
-                half_life = space_half_life_days(doc.space)
-            row["freshness_score"] = compute_freshness(doc, half_life_days=half_life)
+            doc_space_id = str(doc.space_id)
+            is_reference = doc_space_id in library_space_ids
+            if is_reference:
+                row["freshness_score"] = 1.0
+            else:
+                if doc_space_id not in half_life_by_space:
+                    half_life_by_space[doc_space_id] = space_half_life_days(doc.space)
+                row["freshness_score"] = compute_freshness(
+                    doc, half_life_days=half_life_by_space[doc_space_id]
+                )
+            row["is_reference_library"] = is_reference
             row["document_status"] = doc.status
             row["document_version"] = doc.version
 
@@ -262,9 +321,20 @@ class HybridRetriever:
             # (history stays retrievable, never hard-excluded).
             if query_fys and doc_fys and not (query_fys & doc_fys):
                 score *= CROSS_FY_PENALTY
-            if row.get("document_status") == "stale":
+            # P0 fix (§A3): reference-library standards never take the stale hit.
+            if row.get("document_status") == "stale" and not row.get(
+                "is_reference_library"
+            ):
                 score *= STALE_PENALTY
-            row = {**row, "score": round(score, 4), "rerank_score": round(score, 4)}
+            # P0 fix (§A2): boosts/penalties change the score scale, so they
+            # only drive ORDERING (score / signal_adjusted_score). rerank_score
+            # is left untouched — classify_confidence reads it against the
+            # calibrated 0.75/0.55 thresholds.
+            row = {
+                **row,
+                "score": round(score, 4),
+                "signal_adjusted_score": round(score, 4),
+            }
             if matched:
                 row["matched_terms"] = matched
             adjusted.append(row)
