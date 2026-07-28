@@ -78,7 +78,8 @@ export default function AdminLoginPage() {
         localStorage.setItem('ey-language', pref);
       }
 
-      navigate('/platform-admin/dashboard', { replace: true });
+      // Console Entry Hub spec: admins land on the management hub overview.
+      navigate('/console', { replace: true });
     } catch {
       setError(t('login_failed'));
     } finally {

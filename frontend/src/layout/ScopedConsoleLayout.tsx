@@ -10,10 +10,11 @@
 // switch theme or language at all.
 
 import {
-  DownOutlined, GlobalOutlined, HomeOutlined, MoonOutlined, SunOutlined,
+  DownOutlined, GlobalOutlined, HomeOutlined, LogoutOutlined, MoonOutlined,
+  SettingOutlined, SunOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthProvider';
 import { useAuthorization } from '../auth/CapabilityProvider';
@@ -38,7 +39,8 @@ function initials(email?: string) {
 
 export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
   const { t, i18n } = useTranslation('common');
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const access = useAuthorization();
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
@@ -142,14 +144,33 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
           <button className="icon-btn" onClick={toggleLanguage} aria-label={t('language_switch') || 'Switch language'}>
             <GlobalOutlined />
           </button>
-          <button
-            className="icon-btn"
-            style={{ width: 'auto', gap: 8, padding: '2px 12px 2px 4px', borderRadius: 999, border: '1px solid var(--color-border-secondary)', marginLeft: 6 }}
-            aria-label={t('user_menu') || 'User'}
-          >
-            <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12, background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)' }}>{initials(user?.email)}</span>
-            <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>
-          </button>
+          {/* Console Entry Hub follow-up: the user pill is a real account menu
+              (profile / logout) instead of a dead button. */}
+          <details className="header-menu">
+            <summary
+              className="icon-btn"
+              style={{ width: 'auto', gap: 8, padding: '2px 12px 2px 4px', borderRadius: 999, border: '1px solid var(--color-border-secondary)', marginLeft: 6 }}
+              aria-label={t('user_menu') || 'User'}
+            >
+              <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12, background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)' }}>{initials(user?.email)}</span>
+              <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>
+            </summary>
+            <div className="menu-pop header-menu-pop">
+              <button type="button" className="kp-console-usermenu__item" onClick={() => navigate('/profile')}>
+                <SettingOutlined /> {t('user_settings')}
+              </button>
+              <button
+                type="button"
+                className="kp-console-usermenu__item"
+                onClick={async () => {
+                  const ok = await logout();
+                  if (ok) navigate('/login');
+                }}
+              >
+                <LogoutOutlined /> {t('logout')}
+              </button>
+            </div>
+          </details>
         </header>
         <div className="kp-console-content">
           <Outlet />

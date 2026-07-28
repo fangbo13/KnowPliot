@@ -112,7 +112,7 @@ function App({
         />
         <Route
           path="/admintest"
-          element={isAuthenticated ? <Navigate to="/platform-admin/dashboard" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
+          element={isAuthenticated ? <Navigate to="/console" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
         />
         <Route path="/reset-password" element={<SuspendedRoute><ResetPasswordPage /></SuspendedRoute>} />
         <Route

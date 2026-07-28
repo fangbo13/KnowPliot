@@ -304,6 +304,26 @@
   background: var(--color-fill);
   color: var(--color-text);
 }
+/* Console top-bar account menu items (profile / logout). */
+.kp-console-usermenu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.kp-console-usermenu__item:hover {
+  background: var(--color-fill);
+  color: var(--color-text);
+}
 .kp-console-title {
   color: var(--color-text);
   font-family: var(--font-family-display);
