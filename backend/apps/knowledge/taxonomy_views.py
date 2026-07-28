@@ -6,16 +6,21 @@
 
 Endpoints:
     GET/POST  /api/v1/documents/taxonomy/dimensions/
+    PATCH     /api/v1/documents/taxonomy/dimensions/{id}/
     GET/POST  /api/v1/documents/taxonomy/terms/
+    PATCH     /api/v1/documents/taxonomy/terms/{id}/
+    POST      /api/v1/documents/taxonomy/seed-defaults/
+    GET       /api/v1/documents/taxonomy/presets/
     PUT       /api/v1/documents/{id}/tags/
     GET/POST  /api/v1/documents/term-owners/
     DELETE    /api/v1/documents/term-owners/{id}/
     GET       /api/v1/documents/my-terms/
     POST      /api/v1/documents/{id}/confirm-fresh/
 
-Dimensions/terms are organization-scoped controlled vocabulary; documents are
-tagged per space. Reads require space context (X-Space-Id) so the UI filter
-panel only sees dimensions relevant to the active space's business line.
+KB optimization spec §2.1: a space's ``taxonomy_mode`` decides which dimensions
+it sees — ``inherit`` (shared org/business-line dimensions, legacy), ``space``
+(space-private dimensions + org-wide shared) or ``none`` (no taxonomy). Reads
+require space context (X-Space-Id).
 """
 
 from __future__ import annotations
@@ -69,10 +74,10 @@ class TaxonomyDimensionSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaxonomyDimension
         fields = [
-            "id", "organization", "business_line", "code", "name",
+            "id", "organization", "business_line", "space", "code", "name",
             "is_hierarchical", "required", "sort_order", "status", "terms",
         ]
-        read_only_fields = ["id", "organization"]
+        read_only_fields = ["id", "organization", "space"]
 
     def get_terms(self, obj):
         terms = [t for t in obj.terms.all() if t.status == "active"]
@@ -105,6 +110,46 @@ def _require_taxonomy_admin(request, space):
         raise PermissionDenied("Taxonomy management requires knowledge admin rights.")
 
 
+def _require_dimension_admin(request, space, dimension):
+    """KB spec §4: shared dimensions (space is null) are platform-managed only;
+    space-private dimensions may be managed by that space's owner/knowledge_admin."""
+    if is_platform_admin(request.user):
+        return
+    if dimension.space_id is None:
+        raise PermissionDenied("Shared dimensions can only be edited by a platform admin.")
+    if dimension.space_id != space.id:
+        raise PermissionDenied("Dimension belongs to another space.")
+    role = effective_space_role(request.user, space)
+    if role not in TAXONOMY_ADMIN_ROLES:
+        raise PermissionDenied("Taxonomy management requires knowledge admin rights.")
+
+
+def visible_dimensions_qs(space):
+    """KB spec §2.1: dimensions visible to a space depend on its taxonomy_mode.
+
+    inherit — shared org/business-line dimensions (space is null).
+    space   — this space's private dimensions + org-wide shared (business_line & space null).
+    none    — nothing.
+    """
+    from django.db.models import Q
+
+    mode = getattr(space, "taxonomy_mode", "inherit")
+    base = TaxonomyDimension.objects.filter(
+        organization_id=space.organization_id, status="active"
+    )
+    if mode == "none":
+        return base.none()
+    if mode == "space":
+        return base.filter(
+            Q(space_id=space.id)
+            | Q(space__isnull=True, business_line__isnull=True)
+        )
+    # inherit (legacy): shared dimensions for the space's business line.
+    return base.filter(space__isnull=True).filter(
+        Q(business_line__isnull=True) | Q(business_line_id=space.business_line_id)
+    )
+
+
 def document_term_codes(document) -> list[str]:
     return list(
         DocumentTag.objects.filter(document=document, term__status="active")
@@ -134,12 +179,17 @@ def sync_chunk_term_metadata(document) -> None:
 
 
 def validate_required_dimensions(document, *, organization_id, business_line_id):
-    """Raise if a required dimension has no tag on this document (spec §2.5)."""
-    from django.db.models import Q
+    """Raise if a required dimension has no tag on this document (spec §2.5).
 
-    required_dims = TaxonomyDimension.objects.filter(
-        organization_id=organization_id, required=True, status="active"
-    ).filter(Q(business_line__isnull=True) | Q(business_line_id=business_line_id))
+    KB optimization spec §2.1: required-dimension enforcement follows the
+    space's taxonomy_mode — ``none`` spaces skip the check entirely, ``space``
+    spaces check their private (+ org-wide) required dimensions, and legacy
+    ``inherit`` spaces keep the original shared-dimension behavior.
+    """
+    space = document.space
+    if space is None:
+        return
+    required_dims = visible_dimensions_qs(space).filter(required=True)
     tagged_dims = set(
         DocumentTag.objects.filter(document=document).values_list(
             "term__dimension_id", flat=True
@@ -160,16 +210,10 @@ def validate_required_dimensions(document, *, organization_id, business_line_id)
 def taxonomy_dimensions(request):
     space = resolve_request_space(request)
     if request.method == "GET":
-        from django.db.models import Prefetch, Q
+        from django.db.models import Prefetch
 
         dims = (
-            TaxonomyDimension.objects.filter(
-                organization_id=space.organization_id, status="active"
-            )
-            .filter(
-                Q(business_line__isnull=True)
-                | Q(business_line_id=space.business_line_id)
-            )
+            visible_dimensions_qs(space)
             .prefetch_related(
                 Prefetch("terms", queryset=TaxonomyTerm.objects.order_by("sort_order", "code"))
             )
@@ -178,17 +222,63 @@ def taxonomy_dimensions(request):
         return Response(TaxonomyDimensionSerializer(dims, many=True).data)
 
     _require_taxonomy_admin(request, space)
+    mode = getattr(space, "taxonomy_mode", "inherit")
     serializer = TaxonomyDimensionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    dimension = serializer.save(organization_id=space.organization_id)
+    # KB spec §2.1: space-mode spaces create space-private dimensions (managed
+    # by the space's own admins). inherit/none spaces can only create shared
+    # dimensions, which is platform-admin only.
+    if mode == "space" and not is_platform_admin(request.user):
+        dimension = serializer.save(
+            organization_id=space.organization_id, space=space
+        )
+    else:
+        if not is_platform_admin(request.user):
+            raise PermissionDenied(
+                "Only a platform admin can create shared dimensions. "
+                "Set this space's taxonomy mode to 'space' to self-manage."
+            )
+        dimension = serializer.save(organization_id=space.organization_id)
     create_audit_log(
         user=request.user, action="admin_action", target_type="TaxonomyDimension",
         target_id=str(dimension.id),
-        details={"op": "dimension_create", "code": dimension.code}, request=request,
+        details={"op": "dimension_create", "code": dimension.code,
+                 "space": str(dimension.space_id) if dimension.space_id else None},
+        request=request,
     )
     return Response(
         TaxonomyDimensionSerializer(dimension).data, status=status.HTTP_201_CREATED
     )
+
+
+@api_view(["PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def taxonomy_dimension_detail(request, pk):
+    """KB spec §3.1: edit / archive a dimension (name/required/sort_order/status)."""
+    space = resolve_request_space(request)
+    try:
+        dimension = TaxonomyDimension.objects.get(
+            pk=pk, organization_id=space.organization_id
+        )
+    except TaxonomyDimension.DoesNotExist:
+        raise NotFound("Dimension not found.")
+    _require_dimension_admin(request, space, dimension)
+    allowed = {"name", "required", "sort_order", "status", "is_hierarchical"}
+    updates = {k: v for k, v in request.data.items() if k in allowed}
+    if not updates:
+        raise ValidationError({"detail": "No editable fields supplied."})
+    if "status" in updates and updates["status"] not in {"active", "archived"}:
+        raise ValidationError({"status": "Must be 'active' or 'archived'."})
+    for field, value in updates.items():
+        setattr(dimension, field, value)
+    dimension.save(update_fields=[*updates.keys(), "updated_at"])
+    create_audit_log(
+        user=request.user, action="admin_action", target_type="TaxonomyDimension",
+        target_id=str(dimension.id),
+        details={"op": "dimension_update", "fields": sorted(updates.keys())},
+        request=request,
+    )
+    return Response(TaxonomyDimensionSerializer(dimension).data)
 
 
 @api_view(["GET", "POST"])
@@ -199,17 +289,21 @@ def taxonomy_terms(request):
         qs = TaxonomyTerm.objects.filter(
             dimension__organization_id=space.organization_id, status="active"
         ).select_related("dimension").order_by("sort_order", "code")
+        # KB spec §2.1: only terms of dimensions visible to this space.
+        visible_ids = list(visible_dimensions_qs(space).values_list("id", flat=True))
+        qs = qs.filter(dimension_id__in=visible_ids)
         dimension_code = request.query_params.get("dimension")
         if dimension_code:
             qs = qs.filter(dimension__code=dimension_code)
         return Response(TaxonomyTermSerializer(qs, many=True).data)
 
-    _require_taxonomy_admin(request, space)
     serializer = TaxonomyTermSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     dimension = serializer.validated_data["dimension"]
     if dimension.organization_id != space.organization_id:
         raise PermissionDenied("Dimension belongs to another organization.")
+    # Term writes obey the parent dimension's admin scope (shared vs private).
+    _require_dimension_admin(request, space, dimension)
     parent = serializer.validated_data.get("parent")
     if parent is not None and parent.dimension_id != dimension.id:
         raise ValidationError({"parent": "Parent term must be in the same dimension."})
@@ -221,6 +315,86 @@ def taxonomy_terms(request):
         request=request,
     )
     return Response(TaxonomyTermSerializer(term).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def taxonomy_term_detail(request, pk):
+    """KB spec §3.1: edit / archive a term (label/sort_order/status)."""
+    space = resolve_request_space(request)
+    try:
+        term = TaxonomyTerm.objects.select_related("dimension").get(
+            pk=pk, dimension__organization_id=space.organization_id
+        )
+    except TaxonomyTerm.DoesNotExist:
+        raise NotFound("Term not found.")
+    _require_dimension_admin(request, space, term.dimension)
+    allowed = {"label", "sort_order", "status"}
+    updates = {k: v for k, v in request.data.items() if k in allowed}
+    if not updates:
+        raise ValidationError({"detail": "No editable fields supplied."})
+    if "status" in updates and updates["status"] not in {"active", "archived"}:
+        raise ValidationError({"status": "Must be 'active' or 'archived'."})
+    for field, value in updates.items():
+        setattr(term, field, value)
+    term.save(update_fields=[*updates.keys(), "updated_at"])
+    create_audit_log(
+        user=request.user, action="admin_action", target_type="TaxonomyTerm",
+        target_id=str(term.id),
+        details={"op": "term_update", "fields": sorted(updates.keys())},
+        request=request,
+    )
+    return Response(TaxonomyTermSerializer(term).data)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def taxonomy_presets(request):
+    """KB spec §3.1: preset catalog for the creation wizard / seed-defaults."""
+    from .taxonomy_presets import list_presets
+
+    return Response({"presets": list_presets()})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def taxonomy_seed_defaults(request):
+    """KB spec §3.1: one-click import of a default preset into this space.
+
+    Only valid for space-mode spaces; idempotent (get_or_create).
+    """
+    from .taxonomy_presets import get_preset, seed_space_taxonomy
+
+    space = resolve_request_space(request)
+    _require_taxonomy_admin(request, space)
+    mode = getattr(space, "taxonomy_mode", "inherit")
+    if mode != "space":
+        raise ValidationError(
+            {"detail": "Default seeding is only available when taxonomy mode is 'space'."}
+        )
+    preset_code = request.data.get("preset", "audit_default")
+    if get_preset(preset_code) is None:
+        raise ValidationError({"preset": "Unknown preset."})
+    created = seed_space_taxonomy(space, preset_code)
+    create_audit_log(
+        user=request.user, action="admin_action", target_type="KnowledgeSpace",
+        target_id=str(space.id),
+        details={"op": "taxonomy_seed_defaults", "preset": preset_code, "created": created},
+        request=request,
+    )
+    from django.db.models import Prefetch
+
+    dims = (
+        visible_dimensions_qs(space)
+        .prefetch_related(
+            Prefetch("terms", queryset=TaxonomyTerm.objects.order_by("sort_order", "code"))
+        )
+        .order_by("sort_order", "code")
+    )
+    return Response(
+        {"created": created, "dimensions": TaxonomyDimensionSerializer(dims, many=True).data},
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
 
 
 # ── Document tagging ─────────────────────────────────────────────────
@@ -261,11 +435,14 @@ def document_tags(request, pk):
     term_ids = request.data.get("term_ids")
     if not isinstance(term_ids, list):
         raise ValidationError({"term_ids": "Provide a list of term UUIDs."})
+    # KB spec §2.1: only allow terms from dimensions visible to this space, so a
+    # space can never tag with another space's private terms.
+    visible_ids = list(visible_dimensions_qs(space).values_list("id", flat=True))
     terms = list(
         TaxonomyTerm.objects.filter(
             id__in=term_ids,
             status="active",
-            dimension__organization_id=space.organization_id,
+            dimension_id__in=visible_ids,
         )
     )
     if len(terms) != len(set(str(t) for t in term_ids)):

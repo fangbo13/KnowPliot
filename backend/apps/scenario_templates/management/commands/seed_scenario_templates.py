@@ -40,6 +40,8 @@ TEMPLATES_TO_SEED = [
             "What is the procedure for reporting audit exceptions?",
             "Where can I find the templates for working papers?",
         ],
+        # KB optimization spec §2.3: audit spaces seed the default account tree.
+        "taxonomy_profile": {"mode": "default_seed", "preset": "audit_default"},
     },
     {
         "name": "Tax Policy Assistant",

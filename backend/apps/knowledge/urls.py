@@ -22,7 +22,7 @@ from .views import (
     DocumentConvertView,
 )
 from .batch_views import BatchDocumentUploadView, BatchImportResultDetailView
-from . import review_views, taxonomy_views, viz_views
+from . import review_views, taxonomy_views, viz_views, library_views
 
 urlpatterns = [
     path("", DocumentListCreateView.as_view(), name="document-list"),
@@ -48,7 +48,12 @@ urlpatterns = [
     path("convert/", DocumentConvertView.as_view(), name="document-convert"),
     # Knowledge iteration spec §2: taxonomy (dimensions/terms/tags/ownership)
     path("taxonomy/dimensions/", taxonomy_views.taxonomy_dimensions, name="taxonomy-dimensions"),
+    path("taxonomy/dimensions/<uuid:pk>/", taxonomy_views.taxonomy_dimension_detail, name="taxonomy-dimension-detail"),
     path("taxonomy/terms/", taxonomy_views.taxonomy_terms, name="taxonomy-terms"),
+    path("taxonomy/terms/<uuid:pk>/", taxonomy_views.taxonomy_term_detail, name="taxonomy-term-detail"),
+    # KB optimization spec §3.1: presets catalog + one-click default seeding
+    path("taxonomy/presets/", taxonomy_views.taxonomy_presets, name="taxonomy-presets"),
+    path("taxonomy/seed-defaults/", taxonomy_views.taxonomy_seed_defaults, name="taxonomy-seed-defaults"),
     path("<uuid:pk>/tags/", taxonomy_views.document_tags, name="document-tags"),
     path("term-owners/", taxonomy_views.term_owners, name="term-owners"),
     path("term-owners/<uuid:pk>/", taxonomy_views.term_owner_delete, name="term-owner-delete"),
@@ -63,4 +68,12 @@ urlpatterns = [
     path("graph/", viz_views.knowledge_graph, name="knowledge-graph"),
     path("timeline/", viz_views.knowledge_timeline, name="knowledge-timeline"),
     path("dashboard/", viz_views.knowledge_dashboard, name="knowledge-dashboard"),
+    # KB optimization spec §3.4: Obsidian-style backlinks
+    path("<uuid:pk>/backlinks/", viz_views.document_backlinks, name="document-backlinks"),
+    # KB optimization spec §3.2: platform-official reference libraries
+    path("libraries/", library_views.libraries, name="reference-libraries"),
+    path("libraries/catalog/", library_views.libraries_catalog, name="reference-libraries-catalog"),
+    path("libraries/<uuid:pk>/", library_views.library_detail, name="reference-library-detail"),
+    path("library-references/", library_views.library_references, name="space-library-references"),
+    path("library-references/<uuid:pk>/", library_views.library_reference_detail, name="space-library-reference-detail"),
 ]

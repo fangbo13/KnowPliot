@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PIP_TRUSTED_HOST=mirrors.tuna.tsinghua.edu.cn
-ENV PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 # Install Python dependencies
 # psycopg[binary] and pgvector have pre-built wheels, no compilation needed

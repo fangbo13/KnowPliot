@@ -60,7 +60,46 @@ CREATE_ALLOWED_FIELDS = {
     "work_group_id",
     "office_location_ids",
     "template_version_id",
+    "taxonomy_init_mode",
 }
+
+# KB optimization spec §3.1: valid taxonomy initialization choices.
+TAXONOMY_INIT_MODES = {"default_seed", "custom", "none"}
+# Default seed preset applied when the requester chooses "default_seed".
+DEFAULT_TAXONOMY_PRESET = "audit_default"
+
+
+def _taxonomy_profile_for(template_revision) -> dict | None:
+    """KB spec §2.3: the template's taxonomy_profile from its snapshot, if any."""
+    if template_revision is None:
+        return None
+    try:
+        from apps.scenario_templates.contract import taxonomy_profile_from_snapshot
+
+        return taxonomy_profile_from_snapshot(template_revision.snapshot)
+    except Exception:
+        return None
+
+
+def _default_taxonomy_mode_for(template_revision) -> str:
+    """Derive the default taxonomy init mode from the template.
+
+    The snapshot's workspace_defaults.taxonomy_profile wins when present;
+    otherwise fall back to the scenario type — audit → default_seed (audit
+    account tree), enablement → none (no taxonomy), everything else → custom
+    (space admins self-manage).
+    """
+    if template_revision is None:
+        return "custom"
+    profile = _taxonomy_profile_for(template_revision)
+    if profile is not None:
+        return profile["mode"]
+    scenario_type = getattr(getattr(template_revision, "template", None), "scenario_type", None)
+    if scenario_type == "audit":
+        return "default_seed"
+    if scenario_type == "enablement":
+        return "none"
+    return "custom"
 
 
 def _reject_unknown(payload: dict, allowed: set[str] = CREATE_ALLOWED_FIELDS):
@@ -222,6 +261,14 @@ def _normalize_creation_payload(payload: dict, *, actor):
         business_line=business_line,
     )
 
+    # KB optimization spec §3.1: taxonomy initialization choice. Defaults to the
+    # template's scenario-derived mode, else "custom".
+    taxonomy_init_mode = payload.get("taxonomy_init_mode")
+    if taxonomy_init_mode in (None, ""):
+        taxonomy_init_mode = _default_taxonomy_mode_for(template_revision)
+    if taxonomy_init_mode not in TAXONOMY_INIT_MODES:
+        raise ValidationError({"taxonomy_init_mode": "Unsupported taxonomy initialization mode."})
+
     normalized = {
         "name": name,
         "code": code,
@@ -233,6 +280,7 @@ def _normalize_creation_payload(payload: dict, *, actor):
         "work_group_id": work_group.id,
         "office_location_ids": [location.id for location in locations],
         "template_version_id": template_version_id,
+        "taxonomy_init_mode": taxonomy_init_mode,
         "template_id": template_revision.template_id if template_revision else None,
         "template_version": template_revision.version if template_revision else None,
         "template_snapshot_hash": (
@@ -295,6 +343,7 @@ def _request_body(request: GovernedActionRequest):
             "template_version_id": (
                 str(detail.template_version_id) if detail.template_version_id else None
             ),
+            "taxonomy_init_mode": detail.taxonomy_init_mode,
         }
     if request.result_uuid:
         body["space"] = {
@@ -399,6 +448,7 @@ def submit_creation_request(*, actor, payload: dict, idempotency_key: uuid.UUID)
                 work_group_id=work_group.id,
                 office_location_ids=[str(location.id) for location in locations],
                 template_version_id=normalized["template_version_id"],
+                taxonomy_init_mode=normalized["taxonomy_init_mode"],
             )
             # The reservation has a one-to-one-ish active request pointer; set
             # it after the request exists through the FK id so no unsaved
@@ -457,6 +507,7 @@ def refresh_creation_impact(*, actor, request_id, reviewer=True):
             "work_group_id": str(detail.work_group_id),
             "office_location_ids": detail.office_location_ids,
             "template_version_id": str(detail.template_version_id) if detail.template_version_id else None,
+            "taxonomy_init_mode": detail.taxonomy_init_mode,
         },
         actor=row.requester,
     )
@@ -576,6 +627,7 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                         if detail.template_version_id
                         else None
                     ),
+                    "taxonomy_init_mode": detail.taxonomy_init_mode,
                 },
                 actor=row.requester,
             )
@@ -604,6 +656,28 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                 space.office_locations.set(locations)
             except IntegrityError as exc:
                 raise GovernedWorkflowError("space_locator_conflict") from exc
+
+            # KB optimization spec §3.1: apply the requester's taxonomy choice.
+            #   default_seed → space-private mode + one-shot preset copy;
+            #   custom      → space-private mode, admins build their own tree;
+            #   none        → no taxonomy (enablement teams).
+            taxonomy_init_mode = normalized.get("taxonomy_init_mode", "custom")
+            space.taxonomy_mode = (
+                KnowledgeSpace.TAXONOMY_MODE_NONE
+                if taxonomy_init_mode == "none"
+                else KnowledgeSpace.TAXONOMY_MODE_SPACE
+            )
+            space.save(update_fields=["taxonomy_mode", "updated_at"])
+            if taxonomy_init_mode == "default_seed":
+                from apps.knowledge.taxonomy_presets import get_preset, seed_space_taxonomy
+
+                # Template taxonomy_profile may pin a specific preset (§2.3);
+                # unknown/absent presets fall back to the audit default.
+                profile = _taxonomy_profile_for(template_revision)
+                preset_code = (profile or {}).get("preset") or DEFAULT_TAXONOMY_PRESET
+                if get_preset(preset_code) is None:
+                    preset_code = DEFAULT_TAXONOMY_PRESET
+                seed_space_taxonomy(space, preset_code)
 
             old = row.status
             row.target_space = space

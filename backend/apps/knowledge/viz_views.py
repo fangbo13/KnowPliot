@@ -58,7 +58,13 @@ def _cosine(a, b) -> float:
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def knowledge_graph(request):
-    """Local Graph: document nodes + shared-term / explicit-link / similar edges."""
+    """Local Graph: document nodes + shared-term / explicit-link / similar edges.
+
+    KB optimization spec §3.4: when ``center=<doc_id>`` is supplied, the result
+    is restricted to the center document's neighborhood within ``depth`` hops
+    (Obsidian local-graph semantics). Without ``center`` the full space graph is
+    returned (global mode).
+    """
     space = resolve_request_space(request)
     half_life = space_half_life_days(space)
 
@@ -145,7 +151,74 @@ def knowledge_graph(request):
         for sim, tgt in scored[:SIMILAR_EDGES_PER_NODE]:
             _add_edge(src, tgt, "similar", score=round(sim, 4))
 
-    return Response({"nodes": nodes, "edges": edges, "term_filter": term_filter or None})
+    return Response(_maybe_localize_graph(request, nodes, edges, term_filter))
+
+
+def _maybe_localize_graph(request, nodes, edges, term_filter):
+    """KB spec §3.4: restrict to a center document's BFS neighborhood if asked."""
+    center = request.query_params.get("center")
+    payload = {"nodes": nodes, "edges": edges, "term_filter": term_filter or None}
+    if not center:
+        payload["mode"] = "global"
+        return payload
+    try:
+        depth = max(1, min(int(request.query_params.get("depth", 1) or 1), 3))
+    except (TypeError, ValueError):
+        depth = 1
+    node_ids = {n["id"] for n in nodes}
+    if center not in node_ids:
+        # Center is outside the loaded window; return just the center marker.
+        return {"nodes": [n for n in nodes if n["id"] == center], "edges": [],
+                "term_filter": term_filter or None, "mode": "local", "center": center, "depth": depth}
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for e in edges:
+        adjacency[e["source"]].add(e["target"])
+        adjacency[e["target"]].add(e["source"])
+    reachable = {center}
+    frontier = {center}
+    for _ in range(depth):
+        nxt: set[str] = set()
+        for node in frontier:
+            nxt |= adjacency[node] - reachable
+        reachable |= nxt
+        frontier = nxt
+        if not frontier:
+            break
+    local_nodes = [n for n in nodes if n["id"] in reachable]
+    local_edges = [
+        e for e in edges if e["source"] in reachable and e["target"] in reachable
+    ]
+    return {"nodes": local_nodes, "edges": local_edges,
+            "term_filter": term_filter or None, "mode": "local",
+            "center": center, "depth": depth}
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def document_backlinks(request, pk):
+    """KB spec §3.4: Obsidian-style backlinks — documents linking TO this one."""
+    space = resolve_request_space(request)
+    try:
+        document = Document.objects.get(pk=pk, space=space)
+    except Document.DoesNotExist:
+        raise PermissionDenied("Document not found in this space.")
+    links = (
+        DocumentLink.objects.filter(space=space, target=document)
+        .select_related("source")
+        .order_by("-created_at")
+    )
+    backlinks = [
+        {
+            "id": str(link.source_id),
+            "title": link.source.title,
+            "anchor_text": link.anchor_text,
+            "status": link.source.status,
+            "updated_at": link.source.updated_at,
+        }
+        for link in links
+        if link.source.status in ["active", "stale", "pending_review"]
+    ]
+    return Response({"document_id": str(document.id), "backlinks": backlinks})
 
 
 @api_view(["GET"])

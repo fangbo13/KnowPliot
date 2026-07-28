@@ -168,23 +168,35 @@ class HybridRetriever:
         query: str,
         *,
         space_id: str,
+        space_ids: list[str] | None = None,
         top_k: int = 5,
         similarity_threshold: float = 0.3,
         filters: RetrievalFilters | None = None,
     ) -> list[dict]:
         normalized_space_id = str(UUID(str(space_id)))
+        # KB optimization spec §3.3: retrieve across the primary space + any
+        # opted-in reference libraries. Defaults to single-space isolation.
+        if space_ids:
+            normalized_space_ids = list(
+                dict.fromkeys(str(UUID(str(value))) for value in space_ids)
+            )
+            if normalized_space_id not in normalized_space_ids:
+                normalized_space_ids.insert(0, normalized_space_id)
+        else:
+            normalized_space_ids = [normalized_space_id]
         normalized_filters = (filters or RetrievalFilters()).normalized()
         candidate_k = max(top_k * 3, top_k)
         vector_results = self.vector_retriever.search(
             query,
             space_id=normalized_space_id,
+            space_ids=normalized_space_ids,
             top_k=candidate_k,
             similarity_threshold=similarity_threshold,
             filters=normalized_filters,
         )
         lexical_results = self._lexical_search(
             query,
-            space_id=normalized_space_id,
+            space_ids=normalized_space_ids,
             top_k=candidate_k,
             filters=normalized_filters,
         )
@@ -262,7 +274,7 @@ class HybridRetriever:
         self,
         query: str,
         *,
-        space_id: str,
+        space_ids: list[str],
         top_k: int,
         filters: RetrievalFilters,
     ) -> list[dict]:
@@ -272,12 +284,12 @@ class HybridRetriever:
         if connection.vendor == "postgresql":
             return self._postgres_lexical_search(
                 query,
-                space_id=space_id,
+                space_ids=space_ids,
                 top_k=top_k,
                 filters=filters,
             )
         qs = DocumentChunk.objects.filter(
-            space_id=space_id,
+            space_id__in=space_ids,
             document__status__in=["active", "stale"],
         ).filter(*_effective_date_filter()).select_related("document")
         if filters.document_ids:
@@ -316,7 +328,7 @@ class HybridRetriever:
         self,
         query: str,
         *,
-        space_id: str,
+        space_ids: list[str],
         top_k: int,
         filters: RetrievalFilters,
     ) -> list[dict]:
@@ -332,7 +344,7 @@ class HybridRetriever:
         )
         qs = (
             DocumentChunk.objects.filter(
-                space_id=space_id,
+                space_id__in=space_ids,
                 document__status__in=["active", "stale"],
             )
             .filter(*_effective_date_filter())

@@ -26,6 +26,7 @@ export interface TaxonomyTerm {
 export interface TaxonomyDimension {
   id: string;
   business_line: string | null;
+  space: string | null;
   code: string;
   name: string;
   is_hierarchical: boolean;
@@ -33,6 +34,26 @@ export interface TaxonomyDimension {
   sort_order: number;
   status: string;
   terms: TaxonomyTerm[];
+}
+
+// KB optimization spec §3.1 — preset catalog entry for the creation wizard.
+export interface TaxonomyPresetTerm {
+  code: string;
+  label: string;
+  children?: TaxonomyPresetTerm[];
+}
+
+export interface TaxonomyPreset {
+  code: string;
+  name: string;
+  description: string;
+  dimensions: Array<{
+    code: string;
+    name: string;
+    required: boolean;
+    is_hierarchical: boolean;
+    terms: TaxonomyPresetTerm[];
+  }>;
 }
 
 export interface DocumentTagInfo {
@@ -94,6 +115,138 @@ export const taxonomyApi = {
   async confirmFresh(documentId: string): Promise<{ id: string; status: string; last_reviewed_at: string }> {
     const { data } = await apiClient.post(`/documents/${documentId}/confirm-fresh/`);
     return data;
+  },
+
+  // KB optimization spec §3.1 — space-private taxonomy management.
+  async createDimension(body: {
+    code: string;
+    name: string;
+    is_hierarchical?: boolean;
+    required?: boolean;
+    sort_order?: number;
+  }): Promise<TaxonomyDimension> {
+    const { data } = await apiClient.post('/documents/taxonomy/dimensions/', body);
+    return data;
+  },
+
+  async updateDimension(
+    id: string,
+    body: Partial<{ name: string; required: boolean; sort_order: number; status: string; is_hierarchical: boolean }>,
+  ): Promise<TaxonomyDimension> {
+    const { data } = await apiClient.patch(`/documents/taxonomy/dimensions/${id}/`, body);
+    return data;
+  },
+
+  async createTerm(body: {
+    dimension: string;
+    code: string;
+    label: string;
+    parent?: string | null;
+    sort_order?: number;
+  }): Promise<TaxonomyTerm> {
+    const { data } = await apiClient.post('/documents/taxonomy/terms/', body);
+    return data;
+  },
+
+  async updateTerm(
+    id: string,
+    body: Partial<{ label: string; sort_order: number; status: string }>,
+  ): Promise<TaxonomyTerm> {
+    const { data } = await apiClient.patch(`/documents/taxonomy/terms/${id}/`, body);
+    return data;
+  },
+
+  async getPresets(): Promise<{ presets: TaxonomyPreset[] }> {
+    const { data } = await apiClient.get('/documents/taxonomy/presets/');
+    return data;
+  },
+
+  async seedDefaults(preset = 'audit_default'): Promise<{ created: number; dimensions: TaxonomyDimension[] }> {
+    const { data } = await apiClient.post('/documents/taxonomy/seed-defaults/', { preset });
+    return data;
+  },
+};
+
+// ── Reference libraries (KB optimization spec §3.2) ───────────────────
+
+export interface ReferenceLibrary {
+  id: string;
+  space: string;
+  space_name: string;
+  space_code: string;
+  name: string;
+  description: string;
+  category: 'ifrs' | 'cas' | 'ipo_cases' | 'other';
+  status: 'published' | 'unpublished';
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface SpaceLibraryReference {
+  id: string;
+  space: string;
+  library: string;
+  library_name: string;
+  library_category: string;
+  library_status: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export const libraryApi = {
+  // Platform admin management.
+  async list(): Promise<ReferenceLibrary[]> {
+    const { data } = await apiClient.get('/documents/libraries/');
+    return data;
+  },
+
+  async create(body: {
+    space: string;
+    name: string;
+    description?: string;
+    category?: string;
+    status?: string;
+  }): Promise<ReferenceLibrary> {
+    const { data } = await apiClient.post('/documents/libraries/', body);
+    return data;
+  },
+
+  async update(
+    id: string,
+    body: Partial<{ name: string; description: string; category: string; status: string }>,
+  ): Promise<ReferenceLibrary> {
+    const { data } = await apiClient.patch(`/documents/libraries/${id}/`, body);
+    return data;
+  },
+
+  async remove(id: string): Promise<void> {
+    await apiClient.delete(`/documents/libraries/${id}/`);
+  },
+
+  // Published catalog visible to everyone.
+  async catalog(): Promise<ReferenceLibrary[]> {
+    const { data } = await apiClient.get('/documents/libraries/catalog/');
+    return data;
+  },
+
+  // Space-scoped references (X-Space-Id injected by apiClient).
+  async getReferences(): Promise<SpaceLibraryReference[]> {
+    const { data } = await apiClient.get('/documents/library-references/');
+    return data;
+  },
+
+  async addReference(libraryId: string): Promise<SpaceLibraryReference> {
+    const { data } = await apiClient.post('/documents/library-references/', { library: libraryId });
+    return data;
+  },
+
+  async toggleReference(id: string, enabled: boolean): Promise<SpaceLibraryReference> {
+    const { data } = await apiClient.patch(`/documents/library-references/${id}/`, { enabled });
+    return data;
+  },
+
+  async removeReference(id: string): Promise<void> {
+    await apiClient.delete(`/documents/library-references/${id}/`);
   },
 };
 
@@ -220,9 +373,41 @@ export interface DashboardData {
   };
 }
 
+export interface BacklinkInfo {
+  id: string;
+  title: string;
+  anchor_text: string;
+  status: string;
+  updated_at: string;
+}
+
 export const vizApi = {
-  async getGraph(term?: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[]; term_filter: string | null }> {
-    const { data } = await apiClient.get('/documents/graph/', { params: term ? { term } : undefined });
+  async getGraph(
+    term?: string,
+    local?: { center: string; depth: number },
+  ): Promise<{
+    nodes: GraphNode[];
+    edges: GraphEdge[];
+    term_filter: string | null;
+    mode?: 'global' | 'local';
+    center?: string;
+    depth?: number;
+  }> {
+    const params: Record<string, string | number> = {};
+    if (term) params.term = term;
+    if (local) {
+      params.center = local.center;
+      params.depth = local.depth;
+    }
+    const { data } = await apiClient.get('/documents/graph/', {
+      params: Object.keys(params).length ? params : undefined,
+    });
+    return data;
+  },
+
+  // KB optimization spec §3.4 — Obsidian-style backlinks.
+  async getBacklinks(documentId: string): Promise<{ document_id: string; backlinks: BacklinkInfo[] }> {
+    const { data } = await apiClient.get(`/documents/${documentId}/backlinks/`);
     return data;
   },
 

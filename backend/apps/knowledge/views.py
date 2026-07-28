@@ -484,6 +484,11 @@ class DocumentTextEditView(APIView):
             )
         document.text_content = new_text
         document.save(update_fields=["text_content", "updated_at"])
+        # KB optimization spec §3.4: keep wikilink-derived DocumentLink rows in
+        # sync so Backlinks / Local Graph reflect edits immediately.
+        from apps.knowledge.links import sync_document_links
+
+        sync_document_links(document)
         create_audit_log(
             user=request.user,
             action="document_text_edit",

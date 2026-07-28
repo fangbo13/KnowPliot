@@ -48,6 +48,7 @@ class KnowledgeSpaceSerializer(serializers.ModelSerializer):
             "id", "name", "code", "description", "icon", "language",
             "visibility", "status", "organization", "organization_name",
             "business_line", "business_line_name", "review_policy",
+            "taxonomy_mode",
             "my_role", "member_count", "settings", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]

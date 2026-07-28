@@ -377,12 +377,34 @@ class RAGPipeline:
         # return graceful degraded response instead of uncaught exception that
         # causes SSE "error" event → frontend shows "当前无法获取响应".
         retrieval_started = time.monotonic()
+        # KB optimization spec §3.3: expand retrieval to opted-in, still-published
+        # reference libraries. Build a space_id → library name map for provenance.
+        reference_space_ids: list[str] = []
+        library_name_by_space: dict[str, str] = {}
+        try:
+            from apps.knowledge.library_views import resolve_reference_space_ids
+            from apps.knowledge.models import ReferenceLibrary
+            from apps.spaces.models import KnowledgeSpace
+
+            active_space = KnowledgeSpace.objects.filter(pk=space_id).first()
+            if active_space is not None:
+                reference_space_ids = resolve_reference_space_ids(active_space)
+                if reference_space_ids:
+                    for lib in ReferenceLibrary.objects.filter(
+                        space_id__in=reference_space_ids
+                    ).only("space_id", "name"):
+                        library_name_by_space[str(lib.space_id)] = lib.name
+        except Exception:
+            logger.warning("reference_library_resolve_failed", exc_info=True)
+            reference_space_ids = []
+        space_ids = [space_id, *reference_space_ids]
         try:
             chunks = self.retriever.search(
                 query=query,
                 top_k=TOP_K,
                 similarity_threshold=SIMILARITY_THRESHOLD,
                 space_id=space_id,  # V6.0 space isolation
+                space_ids=space_ids,  # KB spec §3.3 cross-library retrieval
             )
         except Exception:
             logger.error("chat_retrieval_failed code=retrieval_error")
@@ -430,7 +452,9 @@ class RAGPipeline:
             content = chunk["content"]
             if not self.guardrails.check_input(content):
                 content = self._sanitize_content(content)
-            sanitized_chunks.append({**chunk, "content": content})
+            # KB optimization spec §3.3: attach reference-library provenance.
+            source_library = library_name_by_space.get(str(chunk.get("space_id")))
+            sanitized_chunks.append({**chunk, "content": content, "source_library": source_library})
         chunks = sanitized_chunks
         retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
         quality = classify_confidence(chunks)
@@ -569,6 +593,7 @@ class RAGPipeline:
                 "score": round(chunk["score"], 3),
                 "quoted_text": chunk["content"][:200],
                 "chunk_id": chunk["id"],
+                "source_library": chunk.get("source_library"),
                 **doc_meta.get(
                     str(chunk["document_id"]),
                     {"version": None, "updated_by": None, "updated_at": None, "stale": False},

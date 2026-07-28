@@ -405,6 +405,21 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
                       )}
                       {cit.snippet && <div className="citation-snippet">{cit.snippet}</div>}
                       <div className="citation-meta">
+                        {/* KB optimization spec §3.3: reference-library provenance badge */}
+                        {cit.source_library && (
+                          <span
+                            className="citation-library-badge"
+                            style={{
+                              color: 'var(--color-accent)',
+                              border: '1px solid rgba(var(--color-accent-rgb), 0.35)',
+                              borderRadius: 4,
+                              padding: '0 6px',
+                              fontSize: 11,
+                            }}
+                          >
+                            {t('citation_library_badge', { name: cit.source_library, defaultValue: '参考库 · {{name}}' })}
+                          </span>
+                        )}
                         {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
                         {/* Spec §3: updater watermark "v{N} · {name} · {date}" on citation cards */}
                         {cit.version != null && (

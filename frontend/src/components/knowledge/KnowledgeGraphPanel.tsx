@@ -11,7 +11,7 @@
 // neighbourhood and opens a side preview.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Empty, Select, Spin, Tag } from 'antd';
+import { Alert, Button, Checkbox, Empty, Segmented, Select, Slider, Spin, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { vizApi } from '../../api/knowledge';
@@ -109,22 +109,33 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [termFilter, setTermFilter] = useState<string | undefined>(undefined);
   const [selected, setSelected] = useState<PositionedNode | null>(null);
+  // KB optimization spec §5.4: Obsidian-style Local Graph mode.
+  const [graphMode, setGraphMode] = useState<'global' | 'local'>('global');
+  const [centerId, setCenterId] = useState<string | undefined>(undefined);
+  const [depth, setDepth] = useState(1);
+  const [edgeKinds, setEdgeKinds] = useState<string[]>(['link', 'term', 'similar']);
+  // Global node list cached for the center-document selector.
+  const [allNodes, setAllNodes] = useState<GraphNode[]>([]);
   const loadedRef = useRef(false);
 
-  const load = useCallback(async (term?: string) => {
-    setLoading(true);
-    setError(null);
-    setSelected(null);
-    try {
-      const data = await vizApi.getGraph(term);
-      setNodes(runLayout(data.nodes, data.edges));
-      setEdges(data.edges);
-    } catch {
-      setError(t('graph_load_failed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const load = useCallback(
+    async (term?: string, local?: { center: string; depth: number }) => {
+      setLoading(true);
+      setError(null);
+      setSelected(null);
+      try {
+        const data = await vizApi.getGraph(term, local);
+        setNodes(runLayout(data.nodes, data.edges));
+        setEdges(data.edges);
+        if (!local) setAllNodes(data.nodes);
+      } catch {
+        setError(t('graph_load_failed'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (loadedRef.current) return;
@@ -132,15 +143,36 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
     void load();
   }, [load]);
 
+  const reload = useCallback(() => {
+    if (graphMode === 'local' && centerId) {
+      void load(termFilter, { center: centerId, depth });
+    } else {
+      void load(termFilter);
+    }
+  }, [graphMode, centerId, depth, termFilter, load]);
+
+  // Reload whenever local-graph controls change.
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    if (graphMode === 'local' && !centerId) return;
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphMode, centerId, depth]);
+
+  const visibleEdges = useMemo(
+    () => edges.filter((edge) => edgeKinds.includes(edge.kind)),
+    [edges, edgeKinds],
+  );
+
   const neighbours = useMemo(() => {
     if (!selected) return new Set<string>();
     const set = new Set<string>([selected.id]);
-    edges.forEach((edge) => {
+    visibleEdges.forEach((edge) => {
       if (edge.source === selected.id) set.add(edge.target);
       if (edge.target === selected.id) set.add(edge.source);
     });
     return set;
-  }, [selected, edges]);
+  }, [selected, visibleEdges]);
 
   const position = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
@@ -151,6 +183,42 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
   return (
     <div data-testid="knowledge-graph-panel">
       <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Segmented
+          value={graphMode}
+          onChange={(v) => {
+            const mode = v as 'global' | 'local';
+            setGraphMode(mode);
+            if (mode === 'global') void load(termFilter);
+          }}
+          options={[
+            { label: t('graph_mode_global'), value: 'global' },
+            { label: t('graph_mode_local'), value: 'local' },
+          ]}
+        />
+        {graphMode === 'local' && (
+          <>
+            <Select
+              showSearch
+              style={{ minWidth: 220 }}
+              placeholder={t('graph_center_placeholder')}
+              value={centerId}
+              optionFilterProp="label"
+              options={allNodes.map((n) => ({ value: n.id, label: n.title }))}
+              onChange={(v) => setCenterId(v)}
+            />
+            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+              {t('graph_depth')}
+            </span>
+            <Slider
+              min={1}
+              max={3}
+              step={1}
+              value={depth}
+              onChange={(v) => setDepth(v)}
+              style={{ width: 120, margin: '0 4px' }}
+            />
+          </>
+        )}
         <Select
           allowClear
           showSearch
@@ -159,9 +227,25 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
           value={termFilter}
           optionFilterProp="label"
           options={termOptions}
-          onChange={(value) => { setTermFilter(value); void load(value); }}
+          onChange={(value) => {
+            setTermFilter(value);
+            if (graphMode === 'local' && centerId) {
+              void load(value, { center: centerId, depth });
+            } else {
+              void load(value);
+            }
+          }}
         />
-        <Button icon={<ReloadOutlined />} onClick={() => void load(termFilter)}>{t('refresh')}</Button>
+        <Checkbox.Group
+          value={edgeKinds}
+          onChange={(vals) => setEdgeKinds(vals as string[])}
+          options={[
+            { label: t('graph_edge_link'), value: 'link' },
+            { label: t('graph_edge_term'), value: 'term' },
+            { label: t('graph_edge_similar'), value: 'similar' },
+          ]}
+        />
+        <Button icon={<ReloadOutlined />} onClick={reload}>{t('refresh')}</Button>
         <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>
           {t('graph_legend')}
         </span>
@@ -184,7 +268,7 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
               role="img"
               aria-label={t('graph_aria_label')}
             >
-              {edges.map((edge, i) => {
+              {visibleEdges.map((edge, i) => {
                 const a = position.get(edge.source);
                 const b = position.get(edge.target);
                 if (!a || !b) return null;

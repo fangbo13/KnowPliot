@@ -26,6 +26,8 @@ import {
   FieldTimeOutlined,
   DashboardOutlined,
   AuditOutlined,
+  TagOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -46,6 +48,11 @@ import { ReviewQueuePanel } from '../../components/knowledge/ReviewQueuePanel';
 import { KnowledgeGraphPanel } from '../../components/knowledge/KnowledgeGraphPanel';
 import { TimelinePanel } from '../../components/knowledge/TimelinePanel';
 import { DashboardPanel } from '../../components/knowledge/DashboardPanel';
+import { TaxonomyManagerPanel } from '../../components/knowledge/TaxonomyManagerPanel';
+import { LibraryReferencesPanel } from '../../components/knowledge/LibraryReferencesPanel';
+import { BacklinksPanel } from '../../components/knowledge/BacklinksPanel';
+import { useAuth } from '../../auth/AuthProvider';
+import { useSpaceStore } from '../../store/spaceStore';
 
 interface Document {
   id: string;
@@ -98,6 +105,12 @@ const tagStyleMap: Record<string, { bg: string; text: string; border: string }> 
 export default function KnowledgeBasePage() {
   const { t } = useTranslation('common');
   const access = useAuthorization();
+  const { user } = useAuth();
+  const { getActiveSpace } = useSpaceStore();
+  const activeSpace = getActiveSpace();
+  // KB optimization spec §2.1/§3.2: taxonomy mode + platform admin flag.
+  const taxonomyMode = activeSpace?.taxonomy_mode ?? 'inherit';
+  const isPlatformAdmin = Boolean(user?.is_superuser || user?.is_super_admin);
   const canRead = access.has('knowledge.read');
   const canManage = access.has('knowledge.manage');
   const canIndex = access.has('knowledge.index');
@@ -168,7 +181,7 @@ export default function KnowledgeBasePage() {
     void loadDocuments();
   }, [loadDocuments]);
 
-  useEffect(() => {
+  const loadDimensions = useCallback(() => {
     if (!canRead) return;
     setDimensionsLoading(true);
     taxonomyApi.getDimensions()
@@ -176,6 +189,10 @@ export default function KnowledgeBasePage() {
       .catch(() => setDimensions([]))
       .finally(() => setDimensionsLoading(false));
   }, [canRead]);
+
+  useEffect(() => {
+    loadDimensions();
+  }, [loadDimensions]);
 
   // Spec §2: pivot filter — a document must carry every selected term (AND).
   const filteredDocuments = useMemo(() => {
@@ -793,6 +810,9 @@ export default function KnowledgeBasePage() {
             { key: 'graph', label: (<span><ApartmentOutlined /> {t('kb_tab_graph')}</span>) },
             { key: 'timeline', label: (<span><FieldTimeOutlined /> {t('kb_tab_timeline')}</span>) },
             { key: 'dashboard', label: (<span><DashboardOutlined /> {t('kb_tab_dashboard')}</span>) },
+            // KB optimization spec §5.2/§5.3: taxonomy manager + reference libraries
+            { key: 'taxonomy', label: (<span><TagOutlined /> {t('kb_tab_taxonomy')}</span>) },
+            { key: 'libraries', label: (<span><BookOutlined /> {t('kb_tab_libraries')}</span>) },
           ]}
         />
         {pageTab === 'review' && (
@@ -813,6 +833,20 @@ export default function KnowledgeBasePage() {
         {pageTab === 'dashboard' && (
           <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
             <DashboardPanel />
+          </Card>
+        )}
+        {pageTab === 'taxonomy' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <TaxonomyManagerPanel
+              taxonomyMode={taxonomyMode}
+              canManage={canManage}
+              onChanged={loadDimensions}
+            />
+          </Card>
+        )}
+        {pageTab === 'libraries' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <LibraryReferencesPanel canManage={canManage} isPlatformAdmin={isPlatformAdmin} />
           </Card>
         )}
         {pageTab === 'documents' && (
@@ -1018,7 +1052,21 @@ export default function KnowledgeBasePage() {
                         readOnly={!canManage}
                         placeholder={t('kb_editor_placeholder')}
                         minHeight={280}
+                        linkCandidates={documents
+                          .filter((d) => d.id !== versionDrawer?.id)
+                          .map((d) => d.title)}
                       />
+                      {/* KB optimization spec §5.4: Obsidian-style backlinks */}
+                      {versionDrawer && (
+                        <BacklinksPanel
+                          documentId={versionDrawer.id}
+                          refreshKey={versions.length}
+                          onOpenDocument={(docId) => {
+                            const target = documents.find((d) => d.id === docId);
+                            if (target) void openVersionDrawer(target);
+                          }}
+                        />
+                      )}
                       {canManage && (
                         <>
                           <div style={{ display: 'flex', gap: 8 }}>
@@ -1153,6 +1201,7 @@ export default function KnowledgeBasePage() {
                   onChange={setCreateText}
                   placeholder={t('kb_editor_placeholder')}
                   minHeight={300}
+                  linkCandidates={documents.map((d) => d.title)}
                 />
               </div>
             </Spin>

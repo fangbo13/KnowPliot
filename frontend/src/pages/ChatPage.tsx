@@ -14,6 +14,7 @@ import { useSpaceStore } from '../store/spaceStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import ChatComposer from '../components/chat/ChatComposer';
 import { chatApi } from '../api/chat';
+import { libraryApi, type SpaceLibraryReference } from '../api/knowledge';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { notify } from '../utils/notifications';
 
@@ -71,6 +72,30 @@ export default function ChatPageContainer() {
 
   const activeSpace = useSpaceStore((s) => s.getActiveSpace());
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
+
+  // KB optimization spec §5.3: show active reference libraries as chips so
+  // users know which shared libraries widen this space's answers.
+  const [libraryRefs, setLibraryRefs] = useState<SpaceLibraryReference[]>([]);
+  useEffect(() => {
+    if (!activeSpace?.id) {
+      setLibraryRefs([]);
+      return;
+    }
+    let cancelled = false;
+    libraryApi
+      .getReferences()
+      .then((refs) => {
+        if (!cancelled) {
+          setLibraryRefs(refs.filter((r) => r.enabled && r.library_status === 'published'));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryRefs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSpace?.id]);
 
   const [inputValue, setInputValue] = useState('');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('fast');
@@ -350,6 +375,28 @@ export default function ChatPageContainer() {
             <span className="chat-title-text">{activeSessionTitle}</span>
             {!!activeSessionId && <EditOutlined className="chat-title-edit-icon" />}
           </button>
+        )}
+        {libraryRefs.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginLeft: 8 }}>
+            {libraryRefs.map((ref) => (
+              <span
+                key={ref.id}
+                title={t('library_chip_tooltip', { defaultValue: '本空间已引用该参考库，回答可结合其内容' })}
+                style={{
+                  fontSize: 11,
+                  lineHeight: '18px',
+                  padding: '0 8px',
+                  borderRadius: 9,
+                  color: 'var(--color-accent)',
+                  background: 'rgba(var(--color-accent-rgb), 0.08)',
+                  border: '1px solid rgba(var(--color-accent-rgb), 0.3)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {ref.library_name}
+              </span>
+            ))}
+          </div>
         )}
       </div>
 

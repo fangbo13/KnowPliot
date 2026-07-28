@@ -11,6 +11,8 @@
   "thinking_generating": "Generating response...",
   "connection_slow": "Connection is slow, retrying...",
   "sources": "Sources",
+    "citation_library_badge": "Library · {{name}}",
+    "library_chip_tooltip": "This space references this library; answers may draw on its content",
   "feedback_question": "Was this helpful?",
   "quick_actions_title": "Common Questions",
   "no_session": "Start a new conversation",

@@ -89,16 +89,28 @@ CONVERSATION HISTORY:
     def _format_context(self, chunks):
         """Format retrieved chunks as context string."""
         parts = []
+        has_reference = any(chunk.get("source_library") for chunk in chunks)
         for i, chunk in enumerate(chunks):
             page_info = ""
             if chunk.get("page_number"):
                 page_info = f" (p.{chunk['page_number']})"
-
+            # KB optimization spec §3.3: mark chunks that come from a shared
+            # reference library so the model can attribute authoritative sources.
+            library = chunk.get("source_library")
+            source_tag = f" [参考库: {library}]" if library else ""
             parts.append(
-                f"[文档 {i + 1}] {chunk['document_title']}{page_info}\n"
+                f"[文档 {i + 1}] {chunk['document_title']}{page_info}{source_tag}\n"
                 f"{chunk['content']}\n"
             )
-        return "\n---\n".join(parts)
+        context = "\n---\n".join(parts)
+        if has_reference:
+            context = (
+                "说明：标有「[参考库: ...]」的文档来自共享参考库（如 IFRS / 中国会计准则 / IPO 案例），"
+                "属权威参考内容；其余为当前项目本地知识。请结合本项目具体情况与参考库权威内容综合作答，"
+                "若二者存在差异请明确指出。\n\n"
+                + context
+            )
+        return context
 
     def _format_history(self, history):
         """Format conversation history."""

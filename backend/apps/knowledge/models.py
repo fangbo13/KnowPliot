@@ -482,6 +482,17 @@ class TaxonomyDimension(models.Model):
         on_delete=models.CASCADE,
         related_name="taxonomy_dimensions",
     )
+    # KB optimization spec §2.1: space-private dimensions. When set, the
+    # dimension belongs to exactly one space (self-managed by that space's
+    # owner/knowledge_admin). When null, the dimension is a shared
+    # organization/business-line dimension (platform-managed, legacy behavior).
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="taxonomy_dimensions",
+    )
     code = models.SlugField(max_length=50)
     name = models.CharField(max_length=100)
     is_hierarchical = models.BooleanField(default=False)
@@ -497,9 +508,17 @@ class TaxonomyDimension(models.Model):
         db_table = "knowledge_taxonomydimension"
         ordering = ["sort_order", "code"]
         constraints = [
+            # Shared dimensions (space IS NULL) stay unique per organization.
             models.UniqueConstraint(
                 fields=["organization", "code"],
+                condition=models.Q(space__isnull=True),
                 name="knowledge_taxdim_org_code_uniq",
+            ),
+            # Space-private dimensions are unique per space.
+            models.UniqueConstraint(
+                fields=["space", "code"],
+                condition=models.Q(space__isnull=False),
+                name="knowledge_taxdim_space_code_uniq",
             ),
         ]
 
@@ -719,3 +738,102 @@ class DocumentLink(models.Model):
 
     def __str__(self):
         return f"{self.source_id} → {self.target_id}"
+
+
+# ---------------------------------------------------------------------------
+# KB optimization spec §2.2 — platform-official reference libraries. A space
+# can be certified as a shared reference library (IFRS / CAS / IPO cases);
+# other spaces reference it so RAG retrieval reads across the isolation
+# boundary for that library only (read-only, retrieval path only).
+# ---------------------------------------------------------------------------
+
+
+class ReferenceLibrary(models.Model):
+    """A KnowledgeSpace certified by a platform admin as a shared reference library."""
+
+    CATEGORY_CHOICES = [
+        ("ifrs", "IFRS"),
+        ("cas", "China Accounting Standards"),
+        ("ipo_cases", "IPO Cases"),
+        ("other", "Other"),
+    ]
+    STATUS_PUBLISHED = "published"
+    STATUS_UNPUBLISHED = "unpublished"
+    STATUS_CHOICES = [
+        (STATUS_PUBLISHED, "Published"),
+        (STATUS_UNPUBLISHED, "Unpublished"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.OneToOneField(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="reference_library",
+    )
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    category = models.CharField(
+        max_length=20, choices=CATEGORY_CHOICES, default="other"
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_UNPUBLISHED
+    )
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="published_reference_libraries",
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_referencelibrary"
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["status", "category"], name="knowledge_reflib_status_cat"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} [{self.category}/{self.status}]"
+
+
+class SpaceLibraryReference(models.Model):
+    """A space's opt-in reference to a published :class:`ReferenceLibrary`."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="library_references",
+    )
+    library = models.ForeignKey(
+        ReferenceLibrary,
+        on_delete=models.CASCADE,
+        related_name="space_references",
+    )
+    enabled = models.BooleanField(default=True)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="added_library_references",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_spacelibraryreference"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["space", "library"],
+                name="knowledge_spacelibref_space_lib_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.space_id} → {self.library_id}"

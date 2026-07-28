@@ -31,6 +31,9 @@ interface MarkdownEditorProps {
   readOnly?: boolean;
   /** Optional min height for the editor area */
   minHeight?: number;
+  /** KB optimization spec §5.4: document titles offered by the `[[` wikilink
+   *  autocomplete (Obsidian-style). Empty/omitted disables the dropdown. */
+  linkCandidates?: string[];
 }
 
 /**
@@ -47,11 +50,14 @@ export function MarkdownEditor({
   placeholder,
   readOnly = false,
   minHeight = 300,
+  linkCandidates,
 }: MarkdownEditorProps) {
   const { t } = useTranslation('common');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [showPreview, setShowPreview] = useState(true);
+  // Wikilink autocomplete: the query typed after an unclosed `[[`, or null.
+  const [wikiQuery, setWikiQuery] = useState<string | null>(null);
 
   const currentValue = value ?? internalValue;
 
@@ -63,6 +69,58 @@ export function MarkdownEditor({
       onChange?.(next);
     },
     [value, onChange],
+  );
+
+  /** Detect an unclosed `[[query` immediately before the cursor. */
+  const detectWikiQuery = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el || !linkCandidates || linkCandidates.length === 0) {
+      setWikiQuery(null);
+      return;
+    }
+    const cursor = el.selectionStart;
+    const before = (value ?? internalValue).substring(0, cursor);
+    const open = before.lastIndexOf('[[');
+    if (open === -1) {
+      setWikiQuery(null);
+      return;
+    }
+    const fragment = before.substring(open + 2);
+    if (fragment.includes(']]') || fragment.includes('\n') || fragment.length > 80) {
+      setWikiQuery(null);
+      return;
+    }
+    setWikiQuery(fragment);
+  }, [linkCandidates, value, internalValue]);
+
+  const wikiMatches = useMemo(() => {
+    if (wikiQuery === null || !linkCandidates) return [];
+    const query = wikiQuery.toLowerCase();
+    return linkCandidates
+      .filter((title) => title.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [wikiQuery, linkCandidates]);
+
+  /** Replace the open `[[query` with a completed `[[Title]]` wikilink. */
+  const insertWikilink = useCallback(
+    (title: string) => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const cursor = el.selectionStart;
+      const before = currentValue.substring(0, cursor);
+      const open = before.lastIndexOf('[[');
+      if (open === -1) return;
+      const newValue =
+        currentValue.substring(0, open) + `[[${title}]]` + currentValue.substring(cursor);
+      handleChange(newValue);
+      setWikiQuery(null);
+      requestAnimationFrame(() => {
+        el.focus();
+        const pos = open + title.length + 4;
+        el.setSelectionRange(pos, pos);
+      });
+    },
+    [currentValue, handleChange],
   );
 
   /**
@@ -226,14 +284,40 @@ export function MarkdownEditor({
         className="md-editor__body"
         style={{ minHeight }}
       >
-        <textarea
-          ref={textareaRef}
-          className="md-editor__textarea"
-          value={currentValue}
-          onChange={(e) => handleChange(e.target.value)}
-          placeholder={placeholder || t('kb_editor_placeholder')}
-          spellCheck={false}
-        />
+        <div className="md-editor__input-wrap">
+          <textarea
+            ref={textareaRef}
+            className="md-editor__textarea"
+            value={currentValue}
+            onChange={(e) => {
+              handleChange(e.target.value);
+              requestAnimationFrame(detectWikiQuery);
+            }}
+            onKeyUp={detectWikiQuery}
+            onClick={detectWikiQuery}
+            onBlur={() => setTimeout(() => setWikiQuery(null), 200)}
+            placeholder={placeholder || t('kb_editor_placeholder')}
+            spellCheck={false}
+          />
+          {wikiQuery !== null && wikiMatches.length > 0 && (
+            <div className="md-editor__wikilink-dropdown">
+              <div className="md-editor__wikilink-hint">{t('kb_wikilink_hint')}</div>
+              {wikiMatches.map((title) => (
+                <button
+                  key={title}
+                  type="button"
+                  className="md-editor__wikilink-item"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    insertWikilink(title);
+                  }}
+                >
+                  {title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {showPreview && (
           <div className="md-editor__preview">
             <div className="markdown-content">

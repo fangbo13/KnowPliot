@@ -345,6 +345,9 @@ class WorkspaceCreateRequestDetail(models.Model):
     work_group_id = models.UUIDField()
     office_location_ids = models.JSONField(default=list)
     template_version_id = models.UUIDField(null=True, blank=True)
+    # KB optimization spec §3.1: the requester's taxonomy initialization choice
+    # (default_seed / custom / none). Applied when the space is provisioned.
+    taxonomy_init_mode = models.CharField(max_length=20, default="custom")
     created_space_uuid = models.UUIDField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

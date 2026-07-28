@@ -48,6 +48,8 @@ class ScenarioTemplate(models.Model):
         ("core_services", "Core Business Services"),
         ("standards_qa", "Standards QA"),
         ("project_ai", "Project AI"),
+        # KB optimization spec §2.3: enablement teams — no taxonomy needed.
+        ("enablement", "Enablement Team"),
     ]
 
     VISIBILITY_CHOICES = [

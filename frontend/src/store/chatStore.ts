@@ -66,6 +66,8 @@ export interface Citation {
   updated_by?: string | null;
   updated_at?: string | null;
   stale?: boolean;
+  // KB optimization spec §3.3: reference-library provenance badge
+  source_library?: string | null;
 }
 
 export interface ChatSession {

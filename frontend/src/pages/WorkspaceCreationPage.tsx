@@ -28,6 +28,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getApiErrorCode, getRateLimitDetails, isAbortError } from '../api/client';
 import { templatesApi, type ScenarioTemplate } from '../api/templates';
+import { taxonomyApi, type TaxonomyPreset } from '../api/knowledge';
 import {
   workspaceCreationApi,
   type TaxonomyOption,
@@ -125,6 +126,8 @@ export default function WorkspaceCreationPage() {
   const [workGroups, setWorkGroups] = useState<TaxonomyOption[]>([]);
   const [offices, setOffices] = useState<TaxonomyOption[]>([]);
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([]);
+  // KB optimization spec §5.1: taxonomy preset preview for "default_seed".
+  const [presets, setPresets] = useState<TaxonomyPreset[]>([]);
   const [requests, setRequests] = useState<WorkspaceCreationRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [dependentLoading, setDependentLoading] = useState(false);
@@ -208,6 +211,14 @@ export default function WorkspaceCreationPage() {
     };
   }, [load]);
 
+  // Preset catalog is auth-only (no space scope); best-effort load.
+  useEffect(() => {
+    taxonomyApi
+      .getPresets()
+      .then((data) => setPresets(data.presets))
+      .catch(() => setPresets([]));
+  }, []);
+
   useEffect(() => {
     const requestedRevision = searchParams.get('template_version_id');
     if (!requestedRevision || !templates.some((template) => template.current_revision_id === requestedRevision)) return;
@@ -278,6 +289,7 @@ export default function WorkspaceCreationPage() {
         visibility: values.join_policy === 'global' ? 'organization' : 'private',
         join_code: values.join_code?.trim() || undefined,
         template_version_id: values.template_version_id || null,
+        taxonomy_init_mode: values.taxonomy_init_mode || 'custom',
       }, controller.signal);
       if (controller.signal.aborted) return;
       setRequests((current) => [request, ...current.filter((item) => item.request_id !== request.request_id)]);
@@ -364,7 +376,7 @@ export default function WorkspaceCreationPage() {
           <Form<WorkspaceCreationSubmission>
             form={form}
             layout="vertical"
-            initialValues={{ visibility: 'private', join_policy: 'access_code', office_location_ids: [], template_version_id: null }}
+            initialValues={{ visibility: 'private', join_policy: 'access_code', office_location_ids: [], template_version_id: null, taxonomy_init_mode: 'default_seed' }}
             onFinish={(values) => void submit(values)}
             requiredMark="optional"
           >
@@ -410,7 +422,62 @@ export default function WorkspaceCreationPage() {
                 <Input.TextArea rows={4} showCount maxLength={2000} placeholder="说明知识边界、目标使用者和预期价值。" />
               </Form.Item>
               <Form.Item className="kp-creation-span" name="template_version_id" label="初始模板版本">
-                <Select allowClear placeholder="不使用模板" options={templateOptions} />
+                <Select
+                  allowClear
+                  placeholder="不使用模板"
+                  options={templateOptions}
+                  onChange={(revisionId) => {
+                    // KB spec §5.1: 模板携带 taxonomy profile 时预填科目初始化选项（用户可覆盖）。
+                    const selected = templates.find((tpl) => tpl.current_revision_id === revisionId);
+                    if (!selected) return;
+                    const mode = selected.scenario_type === 'audit'
+                      ? 'default_seed'
+                      : selected.scenario_type === 'enablement'
+                        ? 'none'
+                        : 'custom';
+                    form.setFieldValue('taxonomy_init_mode', mode);
+                  }}
+                />
+              </Form.Item>
+              {/* KB optimization spec §5.1: 科目初始化三选一 */}
+              <Form.Item
+                className="kp-creation-span"
+                name="taxonomy_init_mode"
+                label="科目初始化"
+                rules={[{ required: true }]}
+                tooltip="决定新工作区的知识科目体系。选择默认科目将一次性复制审计预置科目树，后续可自由编辑；自定义科目由空间管理员自建；赋能团队等可选择不需要科目。"
+              >
+                <Radio.Group>
+                  <Space direction="vertical">
+                    <Radio value="default_seed">使用默认科目一次性创建 — 复制审计预置（会计科目/财年/审计阶段/SCOT），创建后可自由修改</Radio>
+                    <Radio value="custom">自定义科目 — 不预置，由项目组在科目管理面板自建</Radio>
+                    <Radio value="none">不需要科目 — 赋能团队等非审计场景，不启用科目体系</Radio>
+                  </Space>
+                </Radio.Group>
+              </Form.Item>
+              <Form.Item className="kp-creation-span" shouldUpdate={(prev, curr) => prev.taxonomy_init_mode !== curr.taxonomy_init_mode}>
+                {({ getFieldValue }) => {
+                  if (getFieldValue('taxonomy_init_mode') !== 'default_seed') return null;
+                  const preset = presets[0];
+                  if (!preset) return null;
+                  return (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message={`预置预览：${preset.name}`}
+                      description={
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                          {preset.dimensions.map((dim) => (
+                            <Tag key={dim.code} color={dim.required ? 'red' : 'blue'}>
+                              {dim.name}（{dim.terms.length}项{dim.required ? ' · 必填' : ''}）
+                            </Tag>
+                          ))}
+                        </div>
+                      }
+                      style={{ marginBottom: 24 }}
+                    />
+                  );
+                }}
               </Form.Item>
             </div>
             <div className="kp-creation-confirmation">

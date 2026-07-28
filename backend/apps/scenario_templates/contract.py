@@ -147,6 +147,8 @@ def normalize_components(value: Any) -> dict[str, Any]:
         "core_services",
         "standards_qa",
         "project_ai",
+        # KB optimization spec §2.3: enablement teams (no taxonomy).
+        "enablement",
     }
     for index, scenario in enumerate(components["scenario_definitions"]):
         if not isinstance(scenario, dict):
@@ -197,6 +199,31 @@ def normalize_components(value: Any) -> dict[str, Any]:
         raise ValidationError(
             {"components": "workspace_defaults.retrieval_policy must be an object."}
         )
+    # KB optimization spec §2.3: optional taxonomy initialization profile.
+    # Shape: {"mode": "default_seed"|"custom"|"none", "preset": str|None}.
+    profile = defaults.get("taxonomy_profile")
+    if profile is not None:
+        if not isinstance(profile, dict):
+            raise ValidationError(
+                {"components": "workspace_defaults.taxonomy_profile must be an object."}
+            )
+        mode = profile.get("mode")
+        if mode not in {"default_seed", "custom", "none"}:
+            raise ValidationError(
+                {"components": "workspace_defaults.taxonomy_profile.mode is unsupported."}
+            )
+        preset = profile.get("preset")
+        if preset is not None and (
+            not isinstance(preset, str) or not 1 <= len(preset) <= 64
+        ):
+            raise ValidationError(
+                {"components": "workspace_defaults.taxonomy_profile.preset is invalid."}
+            )
+        unknown_profile_keys = sorted(set(profile) - {"mode", "preset"})
+        if unknown_profile_keys:
+            raise ValidationError(
+                {"components": "workspace_defaults.taxonomy_profile has unknown keys."}
+            )
     try:
         encoded = json.dumps(
             components,
@@ -236,6 +263,10 @@ def legacy_template_components(snapshot: Any) -> dict[str, Any]:
         "retrieval_policy": deepcopy(source.get("retrieval_policy") or {}),
         "classification_tags": deepcopy(source.get("tags") or []),
     }
+    # KB optimization spec §2.3: carry the taxonomy profile into the snapshot
+    # so workspace creation can derive the default taxonomy_init_mode.
+    if isinstance(source.get("taxonomy_profile"), dict):
+        workspace_defaults["taxonomy_profile"] = deepcopy(source["taxonomy_profile"])
     return normalize_components(
         {
             "category_tree": category_tree,
@@ -322,6 +353,26 @@ def legacy_template_projection(snapshot: Any) -> dict[str, Any]:
     return projection
 
 
+def taxonomy_profile_from_snapshot(snapshot: Any) -> dict[str, Any] | None:
+    """KB optimization spec §2.3: extract the optional taxonomy profile.
+
+    Returns {"mode": ..., "preset": ...} or None when the revision does not
+    carry a profile (callers then fall back to scenario_type derivation).
+    """
+    try:
+        components = normalize_revision_snapshot(snapshot)["components"]
+    except ValidationError:
+        return None
+    profile = components["workspace_defaults"].get("taxonomy_profile")
+    if not isinstance(profile, dict):
+        return None
+    mode = profile.get("mode")
+    if mode not in {"default_seed", "custom", "none"}:
+        return None
+    preset = profile.get("preset")
+    return {"mode": mode, "preset": preset if isinstance(preset, str) else None}
+
+
 __all__ = [
     "COMPONENT_KEYS",
     "EXCLUDED_COMPONENTS",
@@ -332,4 +383,5 @@ __all__ = [
     "preview_payload",
     "revision_snapshot",
     "snapshot_hash",
+    "taxonomy_profile_from_snapshot",
 ]

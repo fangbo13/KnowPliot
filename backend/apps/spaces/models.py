@@ -297,6 +297,24 @@ class KnowledgeSpace(models.Model):
         default=REVIEW_POLICY_REQUIRE,
         help_text="Whether new document versions need reviewer approval before indexing.",
     )
+    # KB optimization spec §2.1: how this space sources its taxonomy dimensions.
+    #   inherit — shared org/business-line dimensions (legacy; existing spaces).
+    #   space   — space-private dimensions (+ org-wide shared dimensions).
+    #   none    — no taxonomy at all (enablement teams); uploads skip required-tag checks.
+    TAXONOMY_MODE_INHERIT = "inherit"
+    TAXONOMY_MODE_SPACE = "space"
+    TAXONOMY_MODE_NONE = "none"
+    TAXONOMY_MODE_CHOICES = [
+        (TAXONOMY_MODE_INHERIT, "Inherit Shared"),
+        (TAXONOMY_MODE_SPACE, "Space Private"),
+        (TAXONOMY_MODE_NONE, "No Taxonomy"),
+    ]
+    taxonomy_mode = models.CharField(
+        max_length=20,
+        choices=TAXONOMY_MODE_CHOICES,
+        default=TAXONOMY_MODE_INHERIT,
+        help_text="How this space sources controlled taxonomy dimensions.",
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     provisioning_status = models.CharField(
         max_length=20,
