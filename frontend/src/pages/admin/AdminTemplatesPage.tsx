@@ -564,7 +564,7 @@ export default function AdminTemplatesPage() {
               <span
                 style={{
                   cursor: 'not-allowed',
-                  color: 'var(--color-text-placeholder, rgba(0, 0, 0, 0.25))',
+                  color: 'var(--color-text-placeholder)',
                   fontSize: 14,
                 }}
               >
@@ -606,7 +606,7 @@ export default function AdminTemplatesPage() {
               <span
                 style={{
                   cursor: 'not-allowed',
-                  color: 'var(--color-text-placeholder, rgba(0, 0, 0, 0.25))',
+                  color: 'var(--color-text-placeholder)',
                   fontSize: 14,
                 }}
               >

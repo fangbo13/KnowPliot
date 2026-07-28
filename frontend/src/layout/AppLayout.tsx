@@ -388,7 +388,7 @@ export default function AppLayout() {
           className="onboarding-modal"
           role="presentation"
           onMouseDown={(event) => { if (event.target === event.currentTarget) handleOnboardingClose(); }}
-          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: 24, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(6px)' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: 24, background: 'var(--color-overlay)', backdropFilter: 'blur(6px)' }}
         >
           <section className="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" style={{ width: 'min(560px, 100%)', maxHeight: 'min(720px, 90vh)', overflow: 'auto' }}>
             <div className="onboarding-mark">K</div>
@@ -439,7 +439,7 @@ export default function AppLayout() {
 
       {/* Mobile drawer */}
       {isMobile && mobileDrawerOpen && (
-        <div className="mobile-drawer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileDrawerOpen(false); }} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,.28)' }}>
+        <div className="mobile-drawer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileDrawerOpen(false); }} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--color-overlay)' }}>
           <aside role="dialog" aria-modal="true" aria-label={t('mobile_menu') || 'Menu'} style={{ width: 300, height: '100%', background: 'var(--color-bg-sunken)', display: 'flex', flexDirection: 'column' }}>
           <div className="sidebar-header">
             <div className="sidebar-brand"><span className="sidebar-brand-mark">K</span><span className="sidebar-brand-name">KnowPilot</span></div>

@@ -56,7 +56,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', textAlign: 'center', height: '100%', minHeight: 300 }}>
-          <div className="ambient-glow" style={{ width: 64, height: 64, borderRadius: 16, background: 'var(--color-error, #ff4d4f)', color: 'var(--color-text-on-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontFamily: 'var(--font-family-serif)', marginBottom: 24 }}>!</div>
+          <div className="ambient-glow" style={{ width: 64, height: 64, borderRadius: 16, background: 'var(--color-error)', color: 'var(--color-text-on-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontFamily: 'var(--font-family-serif)', marginBottom: 24 }}>!</div>
           <h2 style={{ fontSize: 20, fontWeight: 600, color: 'var(--color-text)', marginBottom: 8, letterSpacing: '-0.01em' }}>{this.props.title}</h2>
           <p style={{ fontSize: 15, color: 'var(--color-text-secondary)', marginBottom: 24, maxWidth: 400 }}>{this.props.description}</p>
           <button

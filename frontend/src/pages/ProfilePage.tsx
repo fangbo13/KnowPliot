@@ -109,7 +109,7 @@ export default function ProfilePage() {
               style={{
                 background: 'var(--gradient-accent)',
                 fontSize: 32,
-                color: '#FFFFFF',
+                color: 'var(--color-text-on-accent)',
                 boxShadow: 'var(--shadow-sm), 0 0 24px rgba(var(--accent-rgb), 0.4)',
               }}
             >
@@ -144,7 +144,7 @@ export default function ProfilePage() {
             <Col xs={24} sm={12}>
               <div>
                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <EnvironmentOutlined /> {t('office_location')} <span style={{ color: 'var(--color-error, #c0392b)' }}>*</span>
+                  <EnvironmentOutlined /> {t('office_location')} <span style={{ color: 'var(--color-error)' }}>*</span>
                 </Typography.Text>
                 <Select
                   size="middle"

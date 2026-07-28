@@ -83,18 +83,20 @@ function runLayout(nodes: GraphNode[], edges: GraphEdge[]): PositionedNode[] {
   return positioned;
 }
 
-/** Freshness → colour: green (fresh) → amber → grey (stale). */
+/** Freshness → colour: neon cyan (fresh) → electric blue → amber (stale).
+ * Palette lives in design/tokens.ts (--graph-*): deep-space blue/violet zone,
+ * intentionally decoupled from the warm Claude palette for a tech feel. */
 function freshnessColor(freshness: number, status: string): string {
-  if (status === 'stale') return 'var(--color-warning)';
-  if (freshness >= 0.7) return 'var(--color-success)';
-  if (freshness >= 0.4) return '#d4a017';
-  return 'var(--color-text-tertiary)';
+  if (status === 'stale') return 'var(--graph-node-stale)';
+  if (freshness >= 0.7) return 'var(--graph-node-fresh)';
+  if (freshness >= 0.4) return 'var(--graph-node-mid)';
+  return 'var(--graph-node-inactive)';
 }
 
 const edgeStyle: Record<string, { stroke: string; dash?: string }> = {
-  link: { stroke: 'var(--color-accent)' },
-  term: { stroke: 'var(--color-border)' },
-  similar: { stroke: 'var(--color-warning)', dash: '4 4' },
+  link: { stroke: 'var(--graph-edge-link)' },
+  term: { stroke: 'var(--graph-edge-term)' },
+  similar: { stroke: 'var(--graph-edge-similar)', dash: '4 4' },
 };
 
 interface Props {
@@ -263,11 +265,29 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
                 minWidth: 0,
                 border: '1px solid var(--color-border)',
                 borderRadius: 12,
-                background: 'var(--color-bg-container)',
+                background: 'linear-gradient(160deg, var(--graph-bg-start), var(--graph-bg-end))',
               }}
               role="img"
               aria-label={t('graph_aria_label')}
             >
+              <defs>
+                {/* Soft outer glow — the "neon" treatment for nodes. */}
+                <filter id="graph-node-glow" x="-80%" y="-80%" width="260%" height="260%">
+                  <feGaussianBlur stdDeviation="2.4" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+                {/* Stronger halo for the selected node. */}
+                <filter id="graph-node-halo" x="-120%" y="-120%" width="340%" height="340%">
+                  <feGaussianBlur stdDeviation="5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
               {visibleEdges.map((edge, i) => {
                 const a = position.get(edge.source);
                 const b = position.get(edge.target);
@@ -288,6 +308,7 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
               {nodes.map((node) => {
                 const radius = 7 + Math.min(node.incoming_links, 8) * 1.6;
                 const dimmed = selected && !neighbours.has(node.id);
+                const isSelected = selected?.id === node.id;
                 return (
                   <g
                     key={node.id}
@@ -296,17 +317,21 @@ export function KnowledgeGraphPanel({ dimensions }: Props) {
                     opacity={dimmed ? 0.18 : 1}
                     onClick={() => setSelected((prev) => (prev?.id === node.id ? null : node))}
                   >
+                    {isSelected && (
+                      <circle r={radius + 7} fill="rgba(var(--graph-halo-rgb), 0.18)" />
+                    )}
                     <circle
                       r={radius}
                       fill={freshnessColor(node.freshness, node.status)}
-                      stroke={selected?.id === node.id ? 'var(--color-accent)' : 'var(--color-bg-container)'}
-                      strokeWidth={selected?.id === node.id ? 3 : 1.5}
+                      stroke={isSelected ? 'var(--graph-halo)' : 'var(--graph-node-stroke)'}
+                      strokeWidth={isSelected ? 2.5 : 1.5}
+                      filter={dimmed ? undefined : (isSelected ? 'url(#graph-node-halo)' : 'url(#graph-node-glow)')}
                     />
                     <text
                       y={radius + 12}
                       textAnchor="middle"
                       fontSize={10}
-                      fill="var(--color-text-secondary)"
+                      fill="var(--graph-label)"
                     >
                       {node.title.length > 14 ? `${node.title.slice(0, 14)}…` : node.title}
                     </text>
