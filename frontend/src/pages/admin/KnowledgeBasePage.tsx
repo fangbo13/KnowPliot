@@ -812,22 +812,38 @@ export default function KnowledgeBasePage() {
           <h1 className="page-title">{t('nav_knowledge')}</h1>
           <p className="page-sub">{t('admin_knowledge_subtitle')}</p>
         </div>
-        {/* Spec §2/§3/§5: documents / review queue / graph / timeline / dashboard */}
+        {/* Spec §2/§3/§5: documents / review queue / graph / timeline / dashboard.
+            KB read-only access spec: browse-only roles (guest/reviewer) see the
+            read tabs; management tabs require quality/manage capabilities. */}
         <Tabs
           activeKey={pageTab}
           onChange={setPageTab}
           style={{ marginBottom: 8 }}
           items={[
             { key: 'documents', label: (<span><AuditOutlined /> {t('kb_tab_documents')}</span>) },
-            { key: 'review', label: (<span><CheckCircleOutlined /> {t('kb_tab_review')}</span>) },
+            ...(access.has('quality.review') || canManage
+              ? [{ key: 'review', label: (<span><CheckCircleOutlined /> {t('kb_tab_review')}</span>) }]
+              : []),
             { key: 'graph', label: (<span><ApartmentOutlined /> {t('kb_tab_graph')}</span>) },
             { key: 'timeline', label: (<span><FieldTimeOutlined /> {t('kb_tab_timeline')}</span>) },
-            { key: 'dashboard', label: (<span><DashboardOutlined /> {t('kb_tab_dashboard')}</span>) },
+            ...(access.has('quality.read') || canManage
+              ? [{ key: 'dashboard', label: (<span><DashboardOutlined /> {t('kb_tab_dashboard')}</span>) }]
+              : []),
             // KB optimization spec §5.2/§5.3: taxonomy manager + reference libraries
-            { key: 'taxonomy', label: (<span><TagOutlined /> {t('kb_tab_taxonomy')}</span>) },
+            ...(canManage
+              ? [{ key: 'taxonomy', label: (<span><TagOutlined /> {t('kb_tab_taxonomy')}</span>) }]
+              : []),
             { key: 'libraries', label: (<span><BookOutlined /> {t('kb_tab_libraries')}</span>) },
           ]}
         />
+        {!canManage && (
+          <Alert
+            type="info"
+            showIcon
+            message={t('kb_readonly_notice')}
+            style={{ marginBottom: 16 }}
+          />
+        )}
         {pageTab === 'review' && (
           <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
             <ReviewQueuePanel onDecided={loadDocuments} />

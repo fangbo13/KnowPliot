@@ -579,7 +579,8 @@ class SpaceMembership(models.Model):
         on_delete=models.CASCADE,
         related_name="space_memberships",
     )
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_MEMBER)
+    # KB read-only access spec (amended): first-time entrants default to guest.
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_GUEST)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     membership_version = models.PositiveBigIntegerField(default=1)
     source_kind = models.CharField(

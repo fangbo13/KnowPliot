@@ -115,7 +115,7 @@ class InviteCodeSerializer(serializers.ModelSerializer):
 class InviteCodeCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(
         choices=[c[0] for c in SpaceMembership.ROLE_CHOICES],
-        default=SpaceMembership.ROLE_MEMBER,
+        default=SpaceMembership.ROLE_GUEST,
     )
     expires_at = serializers.DateTimeField(required=False, allow_null=True)
     max_uses = serializers.IntegerField(required=False, min_value=0, default=0)
@@ -185,7 +185,7 @@ class AddMemberByEmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(
         choices=[c[0] for c in SpaceMembership.ROLE_CHOICES if c[0] != SpaceMembership.ROLE_OWNER],
-        default=SpaceMembership.ROLE_MEMBER,
+        default=SpaceMembership.ROLE_GUEST,
     )
 
 

@@ -88,13 +88,20 @@ Employee       普通员工（默认）              Member           提问 / �
 | space.update / archive | ✅ | ❌ | ❌ | ❌ | ❌ |
 | space.invite / manage_members | ✅ | ❌ | ❌ | ❌ | ❌ |
 | document.view | ✅ | ✅ | ✅ | ✅ | ✅ |
-| document.upload/update/delete/reindex | ✅ | ✅ | ❌ | ❌ | ❌ |
+| document.upload/update/delete | ✅ | ✅ | ❌ | ✅ | ❌ |
+| document.reindex | ✅ | ✅ | ❌ | ❌ | ❌ |
 | document.download | ✅ | ✅ | ✅ | ❌ | ❌ |
+| knowledge.read（进知识库页/Local Graph/时间线浏览） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | chat.ask | ✅ | ✅ | ✅ | ✅ | ✅ |
 | chat.view_history / share / export | ✅ | 部分 | 部分 | ✅ | ❌ |
 | audit.view | ✅ | ❌ | ✅ | ❌ | ❌ |
 
-> 此矩阵已基本由 `apps/spaces/permissions.py: ROLE_PERMISSIONS` 表达。V7 仅做文档化 + 小幅校准：**知识库维护从「全局 hr 角色」改为「按空间 knowledge_admin」**。
+> 此矩阵由 `apps/spaces/permissions.py: ROLE_PERMISSIONS`（服务端授权）与 `apps/rbac/capabilities.py: SPACE_ROLE_CAPABILITIES`（前端能力快照）共同表达。
+> **KB 只读访问 SPEC（2026-07-29 修订，见 `KnowPilot_KB_ReadOnly_Access_SPEC.md`）**：
+> 1. `knowledge.read` 能力下发给全部空间角色（含 Guest/Reviewer/Member），使工区内任何人都能进入知识库页面浏览文档与 Local Graph；
+> 2. Member 升级为可管理文档（`knowledge.manage` + 服务端 `document.upload/update/delete`），但不含 reindex/download；
+> 3. **所有"首次进入空间"路径默认角色改为 Guest**（模型默认值、加入码、发现直加/申请、邀请码与按邮箱添加默认、默认空间兜底、注册落位），Guest 为只读（仅 `document.view`）。
+> 早期校准：知识库维护从「全局 hr 角色」改为「按空间 knowledge_admin」。
 
 ---
 

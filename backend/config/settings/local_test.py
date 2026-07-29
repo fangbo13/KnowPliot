@@ -44,5 +44,10 @@ CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "http:
 # Disable throttling for testing
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []  # noqa: F405
 
+# Hermetic tests must not depend on the host WORKSPACE_PERMANENT_DELETE env var
+# (base.py defaults it to True). Tests that need permanent delete enabled
+# override this locally via @override_settings(WORKSPACE_PERMANENT_DELETE=True).
+WORKSPACE_PERMANENT_DELETE = False
+
 # Logging - more verbose
 LOGGING["loggers"]["apps.rag"]["level"] = "DEBUG"  # noqa: F405

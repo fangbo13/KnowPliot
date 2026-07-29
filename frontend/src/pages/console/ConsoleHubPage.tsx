@@ -58,7 +58,7 @@ export default function ConsoleHubPage() {
   const showPlatform = access.has('platform.access');
   const showGovernance = access.has('governance.access');
   const showWorkspace = manageableSpaces.length > 0;
-  const showKnowledge = Boolean(activeSpaceId) && access.has('knowledge.read');
+  const showKnowledge = Boolean(activeSpaceId) && access.has('knowledge.manage');
 
   if (access.status === 'loading') {
     return (

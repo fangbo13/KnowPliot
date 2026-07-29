@@ -580,8 +580,8 @@ def create_discovery_request(*, actor, space, reason, idempotency_key):
                 row = SpaceAccessRequest.objects.create(
                     space=space,
                     user=actor,
-                    role=SpaceMembership.ROLE_MEMBER,
-                    role_ceiling=SpaceMembership.ROLE_MEMBER,
+                    role=SpaceMembership.ROLE_GUEST,
+                    role_ceiling=SpaceMembership.ROLE_GUEST,
                     source_kind=SpaceAccessRequest.SOURCE_DISCOVERY,
                     discovery_policy_version=1,
                     reason=reason,
@@ -1409,12 +1409,12 @@ def join_by_code(*, actor, join_code, idempotency_key):
                 membership = SpaceMembership.objects.create(
                     space=space,
                     user=actor,
-                    role=SpaceMembership.ROLE_MEMBER,
+                    role=SpaceMembership.ROLE_GUEST,
                     status="active",
                     source_kind=SpaceMembership.SOURCE_JOIN_CODE,
                 )
             else:
-                existing.role = SpaceMembership.ROLE_MEMBER
+                existing.role = SpaceMembership.ROLE_GUEST
                 existing.status = "active"
                 existing.expires_at = None
                 existing.source_kind = SpaceMembership.SOURCE_JOIN_CODE
@@ -1499,12 +1499,12 @@ def global_join(*, actor, space_id, idempotency_key):
                 membership = SpaceMembership.objects.create(
                     space=space,
                     user=actor,
-                    role=SpaceMembership.ROLE_MEMBER,
+                    role=SpaceMembership.ROLE_GUEST,
                     status="active",
                     source_kind=SpaceMembership.SOURCE_DISCOVERY,
                 )
             else:
-                existing.role = SpaceMembership.ROLE_MEMBER
+                existing.role = SpaceMembership.ROLE_GUEST
                 existing.status = "active"
                 existing.expires_at = None
                 existing.source_kind = SpaceMembership.SOURCE_DISCOVERY

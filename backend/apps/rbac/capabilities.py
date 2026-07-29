@@ -37,11 +37,15 @@ MEMBER_CAPABILITIES = frozenset(
 )
 
 SPACE_ROLE_CAPABILITIES: Mapping[str, frozenset[str]] = {
-    "guest": frozenset({"chat.ask"}),
-    "member": MEMBER_CAPABILITIES,
+    # KB read-only access spec: every workspace role can browse documents and
+    # the Local Graph (knowledge.read). Members additionally manage documents
+    # (knowledge.manage); reindex/download stay owner/knowledge_admin only.
+    "guest": frozenset({"chat.ask", "knowledge.read"}),
+    "member": MEMBER_CAPABILITIES | {"knowledge.read", "knowledge.manage"},
     "reviewer": BASE_CHAT_CAPABILITIES
     | {
         "audit.read",
+        "knowledge.read",
         "quality.read",
         "quality.review",
         "workspace.manage",

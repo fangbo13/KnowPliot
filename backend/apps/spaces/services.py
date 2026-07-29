@@ -153,7 +153,7 @@ def join_default_space(user):
         space=space,
         user=user,
         defaults={
-            "role": SpaceMembership.ROLE_MEMBER,
+            "role": SpaceMembership.ROLE_GUEST,
             "status": "active",
             "last_accessed_at": timezone.now(),
         },

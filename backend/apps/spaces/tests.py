@@ -226,8 +226,11 @@ class CrawlerRemovedTest(SpaceTestBase):
 
 
 class DocumentPermissionTest(SpaceTestBase):
-    def test_member_cannot_upload(self):
-        # Alice is a plain member of A -> no document.upload permission.
+    def test_member_can_upload_but_guest_cannot(self):
+        # KB read-only access spec (amended): members hold document.upload;
+        # guests remain read-only.
+        self.assertTrue(sp.has_space_permission(self.alice, self.space_a, sp.DOCUMENT_UPLOAD))
+        SpaceMembership.objects.filter(space=self.space_a, user=self.alice).update(role="guest")
         self.assertFalse(sp.has_space_permission(self.alice, self.space_a, sp.DOCUMENT_UPLOAD))
         self.client.force_authenticate(self.alice)
         f = SimpleUploadedFile("t.txt", b"hello", content_type="text/plain")
@@ -237,14 +240,15 @@ class DocumentPermissionTest(SpaceTestBase):
             format="multipart",
             HTTP_X_SPACE_ID=str(self.space_a.id),
         )
-        self.assertEqual(resp.status_code, 403, "A plain member must not be able to upload")
+        self.assertEqual(resp.status_code, 403, "A guest must not be able to upload")
 
     def test_knowledge_admin_can_upload_in_own_space_only(self):
         SpaceMembership.objects.create(
             space=self.space_a, user=self.bob, role="knowledge_admin", status="active"
         )
         self.assertTrue(sp.has_space_permission(self.bob, self.space_a, sp.DOCUMENT_UPLOAD))
-        # ...but not in space B where Bob is only a member.
+        # ...and not in space B where Bob only holds a read-only guest role.
+        SpaceMembership.objects.filter(space=self.space_b, user=self.bob).update(role="guest")
         self.assertFalse(sp.has_space_permission(self.bob, self.space_b, sp.DOCUMENT_UPLOAD))
 
     def test_member_view_allowed(self):

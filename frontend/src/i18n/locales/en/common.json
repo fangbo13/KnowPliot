@@ -817,6 +817,7 @@
   "notification_retry_after": "retry after {{seconds}}s",
   "space_joined_success": "Joined {{name}}",
   "join_code_invalid": "Invalid join code, please check and try again.",
+  "kb_readonly_notice": "You have read-only access to this knowledge base: you can browse documents, the graph and the timeline, but cannot add, edit or delete content.",
   "kb_tab_documents": "Documents",
   "kb_tab_review": "Review Queue",
   "kb_tab_graph": "Knowledge Graph",

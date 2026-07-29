@@ -107,7 +107,7 @@ def ensure_default_membership(user):
     if space:
         SpaceMembership.objects.get_or_create(
             space=space, user=user,
-            defaults={"role": SpaceMembership.ROLE_MEMBER, "status": "active"},
+            defaults={"role": SpaceMembership.ROLE_GUEST, "status": "active"},
         )
 
 

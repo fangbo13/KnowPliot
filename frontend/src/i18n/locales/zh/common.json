@@ -817,6 +817,7 @@
   "notification_retry_after": "{{seconds}} 秒后重试",
   "space_joined_success": "已加入 {{name}}",
   "join_code_invalid": "加入码无效，请检查后重试。",
+  "kb_readonly_notice": "您对本知识库为只读访问：可浏览文档、图谱与时间线，但不能新增、修改或删除内容。",
   "kb_tab_documents": "文档",
   "kb_tab_review": "审批队列",
   "kb_tab_graph": "知识图谱",

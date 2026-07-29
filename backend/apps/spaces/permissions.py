@@ -73,7 +73,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
     SpaceMembership.ROLE_MEMBER: {
         SPACE_VIEW,
-        DOCUMENT_VIEW,
+        # KB read-only access spec (amended): members hold knowledge.manage, so
+        # the server grants the matching document mutation codes. Reindex and
+        # download remain owner/knowledge_admin capabilities.
+        DOCUMENT_VIEW, DOCUMENT_UPLOAD, DOCUMENT_UPDATE, DOCUMENT_DELETE,
         CHAT_ASK, CHAT_VIEW_HISTORY, CHAT_SHARE, CHAT_EXPORT,
     },
     SpaceMembership.ROLE_GUEST: {

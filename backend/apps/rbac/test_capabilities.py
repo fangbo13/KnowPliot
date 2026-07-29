@@ -41,6 +41,9 @@ MEMBER = {
     "chat.export",
     "chat.history",
     "chat.share",
+    # KB read-only access spec (amended): members browse AND manage documents.
+    "knowledge.read",
+    "knowledge.manage",
     "workspace.ownership.transfer.accept",
 }
 BASE_CHAT = {"chat.ask", "chat.history"}
@@ -66,11 +69,23 @@ OWNER_MANAGEMENT = {
 class CapabilityMatrixTest(SimpleTestCase):
     def test_space_role_matrix_is_locked_and_least_privilege(self):
         self.assertIsNotNone(SPACE_ROLE_CAPABILITIES)
-        self.assertEqual(SPACE_ROLE_CAPABILITIES["guest"], frozenset({"chat.ask"}))
+        self.assertEqual(
+            SPACE_ROLE_CAPABILITIES["guest"],
+            frozenset({"chat.ask", "knowledge.read"}),
+        )
         self.assertEqual(SPACE_ROLE_CAPABILITIES["member"], frozenset(MEMBER))
         self.assertEqual(
             SPACE_ROLE_CAPABILITIES["reviewer"],
-            frozenset(BASE_CHAT | {"workspace.manage", "quality.read", "quality.review", "audit.read"}),
+            frozenset(
+                BASE_CHAT
+                | {
+                    "workspace.manage",
+                    "knowledge.read",
+                    "quality.read",
+                    "quality.review",
+                    "audit.read",
+                }
+            ),
         )
         self.assertEqual(
             SPACE_ROLE_CAPABILITIES["knowledge_admin"],
