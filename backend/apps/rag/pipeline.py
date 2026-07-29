@@ -598,23 +598,22 @@ class RAGPipeline:
             },
         }
 
-        # Step 2b: Refuse ONLY when evidence is entirely absent. P1 fix (E2E
-        # refusal audit): a "low" score no longer hard-refuses — retrieved
-        # chunks still go to the LLM, which answers the supported parts per
-        # prompt Rule 8. Refusing while returning citations produced the
-        # contradictory "has citations but refuses" behaviour; low confidence
-        # now only flags needs_human_review on the quality event above.
+        # Step 2b: Zero retrieval hits no longer hard-refuse. General
+        # definition / concept / small-talk questions ("CCT是啥") are answered
+        # by the LLM under a no-context prompt that opens with a "general
+        # knowledge, not from the KB" disclaimer and bans fabricated
+        # citations; engagement-specific questions still get the refusal copy
+        # from the prompt itself. P1 fix (E2E refusal audit): a "low" score
+        # also never hard-refuses — retrieved chunks still go to the LLM.
         if not chunks:
-            # P0 fix (KB/RAG audit spec §C): domain-neutral refusal copy — the
-            # legacy HR wording predates the audit/accounting positioning.
-            fallback = (
-                "我没有足够的信息来回答此问题，请补充相关知识文档或联系知识库管理员。"
-                if language == "zh"
-                else "I don't have enough information to answer this question. Please add the relevant knowledge documents or contact your knowledge base administrator."
-            )
-            yield {"event": "token", "data": {"token": fallback}}
             yield {"event": "citations", "data": []}
-            yield {"event": "done", "data": {}}
+            yield from self._general_knowledge_fallback(
+                query,
+                language=language,
+                recent_history=recent_history,
+                session_summary=session_summary,
+                key_facts=key_facts,
+            )
             return
         if quality.label == "low":
             logger.info(
@@ -778,6 +777,95 @@ class RAGPipeline:
             )
             yield {"event": "token", "data": {"token": degraded_msg}}
 
+        yield {"event": "done", "data": {}}
+
+    def _general_knowledge_fallback(
+        self,
+        query,
+        *,
+        language,
+        recent_history,
+        session_summary,
+        key_facts,
+    ):
+        """Stream a no-context general-knowledge answer (zero retrieval hits).
+
+        Single-pass streaming under the GENERAL_PROMPT: no citations, no deep
+        critique. Any failure degrades to the legacy refusal copy so a chat
+        turn can never break on the fallback path.
+        """
+        refusal = (
+            "我没有足够的信息来回答此问题，请补充相关知识文档或联系知识库管理员。"
+            if language == "zh"
+            else "I don't have enough information to answer this question. Please add the relevant knowledge documents or contact your knowledge base administrator."
+        )
+        multi_turn = getattr(settings, "CHAT_MULTI_TURN_MESSAGES", False)
+        history_messages = None
+        if multi_turn and recent_history:
+            history_messages = [
+                {
+                    "role": role if role in ("user", "assistant") else "user",
+                    "content": content,
+                }
+                for role, content in recent_history
+                if content
+            ]
+        try:
+            system_prompt = self.prompt_builder.build_general(
+                conversation_history=[] if multi_turn else recent_history[-8:],
+                language=language,
+                session_summary=session_summary,
+                key_facts=key_facts,
+            )
+        except Exception:
+            logger.error("general_fallback_prompt_failed", exc_info=True)
+            yield {"event": "token", "data": {"token": refusal}}
+            yield {"event": "done", "data": {}}
+            return
+        logger.info("rag_general_fallback query_len=%d", len(query))
+        llm_success = False
+        try:
+            stream_parts = getattr(self.llm, "stream_chat_parts", None)
+            if callable(stream_parts):
+                stream_kwargs = {
+                    "model_id": self.model_name,
+                    "thinking_enabled": getattr(self, "thinking_enabled", False),
+                    "thinking_budget": getattr(self, "thinking_budget", None),
+                }
+                if history_messages:
+                    try:
+                        part_iterator = stream_parts(
+                            system_prompt,
+                            query,
+                            history_messages=history_messages,
+                            **stream_kwargs,
+                        )
+                    except TypeError:
+                        part_iterator = stream_parts(
+                            system_prompt, query, **stream_kwargs
+                        )
+                else:
+                    part_iterator = stream_parts(system_prompt, query, **stream_kwargs)
+                for part in part_iterator:
+                    if part.kind == "reasoning_duration":
+                        yield {
+                            "event": "metrics",
+                            "data": {"reasoning_ms": part.duration_ms or 0},
+                        }
+                    elif part.kind == "answer_delta":
+                        llm_success = True
+                        yield {"event": "token", "data": {"token": part.text}}
+            else:
+                for token in self.llm.stream_chat(system_prompt, query):
+                    llm_success = True
+                    yield {"event": "token", "data": {"token": token}}
+            if not llm_success:
+                raise ProviderGenerationError("provider_empty_answer")
+            dashscope_breaker.record_success()
+        except Exception:
+            dashscope_breaker.record_failure()
+            logger.error("general_fallback_stream_failed code=provider_unavailable")
+            yield {"event": "token", "data": {"token": refusal}}
         yield {"event": "done", "data": {}}
 
     def _build_citations(self, chunks):
