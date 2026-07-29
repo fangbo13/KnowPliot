@@ -54,6 +54,9 @@ class ChatSession(models.Model):
     title = models.CharField(max_length=255, blank=True, default="")
     is_active = models.BooleanField(default=True)
     is_pinned = models.BooleanField(default=False, db_index=True)
+    # Session-level reference-library selection: null=never chosen (fall back to
+    # keyword auto-routing), []=explicitly none (space-only), [uuid,...]=chosen.
+    reference_library_ids = models.JSONField(null=True, blank=True, default=None)
     branch_request_id = models.UUIDField(null=True, blank=True)
     branched_from_message = models.ForeignKey(
         "chat.Message",
@@ -156,6 +159,43 @@ class Message(models.Model):
         return f"{self.role}: {self.content[:50]}..."
 
 
+class SessionMemory(models.Model):
+    """Rolling long-term memory for one chat session.
+
+    Messages evicted from the verbatim short-term window are condensed into
+    ``summary`` + ``key_facts`` asynchronously (Celery), so the assistant
+    still remembers early-session agreements after many rounds.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session = models.OneToOneField(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="memory",
+    )
+    # Mirrors session.space for direct scoping (same convention as Message).
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="session_memories",
+    )
+    summary = models.TextField(blank=True, default="")
+    key_facts = models.JSONField(default=list, blank=True)
+    # Watermark: created_at of the last message already folded into summary.
+    summarized_until = models.DateTimeField(null=True, blank=True)
+    summary_version = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_sessionmemory"
+
+    def __str__(self):
+        return f"Memory v{self.summary_version} for session {self.session_id}"
+
+
 class ChatTurn(models.Model):
     """Durable identity and lifecycle for one user question/assistant answer."""
 
@@ -234,6 +274,8 @@ class ChatTurn(models.Model):
     thinking_enabled = models.BooleanField(default=False)
     thinking_snapshot_known = models.BooleanField(default=True)
     thinking_budget = models.PositiveIntegerField(null=True, blank=True)
+    # Reference libraries actually used for this turn (already capped by mode).
+    reference_library_ids = models.JSONField(default=list, blank=True)
     policy_fallback_code = models.CharField(max_length=64, blank=True, default="")
     model_id = models.CharField(max_length=160, blank=True, default="")
     metrics = models.JSONField(default=dict)

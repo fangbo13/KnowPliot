@@ -19,6 +19,8 @@ export interface V3SendRequest {
   answerMode: 'fast' | 'deep';
   thinkingEnabled: boolean;
   regenerateMessageId?: string;
+  /** Session-level reference-library selection; undefined = leave unchanged. */
+  selectedLibraryIds?: string[];
 }
 
 export interface ConsumeV3Options {
@@ -126,6 +128,9 @@ export class ChatStreamV3Transport {
         answer_mode: request.answerMode,
         thinking_enabled: request.thinkingEnabled,
         protocol_version: 3,
+        ...(request.selectedLibraryIds !== undefined
+          ? { selected_library_ids: request.selectedLibraryIds }
+          : {}),
       }),
       signal,
     });

@@ -37,6 +37,14 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ipo_cases": (
         "ipo", "上市", "招股", "科创板", "创业板", "北交所", "案例",
     ),
+    # Company-policy libraries: generic HR / admin / compliance vocabulary.
+    "policy": (
+        "报销", "差旅", "住宿", "餐补", "补贴", "差补", "津贴", "考勤", "休假", "年假", "病假", "加班",
+        "薪酬", "福利", "入职", "离职", "试用期", "转正", "导师",
+        "信息安全", "保密", "密码", "泄露", "合规", "制度", "规范", "员工手册",
+        "工作时间", "弹性", "打卡", "上下班", "调休", "会议室", "访客", "办公",
+        "policy", "reimburse", "travel", "leave", "onboarding", "security",
+    ),
     "other": (),
 }
 
@@ -78,3 +86,51 @@ def route_reference_libraries(query: str, active_space) -> tuple[list[str], dict
             len(selected_ids), len(references), query,
         )
     return selected_ids, name_by_space
+
+
+def resolve_selected_libraries(
+    active_space,
+    selected_ids,
+    max_count: int,
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve an EXPLICIT user selection into (space_ids, name_by_space).
+
+    Session-library-selection spec §5: the user's choice is authoritative for
+    the session — keyword routing is skipped entirely. Only libraries the
+    active space has opted in to (enabled) and that are still published are
+    honoured; anything else is silently dropped. The result is capped at
+    ``max_count`` preserving the caller's order.
+    """
+    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+
+    wanted = [str(value) for value in (selected_ids or [])]
+    if not wanted or max_count <= 0:
+        return [], {}
+
+    references = {
+        str(reference.library_id): reference.library
+        for reference in SpaceLibraryReference.objects.filter(
+            space=active_space,
+            enabled=True,
+            library__status=ReferenceLibrary.STATUS_PUBLISHED,
+            library_id__in=wanted,
+        ).select_related("library")
+    }
+
+    space_ids: list[str] = []
+    name_by_space: dict[str, str] = {}
+    for library_id in dict.fromkeys(wanted):  # de-dupe, keep order
+        library = references.get(library_id)
+        if library is None:
+            continue
+        space_id = str(library.space_id)
+        space_ids.append(space_id)
+        name_by_space[space_id] = library.name
+        if len(space_ids) >= max_count:
+            break
+    if len(space_ids) < len(set(wanted)):
+        logger.info(
+            "[library-selection] honoured=%d/%d (cap=%d)",
+            len(space_ids), len(set(wanted)), max_count,
+        )
+    return space_ids, name_by_space

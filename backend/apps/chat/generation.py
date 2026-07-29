@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from django.conf import settings
 from django.db import close_old_connections, connection, transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -20,6 +21,7 @@ from .coordination import (
     RedisSessionLease,
     create_redis_client,
 )
+from .memory import build_memory_context, estimate_tokens
 from .metrics import ChatStreamMetrics, merge_turn_metrics
 from .models import ChatSession, ChatTurn, Citation, Message, ModelInvocation
 from .services import InvalidTurnTransitionError, transition_chat_turn
@@ -181,25 +183,30 @@ def _maybe_open_knowledge_gap(turn, message) -> None:
         logger.warning("auto_knowledge_gap_failed", exc_info=True)
 
 
-def _conversation_history(session, question_message, window_rounds=10):
-    history = list(
-        Message.objects.filter(session=session)
-        .exclude(pk=question_message.pk)
-        .order_by("-created_at")[: window_rounds * 2]
-        .values_list("role", "content")
-    )
-    history.reverse()
-    return history
+def _conversation_history(session, question_message):
+    """Layered session memory context (kept under the legacy name so existing
+    test patches keep working). Single implementation: apps.chat.memory."""
+    return build_memory_context(session, question_message)
 
 
 def _estimate_token_count(text: str) -> int:
-    try:
-        import tiktoken
+    return estimate_tokens(text)
 
-        encoding = tiktoken.get_encoding("cl100k_base")
-        return len(encoding.encode(text))
+
+def _schedule_memory_update(session_id) -> None:
+    """Best-effort dispatch of the rolling-summary task after a turn lands."""
+    if not getattr(settings, "CHAT_MEMORY_ENABLED", False):
+        return
+    try:
+        from .tasks import update_session_memory
+
+        update_session_memory.delay(str(session_id))
     except Exception:
-        return max(1, len(text) // 4)
+        # A broker outage must never break a completed chat turn.
+        logger.warning(
+            "session_memory_dispatch_failed session_id=%s code=coordination_unavailable",
+            session_id,
+        )
 
 
 def _save_citations(assistant_message, citations_data, space=None):
@@ -247,6 +254,16 @@ def _build_pipeline(turn):
     pipeline.answer_mode = turn.answer_mode
     pipeline.thinking_enabled = turn.thinking_enabled
     pipeline.thinking_budget = turn.thinking_budget
+    # Session-library-selection spec §5: a session that went through the
+    # picker (non-null) pins retrieval to the turn's capped snapshot; a legacy
+    # session (null) keeps keyword auto-routing (None sentinel).
+    session_selection = getattr(turn.session, "reference_library_ids", None)
+    if session_selection is None:
+        pipeline.selected_library_ids = None
+    else:
+        pipeline.selected_library_ids = list(
+            getattr(turn, "reference_library_ids", None) or []
+        )
     return pipeline
 
 
@@ -429,6 +446,9 @@ def _persist_completed_turn(
     timings = stream_metrics.snapshot(now=time.monotonic())
     timings["routing_decision"] = "retrieve"
     _record_metrics(turn, **timings)
+    # Session memory: fold older rounds into the rolling summary off the
+    # critical path (default queue, never chat_generation capacity).
+    _schedule_memory_update(turn.session_id)
     return CompletedTurnPersistence(assistant_message, token_count, timings)
 
 

@@ -230,6 +230,7 @@ class DjangoTurnRepository:
                 "thinking_enabled",
                 "thinking_budget",
                 "policy_fallback_code",
+                "reference_library_ids",
                 "attempt_count",
                 "error_code",
                 "model_id",
@@ -371,6 +372,7 @@ def begin_chat_turn(
     model_id: str = "",
     protocol_version: int = 1,
     question_message=None,
+    reference_library_ids: list | None = None,
     repository: Any | None = None,
     atomic_factory=None,
 ) -> BeginTurnResult:
@@ -379,6 +381,7 @@ def begin_chat_turn(
     repository = repository or DjangoTurnRepository()
     atomic_factory = atomic_factory or transaction.atomic
     requested_answer_mode = requested_answer_mode or answer_mode
+    reference_library_ids = list(reference_library_ids or [])
 
     with atomic_factory():
         expected_user_id = getattr(session, "user_id", None)
@@ -432,6 +435,7 @@ def begin_chat_turn(
                 policy_fallback_code=policy_fallback_code,
                 model_id=model_id,
                 protocol_version=protocol_version,
+                reference_library_ids=reference_library_ids,
             )
             repository.touch_session(session)
             return BeginTurnResult(turn, BeginTurnDisposition.CREATED)
@@ -461,6 +465,7 @@ def begin_chat_turn(
             turn.thinking_enabled = thinking_enabled
             turn.thinking_budget = thinking_budget
             turn.policy_fallback_code = policy_fallback_code
+            turn.reference_library_ids = reference_library_ids
             turn.attempt_count += 1
             turn.error_code = ""
             turn.model_id = model_id

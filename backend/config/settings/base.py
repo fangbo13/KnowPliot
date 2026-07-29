@@ -335,6 +335,38 @@ PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS = int(
 PROVIDER_MAX_OUTPUT_TOKENS = int(
     os.environ.get("PROVIDER_MAX_OUTPUT_TOKENS", "2000")
 )
+
+# ── Session memory (short/long-term conversation memory) ──
+# Master switch: rolling session summary + key facts injection.
+CHAT_MEMORY_ENABLED = env_bool("CHAT_MEMORY_ENABLED", default=True)
+# Token budget for the verbatim recent-history window sent to the LLM.
+CHAT_HISTORY_TOKEN_BUDGET = int(os.environ.get("CHAT_HISTORY_TOKEN_BUDGET", "2000"))
+# Per-message token cap — overly long messages are middle-truncated so one
+# message cannot evict the whole window.
+CHAT_HISTORY_MESSAGE_TOKEN_CAP = int(
+    os.environ.get("CHAT_HISTORY_MESSAGE_TOKEN_CAP", "600")
+)
+# Summarize only when at least this many messages sit beyond the watermark.
+CHAT_MEMORY_SUMMARY_TRIGGER = int(
+    os.environ.get("CHAT_MEMORY_SUMMARY_TRIGGER", "8")
+)
+# Rewrite context-dependent follow-up questions into standalone queries
+# before retrieval (embedding + FTS only — the raw query still goes to the LLM).
+CHAT_QUERY_REWRITE_ENABLED = env_bool("CHAT_QUERY_REWRITE_ENABLED", default=True)
+# Send recent history as a standard multi-turn messages array instead of
+# flattening it into the system prompt.
+CHAT_MULTI_TURN_MESSAGES = env_bool("CHAT_MULTI_TURN_MESSAGES", default=True)
+
+# ── Session-level reference-library selection ──
+# When enabled, users pick which opted-in public libraries a session may cite;
+# the explicit choice overrides keyword auto-routing for that session.
+CHAT_SESSION_LIBRARY_SELECTION_ENABLED = env_bool(
+    "CHAT_SESSION_LIBRARY_SELECTION_ENABLED", default=True
+)
+# Max reference libraries a single turn may cite, per answer mode (the space's
+# own knowledge base is always searched and does not count toward the cap).
+CHAT_LIBRARY_MAX_FAST = int(os.environ.get("CHAT_LIBRARY_MAX_FAST", "1"))
+CHAT_LIBRARY_MAX_DEEP = int(os.environ.get("CHAT_LIBRARY_MAX_DEEP", "3"))
 validate_capacity_settings(
     target_active=CHAT_GENERATION_TARGET_ACTIVE,
     max_outstanding=CHAT_GENERATION_MAX_OUTSTANDING,
@@ -389,6 +421,9 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # Previous: all tasks in single default queue, competing for 4 slots equally.
 CELERY_TASK_ROUTES = {
     "apps.chat.tasks.generate_chat_turn_v3": {"queue": "chat_generation"},
+    # apps.chat.tasks.update_session_memory is intentionally NOT routed: it
+    # lands on the default "celery" queue (which the standard worker consumes)
+    # and must never compete for chat_generation capacity.
     "apps.knowledge.tasks.*": {"queue": "default"},
     "apps.rag.tasks.*": {"queue": "default"},
 }

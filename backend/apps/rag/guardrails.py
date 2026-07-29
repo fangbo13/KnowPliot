@@ -177,6 +177,24 @@ class LiteLLMChatService:
         # V3.7 P1.1: Reuse global shared httpx.Client — shared with EmbeddingService
         self._client = get_shared_httpx_client()
 
+    def _build_messages(self, system_prompt, user_query, history_messages=None):
+        """Compose the messages array; recent history rides as real turns.
+
+        Only user/assistant roles are accepted from history — anything else
+        is coerced to user so callers can never smuggle a second system role.
+        """
+        messages = [{"role": "system", "content": system_prompt}]
+        for item in history_messages or []:
+            role = item.get("role")
+            content = item.get("content", "")
+            if not isinstance(content, str) or not content:
+                continue
+            if role not in ("user", "assistant"):
+                role = "user"
+            messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_query})
+        return messages
+
     def stream_chat_parts(
         self,
         system_prompt,
@@ -185,17 +203,19 @@ class LiteLLMChatService:
         model_id=None,
         thinking_enabled=False,
         thinking_budget=None,
+        history_messages=None,
     ):
         """Stream chat response from LLM via SSE.
 
         V3.7: Uses global shared httpx.Client — no TLS handshake per request.
+        Session memory: ``history_messages`` carries the recent multi-turn
+        window as standard messages instead of flattened system-prompt text.
         """
         payload = {
             "model": model_id or self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_query},
-            ],
+            "messages": self._build_messages(
+                system_prompt, user_query, history_messages
+            ),
             "stream": True,
             "temperature": 0.3,
             "max_tokens": settings.PROVIDER_MAX_OUTPUT_TOKENS,
@@ -239,3 +259,48 @@ class LiteLLMChatService:
         ):
             if part.kind == "answer_delta":
                 yield part.text
+
+    def complete(
+        self,
+        system_prompt,
+        user_prompt,
+        *,
+        model_id=None,
+        max_tokens=512,
+        temperature=0.0,
+        timeout=None,
+    ):
+        """One non-streaming completion (session summary / query rewrite).
+
+        Reuses the shared httpx.Client; ``timeout`` overrides the client
+        default per request so latency-sensitive callers can fail fast.
+        """
+        payload = {
+            "model": model_id or self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "temperature": temperature,
+            "max_tokens": int(max_tokens),
+            # Non-streaming Qwen calls require thinking disabled.
+            "enable_thinking": False,
+        }
+        kwargs = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        response = self._client.post(
+            f"{self.base_url}/chat/completions",
+            headers=self.headers,
+            json=payload,
+            **kwargs,
+        )
+        response.raise_for_status()
+        data = response.json()
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return ""
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        return content if isinstance(content, str) else ""

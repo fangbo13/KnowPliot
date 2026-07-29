@@ -61,6 +61,7 @@ CREATE_ALLOWED_FIELDS = {
     "office_location_ids",
     "template_version_id",
     "taxonomy_init_mode",
+    "reference_library_ids",
 }
 
 # KB optimization spec §3.1: valid taxonomy initialization choices.
@@ -108,6 +109,36 @@ def _reject_unknown(payload: dict, allowed: set[str] = CREATE_ALLOWED_FIELDS):
         raise ValidationError({"unknown_fields": unknown})
 
 
+def _normalize_reference_library_ids(raw) -> list[str]:
+    """Validate optional creator library opt-in into a list of published ids."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise ValidationError({"reference_library_ids": "Must be a list of library ids."})
+    wanted = []
+    for value in raw:
+        parsed = _uuid(value, "reference_library_ids")
+        if str(parsed) not in wanted:
+            wanted.append(str(parsed))
+    if not wanted:
+        return []
+    from apps.knowledge.models import ReferenceLibrary
+
+    valid = set(
+        str(value)
+        for value in ReferenceLibrary.objects.filter(
+            id__in=wanted,
+            status=ReferenceLibrary.STATUS_PUBLISHED,
+        ).values_list("id", flat=True)
+    )
+    invalid = [value for value in wanted if value not in valid]
+    if invalid:
+        raise ValidationError(
+            {"reference_library_ids": "Unknown or unpublished library id(s)."}
+        )
+    return [value for value in wanted if value in valid]
+
+
 def _uuid(value, field: str, *, required=True):
     if value in (None, ""):
         if required:
@@ -123,6 +154,24 @@ def _taxonomy_models():
     from .models import BusinessLine, OfficeLocation, WorkGroup
 
     return BusinessLine, WorkGroup, OfficeLocation
+
+
+def _apply_reference_library_optin(space, library_ids, added_by):
+    """Create SpaceLibraryReference rows for the creator-selected libraries."""
+    if not library_ids:
+        return
+    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+
+    published = ReferenceLibrary.objects.filter(
+        id__in=[str(value) for value in library_ids],
+        status=ReferenceLibrary.STATUS_PUBLISHED,
+    ).exclude(space_id=space.id)
+    for library in published:
+        SpaceLibraryReference.objects.get_or_create(
+            space=space,
+            library=library,
+            defaults={"enabled": True, "added_by": added_by},
+        )
 
 
 def _resolve_template_revision(template_version_id, *, business_line):
@@ -269,6 +318,13 @@ def _normalize_creation_payload(payload: dict, *, actor):
     if taxonomy_init_mode not in TAXONOMY_INIT_MODES:
         raise ValidationError({"taxonomy_init_mode": "Unsupported taxonomy initialization mode."})
 
+    # Session-library-selection spec §4: optional creator opt-in of published
+    # reference libraries (forms the new space's selectable pool). Only valid
+    # published library ids survive; unknown ids are rejected.
+    reference_library_ids = _normalize_reference_library_ids(
+        payload.get("reference_library_ids")
+    )
+
     normalized = {
         "name": name,
         "code": code,
@@ -281,6 +337,7 @@ def _normalize_creation_payload(payload: dict, *, actor):
         "office_location_ids": [location.id for location in locations],
         "template_version_id": template_version_id,
         "taxonomy_init_mode": taxonomy_init_mode,
+        "reference_library_ids": reference_library_ids,
         "template_id": template_revision.template_id if template_revision else None,
         "template_version": template_revision.version if template_revision else None,
         "template_snapshot_hash": (
@@ -449,6 +506,7 @@ def submit_creation_request(*, actor, payload: dict, idempotency_key: uuid.UUID)
                 office_location_ids=[str(location.id) for location in locations],
                 template_version_id=normalized["template_version_id"],
                 taxonomy_init_mode=normalized["taxonomy_init_mode"],
+                reference_library_ids=normalized["reference_library_ids"],
             )
             # The reservation has a one-to-one-ish active request pointer; set
             # it after the request exists through the FK id so no unsaved
@@ -678,6 +736,13 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                 if get_preset(preset_code) is None:
                     preset_code = DEFAULT_TAXONOMY_PRESET
                 seed_space_taxonomy(space, preset_code)
+
+            # Session-library-selection spec §4: opt the new space into the
+            # published reference libraries the creator selected, forming its
+            # selectable pool. Best-effort; unknown/unpublished ids skipped.
+            _apply_reference_library_optin(
+                space, getattr(detail, "reference_library_ids", None), row.requester
+            )
 
             old = row.status
             row.target_space = space

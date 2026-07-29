@@ -689,6 +689,39 @@ def _request_generation_policy(
     )
 
 
+def _library_cap_for_mode(requested_answer_mode):
+    """Session-library-selection spec §2: per-mode reference-library caps."""
+    if requested_answer_mode == ANSWER_MODE_DEEP:
+        return int(getattr(settings, "CHAT_LIBRARY_MAX_DEEP", 3))
+    return int(getattr(settings, "CHAT_LIBRARY_MAX_FAST", 1))
+
+
+def _canonical_selected_libraries(space, selected_ids, requested_answer_mode):
+    """Validate an explicit library selection against the session's space.
+
+    Silently drops ids that are not opted-in/published for this space and
+    truncates to the per-mode cap (keeps the first N) — spec §4 mandates a
+    robust non-failing contract. Returns a list of library-id strings.
+    """
+    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+
+    wanted = list(dict.fromkeys(str(value) for value in (selected_ids or [])))
+    if not wanted or space is None:
+        return []
+    valid_ids = set(
+        str(value)
+        for value in SpaceLibraryReference.objects.filter(
+            space=space,
+            enabled=True,
+            library__status=ReferenceLibrary.STATUS_PUBLISHED,
+            library_id__in=wanted,
+        ).values_list("library_id", flat=True)
+    )
+    canonical = [library_id for library_id in wanted if library_id in valid_ids]
+    cap = _library_cap_for_mode(requested_answer_mode)
+    return canonical[:cap]
+
+
 def _turn_execution_snapshot(turn):
     """One safe snapshot shared by live meta, replay, status, and history."""
 
@@ -919,15 +952,12 @@ def _completed_turn_events_v2(turn, store):
     return events
 
 
-def _conversation_history(session, question_message, window_rounds=10):
-    history = list(
-        Message.objects.filter(session=session)
-        .exclude(pk=question_message.pk)
-        .order_by("-created_at")[: window_rounds * 2]
-        .values_list("role", "content")
-    )
-    history.reverse()
-    return history
+def _conversation_history(session, question_message):
+    """Layered session memory context (kept under the legacy name so existing
+    test patches keep working). Single implementation: apps.chat.memory."""
+    from .memory import build_memory_context
+
+    return build_memory_context(session, question_message)
 
 
 @api_view(["GET"])
@@ -1124,6 +1154,30 @@ def send_message(request, session_id=None, message_id=None):
         session.title = content[:50]
         session.save(update_fields=["title"])
 
+    # Session-library-selection spec §4: an explicit selection updates the
+    # session preference; an absent field keeps it (None = legacy auto-routing).
+    selection_supplied = (
+        bool(getattr(settings, "CHAT_SESSION_LIBRARY_SELECTION_ENABLED", True))
+        and "selected_library_ids" in serializer.validated_data
+    )
+    if selection_supplied:
+        turn_library_ids = _canonical_selected_libraries(
+            space,
+            serializer.validated_data["selected_library_ids"],
+            requested_answer_mode,
+        )
+        if session.reference_library_ids != turn_library_ids:
+            session.reference_library_ids = turn_library_ids
+            session.save(update_fields=["reference_library_ids", "updated_at"])
+    elif session.reference_library_ids is not None:
+        turn_library_ids = _canonical_selected_libraries(
+            space,
+            session.reference_library_ids,
+            requested_answer_mode,
+        )
+    else:
+        turn_library_ids = []
+
     try:
         begin_result = begin_chat_turn(
             session=session,
@@ -1138,6 +1192,7 @@ def send_message(request, session_id=None, message_id=None):
             model_id=generation_policy.model_id,
             protocol_version=protocol_version,
             question_message=question_message_override,
+            reference_library_ids=turn_library_ids,
         )
     except ChatTurnScopeError:
         return Response(

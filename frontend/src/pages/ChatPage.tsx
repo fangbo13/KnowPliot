@@ -19,7 +19,11 @@ import { useAuthorization } from '../auth/CapabilityProvider';
 import { notify } from '../utils/notifications';
 
 const VirtualizedMessageList = lazy(() => import('../components/chat/VirtualizedMessageList'));
-const ProcessingPanel = lazy(() => import('../components/chat/ProcessingPanel'));
+
+// Per-mode reference-library caps (mirror backend CHAT_LIBRARY_MAX_*).
+const LIBRARY_MAX_FAST = 1;
+const LIBRARY_MAX_DEEP = 3;
+const libraryCapForMode = (mode: AnswerMode) => (mode === 'deep' ? LIBRARY_MAX_DEEP : LIBRARY_MAX_FAST);
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -100,6 +104,8 @@ export default function ChatPageContainer() {
   const [inputValue, setInputValue] = useState('');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('fast');
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  // Session-level reference-library selection (default none = space-only).
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
   const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
@@ -156,6 +162,7 @@ export default function ChatPageContainer() {
       previousSessionRef.current = activeSessionId;
       setAnswerMode('fast');
       setThinkingEnabled(false);
+      setSelectedLibraryIds([]);
     }
   }, [activeSessionId]);
 
@@ -186,13 +193,11 @@ export default function ChatPageContainer() {
     }
     isSendingRef.current = true;
     const options = thinkingEnabled
-      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true }
-      : { answerMode, canUseDeep };
+      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true, selectedLibraryIds }
+      : { answerMode, canUseDeep, selectedLibraryIds };
     sendMessage(inputValue.trim(), options);
-    // Each newly submitted logical question starts from the safe defaults;
-    // the captured options above remain attached to its owning Turn.
-    setAnswerMode('fast');
-    setThinkingEnabled(false);
+    // The Deep/Thinking toggles are sticky: they keep the user's choice across
+    // turns in the same conversation instead of resetting to fast/off.
     setModeNotice(null);
     setInputValue('');
     inputRef.current?.focus();
@@ -200,9 +205,10 @@ export default function ChatPageContainer() {
   };
 
   const handleQuickAction = (question: string) => {
-    sendMessage(question, { answerMode: 'fast' });
-    setAnswerMode('fast');
-    setThinkingEnabled(false);
+    const options = thinkingEnabled
+      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true, selectedLibraryIds }
+      : { answerMode, canUseDeep, selectedLibraryIds };
+    sendMessage(question, options);
     inputRef.current?.focus();
   };
 
@@ -376,12 +382,14 @@ export default function ChatPageContainer() {
             {!!activeSessionId && <EditOutlined className="chat-title-edit-icon" />}
           </button>
         )}
-        {libraryRefs.length > 0 && (
+        {selectedLibraryIds.length > 0 && (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginLeft: 8 }}>
-            {libraryRefs.map((ref) => (
+            {libraryRefs
+              .filter((ref) => selectedLibraryIds.includes(ref.library))
+              .map((ref) => (
               <span
                 key={ref.id}
-                title={t('library_chip_tooltip', { defaultValue: '本空间已引用该参考库，回答可结合其内容' })}
+                title={t('library_chip_tooltip', { defaultValue: '本会话已引用该参考库，回答可结合其内容' })}
                 style={{
                   fontSize: 11,
                   lineHeight: '18px',
@@ -409,17 +417,8 @@ export default function ChatPageContainer() {
               : t('thinking_generating'))}
         </div>
 
-        {isStreaming && activeTurn?.safePhase ? (
-          <Suspense fallback={null}>
-            <ProcessingPanel
-              answerMode={activeTurn.answerMode ?? 'fast'}
-              phase={activeTurn.safePhase}
-              timings={activeTurn.timings}
-              citations={activeTurn.citations}
-              executionSnapshot={activeTurn.executionSnapshot}
-            />
-          </Suspense>
-        ) : null}
+        {/* The "Answer processing" panel is intentionally not rendered anymore:
+            processing feedback lives inline in the typing indicator instead. */}
 
         {isLoadingMessages && messages.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px 0' }}>
@@ -486,6 +485,7 @@ export default function ChatPageContainer() {
               streamContent={visibleStreamContent}
               citations={visibleCitations}
               streamPhase={visibleStreamPhase}
+              streamSafePhase={isStreaming ? activeTurn?.safePhase ?? null : null}
               onRegenerate={handleRetry}
               onBranch={handleBranch}
               onShare={handleShare}
@@ -537,14 +537,25 @@ export default function ChatPageContainer() {
             canUseDeep={canUseDeep}
             thinkingEnabled={thinkingEnabled}
             canUseThinking={canUseThinking}
+            libraryOptions={libraryRefs.map((ref) => ({ id: ref.library, name: ref.library_name }))}
+            selectedLibraryIds={selectedLibraryIds}
+            onSelectedLibraryChange={setSelectedLibraryIds}
+            maxLibraries={libraryCapForMode(answerMode)}
             onAnswerModeChange={(mode) => {
               if (mode === 'deep' && !canUseDeep) {
                 setAnswerMode('fast');
                 setModeNotice('error_deep_unavailable');
                 return;
               }
+              // Truncate the selection when the new mode's cap is smaller.
+              const cap = libraryCapForMode(mode);
+              if (selectedLibraryIds.length > cap) {
+                setSelectedLibraryIds((prev) => prev.slice(0, cap));
+                setModeNotice('library_selection_trimmed');
+              } else {
+                setModeNotice(null);
+              }
               setAnswerMode(mode);
-              setModeNotice(null);
             }}
             onThinkingChange={(enabled) => {
               if (enabled && !canUseThinking) {

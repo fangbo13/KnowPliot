@@ -822,6 +822,7 @@ class ReferenceLibrary(models.Model):
         ("ifrs", "IFRS"),
         ("cas", "China Accounting Standards"),
         ("ipo_cases", "IPO Cases"),
+        ("policy", "Company Policy"),
         ("other", "Other"),
     ]
     STATUS_PUBLISHED = "published"

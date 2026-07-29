@@ -142,6 +142,14 @@ class ChatMessageRequestSerializer(serializers.Serializer):
         default=1,
         required=False,
     )
+    # Session-level reference-library selection. Absent field = keep the
+    # session's current selection (None means legacy keyword auto-routing).
+    selected_library_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        allow_empty=True,
+        max_length=20,
+    )
 
     def to_internal_value(self, data):
         if isinstance(data, Mapping):

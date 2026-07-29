@@ -118,6 +118,9 @@ class RAGPipeline:
         self.answer_mode = "fast"
         self.thinking_enabled = False
         self.thinking_budget = None
+        # None = legacy keyword auto-routing; list = explicit user selection
+        # (already capped per answer mode by the chat layer).
+        self.selected_library_ids = None
         if ingestion:
             from .chunker import LangChainChunker
 
@@ -399,6 +402,9 @@ class RAGPipeline:
         """Full RAG: retrieve context, build prompt, call LLM, stream response.
 
         Args:
+            conversation_history: either a legacy list of (role, content)
+                tuples or an ``apps.chat.memory.MemoryContext`` carrying the
+                token-budgeted recent window + rolling session summary.
             space_id: V6.0 — restrict retrieval (and therefore citations) to the
                 active knowledge space. The pipeline no longer supports
                 unscoped callers.
@@ -406,6 +412,17 @@ class RAGPipeline:
         Yields:
             Dicts with 'event' and 'data' keys for SSE streaming.
         """
+        # Session memory: accept MemoryContext (duck-typed to avoid a hard
+        # cross-app import) or a plain history list from legacy callers.
+        if hasattr(conversation_history, "recent_history"):
+            recent_history = list(conversation_history.recent_history)
+            session_summary = conversation_history.summary
+            key_facts = tuple(conversation_history.key_facts)
+        else:
+            recent_history = list(conversation_history or [])
+            session_summary = ""
+            key_facts = ()
+
         # Step 1: Guardrails - check for injection
         try:
             if not self.guardrails.check_input(query):
@@ -424,22 +441,53 @@ class RAGPipeline:
         # return graceful degraded response instead of uncaught exception that
         # causes SSE "error" event → frontend shows "当前无法获取响应".
         retrieval_started = time.monotonic()
-        # KB optimization spec §3.3 + P2 §A1: expand retrieval to opted-in
-        # reference libraries, ROUTED by query signals (library name /
-        # category keywords) instead of unconditionally searching every
-        # library. RAG_LIBRARY_ROUTING_ENABLED=False restores full fan-out.
+        # Session memory: condense context-dependent follow-ups ("那第二条呢？")
+        # into standalone questions for retrieval ONLY — the user's original
+        # wording still goes to the answer LLM.
+        retrieval_query = query
+        try:
+            from .query_condense import condense_query
+
+            retrieval_query = condense_query(
+                query,
+                summary=session_summary,
+                recent_history=recent_history,
+                language=language,
+            )
+        except Exception:
+            logger.warning("query_condense_unavailable", exc_info=True)
+            retrieval_query = query
+        # KB optimization spec §3.3 + P2 §A1 + session-library-selection spec
+        # §5: an explicit user selection (non-None) is authoritative for this
+        # session and SKIPS keyword routing; None falls back to auto-routing.
         reference_space_ids: list[str] = []
         library_name_by_space: dict[str, str] = {}
+        selected_library_ids = getattr(self, "selected_library_ids", None)
         try:
             from apps.spaces.models import KnowledgeSpace
 
-            from .library_routing import route_reference_libraries
+            from .library_routing import (
+                resolve_selected_libraries,
+                route_reference_libraries,
+            )
 
             active_space = KnowledgeSpace.objects.filter(pk=space_id).first()
             if active_space is not None:
-                reference_space_ids, library_name_by_space = route_reference_libraries(
-                    query, active_space
-                )
+                if selected_library_ids is not None:
+                    max_count = (
+                        int(getattr(settings, "CHAT_LIBRARY_MAX_DEEP", 3))
+                        if getattr(self, "answer_mode", "fast") == "deep"
+                        else int(getattr(settings, "CHAT_LIBRARY_MAX_FAST", 1))
+                    )
+                    reference_space_ids, library_name_by_space = (
+                        resolve_selected_libraries(
+                            active_space, selected_library_ids, max_count
+                        )
+                    )
+                else:
+                    reference_space_ids, library_name_by_space = (
+                        route_reference_libraries(retrieval_query, active_space)
+                    )
         except Exception:
             logger.warning("reference_library_resolve_failed", exc_info=True)
             reference_space_ids = []
@@ -447,7 +495,7 @@ class RAGPipeline:
         space_ids = [space_id, *reference_space_ids]
         try:
             chunks = self.retriever.search(
-                query=query,
+                query=retrieval_query,
                 top_k=TOP_K,
                 similarity_threshold=SIMILARITY_THRESHOLD,
                 space_id=space_id,  # V6.0 space isolation
@@ -507,7 +555,7 @@ class RAGPipeline:
         if getattr(settings, "RAG_LLM_RERANK_ENABLED", False) and chunks:
             from .llm_rerank import llm_rerank
 
-            chunks = llm_rerank(query, chunks, self.llm)
+            chunks = llm_rerank(retrieval_query, chunks, self.llm)
         retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
         quality = classify_confidence(chunks)
         yield {
@@ -521,9 +569,13 @@ class RAGPipeline:
             },
         }
 
-        # Step 2b: Refuse when evidence is absent or too weak. Low-confidence
-        # retrieval must never be promoted into an uncited deterministic claim.
-        if not chunks or quality.label in {"low", "insufficient"}:
+        # Step 2b: Refuse ONLY when evidence is entirely absent. P1 fix (E2E
+        # refusal audit): a "low" score no longer hard-refuses — retrieved
+        # chunks still go to the LLM, which answers the supported parts per
+        # prompt Rule 8. Refusing while returning citations produced the
+        # contradictory "has citations but refuses" behaviour; low confidence
+        # now only flags needs_human_review on the quality event above.
+        if not chunks:
             # P0 fix (KB/RAG audit spec §C): domain-neutral refusal copy — the
             # legacy HR wording predates the audit/accounting positioning.
             fallback = (
@@ -532,12 +584,15 @@ class RAGPipeline:
                 else "I don't have enough information to answer this question. Please add the relevant knowledge documents or contact your knowledge base administrator."
             )
             yield {"event": "token", "data": {"token": fallback}}
-            yield {
-                "event": "citations",
-                "data": self._build_citations(chunks) if chunks else [],
-            }
+            yield {"event": "citations", "data": []}
             yield {"event": "done", "data": {}}
             return
+        if quality.label == "low":
+            logger.info(
+                "rag_low_confidence_proceed score=%s chunks=%d",
+                quality.score,
+                len(chunks),
+            )
 
         # Step 3: Build citations data
         citations = self._build_citations(chunks)
@@ -546,12 +601,29 @@ class RAGPipeline:
         # Step 4: Build system prompt
         # V4.3 UAT: Wrap prompt building in try/except — if prompt builder fails,
         # return graceful degraded response instead of uncaught exception.
+        # Session memory: with multi-turn enabled the recent window rides as a
+        # real messages array; the system prompt carries only the rolling
+        # summary + key facts. Legacy mode keeps the flattened-history slot.
+        multi_turn = getattr(settings, "CHAT_MULTI_TURN_MESSAGES", False)
+        history_messages = None
+        if multi_turn and recent_history:
+            history_messages = [
+                {
+                    "role": role if role in ("user", "assistant") else "user",
+                    "content": content,
+                }
+                for role, content in recent_history
+                if content
+            ]
+        prompt_history = [] if multi_turn else recent_history[-8:]
         try:
             system_prompt = self.prompt_builder.build(
                 context_chunks=chunks,
-                conversation_history=conversation_history[-8:],  # Last 8 turns
+                conversation_history=prompt_history,
                 user_profile=user_profile,
                 language=language,
+                session_summary=session_summary,
+                key_facts=key_facts,
             )
         except Exception:
             logger.error("chat_prompt_build_failed code=prompt_build_error")
@@ -578,13 +650,28 @@ class RAGPipeline:
         try:
             stream_parts = getattr(self.llm, "stream_chat_parts", None)
             if callable(stream_parts):
-                for part in stream_parts(
-                    system_prompt,
-                    query,
-                    model_id=self.model_name,
-                    thinking_enabled=getattr(self, "thinking_enabled", False),
-                    thinking_budget=getattr(self, "thinking_budget", None),
-                ):
+                stream_kwargs = {
+                    "model_id": self.model_name,
+                    "thinking_enabled": getattr(self, "thinking_enabled", False),
+                    "thinking_budget": getattr(self, "thinking_budget", None),
+                }
+                if history_messages:
+                    # Legacy test doubles may not accept the new kwarg — fall
+                    # back to the flat call rather than failing the turn.
+                    try:
+                        part_iterator = stream_parts(
+                            system_prompt,
+                            query,
+                            history_messages=history_messages,
+                            **stream_kwargs,
+                        )
+                    except TypeError:
+                        part_iterator = stream_parts(
+                            system_prompt, query, **stream_kwargs
+                        )
+                else:
+                    part_iterator = stream_parts(system_prompt, query, **stream_kwargs)
+                for part in part_iterator:
                     if part.kind == "reasoning_duration":
                         yield {
                             "event": "metrics",
