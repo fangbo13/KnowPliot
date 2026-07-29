@@ -164,11 +164,18 @@ class RAGPipeline:
             document.processing_error = "Extracted text exceeds size limit — truncated."
             document.save(update_fields=["processing_error"])
 
-        # Chunk — P2 §A7: markdown files use structure-aware heading splits.
-        if (document.file_type or "").lower() in ("md", "markdown"):
-            chunks = self.chunker.split_markdown(raw_text)
-        else:
-            chunks = self.chunker.split(raw_text, page_metadata)
+        # Chunk — P2 §A7 + RAG optimization spec Phase 1: markdown files AND
+        # Docling-parsed PDF/DOCX (Docling emits Markdown) use structure-aware
+        # splits with atomic tables; only non-markdown fallbacks stay plain.
+        from .chunker import chunk_document_text
+
+        chunks = chunk_document_text(
+            self.chunker,
+            raw_text,
+            document.file_type,
+            parsed_as_markdown=getattr(self.parser, "parsed_as_markdown", False),
+            page_metadata=page_metadata,
+        )
 
         # V4.2 KB-V4.2-BATCH-006: Chunk count limit per document
         max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
@@ -493,14 +500,33 @@ class RAGPipeline:
             reference_space_ids = []
             library_name_by_space = {}
         space_ids = [space_id, *reference_space_ids]
+        retrieval_refined = False
         try:
-            chunks = self.retriever.search(
-                query=retrieval_query,
-                top_k=TOP_K,
-                similarity_threshold=SIMILARITY_THRESHOLD,
-                space_id=space_id,  # V6.0 space isolation
-                space_ids=space_ids,  # KB spec §3.3 cross-library retrieval
+            search_kwargs = {
+                "top_k": TOP_K,
+                "similarity_threshold": SIMILARITY_THRESHOLD,
+                "space_id": space_id,  # V6.0 space isolation
+                "space_ids": space_ids,  # KB spec §3.3 cross-library retrieval
+            }
+            # Phase 5: deep mode gets ONE bounded refinement round when the
+            # first pass is weak; fast mode stays strictly single-pass.
+            max_rounds = (
+                int(getattr(settings, "RAG_RETRIEVAL_MAX_ROUNDS_DEEP", 2))
+                if getattr(self, "answer_mode", "fast") == "deep"
+                else int(getattr(settings, "RAG_RETRIEVAL_MAX_ROUNDS_FAST", 1))
             )
+            if max_rounds > 1:
+                from .iterative import retrieve_with_refinement
+
+                chunks, _rounds, retrieval_refined = retrieve_with_refinement(
+                    self.retriever,
+                    retrieval_query,
+                    llm=getattr(self, "llm", None),
+                    max_rounds=max_rounds,
+                    search_kwargs=search_kwargs,
+                )
+            else:
+                chunks = self.retriever.search(query=retrieval_query, **search_kwargs)
         except Exception:
             logger.error("chat_retrieval_failed code=retrieval_error")
             dashscope_breaker.record_failure()  # Count as failure for circuit breaker
@@ -557,6 +583,9 @@ class RAGPipeline:
 
             chunks = llm_rerank(retrieval_query, chunks, self.llm)
         retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
+        # Phase 5: tell the frontend a refinement round actually ran.
+        if retrieval_refined:
+            yield {"event": "phase", "data": {"phase": "retrying_retrieval"}}
         quality = classify_confidence(chunks)
         yield {
             "event": "quality",
@@ -597,6 +626,18 @@ class RAGPipeline:
         # Step 3: Build citations data
         citations = self._build_citations(chunks)
         yield {"event": "citations", "data": citations}
+        # RAG optimization spec Phase 3: surface version/date on each chunk so
+        # the prompt renders a recency watermark — Rule 6 conflict resolution
+        # needs machine-readable recency, not model guesses.
+        chunks = [
+            {
+                **chunk,
+                "doc_version": citation.get("version"),
+                "doc_updated_at": citation.get("updated_at"),
+                "doc_stale": citation.get("stale", False),
+            }
+            for chunk, citation in zip(chunks, citations)
+        ]
 
         # Step 4: Build system prompt
         # V4.3 UAT: Wrap prompt building in try/except — if prompt builder fails,
@@ -646,6 +687,14 @@ class RAGPipeline:
         # Step 5: Stream LLM response — V4.2 SYS-V4.2-014: circuit breaker wraps the call
         # On success: record_success() closes the circuit.
         # On failure: record_failure() counts toward opening the circuit.
+        # Phase 6: deep mode buffers the draft, runs one bounded critique
+        # round against the retrieved context, then streams the revision.
+        critique_enabled = (
+            getattr(self, "answer_mode", "fast") == "deep"
+            and getattr(settings, "RAG_SELF_CRITIQUE_ENABLED", True)
+            and callable(getattr(self.llm, "complete", None))
+        )
+        draft_parts: list[str] = []
         llm_success = False
         try:
             stream_parts = getattr(self.llm, "stream_chat_parts", None)
@@ -679,14 +728,43 @@ class RAGPipeline:
                         }
                     elif part.kind == "answer_delta":
                         llm_success = True
-                        yield {"event": "token", "data": {"token": part.text}}
+                        if critique_enabled:
+                            draft_parts.append(part.text)
+                        else:
+                            yield {"event": "token", "data": {"token": part.text}}
             else:
                 for token in self.llm.stream_chat(system_prompt, query):
                     llm_success = True
-                    yield {"event": "token", "data": {"token": token}}
+                    if critique_enabled:
+                        draft_parts.append(token)
+                    else:
+                        yield {"event": "token", "data": {"token": token}}
             # Full success — record it to close/reset the circuit breaker
             if not llm_success:
                 raise ProviderGenerationError("provider_empty_answer")
+            if critique_enabled:
+                yield {"event": "phase", "data": {"phase": "reviewing"}}
+                draft = "".join(draft_parts)
+                final_answer = draft
+                try:
+                    from .self_critique import critique_and_revise
+
+                    final_answer = critique_and_revise(
+                        self.llm,
+                        question=query,
+                        context=self.prompt_builder._format_context(chunks),
+                        draft=draft,
+                    )
+                except Exception:
+                    logger.warning("self_critique_unavailable", exc_info=True)
+                    final_answer = draft
+                # Stream the final answer in small slices so the frontend
+                # keeps its incremental rendering behaviour.
+                for start in range(0, len(final_answer), 120):
+                    yield {
+                        "event": "token",
+                        "data": {"token": final_answer[start : start + 120]},
+                    }
             dashscope_breaker.record_success()
         except Exception as exc:
             # V4.2 SYS-V4.2-014: Record failure to count toward circuit opening
@@ -768,6 +846,12 @@ class RAGPipeline:
 class DocumentParser:
     """Parse documents using Docling with Unstructured fallback."""
 
+    def __init__(self):
+        # RAG optimization spec Phase 1: records whether the LAST parse
+        # produced Markdown (Docling) so ingestion can pick the
+        # structure-aware chunking path.
+        self.parsed_as_markdown = False
+
     def parse(self, file_path: str, file_type: str) -> tuple[str, list[dict]]:
         """Parse a document file.
 
@@ -778,21 +862,37 @@ class DocumentParser:
         Returns:
             Tuple of (full_text, list_of_page_metadata).
         """
+        self.parsed_as_markdown = False
         try:
-            return self._parse_with_docling(file_path)
+            result = self._parse_with_docling(file_path)
+            self.parsed_as_markdown = True
+            return result
         except Exception as e:
             logger.warning(f"Docling failed: {e}, falling back to Unstructured")
             try:
                 return self._parse_with_unstructured(file_path)
             except Exception as e2:
                 logger.error(f"Both parsers failed: {e2}")
+                if file_type == "pdf":
+                    # Raw-text reading a PDF yields binary syntax (%PDF, endobj...)
+                    # which would be chunked and embedded as garbage. Use pypdf
+                    # as the last-resort text extractor instead.
+                    return self._parse_with_pypdf(file_path)
                 return self._parse_as_text(file_path)
 
     def _parse_with_docling(self, file_path: str) -> tuple[str, list[dict]]:
         """Parse using Docling (best for PDF/DOCX)."""
-        from docling.document_converter import DocumentConverter
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
 
-        converter = DocumentConverter()
+        # OCR disabled: no OCR engine is installed in the worker image and
+        # rapidocr tries to download models into read-only site-packages
+        # (worker runs as nobody). Digital-text PDFs parse fine without OCR.
+        pdf_options = PdfPipelineOptions(do_ocr=False)
+        converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)}
+        )
         result = converter.convert(file_path)
 
         # Get markdown text
@@ -824,6 +924,26 @@ class DocumentParser:
             metadata = [{"page": None}]
 
         return text, metadata
+
+    def _parse_with_pypdf(self, file_path: str) -> tuple[str, list[dict]]:
+        """Last-resort PDF text extraction via pypdf.
+
+        Raises if no text layer is found (e.g. scanned PDF) so the document
+        is marked failed instead of ingesting raw PDF syntax as chunks.
+        """
+        from pypdf import PdfReader
+
+        reader = PdfReader(file_path)
+        page_texts = []
+        metadata = []
+        for i, page in enumerate(reader.pages):
+            page_texts.append(page.extract_text() or "")
+            metadata.append({"page": i + 1})
+        text = "\n\n".join(page_texts).strip()
+        if not text:
+            raise ValueError("pypdf extracted no text (scanned PDF without OCR?)")
+        logger.info(f"Parsed PDF with pypdf fallback: {len(reader.pages)} pages")
+        return text, metadata or [{"page": None}]
 
     def _parse_as_text(self, file_path: str) -> tuple[str, list[dict]]:
         """Read as plain text file."""

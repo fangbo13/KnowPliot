@@ -1,0 +1,162 @@
+{
+  "version": "ragopt-v1",
+  "cases": [
+    {
+      "id": "leave-policy-en",
+      "space_code": "evaluation-ragopt",
+      "query": "How many days of annual leave are provided?",
+      "answerable": true,
+      "tags": ["en"],
+      "expected_document_titles": ["Annual Leave Policy"]
+    },
+    {
+      "id": "security-training-en",
+      "space_code": "evaluation-ragopt",
+      "query": "When must security awareness training be completed?",
+      "answerable": true,
+      "tags": ["en"],
+      "expected_document_titles": ["Security Training Guide"]
+    },
+    {
+      "id": "bearing-bore-tolerance",
+      "space_code": "evaluation-ragopt",
+      "query": "轴承内径D1的公差是多少",
+      "answerable": true,
+      "tags": ["zh", "numeric", "table"],
+      "expected_document_titles": ["轴承装配工艺规范"],
+      "answer_snippets": ["D1", "±0.05mm", "公差"]
+    },
+    {
+      "id": "bearing-tolerance-value",
+      "space_code": "evaluation-ragopt",
+      "query": "哪个参数的公差是±0.05mm",
+      "answerable": true,
+      "tags": ["zh", "numeric", "table"],
+      "expected_document_titles": ["轴承装配工艺规范"],
+      "answer_snippets": ["D1", "轴承内径", "±0.05mm"]
+    },
+    {
+      "id": "bearing-clearance",
+      "space_code": "evaluation-ragopt",
+      "query": "径向游隙C1的标准值和公差是多少",
+      "answerable": true,
+      "tags": ["zh", "numeric", "table"],
+      "expected_document_titles": ["轴承装配工艺规范"],
+      "answer_snippets": ["C1", "0.012mm", "关键参数表"]
+    },
+    {
+      "id": "bearing-runout",
+      "space_code": "evaluation-ragopt",
+      "query": "配合过盈量S2的公差是多少，用什么器具检测",
+      "answerable": true,
+      "tags": ["zh", "numeric", "table"],
+      "expected_document_titles": ["轴承装配工艺规范"],
+      "answer_snippets": ["S2", "±0.005mm", "检测器具"]
+    },
+    {
+      "id": "bearing-axial-clearance",
+      "space_code": "evaluation-ragopt",
+      "query": "轴向游隙C2属于哪个参数表，标准值多少",
+      "answerable": true,
+      "tags": ["zh", "numeric", "table"],
+      "expected_document_titles": ["轴承装配工艺规范"],
+      "answer_snippets": ["C2", "0.020mm", "关键参数表"]
+    },
+    {
+      "id": "flatness-limit",
+      "space_code": "evaluation-ragopt",
+      "query": "电机外壳平面度要求不超过多少mm",
+      "answerable": true,
+      "tags": ["zh", "numeric"],
+      "expected_document_titles": ["电机外壳检验标准"],
+      "answer_snippets": ["0.1mm"]
+    },
+    {
+      "id": "roughness-ra",
+      "space_code": "evaluation-ragopt",
+      "query": "表面粗糙度Ra 1.6μm是哪项检验的要求",
+      "answerable": true,
+      "tags": ["zh", "numeric"],
+      "expected_document_titles": ["电机外壳检验标准"],
+      "answer_snippets": ["1.6μm"]
+    },
+    {
+      "id": "weld-percent",
+      "space_code": "evaluation-ragopt",
+      "query": "焊缝余高不得超过母材厚度的百分之多少",
+      "answerable": true,
+      "tags": ["zh", "numeric"],
+      "expected_document_titles": ["焊接质量验收规程"],
+      "answer_snippets": ["5.2%"]
+    },
+    {
+      "id": "hydraulic-pressure",
+      "space_code": "evaluation-ragopt",
+      "query": "溢流阀设定值公差±0.5MPa是哪个系统的要求",
+      "answerable": true,
+      "tags": ["zh", "numeric"],
+      "expected_document_titles": ["液压系统压力标准"],
+      "answer_snippets": ["±0.5MPa"]
+    },
+    {
+      "id": "spindle-lubrication",
+      "space_code": "evaluation-ragopt",
+      "query": "主轴P1的润滑周期和油品型号是什么",
+      "answerable": true,
+      "tags": ["zh", "table"],
+      "expected_document_titles": ["设备维护手册"],
+      "answer_snippets": ["P1", "L-AN46", "润滑周期"]
+    },
+    {
+      "id": "screw-lubrication",
+      "space_code": "evaluation-ragopt",
+      "query": "丝杠P3用什么油品润滑，加注量多少",
+      "answerable": true,
+      "tags": ["zh", "table"],
+      "expected_document_titles": ["设备维护手册"],
+      "answer_snippets": ["P3", "L-HG68", "加注量"]
+    },
+    {
+      "id": "toolchanger-lubrication",
+      "space_code": "evaluation-ragopt",
+      "query": "刀库机构P6的润滑周期和油品是什么",
+      "answerable": true,
+      "tags": ["zh", "table"],
+      "expected_document_titles": ["设备维护手册"],
+      "answer_snippets": ["P6", "L-HM32", "润滑周期"]
+    },
+    {
+      "id": "sampling-ratio-conflict",
+      "space_code": "evaluation-ragopt",
+      "query": "成品检验的抽样比例是多少",
+      "answerable": true,
+      "tags": ["zh", "conflict", "numeric"],
+      "expected_document_titles": ["质检抽样标准（2026版）", "质检抽样标准（2025版）"],
+      "answer_snippets": ["10%"]
+    },
+    {
+      "id": "safety-training-zh",
+      "space_code": "evaluation-ragopt",
+      "query": "新员工安全培训要在多长时间内完成",
+      "answerable": true,
+      "tags": ["zh"],
+      "expected_document_titles": ["新员工安全培训要求"]
+    },
+    {
+      "id": "unanswerable-stock-price",
+      "space_code": "evaluation-ragopt",
+      "query": "What will the company share price be tomorrow?",
+      "answerable": false,
+      "tags": ["en", "unanswerable"],
+      "expected_document_titles": []
+    },
+    {
+      "id": "unanswerable-canteen",
+      "space_code": "evaluation-ragopt",
+      "query": "明天食堂的菜单是什么",
+      "answerable": false,
+      "tags": ["zh", "unanswerable"],
+      "expected_document_titles": []
+    }
+  ]
+}

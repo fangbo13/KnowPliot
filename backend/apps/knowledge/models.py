@@ -114,6 +114,10 @@ class Document(models.Model):
     tags = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     version = models.IntegerField(default=1)
+    # RAG optimization spec Phase 7: aggregated user-feedback signal in
+    # [-1, 1], recomputed daily from Feedback→Message→Citation links.
+    # Applied as an ordering-only boost in retrieval (never rerank_score).
+    feedback_score = models.FloatField(default=0.0)
     parent_document = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="versions"
     )

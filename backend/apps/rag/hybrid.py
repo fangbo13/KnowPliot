@@ -17,7 +17,15 @@ from .cjk import cjk_tokens
 from .retriever import PgVectorRetriever, RetrievalFilters
 
 
-TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+# RAG optimization spec Phase 2: numeric/engineering tokens (0.05mm, ±0.1,
+# 5.2%, 25N·m, 1.6μm) survive tokenization as ONE token — the legacy pattern
+# shredded them at the decimal point and dropped ±/≥/≤ signs entirely.
+NUMERIC_TOKEN = r"[±≥≤]?\d+(?:\.\d+)?[A-Za-z_μ℃%·]*"
+TOKEN_PATTERN = re.compile(NUMERIC_TOKEN + r"|[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+NUMERIC_TOKEN_PATTERN = re.compile(NUMERIC_TOKEN)
+# Ordering-only boost when a query's numeric token appears verbatim in a
+# chunk — embeddings are numerically insensitive, exact figures are not.
+NUMERIC_MATCH_BOOST = 0.15
 # Spec §4: FY-shaped term codes (fy26) — used for cross-FY downweighting.
 FY_CODE_PATTERN = re.compile(r"^fy\d{2}$")
 # Spec §4 L3/L4 tuning constants.
@@ -73,6 +81,23 @@ def _tokens(value: str) -> set[str]:
         for token in TOKEN_PATTERN.findall(value or "")
         if token.lower() not in ENGLISH_STOP_WORDS
     }
+
+
+def _numeric_query_tokens(value: str) -> set[str]:
+    """Numeric tokens that plain word tokenization corrupts or loses.
+
+    Kept: decimals (0.05mm), signed tolerances (±0.1), percentages (5.2%),
+    number+unit compounds (25N·m). Plain integers are excluded — boosting
+    every \"2\" or \"30\" would add noise, and they already tokenize fine.
+    """
+    tokens: set[str] = set()
+    for match in NUMERIC_TOKEN_PATTERN.finditer(value or ""):
+        token = match.group(0)
+        if any(ch in token for ch in ".±≥≤%") or re.search(
+            r"\d[A-Za-zμ℃·]", token
+        ):
+            tokens.add(token.lower())
+    return tokens
 
 
 def _normalized_lexical_query(value: str) -> str:
@@ -335,6 +360,8 @@ class HybridRetriever:
             row["is_reference_library"] = is_reference
             row["document_status"] = doc.status
             row["document_version"] = doc.version
+            # Phase 7: carry the aggregated feedback signal for ordering.
+            row["feedback_score"] = float(getattr(doc, "feedback_score", 0.0) or 0.0)
 
     def _apply_query_signals(
         self, rows: list[dict], *, query: str, space_id: str, signals=None
@@ -356,6 +383,9 @@ class HybridRetriever:
                 signals = None
         query_terms = set(signals.term_codes) if signals else set()
         query_fys = set(signals.fiscal_year_codes) if signals else set()
+        # Phase 2: verbatim numeric hits (tolerances, percentages) outrank
+        # semantically-similar-but-numerically-wrong chunks.
+        numeric_tokens = _numeric_query_tokens(query)
 
         adjusted = []
         for row in rows:
@@ -365,6 +395,14 @@ class HybridRetriever:
             matched = sorted(query_terms & doc_terms)
             if matched:
                 score += TERM_MATCH_BOOST
+            matched_numerics = []
+            if numeric_tokens:
+                content_lower = (row.get("content") or "").lower()
+                matched_numerics = sorted(
+                    token for token in numeric_tokens if token in content_lower
+                )
+                if matched_numerics:
+                    score += NUMERIC_MATCH_BOOST
             # Query pins a fiscal year the document does not carry → downweight
             # (history stays retrievable, never hard-excluded).
             if query_fys and doc_fys and not (query_fys & doc_fys):
@@ -374,6 +412,12 @@ class HybridRetriever:
                 "is_reference_library"
             ):
                 score *= STALE_PENALTY
+            # Phase 7: feedback-driven nudge — documents users found helpful
+            # surface higher, repeatedly-wrong ones sink. Bounded ±0.05 so it
+            # only breaks ties, never overrides evidence.
+            feedback_score = float(row.get("feedback_score", 0.0) or 0.0)
+            if feedback_score:
+                score += 0.05 * feedback_score
             # P0 fix (§A2): boosts/penalties change the score scale, so they
             # only drive ORDERING (score / signal_adjusted_score). rerank_score
             # is left untouched — classify_confidence reads it against the
@@ -385,6 +429,8 @@ class HybridRetriever:
             }
             if matched:
                 row["matched_terms"] = matched
+            if matched_numerics:
+                row["matched_numerics"] = matched_numerics
             adjusted.append(row)
         return sorted(adjusted, key=lambda r: (-r["score"], str(r["id"])))
 

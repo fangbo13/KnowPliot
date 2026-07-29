@@ -53,6 +53,27 @@ class GuardrailsService:
         r"(?i)(?:---\s*(?:new|user|admin|developer)\s+(?:instructions?|command|prompt))",
         # Hypothetical framing
         r"(?i)(?:hypothetically|in a hypothetical|imagine|suppose)\b.*?\b(ignore|bypass|override|no longer)",
+        # RAG optimization spec Phase 8: Chinese injection patterns. The English
+        # rules above never matched Chinese, so "请忽略之前的指令" passed straight
+        # through. Patterns target imperative-verb + object shapes rather than
+        # single words to keep benign questions (e.g. "公司规则忽略节假日吗")
+        # from tripping the filter.
+        # 忽略/无视/忽视/忘记/抛开 … (之前|以上|上面|先前|所有|前面) … 指令/规则/设定/提示/限制
+        r"(?:忽略|无视|忽视|忘记|抛开|不要管)[^。\n]{0,12}(?:之前|以上|上面|先前|所有|前面|既定)?[^。\n]{0,6}(?:指令|命令|规则|规定|设定|提示词?|限制|约束)",
+        # 你现在是 / 你不再是 / 从现在开始你 (角色接管)
+        r"你现在是(?!否|不是)",
+        r"你不再是",
+        r"从现在开始，?你",
+        # 扮演/假装 (你是|自己是|成为) — role-play
+        r"(?:扮演|假装|模拟你是)[^。\n]{0,8}(?:你是|自己是|一个|黑客|管理员|成为)",
+        # 越狱 / 开发者模式 / DAN
+        r"越狱",
+        r"开发者模式",
+        # 绕过/突破/禁用/关闭 … (安全|限制|规则|过滤|护栏|防护)
+        r"(?:绕过|突破|禁用|关闭|解除)[^。\n]{0,8}(?:安全|限制|规则|过滤|护栏|防护|审查)",
+        # 索取/泄露系统提示词 — prompt-leak probing (动词在提示词前后均可)
+        r"(?:告诉我|输出|打印|发给我|显示|泄露|给我)[^。\n]{0,10}(?:系统)?提示词",
+        r"(?:系统)?提示词[^。\n]{0,10}(?:原文)?(?:发|告诉|给|输出|打印|显示|泄露)",
     ]
 
     def check_input(self, query: str) -> bool:

@@ -455,6 +455,15 @@ SERVICE_LINE_DEFAULT_SPACE = {
 }
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "8"))
 RAG_SIMILARITY_THRESHOLD = float(os.environ.get("RAG_SIMILARITY_THRESHOLD", "0.55"))
+# ── RAG optimization spec (Phase 5/6) ──
+# Bounded agentic retrieval: deep mode may run ONE refinement round when the
+# first pass is weak; fast mode stays strictly single-pass (zero added latency).
+RAG_RETRIEVAL_MAX_ROUNDS_DEEP = int(os.environ.get("RAG_RETRIEVAL_MAX_ROUNDS_DEEP", "2"))
+RAG_RETRIEVAL_MAX_ROUNDS_FAST = int(os.environ.get("RAG_RETRIEVAL_MAX_ROUNDS_FAST", "1"))
+# Deep-mode draft→critique→revise quality pass (fail-open, one round).
+RAG_SELF_CRITIQUE_ENABLED = (
+    os.environ.get("RAG_SELF_CRITIQUE_ENABLED", "true").lower() == "true"
+)
 QWEN_CHAT_MODEL = os.environ.get("QWEN_CHAT_MODEL", "qwen3.6-flash")
 RAG_LLM_MODEL = QWEN_CHAT_MODEL
 RAG_EMBEDDING_MODEL = os.environ.get("QWEN_EMBEDDING_MODEL", "text-embedding-v4")

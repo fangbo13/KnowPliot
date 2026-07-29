@@ -23,16 +23,25 @@ import re
 
 WORD_RE = re.compile(r"[A-Za-z0-9_]+")
 CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]+")
+# RAG optimization spec Phase 2: numeric/engineering tokens (0.05mm, ±0.1,
+# 5.2%) kept whole on BOTH ingest and query sides so tolerances are
+# lexically matchable — the word pattern alone shreds them at the decimal.
+NUMERIC_RE = re.compile(r"[±≥≤]?\d+(?:\.\d+)?[A-Za-z_μ℃%·]*")
+_TOKEN_SCAN_RE = re.compile(
+    r"[±≥≤]?\d+(?:\.\d+)?[A-Za-z_μ℃%·]*"
+    r"|[A-Za-z0-9_]+"
+    r"|[\u4e00-\u9fff\u3400-\u4dbf]+"
+)
 
 
 def cjk_tokens(text: str) -> list[str]:
-    """Return latin words + CJK bigrams for ``text`` (order preserved)."""
+    """Return latin words + numeric tokens + CJK bigrams (order preserved)."""
     if not text:
         return []
     tokens: list[str] = []
-    for match in re.finditer(r"[A-Za-z0-9_]+|[\u4e00-\u9fff\u3400-\u4dbf]+", text):
+    for match in _TOKEN_SCAN_RE.finditer(text):
         run = match.group(0)
-        if WORD_RE.fullmatch(run):
+        if NUMERIC_RE.fullmatch(run) or WORD_RE.fullmatch(run):
             tokens.append(run.lower())
             continue
         if len(run) == 1:

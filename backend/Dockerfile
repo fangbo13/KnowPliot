@@ -6,9 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install runtime dependencies (V4.1 SYS-V4.1-011: added ca-certificates for HTTPS)
+# libxcb1/libgl1/libglib2.0-0: required by Docling's opencv dependency for PDF parsing
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     ca-certificates \
+    libxcb1 \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PIP_TRUSTED_HOST=mirrors.aliyun.com

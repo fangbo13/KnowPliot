@@ -412,3 +412,72 @@ def update_session_memory(self, session_id: str):
         "summarized": len(to_summarize),
     }
 
+
+# ── RAG optimization spec Phase 7: feedback-driven retrieval signal ──
+
+# Weights for the per-document feedback score. Incorrect feedback is the
+# strongest negative signal (it means the cited document misled the answer).
+_FEEDBACK_WEIGHTS = {
+    "helpful": 1.0,
+    "unhelpful": -1.0,
+    "incorrect": -2.0,
+    "outdated": -1.0,
+    "missing_source": 0.0,
+}
+
+
+@shared_task(name="apps.chat.tasks.recompute_document_feedback_scores")
+def recompute_document_feedback_scores() -> dict:
+    """Aggregate Feedback→Message→Citation→Document into Document.feedback_score.
+
+    score = clamp((Σ weighted feedback) / max(count, 1), -1, 1). Applied as an
+    ordering-only retrieval boost (see hybrid._apply_query_signals) so good
+    documents surface higher and repeatedly-wrong ones sink — without ever
+    touching the calibrated rerank_score / confidence thresholds.
+    """
+    from collections import defaultdict
+
+    from django.db.models import Count
+
+    from apps.knowledge.models import Document
+
+    from .models import Citation, Feedback
+
+    # message_id -> {feedback_type: count}
+    per_message: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    feedback_rows = (
+        Feedback.objects.exclude(message_id=None)
+        .values("message_id", "feedback_type")
+        .annotate(n=Count("id"))
+    )
+    for row in feedback_rows:
+        per_message[str(row["message_id"])][row["feedback_type"]] += row["n"]
+    if not per_message:
+        return {"status": "no_feedback", "documents": 0}
+
+    # document_id -> [weighted_sum, count]
+    doc_acc: dict[str, list[float]] = defaultdict(lambda: [0.0, 0])
+    citations = Citation.objects.filter(
+        message_id__in=per_message.keys()
+    ).values("message_id", "document_id")
+    for citation in citations:
+        if citation["document_id"] is None:
+            continue
+        counts = per_message.get(str(citation["message_id"]), {})
+        for feedback_type, n in counts.items():
+            weight = _FEEDBACK_WEIGHTS.get(feedback_type, 0.0)
+            acc = doc_acc[str(citation["document_id"])]
+            acc[0] += weight * n
+            acc[1] += n
+
+    updated = 0
+    for document_id, (weighted_sum, count) in doc_acc.items():
+        if count == 0:
+            continue
+        score = max(-1.0, min(1.0, weighted_sum / count))
+        updated += Document.objects.filter(id=document_id).update(
+            feedback_score=round(score, 4)
+        )
+    logger.info("[feedback-score] documents=%d", updated)
+    return {"status": "ok", "documents": updated}
+

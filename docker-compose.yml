@@ -63,6 +63,10 @@ services:
       dockerfile: Dockerfile
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.docker
+      # Worker runs as nobody (--uid below) whose HOME=/root is not readable,
+      # so HuggingFace cache must point at a world-writable location or
+      # Docling PDF parsing dies with EACCES on /root/.cache/huggingface.
+      HF_HOME: /tmp/hf_cache
     command: celery -A config worker -l info -c 4 --uid=nobody --gid=nogroup
     volumes:
       - ./backend:/app
