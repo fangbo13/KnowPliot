@@ -114,7 +114,9 @@ class SessionCursorPagination(CursorPagination):
 
 # V3.5 HIGH-004: Cursor pagination for messages
 class MessageCursorPagination(CursorPagination):
-    ordering = '-created_at'
+    # Branch-order fix: copied messages can share a created_at value, so the
+    # cursor needs a unique tie-breaker to keep pagination stable.
+    ordering = ('-created_at', '-id')
     page_size = 40  # ~20 rounds
 
 
@@ -256,9 +258,20 @@ class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
 
     def perform_update(self, serializer):
-        """Only update title field — preserve updated_at so session stays in
-        its original position in the sidebar list instead of jumping to the top."""
-        serializer.save(update_fields=list(serializer.validated_data))
+        """Only update the submitted fields — preserve updated_at so the session
+        stays in its original position in the sidebar list instead of jumping
+        to the top.
+
+        Note: passing update_fields through serializer.save() does NOT work —
+        DRF merges extra kwargs into validated_data, so the previous version
+        silently ran a full save() and refreshed the auto_now updated_at.
+        """
+        instance = serializer.instance
+        updated_fields = list(serializer.validated_data)
+        for attr, value in serializer.validated_data.items():
+            setattr(instance, attr, value)
+        if updated_fields:
+            instance.save(update_fields=updated_fields)
 
 
 @api_view(["GET"])
@@ -395,6 +408,15 @@ def branch_from_message(request, message_id):
             if message.pk == source_message.pk:
                 break
         Message.objects.bulk_create(copied)
+        # Branch-order fix: bulk_create stamps every copy with "now()"
+        # (auto_now_add), so all copies share one created_at and the read-side
+        # ordering (created_at) returns them in arbitrary order — user/AI
+        # turns could flip. Restore the source chronology by rewriting each
+        # copy's created_at with the original message's timestamp (distinct
+        # and ordered); bulk_update bypasses auto_now_add on update.
+        for source, destination in zip(source_messages, copied, strict=False):
+            destination.created_at = source.created_at
+        Message.objects.bulk_update(copied, ["created_at"])
         citation_copies = []
         for source, destination in zip(source_messages, copied, strict=False):
             for citation in source.citations.all():
@@ -458,7 +480,7 @@ class ChatSessionMessagesView(generics.ListAPIView):
         )
         if self.request.query_params.get("include_versions") != "true":
             queryset = queryset.exclude(role="assistant", is_current_version=False)
-        return queryset.select_related("assistant_turn").order_by("created_at").prefetch_related(
+        return queryset.select_related("assistant_turn").order_by("created_at", "id").prefetch_related(
             "citations__document",
             "citations__space__organization",
             "citations__space__business_line",
@@ -1642,21 +1664,21 @@ def quick_actions(request):
 
     if language == "zh":
         actions = [
-            {"id": "1", "question": "如何设置我的公司邮箱和电脑？", "category": "it"},
-            {"id": "2", "question": "报销流程是什么？", "category": "hr"},
-            {"id": "3", "question": "我的年假有多少天？", "category": "benefits"},
-            {"id": "4", "question": "入职培训有哪些课程？", "category": "training"},
-            {"id": "5", "question": "办公室在哪里？怎么去？", "category": "office"},
-            {"id": "6", "question": "我的导师/Buddy是谁？", "category": "team"},
+            {"id": "1", "question": "审计适用哪些准则和规范？", "category": "standards"},
+            {"id": "2", "question": "如何进行内部控制评价？", "category": "control"},
+            {"id": "3", "question": "风险评估的流程是什么？", "category": "risk"},
+            {"id": "4", "question": "本次审计需要执行哪些程序？", "category": "procedures"},
+            {"id": "5", "question": "审计报告应包含哪些内容？", "category": "report"},
+            {"id": "6", "question": "关键合规要求有哪些？", "category": "compliance"},
         ]
     else:
         actions = [
-            {"id": "1", "question": "How do I set up my company email and laptop?", "category": "it"},
-            {"id": "2", "question": "What is the expense reimbursement process?", "category": "hr"},
-            {"id": "3", "question": "How many annual leave days do I have?", "category": "benefits"},
-            {"id": "4", "question": "What training courses are included in onboarding?", "category": "training"},
-            {"id": "5", "question": "Where is the office and how do I get there?", "category": "office"},
-            {"id": "6", "question": "Who is my mentor/buddy?", "category": "team"},
+            {"id": "1", "question": "What audit standards and regulations apply?", "category": "standards"},
+            {"id": "2", "question": "How do I assess internal controls?", "category": "control"},
+            {"id": "3", "question": "What is the risk assessment process?", "category": "risk"},
+            {"id": "4", "question": "What audit procedures are required for this engagement?", "category": "procedures"},
+            {"id": "5", "question": "What should the audit report include?", "category": "report"},
+            {"id": "6", "question": "What are the key compliance requirements?", "category": "compliance"},
         ]
 
     return Response({"actions": actions})

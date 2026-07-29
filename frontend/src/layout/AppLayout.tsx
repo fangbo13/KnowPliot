@@ -77,6 +77,8 @@ export default function AppLayout() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; title: string } | null>(null);
+  // In-flight lock: Modal Enter + OK click can both fire handleRenameSession.
+  const renameInFlightRef = useRef(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
 
   const debouncedSidebarSearch = useDebounce(sidebarSearch, 300);
@@ -252,9 +254,10 @@ export default function AppLayout() {
   const openRenameSession = useCallback((session: { id: string; title: string }) => { setRenameSessionTarget(session); closeMenu(); }, [closeMenu]);
 
   const handleRenameSession = useCallback(async (nextTitle: string) => {
-    if (!renameSessionTarget) return;
+    if (!renameSessionTarget || renameInFlightRef.current) return;
     const trimmed = nextTitle.trim();
     if (!trimmed) { void notify('warning', i18n.language?.startsWith('zh') ? '请输入对话标题' : 'Please enter a conversation title'); return; }
+    renameInFlightRef.current = true;
     try {
       await chatApi.renameSession(renameSessionTarget.id, trimmed);
       await loadSessions();
@@ -263,6 +266,8 @@ export default function AppLayout() {
     } catch (err) {
       console.error('Failed to rename session:', err);
       void notify('error', i18n.language?.startsWith('zh') ? '重命名失败，请重试' : 'Rename failed. Please try again');
+    } finally {
+      renameInFlightRef.current = false;
     }
   }, [loadSessions, renameSessionTarget]);
 

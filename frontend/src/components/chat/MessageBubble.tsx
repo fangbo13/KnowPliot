@@ -381,28 +381,15 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
           {sourcesExpanded && (
             <div className="citation-list">
               {message.citations.map((cit: Citation, i: number) => {
-                const sourceUrl = cit.source_url?.startsWith('/api/v1/chat/citations/')
-                  ? cit.source_url
-                  : null;
                 return (
                   <div key={cit.source_id ?? `${cit.document_id}-${i}`} className="citation-item">
                     <span className="citation-index">{i + 1}.</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {sourceUrl ? (
-                        <a
-                          className="citation-title"
-                          href={sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={cit.document_title}
-                        >
-                          {cit.document_title}
-                        </a>
-                      ) : (
-                        <div className="citation-title" title={cit.document_title}>
-                          {cit.document_title}
-                        </div>
-                      )}
+                      {/* Citation titles render as plain text — source links are
+                          intentionally disabled (no navigation from citations). */}
+                      <div className="citation-title" title={cit.document_title}>
+                        {cit.document_title}
+                      </div>
                       {cit.snippet && <div className="citation-snippet">{cit.snippet}</div>}
                       <div className="citation-meta">
                         {/* KB optimization spec §3.3: reference-library provenance badge */}

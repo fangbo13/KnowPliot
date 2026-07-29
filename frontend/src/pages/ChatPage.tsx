@@ -292,13 +292,18 @@ export default function ChatPageContainer() {
   };
   const cancelRenameTitle = () => { setRenameDraft(activeSessionTitle); setIsRenamingTitle(false); };
 
+  // In-flight lock: Enter + input blur can both fire handleRenameSession for
+  // the same draft — the second call must not send a duplicate PATCH.
+  const renameInFlightRef = useRef(false);
   const handleRenameSession = async (nextTitle: string) => {
-    if (!activeSessionId) return;
+    if (!activeSessionId || renameInFlightRef.current) return;
     const trimmed = nextTitle.trim();
     if (!trimmed) {
       void notify('warning', t('rename_empty_warning', { defaultValue: 'Please enter a title' }));
       return;
     }
+    if (trimmed === activeSessionTitle) { setIsRenamingTitle(false); return; }
+    renameInFlightRef.current = true;
     try {
       await chatApi.renameSession(activeSessionId, trimmed);
       await loadSessions();
@@ -307,6 +312,8 @@ export default function ChatPageContainer() {
     } catch (error) {
       console.error('Failed to rename session:', error);
       void notify('error', t('session_renamed_failed', { defaultValue: 'Rename failed. Please try again' }));
+    } finally {
+      renameInFlightRef.current = false;
     }
   };
 
