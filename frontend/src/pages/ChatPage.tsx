@@ -328,7 +328,7 @@ export default function ChatPageContainer() {
           onSendMessage={(m, opts) => sendMessage(m, { answerMode: opts?.answerMode ?? 'fast', ...(opts?.thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}), canUseDeep: true })}
           templateQuickQuestions={templateQuickQuestions}
         />
-        <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
+        <div className="chat-bottom-bar">
           <div style={{
             opacity: visibleAiStatusText ? 1 : 0,
             transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
@@ -509,7 +509,7 @@ export default function ChatPageContainer() {
         </div>
       </div>
 
-      <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
+      <div className="chat-bottom-bar">
         <div style={{
           opacity: visibleAiStatusText ? 1 : 0,
           transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',

@@ -246,7 +246,23 @@
 /* ============================================================================
    Chat view
    ============================================================================ */
-.chat-view { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; width: 100%; }
+.chat-view { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; width: 100%; position: relative; }
+
+/* Bottom bar (status indicator + composer). Absolutely positioned inside
+   .chat-view — NOT fixed to the viewport — so its centering axis matches the
+   message column (.msg-col centers within app-main) and follows the sidebar
+   expand/collapse transition instead of drifting off-center. */
+.chat-bottom-bar {
+  position: absolute;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 100;
+  pointer-events: none;
+}
 
 .chat-titlebar { display: flex; align-items: center; gap: 10px; padding: 14px 24px 6px; max-width: var(--content-max); width: 100%; margin: 0 auto; }
 .chat-title-btn {
