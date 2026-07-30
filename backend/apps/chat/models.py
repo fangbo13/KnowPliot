@@ -369,9 +369,14 @@ class Citation(models.Model):
     relevance_score = models.FloatField()
     page_number = models.IntegerField(null=True, blank=True)
     quoted_text = models.TextField(blank=True, default="")
+    # Prompt-order position ([文档 N] = position N): keeps the persisted
+    # Sources list aligned with the answer's inline citation numbering —
+    # unordered UUID rows gave Postgres free rein over the returned order.
+    position = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "chat_citation"
+        ordering = ["position", "id"]
 
     def __str__(self):
         return f"Citation: {self.document.title} (p.{self.page_number})"

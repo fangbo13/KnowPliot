@@ -646,19 +646,53 @@ def citation_source(request, citation_id):
     })
 
 
+def _citation_allowed_space_ids(space):
+    """Spaces whose documents may legitimately be cited in this session.
+
+    KB optimization spec §3.3: retrieval spans the session space PLUS any
+    published reference library the space has opted into — the citation
+    persistence guard must accept the same set, otherwise reference-library
+    citations are dropped and the Sources list shifts out of alignment with
+    the answer's [文档 N] numbering.
+    """
+    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+
+    allowed = {space.id}
+    try:
+        allowed.update(
+            SpaceLibraryReference.objects.filter(
+                space=space,
+                enabled=True,
+                library__status=ReferenceLibrary.STATUS_PUBLISHED,
+            ).values_list("library__space_id", flat=True)
+        )
+    except Exception:
+        logger.warning("citation_reference_space_lookup_failed", exc_info=True)
+    return allowed
+
+
 def _save_citations(assistant_message, citations_data, space=None):
     """Save citation records for an assistant message.
 
     V6.0: citations carry the message's space, and we defensively skip any
-    document that is not in the active space — retrieval is already space-scoped,
-    so this is a second line of defense against cross-space citation leakage.
+    document outside the allowed set — the session space plus its opted-in
+    published reference libraries (KB spec §3.3 cross-library retrieval).
+    ``position`` preserves the prompt order so the persisted Sources list
+    keeps matching the answer's [文档 N] numbering after reload.
     """
     from apps.knowledge.models import Document, DocumentChunk
 
-    for cit in citations_data:
+    allowed_space_ids = (
+        _citation_allowed_space_ids(space) if space is not None else None
+    )
+    for position, cit in enumerate(citations_data, start=1):
         try:
             doc = Document.objects.get(id=cit.get("document_id"))
-            if space is not None and doc.space_id is not None and doc.space_id != space.id:
+            if (
+                allowed_space_ids is not None
+                and doc.space_id is not None
+                and doc.space_id not in allowed_space_ids
+            ):
                 logger.warning(
                     "Skipping cross-space citation: doc %s (space %s) != session space %s",
                     doc.id, doc.space_id, space.id,
@@ -676,6 +710,7 @@ def _save_citations(assistant_message, citations_data, space=None):
                 page_number=cit.get("page_number"),
                 quoted_text=cit.get("quoted_text", ""),
                 space=space,
+                position=position,
             )
         except Exception:
             logger.warning(

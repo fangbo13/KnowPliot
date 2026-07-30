@@ -210,15 +210,37 @@ def _schedule_memory_update(session_id) -> None:
 
 
 def _save_citations(assistant_message, citations_data, space=None):
-    from apps.knowledge.models import Document, DocumentChunk
+    from apps.knowledge.models import (
+        Document,
+        DocumentChunk,
+        ReferenceLibrary,
+        SpaceLibraryReference,
+    )
 
-    for citation in citations_data:
+    # KB spec §3.3: documents from opted-in published reference libraries are
+    # legitimate citations — skipping them shifted the persisted Sources list
+    # out of alignment with the answer's [文档 N] numbering.
+    allowed_space_ids = None
+    if space is not None:
+        allowed_space_ids = {space.id}
+        try:
+            allowed_space_ids.update(
+                SpaceLibraryReference.objects.filter(
+                    space=space,
+                    enabled=True,
+                    library__status=ReferenceLibrary.STATUS_PUBLISHED,
+                ).values_list("library__space_id", flat=True)
+            )
+        except Exception:
+            logger.warning("citation_reference_space_lookup_failed", exc_info=True)
+
+    for position, citation in enumerate(citations_data, start=1):
         try:
             document = Document.objects.get(id=citation.get("document_id"))
             if (
-                space is not None
+                allowed_space_ids is not None
                 and document.space_id is not None
-                and document.space_id != space.id
+                and document.space_id not in allowed_space_ids
             ):
                 logger.warning(
                     "citation_scope_mismatch message_id=%s code=persistence_error",
@@ -238,6 +260,7 @@ def _save_citations(assistant_message, citations_data, space=None):
                 page_number=citation.get("page_number"),
                 quoted_text=citation.get("quoted_text", ""),
                 space=space,
+                position=position,
             )
         except Exception:
             logger.warning(
