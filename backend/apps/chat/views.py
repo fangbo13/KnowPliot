@@ -753,26 +753,26 @@ def _library_cap_for_mode(requested_answer_mode):
     return int(getattr(settings, "CHAT_LIBRARY_MAX_FAST", 1))
 
 
-def _canonical_selected_libraries(space, selected_ids, requested_answer_mode):
-    """Validate an explicit library selection against the session's space.
+def _canonical_selected_libraries(user, space, selected_ids, requested_answer_mode):
+    """Validate a selection against the user's five favorite official libraries.
 
-    Silently drops ids that are not opted-in/published for this space and
-    truncates to the per-mode cap (keeps the first N) — spec §4 mandates a
-    robust non-failing contract. Returns a list of library-id strings.
+    The official catalog is only the place where users configure shortcuts;
+    chat may cite a library only after this user has marked it as a favorite.
+    Invalid or stale ids are silently dropped, then the per-mode cap keeps the
+    first N selections. Returns a list of library-id strings.
     """
-    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+    from apps.knowledge.models import ReferenceLibrary
 
     wanted = list(dict.fromkeys(str(value) for value in (selected_ids or [])))
-    if not wanted or space is None:
+    if not wanted or user is None or space is None:
         return []
     valid_ids = set(
         str(value)
-        for value in SpaceLibraryReference.objects.filter(
-            space=space,
-            enabled=True,
-            library__status=ReferenceLibrary.STATUS_PUBLISHED,
-            library_id__in=wanted,
-        ).values_list("library_id", flat=True)
+        for value in ReferenceLibrary.objects.filter(
+            is_official=True,
+            id__in=wanted,
+            user_favorites__user=user,
+        ).exclude(space_id=space.id).values_list("id", flat=True)
     )
     canonical = [library_id for library_id in wanted if library_id in valid_ids]
     cap = _library_cap_for_mode(requested_answer_mode)
@@ -1219,6 +1219,7 @@ def send_message(request, session_id=None, message_id=None):
     )
     if selection_supplied:
         turn_library_ids = _canonical_selected_libraries(
+            user,
             space,
             serializer.validated_data["selected_library_ids"],
             requested_answer_mode,
@@ -1228,6 +1229,7 @@ def send_message(request, session_id=None, message_id=None):
             session.save(update_fields=["reference_library_ids", "updated_at"])
     elif session.reference_library_ids is not None:
         turn_library_ids = _canonical_selected_libraries(
+            user,
             space,
             session.reference_library_ids,
             requested_answer_mode,

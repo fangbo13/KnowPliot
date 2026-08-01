@@ -8,7 +8,7 @@
 // Not a fixed folder tree — any term combination narrows the document list.
 // Includes the "我负责的科目" quick view backed by /documents/my-terms/.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Checkbox, Collapse, Spin, Tag, Typography } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -25,6 +25,12 @@ interface Props {
 export function TaxonomyFilterPanel({ dimensions, loading, selectedCodes, onChange }: Props) {
   const { t } = useTranslation('common');
   const [myTerms, setMyTerms] = useState<TermOwnership[]>([]);
+  // Controlled activeKey so panels auto-expand when dimensions are async-loaded.
+  // defaultActiveKey only applies on first render (when dimensions is still empty).
+  const [activeKeys, setActiveKeys] = useState<string[]>([]);
+  // Track whether the one-time auto-expand has already run so collapsing all
+  // panels does not trigger re-expansion.
+  const autoExpandedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +39,14 @@ export function TaxonomyFilterPanel({ dimensions, loading, selectedCodes, onChan
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
+
+  // Auto-expand all dimension panels once dimensions data arrives.
+  useEffect(() => {
+    if (dimensions.length > 0 && !autoExpandedRef.current) {
+      autoExpandedRef.current = true;
+      setActiveKeys(dimensions.map((d) => d.code));
+    }
+  }, [dimensions]);
 
   const toggle = (code: string, checked: boolean) => {
     if (checked) onChange([...selectedCodes, code]);
@@ -77,7 +91,8 @@ export function TaxonomyFilterPanel({ dimensions, loading, selectedCodes, onChan
       <Collapse
         ghost
         size="small"
-        defaultActiveKey={dimensions.map((d) => d.code)}
+        activeKey={activeKeys}
+        onChange={(keys) => setActiveKeys(keys as string[])}
         items={dimensions.map((dimension) => ({
           key: dimension.code,
           label: (

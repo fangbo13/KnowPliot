@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip, Select } from 'antd';
+import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip, Select, Switch } from 'antd';
 import {
   InboxOutlined,
   DownloadOutlined,
@@ -27,7 +27,7 @@ import {
   DashboardOutlined,
   AuditOutlined,
   TagOutlined,
-  BookOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -38,7 +38,7 @@ import {
 } from '../../api/documents';
 import { reviewApi, taxonomyApi } from '../../api/knowledge';
 import type { TaxonomyDimension } from '../../api/knowledge';
-import { useAuthorization } from '../../auth/CapabilityProvider';
+import { useAuthorization, useCapabilities } from '../../auth/CapabilityProvider';
 import { MarkdownEditor } from '../../components/knowledge/MarkdownEditor';
 import { DiffPreview } from '../../components/knowledge/DiffPreview';
 import type { DiffPreviewData } from '../../components/knowledge/DiffPreview';
@@ -49,10 +49,10 @@ import { KnowledgeGraphPanel } from '../../components/knowledge/KnowledgeGraphPa
 import { TimelinePanel } from '../../components/knowledge/TimelinePanel';
 import { DashboardPanel } from '../../components/knowledge/DashboardPanel';
 import { TaxonomyManagerPanel } from '../../components/knowledge/TaxonomyManagerPanel';
-import { LibraryReferencesPanel } from '../../components/knowledge/LibraryReferencesPanel';
 import { BacklinksPanel } from '../../components/knowledge/BacklinksPanel';
-import { useAuth } from '../../auth/AuthProvider';
+import GuestOnboardingBanner from '../../components/knowledge/GuestOnboardingBanner';
 import { useSpaceStore } from '../../store/spaceStore';
+import { spacesApi } from '../../api/spaces';
 
 interface Document {
   id: string;
@@ -105,12 +105,12 @@ const tagStyleMap: Record<string, { bg: string; text: string; border: string }> 
 export default function KnowledgeBasePage() {
   const { t } = useTranslation('common');
   const access = useAuthorization();
-  const { user } = useAuth();
-  const { getActiveSpace } = useSpaceStore();
+  const capabilityState = useCapabilities();
+  const { getActiveSpace, loadSpaces } = useSpaceStore();
   const activeSpace = getActiveSpace();
+  const spaceId = activeSpace?.id;
   // KB optimization spec §2.1/§3.2: taxonomy mode + platform admin flag.
   const taxonomyMode = activeSpace?.taxonomy_mode ?? 'inherit';
-  const isPlatformAdmin = Boolean(user?.is_superuser || user?.is_super_admin);
   const canRead = access.has('knowledge.read');
   const canManage = access.has('knowledge.manage');
   const canIndex = access.has('knowledge.index');
@@ -165,6 +165,33 @@ export default function KnowledgeBasePage() {
   // Spec §3: contributors watermark shown in the version drawer
   const [contributors, setContributors] = useState<Array<{ id: string; name: string }>>([]);
   const [pageTab, setPageTab] = useState('documents');
+  // KB settings: review policy toggle (direct_publish | require_review)
+  const [reviewPolicy, setReviewPolicy] = useState<'direct_publish' | 'require_review'>(
+    activeSpace?.review_policy ?? 'direct_publish',
+  );
+  const [policySaving, setPolicySaving] = useState(false);
+  
+  useEffect(() => {
+    setReviewPolicy(activeSpace?.review_policy ?? 'direct_publish');
+  }, [activeSpace?.review_policy]);
+
+  // KB settings: save review policy toggle (direct_publish ↔ require_review)
+  const saveReviewPolicy = useCallback(async (next: 'direct_publish' | 'require_review') => {
+    if (!spaceId) return;
+    setPolicySaving(true);
+    try {
+      await spacesApi.update(spaceId, { review_policy: next });
+      await loadSpaces();
+      setReviewPolicy(next);
+      message.success(t('kb_policy_saved'));
+    } catch {
+      message.error(t('kb_policy_save_failed'));
+      // revert local state to server value
+      setReviewPolicy(activeSpace?.review_policy ?? 'direct_publish');
+    } finally {
+      setPolicySaving(false);
+    }
+  }, [spaceId, loadSpaces, t, activeSpace?.review_policy]);
 
   const loadDocuments = useCallback(async () => {
     if (!canRead) return;
@@ -573,6 +600,17 @@ export default function KnowledgeBasePage() {
       message.warning(t('kb_create_from_text_empty'));
       return;
     }
+    // Prevent creating a document with a duplicate title
+    const trimmedTitle = createTitle.trim();
+    if (trimmedTitle) {
+      const isDuplicate = documents.some(
+        (doc) => doc.title.toLowerCase() === trimmedTitle.toLowerCase(),
+      );
+      if (isDuplicate) {
+        message.warning(t('kb_create_from_text_duplicate'));
+        return;
+      }
+    }
     setCreateFromTextSaving(true);
     try {
       const result = await documentApi.createFromText({
@@ -812,6 +850,15 @@ export default function KnowledgeBasePage() {
           <h1 className="page-title">{t('nav_knowledge')}</h1>
           <p className="page-sub">{t('admin_knowledge_subtitle')}</p>
         </div>
+        {activeSpace?.my_role === 'guest' && spaceId ? (
+          <GuestOnboardingBanner
+            spaceId={spaceId}
+            onCompleted={async () => {
+              await loadSpaces();
+              capabilityState.refresh();
+            }}
+          />
+        ) : null}
         {/* Spec §2/§3/§5: documents / review queue / graph / timeline / dashboard.
             KB read-only access spec: browse-only roles (guest/reviewer) see the
             read tabs; management tabs require quality/manage capabilities. */}
@@ -829,11 +876,15 @@ export default function KnowledgeBasePage() {
             ...(access.has('quality.read') || canManage
               ? [{ key: 'dashboard', label: (<span><DashboardOutlined /> {t('kb_tab_dashboard')}</span>) }]
               : []),
-            // KB optimization spec §5.2/§5.3: taxonomy manager + reference libraries
+            // Taxonomy remains space-scoped; reference libraries moved to a
+            // top-level personal entry.
             ...(canManage
               ? [{ key: 'taxonomy', label: (<span><TagOutlined /> {t('kb_tab_taxonomy')}</span>) }]
               : []),
-            { key: 'libraries', label: (<span><BookOutlined /> {t('kb_tab_libraries')}</span>) },
+            // KB settings tab: visible to space owners / knowledge managers
+            ...(canManage
+              ? [{ key: 'settings', label: (<span><SettingOutlined /> {t('kb_tab_settings')}</span>) }]
+              : []),
           ]}
         />
         {!canManage && (
@@ -873,9 +924,44 @@ export default function KnowledgeBasePage() {
             />
           </Card>
         )}
-        {pageTab === 'libraries' && (
-          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
-            <LibraryReferencesPanel canManage={canManage} isPlatformAdmin={isPlatformAdmin} />
+        {pageTab === 'settings' && (
+          <Card styles={{ body: { padding: '28px 28px 24px' } }} className="glass-panel hover-lift" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <div style={{ marginBottom: 24 }}>
+              <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
+                {t('kb_settings_title')}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 24,
+                padding: '20px 0',
+                borderTop: '1px solid var(--color-border-secondary)',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--color-text)', marginBottom: 6 }}>
+                  {t('kb_review_switch_label')}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+                  {t('kb_review_switch_desc')}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 8 }}>
+                  {reviewPolicy === 'require_review'
+                    ? t('kb_review_switch_on')
+                    : t('kb_review_switch_off')}
+                </div>
+              </div>
+              <Switch
+                checked={reviewPolicy === 'require_review'}
+                loading={policySaving}
+                onChange={(checked) => {
+                  void saveReviewPolicy(checked ? 'require_review' : 'direct_publish');
+                }}
+              />
+            </div>
           </Card>
         )}
         {pageTab === 'documents' && (

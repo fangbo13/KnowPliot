@@ -282,9 +282,9 @@ class KnowledgeSpace(models.Model):
         help_text="Whether non-owner members can invite new users.",
     )
     join_code_updated_at = models.DateTimeField(null=True, blank=True)
-    # Knowledge iteration spec §3.1: space-level review gate. New spaces
-    # default to require_review; existing rows are backfilled to
-    # direct_publish by the migration so live spaces keep current behavior.
+    # Knowledge iteration spec §3.1: space-level review gate. Default is
+    # direct_publish (no approval needed); owners can enable require_review
+    # from KB settings when updates should go through review.
     REVIEW_POLICY_DIRECT = "direct_publish"
     REVIEW_POLICY_REQUIRE = "require_review"
     REVIEW_POLICY_CHOICES = [
@@ -294,7 +294,7 @@ class KnowledgeSpace(models.Model):
     review_policy = models.CharField(
         max_length=20,
         choices=REVIEW_POLICY_CHOICES,
-        default=REVIEW_POLICY_REQUIRE,
+        default=REVIEW_POLICY_DIRECT,
         help_text="Whether new document versions need reviewer approval before indexing.",
     )
     # KB optimization spec §2.1: how this space sources its taxonomy dimensions.
@@ -537,14 +537,16 @@ class SpaceMembership(models.Model):
     """
 
     ROLE_OWNER = "owner"
-    ROLE_KNOWLEDGE_ADMIN = "knowledge_admin"
-    ROLE_REVIEWER = "reviewer"
+    ROLE_SPACE_ADMIN = "space_admin"
+    # Deprecated aliases keep older import sites operational while ensuring
+    # every new model value is the canonical ``space_admin`` role.
+    ROLE_KNOWLEDGE_ADMIN = ROLE_SPACE_ADMIN
+    ROLE_REVIEWER = ROLE_SPACE_ADMIN
     ROLE_MEMBER = "member"
     ROLE_GUEST = "guest"
     ROLE_CHOICES = [
         (ROLE_OWNER, "Space Owner"),
-        (ROLE_KNOWLEDGE_ADMIN, "Knowledge Admin"),
-        (ROLE_REVIEWER, "Reviewer"),
+        (ROLE_SPACE_ADMIN, "Space Admin"),
         (ROLE_MEMBER, "Member"),
         (ROLE_GUEST, "Guest"),
     ]
@@ -583,6 +585,7 @@ class SpaceMembership(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_GUEST)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     membership_version = models.PositiveBigIntegerField(default=1)
+    onboarding_completed_at = models.DateTimeField(null=True, blank=True)
     source_kind = models.CharField(
         max_length=20,
         choices=SOURCE_CHOICES,
@@ -826,10 +829,7 @@ class SpaceAccessCode(models.Model):
         (STATUS_REVOKED, "Revoked"),
         (STATUS_EXPIRED, "Expired"),
     ]
-    ROLE_CHOICES = [
-        (SpaceMembership.ROLE_MEMBER, "Member"),
-        (SpaceMembership.ROLE_GUEST, "Guest"),
-    ]
+    ROLE_CHOICES = [(SpaceMembership.ROLE_GUEST, "Guest")]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     space = models.ForeignKey(
@@ -850,7 +850,7 @@ class SpaceAccessCode(models.Model):
     role_ceiling = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES,
-        default=SpaceMembership.ROLE_MEMBER,
+        default=SpaceMembership.ROLE_GUEST,
     )
     max_uses = models.PositiveIntegerField()
     used_count = models.PositiveIntegerField(default=0)
@@ -877,7 +877,7 @@ class SpaceAccessCode(models.Model):
                 name="spaces_access_code_hash_shape",
             ),
             models.CheckConstraint(
-                check=Q(role_ceiling__in=["member", "guest"]),
+                check=Q(role_ceiling="guest"),
                 name="spaces_access_code_role_ceiling",
             ),
             models.CheckConstraint(
@@ -919,12 +919,7 @@ class SpaceInvitation(models.Model):
         (STATUS_REVOKED, "Revoked"),
         (STATUS_INVALIDATED, "Invalidated"),
     ]
-    ROLE_CHOICES = [
-        (SpaceMembership.ROLE_KNOWLEDGE_ADMIN, "Knowledge Admin"),
-        (SpaceMembership.ROLE_REVIEWER, "Reviewer"),
-        (SpaceMembership.ROLE_MEMBER, "Member"),
-        (SpaceMembership.ROLE_GUEST, "Guest"),
-    ]
+    ROLE_CHOICES = [(SpaceMembership.ROLE_GUEST, "Guest")]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     space = models.ForeignKey(
@@ -995,7 +990,7 @@ class SpaceInvitation(models.Model):
                 name="spaces_invitation_key_evidence",
             ),
             models.CheckConstraint(
-                check=Q(role__in=["knowledge_admin", "reviewer", "member", "guest"]),
+                check=Q(role="guest"),
                 name="spaces_invitation_non_owner_role",
             ),
             models.CheckConstraint(
@@ -1073,11 +1068,8 @@ class InviteCode(models.Model):
     )
     role = models.CharField(
         max_length=20,
-        choices=[
-            (SpaceMembership.ROLE_MEMBER, "Member"),
-            (SpaceMembership.ROLE_GUEST, "Guest"),
-        ],
-        default=SpaceMembership.ROLE_MEMBER,
+        choices=[(SpaceMembership.ROLE_GUEST, "Guest")],
+        default=SpaceMembership.ROLE_GUEST,
     )
     compatibility_kind = models.CharField(
         max_length=32,
@@ -1102,7 +1094,7 @@ class InviteCode(models.Model):
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(
-                check=Q(role__in=["member", "guest"]),
+                check=Q(role="guest"),
                 name="spaces_legacy_invite_non_owner",
             ),
         ]
@@ -1208,7 +1200,7 @@ class SpaceEmailInvite(models.Model):
         KnowledgeSpace, on_delete=models.CASCADE, related_name="email_invites"
     )
     role = models.CharField(
-        max_length=20, choices=SpaceMembership.ROLE_CHOICES, default=SpaceMembership.ROLE_MEMBER
+        max_length=20, choices=[(SpaceMembership.ROLE_GUEST, "Guest")], default=SpaceMembership.ROLE_GUEST
     )
     invited_by = models.ForeignKey(
         django_settings.AUTH_USER_MODEL,
@@ -1260,10 +1252,7 @@ class SpaceAccessRequest(models.Model):
         (SOURCE_ACCESS_CODE, "Access Code"),
         (SOURCE_DISCOVERY, "Discovery"),
     ]
-    ROLE_CHOICES = [
-        (SpaceMembership.ROLE_MEMBER, "Member"),
-        (SpaceMembership.ROLE_GUEST, "Guest"),
-    ]
+    ROLE_CHOICES = [(SpaceMembership.ROLE_GUEST, "Guest")]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     space = models.ForeignKey(
@@ -1277,12 +1266,12 @@ class SpaceAccessRequest(models.Model):
     role = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES,
-        default=SpaceMembership.ROLE_MEMBER,
+        default=SpaceMembership.ROLE_GUEST,
     )
     role_ceiling = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES,
-        default=SpaceMembership.ROLE_MEMBER,
+        default=SpaceMembership.ROLE_GUEST,
     )
     source_kind = models.CharField(
         max_length=20,
@@ -1331,9 +1320,7 @@ class SpaceAccessRequest(models.Model):
                 name="spaces_one_pending_access_request",
             ),
             models.CheckConstraint(
-                check=Q(role__in=["member", "guest"])
-                & Q(role_ceiling__in=["member", "guest"])
-                & (~Q(role_ceiling="guest") | Q(role="guest")),
+                check=Q(role="guest") & Q(role_ceiling="guest"),
                 name="spaces_access_request_role_ceiling",
             ),
             models.CheckConstraint(

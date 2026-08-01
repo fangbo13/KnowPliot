@@ -119,9 +119,12 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         # stop at pending_review — approval is the only path into the index.
         from apps.knowledge.review_views import (
             create_review_request,
+            owner_bypasses_review,
             space_requires_review,
         )
-        if space_requires_review(space):
+        if space_requires_review(space) and not owner_bypasses_review(
+            self.request.user, space
+        ):
             doc.status = "pending_review"
             doc.save(update_fields=["status", "updated_at"])
             create_review_request(
@@ -636,6 +639,10 @@ def _create_version_atomically(
         current_doc.effective_to = effective_from
         current_doc.status = "superseded"
         current_doc.save(update_fields=["effective_to", "status", "updated_at"])
+        # Detach Citation references before deleting chunks to avoid
+        # ProtectedError from Citation.chunk (on_delete=PROTECT).
+        from apps.chat.models import Citation
+        Citation.objects.filter(chunk__document=current_doc).update(chunk=None)
         DocumentChunk.objects.filter(document=current_doc).delete()
     else:
         # Scheduled: old version stays active, but effective_to caps at new version
@@ -796,9 +803,14 @@ class DocumentVersionCreateView(APIView):
         # endpoint later runs the same atomic switch.
         from apps.knowledge.review_views import (
             create_pending_version,
+            owner_bypasses_review,
             space_requires_review,
         )
-        if document.space is not None and space_requires_review(document.space):
+        if (
+            document.space is not None
+            and space_requires_review(document.space)
+            and not owner_bypasses_review(request.user, document.space)
+        ):
             with transaction.atomic():
                 current_doc = (
                     Document.objects

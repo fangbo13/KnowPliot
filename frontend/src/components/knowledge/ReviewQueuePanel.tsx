@@ -14,6 +14,7 @@ import { CheckOutlined, CloseOutlined, WarningOutlined } from '@ant-design/icons
 import { useTranslation } from 'react-i18next';
 import { reviewApi } from '../../api/knowledge';
 import type { ReviewRequestInfo } from '../../api/knowledge';
+import { useAuth } from '../../auth/AuthProvider';
 
 interface Props {
   onDecided?: () => void;
@@ -27,6 +28,7 @@ const decisionColor: Record<string, string> = {
 
 export function ReviewQueuePanel({ onDecided }: Props) {
   const { t } = useTranslation('common');
+  const { user } = useAuth();
   const [decision, setDecision] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [reviews, setReviews] = useState<ReviewRequestInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -153,24 +155,30 @@ export function ReviewQueuePanel({ onDecided }: Props) {
                       )}
                     </div>
                     {review.decision === 'pending' && (
-                      <Space>
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<CheckOutlined />}
-                          onClick={() => openDecide(review, 'approve')}
-                        >
-                          {t('review_approve')}
-                        </Button>
-                        <Button
-                          danger
-                          size="small"
-                          icon={<CloseOutlined />}
-                          onClick={() => openDecide(review, 'reject')}
-                        >
-                          {t('review_reject')}
-                        </Button>
-                      </Space>
+                      review.submitted_by.id === user?.id ? (
+                        <Tag color="warning" icon={<WarningOutlined />}>
+                          {t('review_self_blocked')}
+                        </Tag>
+                      ) : (
+                        <Space>
+                          <Button
+                            type="primary"
+                            size="small"
+                            icon={<CheckOutlined />}
+                            onClick={() => openDecide(review, 'approve')}
+                          >
+                            {t('review_approve')}
+                          </Button>
+                          <Button
+                            danger
+                            size="small"
+                            icon={<CloseOutlined />}
+                            onClick={() => openDecide(review, 'reject')}
+                          >
+                            {t('review_reject')}
+                          </Button>
+                        </Space>
+                      )
                     )}
                   </div>
                 </Card>

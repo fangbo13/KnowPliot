@@ -165,6 +165,9 @@ class UserManageSerializer(serializers.ModelSerializer):
 
     roles = serializers.SerializerMethodField()
     is_active = serializers.SerializerMethodField()
+    business_line_name = serializers.CharField(
+        source="business_line.name", read_only=True, default=None
+    )
 
     class Meta:
         model = User
@@ -174,6 +177,8 @@ class UserManageSerializer(serializers.ModelSerializer):
             "username",
             "employee_id",
             "service_line",
+            "business_line",
+            "business_line_name",
             "office_location",
             "role_level",
             "is_hr_admin",
@@ -182,7 +187,7 @@ class UserManageSerializer(serializers.ModelSerializer):
             "start_date",
             "language_preference",
         ]
-        read_only_fields = ["id", "email", "roles", "is_active"]
+        read_only_fields = ["id", "email", "roles", "is_active", "business_line", "business_line_name"]
 
     def get_roles(self, obj):
         from apps.rbac.models import UserRole

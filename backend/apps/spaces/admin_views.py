@@ -897,6 +897,7 @@ class AdminSpaceListSerializer(serializers.ModelSerializer):
     owner_name = serializers.SerializerMethodField()
     member_count = serializers.SerializerMethodField()
     document_count = serializers.SerializerMethodField()
+    reference_library_info = serializers.SerializerMethodField()
 
     class Meta:
         model = KnowledgeSpace
@@ -923,6 +924,7 @@ class AdminSpaceListSerializer(serializers.ModelSerializer):
             "updated_at",
             "member_count",
             "document_count",
+            "reference_library_info",
         ]
         read_only_fields = fields
 
@@ -947,6 +949,18 @@ class AdminSpaceListSerializer(serializers.ModelSerializer):
             for loc in obj.office_locations.all()
         ]
 
+    def get_reference_library_info(self, obj):
+        """Return reference library certification info if this space is certified."""
+        ref_lib = getattr(obj, "reference_library", None)
+        if ref_lib is None:
+            return None
+        return {
+            "id": str(ref_lib.id),
+            "name": ref_lib.name,
+            "category": ref_lib.category,
+            "status": ref_lib.status,
+        }
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -962,13 +976,13 @@ def admin_space_list(request):
         if not org_ids and not line_ids:
             return Response({"results": [], "count": 0, "next": None, "previous": None})
         qs = KnowledgeSpace.objects.select_related(
-            "organization", "business_line", "work_group", "owner"
+            "organization", "business_line", "work_group", "owner", "reference_library"
         ).prefetch_related("office_locations").filter(
             Q(organization_id__in=org_ids) | Q(business_line_id__in=line_ids)
         )
     else:
         qs = KnowledgeSpace.objects.select_related(
-            "organization", "business_line", "work_group", "owner"
+            "organization", "business_line", "work_group", "owner", "reference_library"
         ).prefetch_related("office_locations")
 
     status_filter = request.query_params.get("status")

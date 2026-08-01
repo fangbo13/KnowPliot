@@ -9,7 +9,7 @@
 // resolved purely from the capability snapshot — no new backend contract.
 
 import {
-  ApartmentOutlined, AppstoreOutlined, BookOutlined, RightOutlined, TeamOutlined,
+  ApartmentOutlined, AppstoreOutlined, RightOutlined, TeamOutlined,
 } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import { Tag } from 'antd';
@@ -34,14 +34,13 @@ const VISIBLE_SPACES_COLLAPSED = 5;
 // Roles that carry workspace-management responsibility (final access is still
 // gated by WorkspaceCapabilityBoundary + CapabilityGate on the target route).
 const MANAGING_ROLES: ReadonlySet<SpaceRole> = new Set([
-  'super_admin', 'org_admin', 'business_admin', 'owner', 'knowledge_admin',
+  'super_admin', 'org_admin', 'business_admin', 'owner', 'space_admin', 'knowledge_admin',
 ]);
 
 export default function ConsoleHubPage() {
   const { t } = useTranslation('common');
   const access = useAuthorization();
   const spaces = useSpaceStore((state) => state.spaces);
-  const activeSpaceId = useSpaceStore((state) => state.activeSpaceId);
   const [showAllSpaces, setShowAllSpaces] = useState(false);
 
   // Spec §2.3: spaces I can manage — managing role, plus the capability
@@ -58,7 +57,6 @@ export default function ConsoleHubPage() {
   const showPlatform = access.has('platform.access');
   const showGovernance = access.has('governance.access');
   const showWorkspace = manageableSpaces.length > 0;
-  const showKnowledge = Boolean(activeSpaceId) && access.has('knowledge.manage');
 
   if (access.status === 'loading') {
     return (
@@ -67,7 +65,7 @@ export default function ConsoleHubPage() {
       </div>
     );
   }
-  if (!showPlatform && !showGovernance && !showWorkspace && !showKnowledge) {
+  if (!showPlatform && !showGovernance && !showWorkspace) {
     return <ForbiddenPage />;
   }
 
@@ -140,6 +138,9 @@ export default function ConsoleHubPage() {
                 <div key={space.id} className="kp-hub-space-row">
                   <span className="kp-hub-space-row__name">{space.name}</span>
                   <Tag>{space.my_role}</Tag>
+                  <Link className="kp-hub-space-row__manage" to={`/workspace/${space.id}/knowledge`}>
+                    {t('knowledge_spaces_enter')} <RightOutlined />
+                  </Link>
                   <Link className="kp-hub-space-row__manage" to={`/workspace/${space.id}/manage`}>
                     {t('console_hub_manage')} <RightOutlined />
                   </Link>
@@ -151,13 +152,6 @@ export default function ConsoleHubPage() {
                 </button>
               )}
             </div>
-          </Surface>
-        )}
-
-        {showKnowledge && (
-          <Surface as="section" className="kp-hub-card">
-            {renderCardHeader(<BookOutlined />, 'knowledge_base', `/workspace/${activeSpaceId}/knowledge`)}
-            <p className="kp-hub-card__desc">{t('console_hub_card_knowledge_desc')}</p>
           </Surface>
         )}
       </div>

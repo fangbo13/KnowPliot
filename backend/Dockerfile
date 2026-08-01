@@ -7,7 +7,9 @@ ENV PYTHONUNBUFFERED=1
 
 # Install runtime dependencies (V4.1 SYS-V4.1-011: added ca-certificates for HTTPS)
 # libxcb1/libgl1/libglib2.0-0: required by Docling's opencv dependency for PDF parsing
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Use Aliyun mirror to avoid network issues with default deb.debian.org
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     ca-certificates \
     libxcb1 \

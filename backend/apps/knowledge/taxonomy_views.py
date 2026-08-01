@@ -50,7 +50,7 @@ from .models import (
     TermOwnership,
 )
 
-TAXONOMY_ADMIN_ROLES = {"owner", "knowledge_admin"}
+TAXONOMY_ADMIN_ROLES = {"owner", "space_admin"}
 
 
 # ── Serializers ──────────────────────────────────────────────────────

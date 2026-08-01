@@ -13,8 +13,8 @@ import hashlib
 import unicodedata
 import uuid
 
-from django.db import models
 from django.conf import settings
+from django.db import models
 
 
 def _locator_digest(value):
@@ -850,6 +850,9 @@ class ReferenceLibrary(models.Model):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default=STATUS_UNPUBLISHED
     )
+    # Authoritative publication flag for the global user-facing catalog.
+    # ``status`` remains for backwards compatibility with older admin clients.
+    is_official = models.BooleanField(default=False, db_index=True)
     published_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -870,6 +873,46 @@ class ReferenceLibrary(models.Model):
 
     def __str__(self):
         return f"{self.name} [{self.category}/{self.status}]"
+
+
+class UserReferenceLibraryFavorite(models.Model):
+    """A user's global shortcut to an official reference library."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reference_library_favorites",
+    )
+    library = models.ForeignKey(
+        ReferenceLibrary,
+        on_delete=models.CASCADE,
+        related_name="user_favorites",
+    )
+    position = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_userreferencelibraryfavorite"
+        ordering = ["position", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "library"],
+                name="knowledge_user_reflib_favorite_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "position"],
+                name="knowledge_user_reflib_position_uniq",
+            ),
+            models.CheckConstraint(
+                check=models.Q(position__gte=1, position__lte=5),
+                name="knowledge_user_reflib_position_range",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} ★ {self.library_id} ({self.position})"
 
 
 class SpaceLibraryReference(models.Model):

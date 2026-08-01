@@ -22,8 +22,7 @@ from .models import KnowledgeSpace, OwnershipTransfer, SpaceMembership
 
 
 MUTABLE_ROLES = {
-    SpaceMembership.ROLE_KNOWLEDGE_ADMIN,
-    SpaceMembership.ROLE_REVIEWER,
+    SpaceMembership.ROLE_SPACE_ADMIN,
     SpaceMembership.ROLE_MEMBER,
     SpaceMembership.ROLE_GUEST,
 }
@@ -50,7 +49,10 @@ def member_body(membership, *, canonical_owner_id=None):
 
 def list_members(*, actor, space):
     _require_member_management(actor=actor, space_id=space.id)
-    if space.owner_id != actor.id or space.status not in {"active", "archived"}:
+    actor_role = SpaceMembership.objects.filter(
+        space=space, user=actor, status="active", expires_at__isnull=True
+    ).values_list("role", flat=True).first()
+    if actor_role not in {SpaceMembership.ROLE_OWNER, SpaceMembership.ROLE_SPACE_ADMIN} or space.status not in {"active", "archived"}:
         raise NotFound("Workspace not found.")
     rows = SpaceMembership.objects.filter(space=space).select_related("user").order_by("created_at", "id")[:100]
     return {"results": [member_body(row, canonical_owner_id=space.owner_id) for row in rows], "next_cursor": None}
@@ -214,7 +216,10 @@ def update_member(
             target_user = next((row for row in users if row.id == reference.user_id), None)
             space = KnowledgeSpace.objects.select_for_update(of=("self",)).order_by("pk").get(pk=space_id)
             membership = SpaceMembership.objects.select_for_update(of=("self",)).select_related("user").order_by("pk").get(pk=membership_id, space=space)
-            if space.owner_id != actor.id or space.status not in {"active", "archived"}:
+            actor_role = SpaceMembership.objects.filter(
+                space=space, user=actor, status="active", expires_at__isnull=True
+            ).values_list("role", flat=True).first()
+            if actor_role not in {SpaceMembership.ROLE_OWNER, SpaceMembership.ROLE_SPACE_ADMIN} or space.status not in {"active", "archived"}:
                 raise NotFound("Workspace not found.")
             if membership.user_id == space.owner_id or membership.role == SpaceMembership.ROLE_OWNER:
                 raise GovernedWorkflowError("ownership_workflow_required")
@@ -226,6 +231,11 @@ def update_member(
             next_status = fields.get("status", membership.status)
             if next_role not in MUTABLE_ROLES:
                 raise GovernedWorkflowError("ownership_workflow_required")
+            if actor_role == SpaceMembership.ROLE_SPACE_ADMIN and (
+                membership.role == SpaceMembership.ROLE_SPACE_ADMIN
+                or next_role == SpaceMembership.ROLE_SPACE_ADMIN
+            ):
+                raise GovernedWorkflowError("workspace_admin_required", status_code=403)
             if next_status not in {"active", "revoked"}:
                 raise ValidationError({"status": "Unsupported member status."})
             expires_at = membership.expires_at
@@ -294,10 +304,15 @@ def remove_member(
             target_user = next((row for row in users if row.id == reference.user_id), None)
             space = KnowledgeSpace.objects.select_for_update(of=("self",)).order_by("pk").get(pk=space_id)
             membership = SpaceMembership.objects.select_for_update(of=("self",)).select_related("user").order_by("pk").get(pk=membership_id, space=space)
-            if space.owner_id != actor.id or space.status not in {"active", "archived"}:
+            actor_role = SpaceMembership.objects.filter(
+                space=space, user=actor, status="active", expires_at__isnull=True
+            ).values_list("role", flat=True).first()
+            if actor_role not in {SpaceMembership.ROLE_OWNER, SpaceMembership.ROLE_SPACE_ADMIN} or space.status not in {"active", "archived"}:
                 raise NotFound("Workspace not found.")
             if membership.user_id == space.owner_id or membership.role == SpaceMembership.ROLE_OWNER:
                 raise GovernedWorkflowError("ownership_workflow_required")
+            if actor_role == SpaceMembership.ROLE_SPACE_ADMIN and membership.role == SpaceMembership.ROLE_SPACE_ADMIN:
+                raise GovernedWorkflowError("workspace_admin_required", status_code=403)
             if membership.membership_version != expected_version:
                 raise GovernedWorkflowError("stale_membership_version", details={"current_version": membership.membership_version})
             transfers = list(

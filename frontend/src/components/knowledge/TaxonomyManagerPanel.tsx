@@ -236,17 +236,17 @@ export function TaxonomyManagerPanel({ taxonomyMode, canManage, onChanged }: Pro
             )}
           </Empty>
         ) : (
-          dimensions.map((dim) => (
-            <div
-              key={dim.id}
-              style={{
-                border: '1px solid var(--color-border)',
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 12,
-                background: 'var(--color-bg-container)',
-              }}
-            >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {dimensions.map((dim) => (
+              <div
+                key={dim.id}
+                style={{
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 8,
+                  padding: 12,
+                  background: 'var(--color-bg-container)',
+                }}
+              >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                 <strong>{dim.name}</strong>
                 <Tag>{dim.code}</Tag>
@@ -283,7 +283,8 @@ export function TaxonomyManagerPanel({ taxonomyMode, canManage, onChanged }: Pro
                 <Tree treeData={buildTermNodes(dim, null)} defaultExpandAll selectable={false} />
               )}
             </div>
-          ))
+            ))}
+          </div>
         )}
       </Spin>
 

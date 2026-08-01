@@ -55,6 +55,9 @@ class ReviewFlowTest(TestCase):
         cls.member = User.objects.create_user(
             username="rv-member", email="rv-member@example.test", password="pw"
         )
+        cls.knowledge_admin = User.objects.create_user(
+            username="rv-kadmin", email="rv-kadmin@example.test", password="pw"
+        )
         cls.org = Organization.objects.create(name="Review org", slug="review-org")
         cls.space = create_space_with_owner(
             organization=cls.org,
@@ -74,6 +77,10 @@ class ReviewFlowTest(TestCase):
         SpaceMembership.objects.create(
             space=cls.space, user=cls.member,
             role=SpaceMembership.ROLE_MEMBER, status="active",
+        )
+        SpaceMembership.objects.create(
+            space=cls.space, user=cls.knowledge_admin,
+            role=SpaceMembership.ROLE_KNOWLEDGE_ADMIN, status="active",
         )
 
     def setUp(self):
@@ -97,11 +104,13 @@ class ReviewFlowTest(TestCase):
             headers["HTTP_IDEMPOTENCY_KEY"] = str(uuid.uuid4())
         return self.client.post(path, data, format="json", **headers)
 
-    def _stage_version(self):
+    def _stage_version(self, user=None):
+        """Stage a version as pending_review via a non-owner user."""
+        user = user or self.member
         resp = self._post(
             f"/api/v1/documents/{self.doc.id}/versions/",
             {"text_content": "Line 1\nLine 2 modified", "reason": "gated edit"},
-            self.owner,
+            user,
         )
         self.assertEqual(resp.status_code, 202, resp.data)
         return resp.data
@@ -120,7 +129,7 @@ class ReviewFlowTest(TestCase):
         self.assertEqual(self.doc.status, "active")
         review = ReviewRequest.objects.get(id=data["review_id"])
         self.assertEqual(review.decision, "pending")
-        self.assertEqual(review.submitted_by_id, self.owner.id)
+        self.assertEqual(review.submitted_by_id, self.member.id)
         self.assertIn("added_lines", review.diff_summary)
 
     @patch("apps.rag.pipeline.RAGPipeline")
@@ -160,10 +169,12 @@ class ReviewFlowTest(TestCase):
         self.assertEqual(DocumentChunk.objects.filter(document=new_doc).count(), 0)
 
     def test_submitter_cannot_decide_own_review(self, _dc):
-        data = self._stage_version()
+        # knowledge_admin submits (goes through review — not owner bypass)
+        # and is a reviewer, but cannot approve their own submission.
+        data = self._stage_version(self.knowledge_admin)
         resp = self._post(
             f"/api/v1/documents/reviews/{data['review_id']}/approve/",
-            {}, self.owner, idem=False,
+            {}, self.knowledge_admin, idem=False,
         )
         self.assertEqual(resp.status_code, 403, resp.data)
         self.assertEqual(
@@ -188,7 +199,7 @@ class ReviewFlowTest(TestCase):
             {"comment": "no"}, self.reviewer, idem=False,
         )
         resp = self._post(
-            f"/api/v1/documents/{data['id']}/submit-review/", {}, self.owner, idem=False,
+            f"/api/v1/documents/{data['id']}/submit-review/", {}, self.member, idem=False,
         )
         self.assertEqual(resp.status_code, 201, resp.data)
         new_doc = Document.objects.get(id=data["id"])
@@ -196,3 +207,46 @@ class ReviewFlowTest(TestCase):
         self.assertEqual(
             ReviewRequest.objects.filter(document_id=data["id"]).count(), 2
         )
+
+    # ── Owner bypass (spec §3): owner may directly publish — no review gate ─
+
+    @patch("apps.rag.pipeline.RAGPipeline")
+    def test_owner_version_bypasses_review(self, mock_pipeline_cls, _dc):
+        """Space owner may directly publish a new version without review."""
+        mock_pipeline_cls.return_value.ingest_text_content.side_effect = (
+            _fake_ingest_text_content
+        )
+        resp = self._post(
+            f"/api/v1/documents/{self.doc.id}/versions/",
+            {"text_content": "Line 1\nLine 2 owner bypass", "reason": "owner edit"},
+            self.owner,
+        )
+        # Owner bypasses review → 201 (directly published), not 202
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertNotIn("pending_review", resp.data)
+        new_doc = Document.objects.get(id=resp.data["id"])
+        self.assertEqual(new_doc.status, "active")
+        # No ReviewRequest should exist for the owner's version
+        self.assertFalse(
+            ReviewRequest.objects.filter(document_id=new_doc.id).exists()
+        )
+        # Chunks created (direct publish)
+        self.assertGreater(
+            DocumentChunk.objects.filter(document=new_doc).count(), 0
+        )
+        # Parent superseded
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.status, "superseded")
+
+    @patch("apps.knowledge.ingestion.enqueue_document_ingestion")
+    def test_owner_upload_bypasses_review(self, mock_enqueue, _dc):
+        """Space owner uploads → document skips pending_review (spec §3)."""
+        resp = self._post(
+            "/api/v1/documents/",
+            {"title": "Owner Direct Upload", "text_content": "Owner content"},
+            self.owner,
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        doc = Document.objects.get(id=resp.data["id"])
+        self.assertNotEqual(doc.status, "pending_review")
+        self.assertFalse(ReviewRequest.objects.filter(document_id=doc.id).exists())

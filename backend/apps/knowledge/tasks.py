@@ -122,6 +122,10 @@ def purge_superseded_chunks() -> dict:
     )
     deleted = 0
     if doc_ids:
+        from apps.chat.models import Citation
+        # Detach Citation references before deleting chunks to avoid
+        # ProtectedError from Citation.chunk (on_delete=PROTECT).
+        Citation.objects.filter(chunk__document_id__in=doc_ids).update(chunk=None)
         deleted, _ = DocumentChunk.objects.filter(document_id__in=doc_ids).delete()
     logger.info(
         "[chunk-purge] documents=%d chunks_deleted=%d retention_days=%d",

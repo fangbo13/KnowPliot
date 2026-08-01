@@ -114,19 +114,19 @@ export default function SpaceManagementPage() {
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState('private');
   // Spec §3: space-level review gate (direct_publish | require_review)
-  const [reviewPolicy, setReviewPolicy] = useState('require_review');
+  const [reviewPolicy, setReviewPolicy] = useState('direct_publish');
   const [savingSettings, setSavingSettings] = useState(false);
 
   // Invite creation
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteRole, setInviteRole] = useState<SpaceRole>('member');
+  const [inviteRole] = useState<SpaceRole>('guest');
   const [inviteMaxUses, setInviteMaxUses] = useState<number>(20);
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
 
   // V7.0: add member by email
   const [memberEmail, setMemberEmail] = useState('');
-  const [memberRole, setMemberRole] = useState<SpaceRole>('member');
+  const [memberRole] = useState<SpaceRole>('guest');
   const [addingMember, setAddingMember] = useState(false);
 
   // Join policy management
@@ -186,7 +186,7 @@ export default function SpaceManagementPage() {
     setName(active.name);
     setDescription(active.description);
     setVisibility(active.visibility);
-        setReviewPolicy(active.review_policy || 'require_review');
+        setReviewPolicy(active.review_policy || 'direct_publish');
     setJoinCodeInfo({
       space_id: active.id,
       join_policy: active.join_policy,
@@ -435,9 +435,9 @@ export default function SpaceManagementPage() {
     }
   };
 
-  // Roles assignable from this page. 'guest' is removed per Bug#13 — accepted
-  // invitations default to 'member'. Only the owner can change roles.
-  const MEMBER_ROLE_OPTIONS: SpaceRole[] = ['knowledge_admin', 'reviewer', 'member'];
+  const MEMBER_ROLE_OPTIONS: SpaceRole[] = isOwner
+    ? ['space_admin', 'member', 'guest']
+    : ['member', 'guest'];
 
   if (!active) {
     return (
@@ -681,10 +681,10 @@ export default function SpaceManagementPage() {
               />
               <Select
                 value={memberRole}
-                onChange={(v) => setMemberRole(v as SpaceRole)}
+                disabled
                 style={{ width: 170 }}
                 classNames={{ popup: { root: 'menu-pop-dropdown' } }}
-                options={MEMBER_ROLE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+                options={[{ value: 'guest', label: 'guest' }]}
               />
               <Button
                 type="primary"
@@ -711,7 +711,8 @@ export default function SpaceManagementPage() {
                       <Tag color={rec.status === 'active' ? 'green' : 'default'}>{rec.status}</Tag>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      {isOwner && canManageMembers && rec.status === 'active' && rec.role !== 'owner' ? (
+                      {canManageMembers && rec.status === 'active' && rec.role !== 'owner'
+                        && (isOwner || rec.role !== 'space_admin') ? (
                         <Select
                           size="small"
                           value={rec.role}
@@ -909,14 +910,10 @@ export default function SpaceManagementPage() {
               <Select
                 size="large"
                 value={inviteRole}
-                onChange={(v) => setInviteRole(v as SpaceRole)}
+                disabled
                 style={{ width: '100%', marginTop: 6 }}
                 classNames={{ popup: { root: 'menu-pop-dropdown' } }}
-                options={[
-                  { value: 'member', label: 'member' },
-                  { value: 'reviewer', label: 'reviewer' },
-                  { value: 'knowledge_admin', label: 'knowledge_admin' },
-                ]}
+                options={[{ value: 'guest', label: 'guest' }]}
               />
             </div>
             <div>

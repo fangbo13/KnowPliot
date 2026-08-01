@@ -54,9 +54,9 @@ class ChatSession(models.Model):
     title = models.CharField(max_length=255, blank=True, default="")
     is_active = models.BooleanField(default=True)
     is_pinned = models.BooleanField(default=False, db_index=True)
-    # Session-level reference-library selection: null=never chosen (fall back to
-    # keyword auto-routing), []=explicitly none (space-only), [uuid,...]=chosen.
-    reference_library_ids = models.JSONField(null=True, blank=True, default=None)
+    # Session-level explicit selection. New and migrated sessions default to
+    # space-only retrieval; external libraries are never auto-selected.
+    reference_library_ids = models.JSONField(blank=True, default=list)
     branch_request_id = models.UUIDField(null=True, blank=True)
     branched_from_message = models.ForeignKey(
         "chat.Message",

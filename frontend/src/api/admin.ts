@@ -35,6 +35,8 @@ export interface AdminUser {
   email: string;
   username: string;
   service_line: string | null;
+  business_line: string | null;
+  business_line_name: string | null;
   role_level: string | null;
   is_hr_admin: boolean;
   roles: string[];
@@ -705,4 +707,10 @@ export interface AdminSpaceListItem {
   updated_at: string;
   member_count: number;
   document_count: number;
+  reference_library_info: {
+    id: string;
+    name: string;
+    category: string;
+    status: 'published' | 'unpublished';
+  } | null;
 }

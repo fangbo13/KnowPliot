@@ -9,7 +9,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import {
   MessageOutlined, BookOutlined, UserOutlined, LogoutOutlined,
   SunOutlined, MoonOutlined, GlobalOutlined, SettingOutlined, PlusOutlined,
-  DeleteOutlined, SearchOutlined, MoreOutlined, MenuOutlined, AppstoreOutlined,
+  DeleteOutlined, SearchOutlined, MoreOutlined, MenuOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, TeamOutlined, EditOutlined, RocketOutlined,
   CloseOutlined,
   PushpinOutlined, DownloadOutlined, FileTextOutlined, HistoryOutlined,
@@ -154,11 +154,9 @@ export default function AppLayout() {
   const userMenu = useMemo(() => {
     const items: any[] = [];
     for (const entry of managementEntries) {
-      const icon = entry.id === 'hub' || entry.id === 'console'
-        ? <AppstoreOutlined />
-        : entry.id === 'workspace'
-          ? <TeamOutlined />
-          : <BookOutlined />;
+      const icon = entry.id === 'reference-libraries'
+        ? <FileTextOutlined />
+        : <BookOutlined />;
       items.push({
         key: `management-${entry.id}`,
         icon,

@@ -351,6 +351,13 @@ h1, h2, h3, h4, h5 {
 #root .ant-table-tbody > tr:hover > td {
   background: var(--color-bg-section);
 }
+/* Fix: empty-state layout when table has scroll.x — override ant-table-expanded-row-fixed constraints */
+#root .ant-table-placeholder .ant-table-expanded-row-fixed {
+  width: auto !important;
+  overflow: visible !important;
+  position: relative !important;
+  left: auto !important;
+}
 /* G1: Modal renders in portal — use doubled class for specificity instead of !important */
 .ant-modal-content.ant-modal-content {
   border-radius: var(--radius-xl);
@@ -555,6 +562,248 @@ h1, h2, h3, h4, h5 {
 /* ============================================================================
    Reduced motion
    ============================================================================ */
+.kp-primary-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kp-primary-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+
+.kp-primary-nav button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.kp-knowledge-spaces,
+.kp-reference-libraries {
+  overflow: auto;
+  padding-block: clamp(28px, 5vw, 64px);
+}
+
+.kp-directory-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 24px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-container);
+}
+
+.kp-reference-favorites {
+  margin-top: 24px;
+  padding: clamp(18px, 3vw, 26px);
+  border-color: rgba(var(--color-accent-rgb), .24);
+  background:
+    linear-gradient(120deg, rgba(var(--color-accent-rgb), .09), transparent 62%),
+    var(--color-bg-container);
+}
+
+.kp-reference-favorites__intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.kp-reference-favorites__intro > div {
+  display: grid;
+  gap: 4px;
+}
+
+.kp-reference-favorites__eyebrow {
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.kp-reference-favorites__intro strong {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 24px;
+}
+
+.kp-reference-favorites__intro p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.kp-reference-favorites__slots {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.kp-reference-slot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text-tertiary);
+  background: rgba(var(--color-bg-rgb, 255, 255, 255), .36);
+}
+
+.kp-reference-slot.is-filled {
+  border-style: solid;
+  border-color: rgba(var(--color-accent-rgb), .28);
+  color: var(--color-text-primary);
+  background: var(--color-bg-container);
+}
+
+.kp-reference-slot > span {
+  display: grid;
+  flex: 0 0 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(var(--color-accent-rgb), .1);
+}
+
+.kp-reference-slot > strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kp-directory-toolbar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+}
+
+.kp-directory-toolbar > span:last-child {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.kp-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+  gap: 16px;
+}
+
+.kp-directory-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 14px;
+  min-height: 210px;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.kp-directory-card.is-favorite::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 64px;
+  height: 4px;
+  content: '';
+  background: var(--color-accent);
+}
+
+.kp-directory-card__mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), .1);
+}
+
+.kp-directory-card__copy h2 {
+  margin: 9px 0 7px;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 20px;
+}
+
+.kp-directory-card__copy p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.kp-directory-card__meta,
+.kp-directory-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .kp-reference-favorites__intro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .kp-reference-favorites__intro p { text-align: left; }
+  .kp-reference-favorites__slots { grid-template-columns: 1fr; }
+}
+
+.kp-guest-onboarding {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+  padding: 20px 22px;
+  border: 1px solid rgba(var(--color-accent-rgb), .28);
+  border-radius: 16px;
+  background: linear-gradient(110deg, rgba(var(--color-accent-rgb), .09), transparent 72%);
+}
+
+.kp-guest-onboarding h2 { margin: 4px 0 7px; font-size: 20px; }
+.kp-guest-onboarding p { margin: 0; color: var(--color-text-secondary); }
+.kp-guest-onboarding__features { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 13px; color: var(--color-text-secondary); font-size: 13px; }
+.kp-guest-onboarding__features span { display: inline-flex; align-items: center; gap: 5px; }
+
+.kp-directory-card__meta {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.kp-directory-card__actions {
+  grid-column: 1 / -1;
+  align-self: end;
+}
+
+@media (max-width: 900px) {
+  .kp-primary-nav button { font-size: 0; }
+  .kp-primary-nav button svg { font-size: 16px; }
+  .kp-guest-onboarding { align-items: flex-start; flex-direction: column; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

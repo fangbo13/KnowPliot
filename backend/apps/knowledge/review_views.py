@@ -37,7 +37,7 @@ from .models import Document, DocumentChunk, DocumentTag, ReviewRequest, TermOwn
 
 logger = logging.getLogger(__name__)
 
-REVIEWER_ROLES = {"owner", "knowledge_admin", "reviewer"}
+REVIEWER_ROLES = {"owner", "space_admin"}
 CONFLICT_SIMILARITY_THRESHOLD = 0.85
 CONFLICT_TOP_N = 5
 
@@ -47,6 +47,20 @@ CONFLICT_TOP_N = 5
 
 def space_requires_review(space) -> bool:
     return getattr(space, "review_policy", "direct_publish") == "require_review"
+
+
+def owner_bypasses_review(user, space) -> bool:
+    """Space owners may directly publish their own content updates (spec §3).
+
+    The review gate (require_review) applies to members, reviewers, and
+    knowledge_admins — but the space owner is the authority figure and may
+    directly publish.  This preserves separation of duties: the owner never
+    *approves* their own work (they simply skip the gate), so non-owner
+    submissions still require an independent reviewer.
+    """
+    if space is None:
+        return False
+    return effective_space_role(user, space) == "owner"
 
 
 def _reviewer_users(space, *, exclude_user=None):
@@ -273,6 +287,10 @@ def _publish_approved_version(review, *, request):
             parent.effective_to = now
             parent.status = "superseded"
             parent.save(update_fields=["effective_to", "status", "updated_at"])
+            # Detach Citation references before deleting chunks to avoid
+            # ProtectedError from Citation.chunk (on_delete=PROTECT).
+            from apps.chat.models import Citation
+            Citation.objects.filter(chunk__document=parent).update(chunk=None)
             DocumentChunk.objects.filter(document=parent).delete()
 
     published_via_task = False
@@ -358,6 +376,10 @@ def submit_review(request, pk):
     Covers the rejected → resubmit loop and drafts created before the space
     enabled require_review. Upload/version-create in a require_review space
     submit automatically.
+
+    Space owners bypass the review gate entirely (spec §3): their uploads
+    are auto-published, so submitting their own content for review would
+    create a dead record that no one can approve (separation of duties).
     """
     try:
         document = Document.objects.select_related("space", "parent_document").get(pk=pk)
@@ -366,6 +388,13 @@ def submit_review(request, pk):
     space = document.space
     if space is None or effective_space_role(request.user, space) is None:
         raise NotFound("Document not found.")
+    # Owner bypass (spec §3): space owners never enter the review gate —
+    # their uploads are auto-published.  Rejecting here prevents dead
+    # review records that no one can approve (separation of duties).
+    if owner_bypasses_review(request.user, space):
+        raise ValidationError(
+            {"detail": "Owner submissions bypass review — upload or version the document directly."}
+        )
     if document.status not in ("draft", "rejected", "pending_review", "failed"):
         raise ValidationError({"detail": f"Cannot submit a {document.status} document for review."})
     if ReviewRequest.objects.filter(document=document, decision="pending").exists():

@@ -465,8 +465,8 @@ class RAGPipeline:
             logger.warning("query_condense_unavailable", exc_info=True)
             retrieval_query = query
         # KB optimization spec §3.3 + P2 §A1 + session-library-selection spec
-        # §5: an explicit user selection (non-None) is authoritative for this
-        # session and SKIPS keyword routing; None falls back to auto-routing.
+        # §5: external retrieval is explicit-only. Empty/legacy selections
+        # search the active space alone; keyword auto-routing is deprecated.
         reference_space_ids: list[str] = []
         library_name_by_space: dict[str, str] = {}
         selected_library_ids = getattr(self, "selected_library_ids", None)
@@ -475,12 +475,11 @@ class RAGPipeline:
 
             from .library_routing import (
                 resolve_selected_libraries,
-                route_reference_libraries,
             )
 
             active_space = KnowledgeSpace.objects.filter(pk=space_id).first()
             if active_space is not None:
-                if selected_library_ids is not None:
+                if selected_library_ids:
                     max_count = (
                         int(getattr(settings, "CHAT_LIBRARY_MAX_DEEP", 3))
                         if getattr(self, "answer_mode", "fast") == "deep"
@@ -490,10 +489,6 @@ class RAGPipeline:
                         resolve_selected_libraries(
                             active_space, selected_library_ids, max_count
                         )
-                    )
-                else:
-                    reference_space_ids, library_name_by_space = (
-                        route_reference_libraries(retrieval_query, active_space)
                     )
         except Exception:
             logger.warning("reference_library_resolve_failed", exc_info=True)

@@ -216,7 +216,7 @@ class ReferenceLibraryTests(_BaseCase):
         )
         cls.library = ReferenceLibrary.objects.create(
             space=cls.lib_space, name="IFRS参考库", category="ifrs",
-            status="published", published_by=cls.admin,
+            status="published", is_official=True, published_by=cls.admin,
         )
         cls.unpublished_space = create_space_with_owner(
             organization=cls.org, owner=cls.admin,
@@ -290,7 +290,8 @@ class ReferenceLibraryTests(_BaseCase):
         ref.enabled = True
         ref.save(update_fields=["enabled"])
         self.library.status = "unpublished"
-        self.library.save(update_fields=["status"])
+        self.library.is_official = False
+        self.library.save(update_fields=["status", "is_official"])
         self.assertEqual(resolve_reference_space_ids(self.space_private), [])
 
 

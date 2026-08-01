@@ -15,7 +15,11 @@ from django.test import TestCase, override_settings
 from apps.chat.models import ChatSession
 from apps.chat.services import begin_chat_turn
 from apps.chat.views import _canonical_selected_libraries
-from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+from apps.knowledge.models import (
+    ReferenceLibrary,
+    SpaceLibraryReference,
+    UserReferenceLibraryFavorite,
+)
 from apps.rag.library_routing import resolve_selected_libraries
 from apps.spaces.models import Organization
 from apps.spaces.test_utils import create_test_space
@@ -43,11 +47,17 @@ class LibrarySelectionTestBase(TestCase):
                 name=f"Reference {i}",
                 category="policy",
                 status=ReferenceLibrary.STATUS_PUBLISHED,
+                is_official=True,
             )
             SpaceLibraryReference.objects.create(
                 space=cls.space, library=library, enabled=True
             )
             cls.libraries.append(library)
+            UserReferenceLibraryFavorite.objects.create(
+                user=cls.user,
+                library=library,
+                position=i + 1,
+            )
         # An unpublished library the space also opted into (must be excluded).
         cls.unpub_space = create_test_space(
             organization=cls.org, name="Unpub", code="libsel-unpub"
@@ -90,22 +100,24 @@ class CanonicalSelectedLibrariesTest(LibrarySelectionTestBase):
     @override_settings(CHAT_LIBRARY_MAX_FAST=1, CHAT_LIBRARY_MAX_DEEP=3)
     def test_fast_caps_to_one(self):
         ids = [str(lib.id) for lib in self.libraries[:3]]
-        result = _canonical_selected_libraries(self.space, ids, "fast")
+        result = _canonical_selected_libraries(self.user, self.space, ids, "fast")
         self.assertEqual(result, [str(self.libraries[0].id)])
 
     @override_settings(CHAT_LIBRARY_MAX_FAST=1, CHAT_LIBRARY_MAX_DEEP=3)
     def test_deep_caps_to_three(self):
         ids = [str(lib.id) for lib in self.libraries]  # 4 selected
-        result = _canonical_selected_libraries(self.space, ids, "deep")
+        result = _canonical_selected_libraries(self.user, self.space, ids, "deep")
         self.assertEqual(result, [str(lib.id) for lib in self.libraries[:3]])
 
     def test_invalid_and_unpublished_dropped(self):
         ids = [str(self.unpub_library.id), str(self.libraries[0].id)]
-        result = _canonical_selected_libraries(self.space, ids, "deep")
+        result = _canonical_selected_libraries(self.user, self.space, ids, "deep")
         self.assertEqual(result, [str(self.libraries[0].id)])
 
     def test_empty_selection(self):
-        self.assertEqual(_canonical_selected_libraries(self.space, [], "deep"), [])
+        self.assertEqual(
+            _canonical_selected_libraries(self.user, self.space, [], "deep"), []
+        )
 
 
 class BeginChatTurnLibrarySnapshotTest(LibrarySelectionTestBase):

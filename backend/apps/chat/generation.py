@@ -277,16 +277,11 @@ def _build_pipeline(turn):
     pipeline.answer_mode = turn.answer_mode
     pipeline.thinking_enabled = turn.thinking_enabled
     pipeline.thinking_budget = turn.thinking_budget
-    # Session-library-selection spec §5: a session that went through the
-    # picker (non-null) pins retrieval to the turn's capped snapshot; a legacy
-    # session (null) keeps keyword auto-routing (None sentinel).
-    session_selection = getattr(turn.session, "reference_library_ids", None)
-    if session_selection is None:
-        pipeline.selected_library_ids = None
-    else:
-        pipeline.selected_library_ids = list(
-            getattr(turn, "reference_library_ids", None) or []
-        )
+    # External retrieval is explicit-only. The turn snapshot is authoritative;
+    # an empty selection searches the active space alone.
+    pipeline.selected_library_ids = list(
+        getattr(turn, "reference_library_ids", None) or []
+    )
     return pipeline
 
 

@@ -62,7 +62,7 @@ class WorkspaceJoinV2ApiTests(TestCase):
     def key(self):
         return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
-    def issue_code(self, *, max_pending=10, role_ceiling="member"):
+    def issue_code(self, *, max_pending=10, role_ceiling="guest"):
         self.auth(self.owner)
         return self.client.post(
             f"/api/v1/spaces/{self.space.id}/access-codes/",
@@ -194,7 +194,7 @@ class WorkspaceJoinV2ApiTests(TestCase):
         )
         self.assertEqual(approved.status_code, 200, approved.data)
         membership = SpaceMembership.objects.get(space=self.space, user=self.requester)
-        self.assertEqual(membership.role, "member")
+        self.assertEqual(membership.role, "guest")
         self.assertEqual(membership.source_kind, "access_request")
         self.assertEqual(approved.data["resulting_membership_uuid"], str(membership.id))
         row = SpaceAccessRequest.objects.get(pk=redeemed.data["id"])
@@ -278,22 +278,16 @@ class WorkspaceJoinV2ApiTests(TestCase):
         self.assertEqual(denied.status_code, 404, denied.data)
 
         self.auth(self.owner)
-        over_ceiling = self.client.post(
+        normalized = self.client.post(
             f"/api/v1/spaces/{self.space.id}/access-requests/{pending.data['id']}/approve/",
             {"expected_request_version": 1, "role": "member"},
             format="json",
             **self.key(),
         )
-        self.assertEqual(over_ceiling.status_code, 400, over_ceiling.data)
+        self.assertEqual(normalized.status_code, 200, normalized.data)
         self.assertEqual(
-            SpaceAccessRequest.objects.get(pk=pending.data["id"]).status,
-            SpaceAccessRequest.STATUS_PENDING,
-        )
-        self.assertFalse(
-            SpaceMembership.objects.filter(
-                space=self.space,
-                user=self.requester,
-            ).exists()
+            SpaceMembership.objects.get(space=self.space, user=self.requester).role,
+            SpaceMembership.ROLE_GUEST,
         )
 
     def test_access_code_revoke_blocks_new_redemption_not_existing_request(self):
@@ -327,7 +321,7 @@ class WorkspaceJoinV2ApiTests(TestCase):
             "pending",
         )
 
-    def issue_invitation(self, target=None, role="reviewer"):
+    def issue_invitation(self, target=None, role="guest"):
         self.auth(self.owner)
         return self.client.post(
             f"/api/v1/spaces/{self.space.id}/invitations/",
@@ -381,7 +375,7 @@ class WorkspaceJoinV2ApiTests(TestCase):
         )
         self.assertEqual(accepted.status_code, 200, accepted.data)
         membership = SpaceMembership.objects.get(space=self.space, user=self.invitee)
-        self.assertEqual(membership.role, "reviewer")
+        self.assertEqual(membership.role, "guest")
         self.assertEqual(membership.source_kind, "invitation")
         created_outbox = ActionOutboxEvent.objects.get(
             aggregate_type="space_invitation",
@@ -506,13 +500,13 @@ class WorkspaceJoinV2ApiTests(TestCase):
             space=self.space,
             user=self.requester,
         )
-        self.assertEqual(membership.role, SpaceMembership.ROLE_MEMBER)
+        self.assertEqual(membership.role, SpaceMembership.ROLE_GUEST)
         notification.refresh_from_db()
         self.assertEqual(notification.action_state, Notification.ACTION_ACTIONED)
         self.assertEqual(notification.allowed_actions, [])
 
     def test_access_approval_then_invitation_accept_converges_on_same_membership(self):
-        invitation = self.issue_invitation(target=self.requester, role="reviewer")
+        invitation = self.issue_invitation(target=self.requester, role="guest")
         code = self.issue_code()
         self.auth(self.requester)
         pending = self.client.post(
@@ -549,7 +543,7 @@ class WorkspaceJoinV2ApiTests(TestCase):
             str(membership.id),
         )
         membership.refresh_from_db()
-        self.assertEqual(membership.role, SpaceMembership.ROLE_MEMBER)
+        self.assertEqual(membership.role, SpaceMembership.ROLE_GUEST)
         self.assertEqual(
             SpaceMembership.objects.filter(
                 space=self.space,
@@ -565,7 +559,7 @@ class WorkspaceJoinV2ApiTests(TestCase):
             {
                 "target_user_id": None,
                 "target_email": self.invitee.email,
-                "role": "member",
+                "role": "guest",
                 "expires_in_days": 7,
             },
             format="json",

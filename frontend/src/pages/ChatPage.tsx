@@ -14,7 +14,7 @@ import { useSpaceStore } from '../store/spaceStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import ChatComposer from '../components/chat/ChatComposer';
 import { chatApi } from '../api/chat';
-import { libraryApi, type SpaceLibraryReference } from '../api/knowledge';
+import { libraryApi, type ReferenceLibrary } from '../api/knowledge';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { notify } from '../utils/notifications';
 
@@ -77,9 +77,9 @@ export default function ChatPageContainer() {
   const activeSpace = useSpaceStore((s) => s.getActiveSpace());
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
 
-  // KB optimization spec §5.3: show active reference libraries as chips so
-  // users know which shared libraries widen this space's answers.
-  const [libraryRefs, setLibraryRefs] = useState<SpaceLibraryReference[]>([]);
+  // The official catalog is managed on the reference-libraries page. Chat may
+  // only select from this user's five favorite shortcuts.
+  const [libraryRefs, setLibraryRefs] = useState<ReferenceLibrary[]>([]);
   useEffect(() => {
     if (!activeSpace?.id) {
       setLibraryRefs([]);
@@ -87,10 +87,14 @@ export default function ChatPageContainer() {
     }
     let cancelled = false;
     libraryApi
-      .getReferences()
+      .catalog()
       .then((refs) => {
         if (!cancelled) {
-          setLibraryRefs(refs.filter((r) => r.enabled && r.library_status === 'published'));
+          setLibraryRefs(refs.filter((library) => (
+            library.is_official
+            && library.is_favorite
+            && library.space !== activeSpace.id
+          )));
         }
       })
       .catch(() => {
@@ -392,7 +396,7 @@ export default function ChatPageContainer() {
         {selectedLibraryIds.length > 0 && (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginLeft: 8 }}>
             {libraryRefs
-              .filter((ref) => selectedLibraryIds.includes(ref.library))
+              .filter((ref) => selectedLibraryIds.includes(ref.id))
               .map((ref) => (
               <span
                 key={ref.id}
@@ -408,7 +412,7 @@ export default function ChatPageContainer() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {ref.library_name}
+                {ref.name}
               </span>
             ))}
           </div>
@@ -544,7 +548,7 @@ export default function ChatPageContainer() {
             canUseDeep={canUseDeep}
             thinkingEnabled={thinkingEnabled}
             canUseThinking={canUseThinking}
-            libraryOptions={libraryRefs.map((ref) => ({ id: ref.library, name: ref.library_name }))}
+            libraryOptions={libraryRefs.map((ref) => ({ id: ref.id, name: ref.name }))}
             selectedLibraryIds={selectedLibraryIds}
             onSelectedLibraryChange={setSelectedLibraryIds}
             maxLibraries={libraryCapForMode(answerMode)}

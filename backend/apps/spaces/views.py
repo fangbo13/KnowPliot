@@ -487,7 +487,9 @@ class SpaceMembersView(generics.ListCreateAPIView):
         serializer = AddMemberByEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"].lower()
-        role = serializer.validated_data["role"]
+        # Every non-creation entry path begins as guest.  Role elevation is
+        # deliberately a separate owner-governed membership operation.
+        role = SpaceMembership.ROLE_GUEST
 
         from django.contrib.auth import get_user_model
         User = get_user_model()
@@ -616,6 +618,13 @@ def space_member_detail(request, pk, user_id):
         from rest_framework.exceptions import NotFound
         raise NotFound("Member not found.")
 
+    actor_role = effective_space_role(request.user, space)
+    if actor_role not in {
+        SpaceMembership.ROLE_OWNER,
+        SpaceMembership.ROLE_SPACE_ADMIN,
+    }:
+        raise PermissionDenied("You cannot manage members of this space.")
+
     def _is_last_owner() -> bool:
         # The canonical owner FK is authoritative during and after the
         # compatibility period. A corrupt legacy owner mirror must never make
@@ -630,6 +639,11 @@ def space_member_detail(request, pk, user_id):
         return not owners
 
     if request.method == "DELETE":
+        if actor_role == SpaceMembership.ROLE_SPACE_ADMIN and membership.role in {
+            SpaceMembership.ROLE_OWNER,
+            SpaceMembership.ROLE_SPACE_ADMIN,
+        }:
+            raise PermissionDenied("Space admins may manage guests and members only.")
         if _is_last_owner():
             raise ValidationError({"detail": "Cannot remove the last owner of a space."})
         membership.status = "revoked"
@@ -647,6 +661,17 @@ def space_member_detail(request, pk, user_id):
     serializer = UpdateMemberRoleSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     new_role = serializer.validated_data["role"]
+    if actor_role == SpaceMembership.ROLE_SPACE_ADMIN and (
+        membership.role in {
+            SpaceMembership.ROLE_OWNER,
+            SpaceMembership.ROLE_SPACE_ADMIN,
+        }
+        or new_role not in {
+            SpaceMembership.ROLE_GUEST,
+            SpaceMembership.ROLE_MEMBER,
+        }
+    ):
+        raise PermissionDenied("Space admins may change guests and members only.")
     if _is_last_owner() and new_role != SpaceMembership.ROLE_OWNER:
         raise ValidationError({"detail": "Cannot downgrade the last owner of a space."})
     membership.role = new_role
@@ -654,6 +679,50 @@ def space_member_detail(request, pk, user_id):
     _audit(request.user, "space_member_update", target_id=space.id,
            details={"member_user_id": str(user_id), "role": new_role}, request=request)
     return Response(SpaceMembershipSerializer(membership).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def space_onboarding_complete(request, pk):
+    """Promote the current active guest after first-run onboarding.
+
+    The transition is intentionally self-service and one-way: a member retry
+    is a no-op, while every other state is rejected without disclosing extra
+    workspace detail.
+    """
+
+    with transaction.atomic():
+        membership = (
+            SpaceMembership.objects.select_for_update()
+            .filter(space_id=pk, user=request.user)
+            .first()
+        )
+        if membership is None or not membership.is_effective:
+            raise PermissionDenied("An active guest membership is required.")
+        if membership.role == SpaceMembership.ROLE_MEMBER:
+            return Response({"role": membership.role, "completed": True})
+        if membership.role != SpaceMembership.ROLE_GUEST:
+            raise PermissionDenied("Only guests may complete onboarding.")
+        now = timezone.now()
+        membership.role = SpaceMembership.ROLE_MEMBER
+        membership.onboarding_completed_at = now
+        membership.membership_version += 1
+        membership.save(
+            update_fields=[
+                "role",
+                "onboarding_completed_at",
+                "membership_version",
+                "updated_at",
+            ]
+        )
+        _audit(
+            request.user,
+            "space_onboarding_complete",
+            target_id=membership.id,
+            details={"membership_version": membership.membership_version},
+            request=request,
+        )
+    return Response({"role": membership.role, "completed": True})
 
 
 class InviteCodeListCreateView(generics.ListCreateAPIView):

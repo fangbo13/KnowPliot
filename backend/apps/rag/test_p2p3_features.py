@@ -76,6 +76,7 @@ class LibraryRoutingTest(TestCase):
             name="IFRS Reference",
             category="ifrs",
             status=ReferenceLibrary.STATUS_PUBLISHED,
+            is_official=True,
         )
         SpaceLibraryReference.objects.create(
             space=cls.space, library=cls.library, enabled=True
@@ -245,6 +246,7 @@ class ObsidianLinksTest(TestCase):
             name="Standards Lib",
             category="ifrs",
             status=ReferenceLibrary.STATUS_PUBLISHED,
+            is_official=True,
         )
         SpaceLibraryReference.objects.create(
             space=cls.space, library=library, enabled=True

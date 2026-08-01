@@ -13,8 +13,8 @@ from apps.spaces.models import OrganizationMembership
 
 try:
     from apps.rbac.capabilities import (
-        BUSINESS_ADMIN_CAPABILITIES,
         ARCHIVED_OWNER_CAPABILITIES,
+        BUSINESS_ADMIN_CAPABILITIES,
         ORGANIZATION_ADMIN_CAPABILITIES,
         PLATFORM_CAPABILITIES,
         SPACE_ROLE_CAPABILITIES,
@@ -41,12 +41,13 @@ MEMBER = {
     "chat.export",
     "chat.history",
     "chat.share",
+    "space.view",
+    "document.view",
     # KB read-only access spec (amended): members browse AND manage documents.
     "knowledge.read",
     "knowledge.manage",
     "workspace.ownership.transfer.accept",
 }
-BASE_CHAT = {"chat.ask", "chat.history"}
 OWNER_MANAGEMENT = {
     "audit.read",
     "knowledge.download",
@@ -71,34 +72,26 @@ class CapabilityMatrixTest(SimpleTestCase):
         self.assertIsNotNone(SPACE_ROLE_CAPABILITIES)
         self.assertEqual(
             SPACE_ROLE_CAPABILITIES["guest"],
-            frozenset({"chat.ask", "knowledge.read"}),
+            frozenset({"space.view", "document.view", "knowledge.read"}),
         )
         self.assertEqual(SPACE_ROLE_CAPABILITIES["member"], frozenset(MEMBER))
         self.assertEqual(
-            SPACE_ROLE_CAPABILITIES["reviewer"],
+            SPACE_ROLE_CAPABILITIES["space_admin"],
             frozenset(
-                BASE_CHAT
+                MEMBER
                 | {
-                    "workspace.manage",
-                    "knowledge.read",
-                    "quality.read",
-                    "quality.review",
                     "audit.read",
-                }
-            ),
-        )
-        self.assertEqual(
-            SPACE_ROLE_CAPABILITIES["knowledge_admin"],
-            frozenset(
-                BASE_CHAT
-                | {
                     "workspace.manage",
+                    "workspace.members.manage",
+                    "workspace.invites.manage",
+                    "workspace.access_requests.manage",
                     "knowledge.read",
                     "knowledge.manage",
                     "knowledge.index",
                     "knowledge.download",
                     "quality.read",
                     "quality.review",
+                    "taxonomy.manage",
                 }
             ),
         )
@@ -106,7 +99,7 @@ class CapabilityMatrixTest(SimpleTestCase):
             SPACE_ROLE_CAPABILITIES["owner"],
             frozenset(MEMBER | OWNER_MANAGEMENT),
         )
-        for role in ("knowledge_admin", "reviewer", "guest"):
+        for role in ("guest",):
             with self.subTest(role=role):
                 self.assertNotIn("chat.share", SPACE_ROLE_CAPABILITIES[role])
                 self.assertNotIn("chat.export", SPACE_ROLE_CAPABILITIES[role])
@@ -218,7 +211,7 @@ class CapabilityMatrixTest(SimpleTestCase):
                 "/governance",
             ),
             (
-                CapabilityGrantSnapshot(space_roles={SPACE_B: "owner", SPACE_A: "reviewer"}),
+                CapabilityGrantSnapshot(space_roles={SPACE_B: "owner", SPACE_A: "space_admin"}),
                 f"/workspace/{SPACE_A}/manage",
             ),
             (

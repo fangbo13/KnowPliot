@@ -73,16 +73,14 @@ def _owner_space(user, space_id, capability):
         space = KnowledgeSpace.objects.select_related("owner").get(pk=space_id)
     except KnowledgeSpace.DoesNotExist as exc:
         raise NotFound("Workspace not found.") from exc
-    if space.owner_id != user.id:
-        raise NotFound("Workspace not found.")
-    owner_mirror = SpaceMembership.objects.filter(
+    manager_mirror = SpaceMembership.objects.filter(
         space=space,
         user=user,
-        role=SpaceMembership.ROLE_OWNER,
+        role__in=[SpaceMembership.ROLE_OWNER, SpaceMembership.ROLE_SPACE_ADMIN],
         status="active",
         expires_at__isnull=True,
     ).exists()
-    if not owner_mirror:
+    if not manager_mirror:
         raise NotFound("Workspace not found.")
     archived_reduction = (
         space.status == "archived"
@@ -504,7 +502,7 @@ def allow_member_invite_toggle_view(request, space_id):
     """Toggle allow_member_invite for a workspace (owner/admin only)."""
     _enabled()
     _strict(request.data, {"allow_member_invite"})
-    space = _manage_space(request.user, space_id)
+    space = _owner_space(request.user, space_id, "workspace.settings.manage")
     value = request.data.get("allow_member_invite")
     if not isinstance(value, bool):
         raise ValidationError({"allow_member_invite": "Must be a boolean."})

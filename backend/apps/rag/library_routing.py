@@ -96,25 +96,23 @@ def resolve_selected_libraries(
     """Resolve an EXPLICIT user selection into (space_ids, name_by_space).
 
     Session-library-selection spec §5: the user's choice is authoritative for
-    the session — keyword routing is skipped entirely. Only libraries the
-    active space has opted in to (enabled) and that are still published are
-    honoured; anything else is silently dropped. The result is capped at
+    the session — keyword routing is skipped entirely. Only libraries still
+    marked official are honoured; the deprecated space opt-in relation is not
+    consulted. The result is capped at
     ``max_count`` preserving the caller's order.
     """
-    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+    from apps.knowledge.models import ReferenceLibrary
 
     wanted = [str(value) for value in (selected_ids or [])]
     if not wanted or max_count <= 0:
         return [], {}
 
     references = {
-        str(reference.library_id): reference.library
-        for reference in SpaceLibraryReference.objects.filter(
-            space=active_space,
-            enabled=True,
-            library__status=ReferenceLibrary.STATUS_PUBLISHED,
-            library_id__in=wanted,
-        ).select_related("library")
+        str(library.id): library
+        for library in ReferenceLibrary.objects.filter(
+            is_official=True,
+            id__in=wanted,
+        ).exclude(space_id=active_space.id)
     }
 
     space_ids: list[str] = []

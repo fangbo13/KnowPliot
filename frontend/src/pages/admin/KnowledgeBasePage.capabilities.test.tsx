@@ -11,10 +11,14 @@ import KnowledgeBasePage from './KnowledgeBasePage';
 const granted = new Set<Capability>();
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock('../../auth/CapabilityProvider', () => ({ useAuthorization: vi.fn() }));
+vi.mock('../../auth/CapabilityProvider', () => ({
+  useAuthorization: vi.fn(),
+  useCapabilities: () => ({ refresh: vi.fn() }),
+}));
 
 vi.mock('../../api/documents', async () => {
   const actual = await vi.importActual<typeof import('../../api/documents')>('../../api/documents');
@@ -26,6 +30,7 @@ vi.mock('../../api/documents', async () => {
       downloadDocument: vi.fn(),
       reindexDocument: vi.fn(),
       archiveDocument: vi.fn(),
+      getLinkSuggestions: vi.fn(),
     },
   };
 });
@@ -82,6 +87,7 @@ describe('KnowledgeBasePage capability actions', () => {
     vi.mocked(documentApi.downloadDocument).mockReset();
     vi.mocked(documentApi.reindexDocument).mockReset();
     vi.mocked(documentApi.archiveDocument).mockReset();
+    vi.mocked(documentApi.getLinkSuggestions).mockReset().mockResolvedValue({ suggestions: [] });
   });
 
   afterEach(cleanup);

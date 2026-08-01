@@ -81,17 +81,9 @@ function capabilityRouteAllowed(pathname: string, snapshot: CapabilitySnapshot):
   if (path === '/platform-admin' || path === '/platform-admin/dashboard') {
     return has(snapshot, 'platform.access');
   }
-  // Console Entry Hub spec §2.6: hub is reachable with any management capability.
-  // KB read-only access spec: knowledge.read is now a browse capability held by
-  // every space role, so the hub gate uses knowledge.manage instead.
-  if (path === '/console') {
-    return hasAny(snapshot, [
-      'platform.access',
-      'governance.access',
-      'workspace.manage',
-      'knowledge.manage',
-    ]);
-  }
+  // Management center merged into knowledge base — /console redirects to /knowledge.
+  // Knowledge spaces page is accessible to all authenticated users.
+  if (path === '/console' || path === '/knowledge') return true;
   if (path === '/platform-admin/users') return has(snapshot, 'platform.users.manage');
   if (path === '/platform-admin/business-lines') {
     return has(snapshot, 'platform.organizations.manage');

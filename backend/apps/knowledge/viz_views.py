@@ -43,7 +43,7 @@ from .models import (
 GRAPH_NODE_LIMIT = 300
 SIMILAR_EDGE_THRESHOLD = 0.8
 SIMILAR_EDGES_PER_NODE = 3
-DASHBOARD_ROLES = {"owner", "knowledge_admin", "reviewer"}
+DASHBOARD_ROLES = {"owner", "space_admin"}
 
 
 def _cosine(a, b) -> float:

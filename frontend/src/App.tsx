@@ -41,9 +41,10 @@ const AdminQualityPage = lazy(() => import('./pages/admin/AdminQualityPage'));
 const AdminTemplatesPage = lazy(() => import('./pages/admin/AdminTemplatesPage'));
 const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage'));
 const KnowledgeBasePage = lazy(() => import('./pages/admin/KnowledgeBasePage'));
+const KnowledgeSpacesPage = lazy(() => import('./pages/KnowledgeSpacesPage'));
+const ReferenceLibrariesPage = lazy(() => import('./pages/ReferenceLibrariesPage'));
 const AccessRequestsPage = lazy(() => import('./pages/console/AccessRequestsPage'));
 const ConsoleOverviewPage = lazy(() => import('./pages/console/ConsoleOverviewPage'));
-const ConsoleHubPage = lazy(() => import('./pages/console/ConsoleHubPage'));
 const ScopedAuditPage = lazy(() => import('./pages/console/ScopedAuditPage'));
 const ScopedMetricsPage = lazy(() => import('./pages/console/ScopedMetricsPage'));
 const ScopedQualityPage = lazy(() => import('./pages/console/ScopedQualityPage'));
@@ -112,7 +113,7 @@ function App({
         />
         <Route
           path="/admintest"
-          element={isAuthenticated ? <Navigate to="/console" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
+          element={isAuthenticated ? <Navigate to="/knowledge" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
         />
         <Route path="/reset-password" element={<SuspendedRoute><ResetPasswordPage /></SuspendedRoute>} />
         <Route
@@ -130,18 +131,11 @@ function App({
           <Route path="spaces/discover" element={<SuspendedRoute><SpaceDiscoveryPage /></SuspendedRoute>} />
           <Route path="spaces/create" element={<CapabilityGate required="workspace.creation.request"><SuspendedRoute><WorkspaceCreationPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="profile" element={<SuspendedRoute><ProfilePage /></SuspendedRoute>} />
+          <Route path="knowledge" element={<SuspendedRoute><KnowledgeSpacesPage /></SuspendedRoute>} />
+          <Route path="reference-libraries" element={<CapabilityGate required="chat.ask"><SuspendedRoute><ReferenceLibrariesPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="ownership-transfers" element={<SuspendedRoute><OwnershipTransfersPage /></SuspendedRoute>} />
-          {/* Console Entry Hub spec §2.6: single management entry, capability mode only. */}
-          <Route
-            path="console"
-            element={(
-              <NavigationModeBoundary expected={expectedNavigationMode}>
-                {capabilityNavigationEnabled
-                  ? <SuspendedRoute><ConsoleHubPage /></SuspendedRoute>
-                  : <Navigate to="/admin" replace />}
-              </NavigationModeBoundary>
-            )}
-          />
+          {/* Management center merged into knowledge base — /console redirects to /knowledge. */}
+          <Route path="console" element={<Navigate to="/knowledge" replace />} />
           <Route
             path="workspace/:spaceId/knowledge"
             element={(

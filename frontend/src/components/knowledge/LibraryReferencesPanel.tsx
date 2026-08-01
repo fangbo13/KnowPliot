@@ -30,6 +30,7 @@ import { BookOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { libraryApi } from '../../api/knowledge';
 import type { ReferenceLibrary, SpaceLibraryReference } from '../../api/knowledge';
+import { useSpaceStore } from '../../store/spaceStore';
 
 const CATEGORY_COLORS: Record<string, string> = {
   ifrs: 'geekblue',
@@ -47,6 +48,7 @@ interface Props {
 
 export function LibraryReferencesPanel({ canManage, isPlatformAdmin = false }: Props) {
   const { t } = useTranslation('common');
+  const activeSpaceId = useSpaceStore((s) => s.activeSpaceId);
   const [catalog, setCatalog] = useState<ReferenceLibrary[]>([]);
   const [references, setReferences] = useState<SpaceLibraryReference[]>([]);
   const [adminLibraries, setAdminLibraries] = useState<ReferenceLibrary[]>([]);
@@ -213,7 +215,11 @@ export function LibraryReferencesPanel({ canManage, isPlatformAdmin = false }: P
                 actions={
                   canManage
                     ? [
-                        referencedIds.has(lib.id) ? (
+                        lib.space === activeSpaceId ? (
+                          <Tag key="self" color="default">
+                            {t('kb_library_self')}
+                          </Tag>
+                        ) : referencedIds.has(lib.id) ? (
                           <Tag key="added" color="success">
                             {t('kb_library_added')}
                           </Tag>

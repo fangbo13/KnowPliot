@@ -7,6 +7,7 @@
 from django.contrib import admin
 from django.conf import settings
 from django.urls import path, include
+from apps.knowledge import library_views
 from apps.spaces.join_views import invitation_redeem
 
 urlpatterns = [
@@ -15,6 +16,16 @@ urlpatterns = [
     path("api/v1/auth/", include("apps.users.urls")),
     path("api/v1/chat/", include("apps.chat.urls")),
     path("api/v1/documents/", include("apps.knowledge.urls")),
+    path(
+        "api/v1/reference-libraries/",
+        library_views.user_reference_libraries,
+        name="user-reference-libraries",
+    ),
+    path(
+        "api/v1/reference-libraries/<uuid:pk>/favorite/",
+        library_views.user_reference_library_favorite,
+        name="user-reference-library-favorite",
+    ),
     path("api/v1/audit/", include("apps.audit.urls")),
     path("api/v1/rbac/", include("apps.rbac.urls")),
     path("api/v1/spaces/", include("apps.spaces.urls")),  # V6.0: multi-space platform

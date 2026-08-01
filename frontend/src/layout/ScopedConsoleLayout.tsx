@@ -10,7 +10,7 @@
 // switch theme or language at all.
 
 import {
-  DownOutlined, GlobalOutlined, HomeOutlined, LogoutOutlined, MoonOutlined,
+  DownOutlined, GlobalOutlined, LogoutOutlined, MoonOutlined,
   SettingOutlined, SunOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -94,9 +94,6 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
               <DownOutlined className="kp-console-switcher__caret" />
             </summary>
             <div className="kp-console-switcher__pop">
-              <Link className="kp-console-switcher__item" to="/console">
-                <HomeOutlined /> {t('management_hub')}
-              </Link>
               {switchTargets.map((target) => (
                 <Link key={target.key} className="kp-console-switcher__item" to={target.to}>
                   {target.label}
@@ -122,9 +119,6 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
         </nav>
 
         <div className="kp-console-sidebar__spacer" />
-        <Link to="/console" className="kp-console-back">
-          <HomeOutlined /> {t('management_hub')}
-        </Link>
         <Link to="/chat" className="kp-console-back">
           {t('back_to_app')}
         </Link>

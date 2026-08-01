@@ -8,15 +8,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  AppstoreOutlined,
   BookOutlined,
   BulbOutlined,
+  FileTextOutlined,
   HistoryOutlined,
   MessageOutlined,
   PlusOutlined,
   SearchOutlined,
   SwapOutlined,
-  TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 
@@ -106,11 +105,9 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     }
 
     for (const entry of buildManagementEntries(access, activeSpaceId)) {
-      const icon = entry.id === 'knowledge'
-        ? <BookOutlined />
-        : entry.id === 'workspace'
-          ? <TeamOutlined />
-          : <AppstoreOutlined />;
+      const icon = entry.id === 'reference-libraries'
+        ? <FileTextOutlined />
+        : <BookOutlined />;
       list.push({
         id: `nav-${entry.id}`,
         group: 'navigate',

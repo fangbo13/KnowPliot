@@ -86,6 +86,7 @@ class ReferenceLibraryFreshnessTest(TestCase):
             name="IFRS Reference",
             category="ifrs",
             status=ReferenceLibrary.STATUS_PUBLISHED,
+            is_official=True,
         )
         cls.library_doc = Document.objects.create(
             space=cls.library_space,

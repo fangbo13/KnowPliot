@@ -65,6 +65,7 @@ class AuditLog(models.Model):
         ("space_invite_revoke", "Space Invite Code Revoke"),
         ("space_member_add", "Space Member Add"),
         ("space_member_update", "Space Member Update"),
+        ("space_onboarding_complete", "Space Onboarding Complete"),
         ("permission_denied", "Permission Denied"),
         # ── Identity / Governance domain (V7.0 new) ──
         ("user_register", "User Register"),

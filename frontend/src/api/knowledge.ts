@@ -176,8 +176,11 @@ export interface ReferenceLibrary {
   space_code: string;
   name: string;
   description: string;
-  category: 'ifrs' | 'cas' | 'ipo_cases' | 'other';
+  category: 'ifrs' | 'cas' | 'ipo_cases' | 'policy' | 'other';
   status: 'published' | 'unpublished';
+  is_official: boolean;
+  is_favorite: boolean;
+  favorite_position: number | null;
   published_at: string | null;
   created_at: string;
 }
@@ -213,7 +216,7 @@ export const libraryApi = {
 
   async update(
     id: string,
-    body: Partial<{ name: string; description: string; category: string; status: string }>,
+    body: Partial<{ name: string; description: string; category: string; status: string; is_official: boolean }>,
   ): Promise<ReferenceLibrary> {
     const { data } = await apiClient.patch(`/documents/libraries/${id}/`, body);
     return data;
@@ -223,10 +226,22 @@ export const libraryApi = {
     await apiClient.delete(`/documents/libraries/${id}/`);
   },
 
-  // Published catalog visible to everyone.
+  // Global official catalog for onboarded users; favorites are ordered first.
   async catalog(): Promise<ReferenceLibrary[]> {
-    const { data } = await apiClient.get('/documents/libraries/catalog/');
+    const { data } = await apiClient.get('/reference-libraries/');
     return data;
+  },
+
+  async favorite(id: string, position?: number): Promise<ReferenceLibrary> {
+    const { data } = await apiClient.post(
+      `/reference-libraries/${id}/favorite/`,
+      position == null ? {} : { position },
+    );
+    return data;
+  },
+
+  async unfavorite(id: string): Promise<void> {
+    await apiClient.delete(`/reference-libraries/${id}/favorite/`);
   },
 
   // Space-scoped references (X-Space-Id injected by apiClient).
