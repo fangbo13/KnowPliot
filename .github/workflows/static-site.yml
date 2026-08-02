@@ -49,7 +49,10 @@ jobs:
 
   deploy:
     environment:
-      name: github-pages
+      # The repository's built-in github-pages environment restricts deployments
+      # to a different branch. Keep this deployment branch isolated in its own
+      # Pages environment so the safety branch remains separate.
+      name: knowpilot-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
