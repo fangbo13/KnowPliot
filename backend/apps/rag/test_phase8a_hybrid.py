@@ -265,7 +265,10 @@ class PipelineQualityEventTest(TestCase):
         self.assertTrue(quality["data"]["needs_human_review"])
         pipeline.llm.stream_chat.assert_not_called()
 
-    def test_pipeline_refuses_low_confidence_evidence_without_llm(self):
+    def test_pipeline_generates_on_low_confidence_with_citations(self):
+        # P1 fix (E2E refusal audit): low confidence with retrieved chunks no
+        # longer hard-refuses — the LLM answers from context; the quality event
+        # still flags needs_human_review for the review queue.
         pipeline = self.make_pipeline(
             [{**result("a", "doc-a"), "rerank_score": 0.42}]
         )
@@ -281,7 +284,12 @@ class PipelineQualityEventTest(TestCase):
 
         quality = next(event for event in events if event["event"] == "quality")
         self.assertEqual(quality["data"]["confidence"], "low")
-        pipeline.llm.stream_chat.assert_not_called()
+        self.assertTrue(quality["data"]["needs_human_review"])
+        citations = next(event for event in events if event["event"] == "citations")
+        self.assertEqual(len(citations["data"]), 1)
+        pipeline.llm.stream_chat.assert_called_once()
+        tokens = [e["data"]["token"] for e in events if e["event"] == "token"]
+        self.assertIn("answer", tokens)
 
 
 class MessageQualityPersistenceTest(TestCase):

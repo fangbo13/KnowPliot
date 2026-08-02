@@ -249,3 +249,235 @@ def enqueue_chat_turn_v3(turn_id):
         args=[str(turn_id)],
         queue="chat_generation",
     )
+
+
+# ── Session long-term memory (rolling summary) ──
+
+# Freshest messages stay verbatim-only; the summary lags slightly behind so
+# it never has to describe the exchange still fully present in the window.
+_MEMORY_KEEP_RECENT = 4
+_MEMORY_TRANSCRIPT_MESSAGE_CHARS = 800
+_MEMORY_SUMMARY_MAX_CHARS = 4000
+_MEMORY_MAX_KEY_FACTS = 12
+
+_MEMORY_SYSTEM_PROMPT = (
+    "You maintain the rolling memory of one assistant conversation. Merge the "
+    "previous summary with the new transcript into an updated memory. Keep "
+    "user-stated constraints, entities, decisions, numbers and open questions; "
+    "drop pleasantries. Write summary and key_facts in the SAME language the "
+    "transcript itself is written in (e.g. Chinese transcript -> Chinese "
+    "summary), at most 300 tokens. Respond with ONLY a JSON object: "
+    '{"summary": "...", "key_facts": ["...", "..."]} — key_facts is a list of '
+    "at most 12 short standalone facts."
+)
+
+
+def _parse_memory_payload(raw: str) -> tuple[str, list[str]] | None:
+    """Extract {summary, key_facts} from an LLM reply, tolerating code fences."""
+    import json as _json
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = _json.loads(text[start : end + 1])
+        except (ValueError, TypeError):
+            data = None
+        if isinstance(data, dict):
+            summary = str(data.get("summary") or "").strip()
+            facts_raw = data.get("key_facts")
+            facts = []
+            if isinstance(facts_raw, list):
+                facts = [
+                    str(fact).strip()[:300]
+                    for fact in facts_raw
+                    if str(fact).strip()
+                ][:_MEMORY_MAX_KEY_FACTS]
+            if summary:
+                return summary[:_MEMORY_SUMMARY_MAX_CHARS], facts
+    # Degenerate reply: treat the whole text as the summary, keep old facts.
+    return text[:_MEMORY_SUMMARY_MAX_CHARS], []
+
+
+@shared_task(
+    bind=True,
+    name="apps.chat.tasks.update_session_memory",
+    max_retries=0,
+    soft_time_limit=60,
+    time_limit=75,
+)
+def update_session_memory(self, session_id: str):
+    """Fold messages beyond the watermark into the rolling session summary.
+
+    Idempotent per watermark; any LLM failure leaves the previous summary
+    untouched and the next completed turn retries naturally.
+    """
+    from django.db import transaction
+
+    from .models import ChatSession, Message, SessionMemory
+
+    if not getattr(settings, "CHAT_MEMORY_ENABLED", False):
+        return {"status": "disabled"}
+
+    session = ChatSession.objects.filter(pk=session_id).first()
+    if session is None:
+        return {"status": "session_missing"}
+
+    memory, _created = SessionMemory.objects.get_or_create(
+        session=session,
+        defaults={"space": session.space},
+    )
+
+    pending_qs = Message.objects.filter(session=session).order_by("created_at")
+    if memory.summarized_until is not None:
+        pending_qs = pending_qs.filter(created_at__gt=memory.summarized_until)
+    pending = list(pending_qs.values("role", "content", "created_at"))
+
+    trigger = getattr(settings, "CHAT_MEMORY_SUMMARY_TRIGGER", 8)
+    if len(pending) < trigger:
+        return {"status": "below_trigger", "pending": len(pending)}
+
+    to_summarize = pending[:-_MEMORY_KEEP_RECENT] if len(
+        pending
+    ) > _MEMORY_KEEP_RECENT else pending
+    if not to_summarize:
+        return {"status": "below_trigger", "pending": len(pending)}
+
+    transcript = "\n".join(
+        f"{item['role']}: {(item['content'] or '')[:_MEMORY_TRANSCRIPT_MESSAGE_CHARS]}"
+        for item in to_summarize
+    )
+    previous_block = memory.summary or "(none)"
+    facts_block = "\n".join(f"- {fact}" for fact in (memory.key_facts or [])) or "(none)"
+    user_prompt = (
+        f"[Previous summary]\n{previous_block}\n\n"
+        f"[Previous key facts]\n{facts_block}\n\n"
+        f"[New transcript]\n{transcript}"
+    )
+
+    try:
+        from apps.rag.guardrails import get_llm_service
+
+        raw = get_llm_service().complete(
+            _MEMORY_SYSTEM_PROMPT,
+            user_prompt,
+            max_tokens=500,
+            temperature=0.0,
+            timeout=45,
+        )
+    except Exception:
+        # Keep the previous summary intact — the next turn retries naturally.
+        logger.warning(
+            "session_memory_llm_failed session_id=%s code=provider_unavailable",
+            session_id,
+        )
+        return {"status": "llm_failed"}
+
+    parsed = _parse_memory_payload(raw)
+    if parsed is None:
+        logger.warning(
+            "session_memory_empty_reply session_id=%s code=provider_empty_answer",
+            session_id,
+        )
+        return {"status": "empty_reply"}
+    new_summary, new_facts = parsed
+    if not new_facts:
+        new_facts = list(memory.key_facts or [])[:_MEMORY_MAX_KEY_FACTS]
+    watermark = to_summarize[-1]["created_at"]
+
+    with transaction.atomic():
+        locked = SessionMemory.objects.select_for_update().get(pk=memory.pk)
+        if locked.summarized_until != memory.summarized_until:
+            # A concurrent run already advanced the watermark — idempotent exit.
+            return {"status": "already_updated"}
+        locked.summary = new_summary
+        locked.key_facts = new_facts
+        locked.summarized_until = watermark
+        locked.summary_version += 1
+        locked.save(
+            update_fields=[
+                "summary",
+                "key_facts",
+                "summarized_until",
+                "summary_version",
+                "updated_at",
+            ]
+        )
+    return {
+        "status": "updated",
+        "version": locked.summary_version,
+        "summarized": len(to_summarize),
+    }
+
+
+# ── RAG optimization spec Phase 7: feedback-driven retrieval signal ──
+
+# Weights for the per-document feedback score. Incorrect feedback is the
+# strongest negative signal (it means the cited document misled the answer).
+_FEEDBACK_WEIGHTS = {
+    "helpful": 1.0,
+    "unhelpful": -1.0,
+    "incorrect": -2.0,
+    "outdated": -1.0,
+    "missing_source": 0.0,
+}
+
+
+@shared_task(name="apps.chat.tasks.recompute_document_feedback_scores")
+def recompute_document_feedback_scores() -> dict:
+    """Aggregate Feedback→Message→Citation→Document into Document.feedback_score.
+
+    score = clamp((Σ weighted feedback) / max(count, 1), -1, 1). Applied as an
+    ordering-only retrieval boost (see hybrid._apply_query_signals) so good
+    documents surface higher and repeatedly-wrong ones sink — without ever
+    touching the calibrated rerank_score / confidence thresholds.
+    """
+    from collections import defaultdict
+
+    from django.db.models import Count
+
+    from apps.knowledge.models import Document
+
+    from .models import Citation, Feedback
+
+    # message_id -> {feedback_type: count}
+    per_message: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    feedback_rows = (
+        Feedback.objects.exclude(message_id=None)
+        .values("message_id", "feedback_type")
+        .annotate(n=Count("id"))
+    )
+    for row in feedback_rows:
+        per_message[str(row["message_id"])][row["feedback_type"]] += row["n"]
+    if not per_message:
+        return {"status": "no_feedback", "documents": 0}
+
+    # document_id -> [weighted_sum, count]
+    doc_acc: dict[str, list[float]] = defaultdict(lambda: [0.0, 0])
+    citations = Citation.objects.filter(
+        message_id__in=per_message.keys()
+    ).values("message_id", "document_id")
+    for citation in citations:
+        if citation["document_id"] is None:
+            continue
+        counts = per_message.get(str(citation["message_id"]), {})
+        for feedback_type, n in counts.items():
+            weight = _FEEDBACK_WEIGHTS.get(feedback_type, 0.0)
+            acc = doc_acc[str(citation["document_id"])]
+            acc[0] += weight * n
+            acc[1] += n
+
+    updated = 0
+    for document_id, (weighted_sum, count) in doc_acc.items():
+        if count == 0:
+            continue
+        score = max(-1.0, min(1.0, weighted_sum / count))
+        updated += Document.objects.filter(id=document_id).update(
+            feedback_score=round(score, 4)
+        )
+    logger.info("[feedback-score] documents=%d", updated)
+    return {"status": "ok", "documents": updated}
+

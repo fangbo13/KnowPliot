@@ -81,6 +81,9 @@ function capabilityRouteAllowed(pathname: string, snapshot: CapabilitySnapshot):
   if (path === '/platform-admin' || path === '/platform-admin/dashboard') {
     return has(snapshot, 'platform.access');
   }
+  // Management center merged into knowledge base — /console redirects to /knowledge.
+  // Knowledge spaces page is accessible to all authenticated users.
+  if (path === '/console' || path === '/knowledge') return true;
   if (path === '/platform-admin/users') return has(snapshot, 'platform.users.manage');
   if (path === '/platform-admin/business-lines') {
     return has(snapshot, 'platform.organizations.manage');
@@ -104,14 +107,20 @@ function capabilityRouteAllowed(pathname: string, snapshot: CapabilitySnapshot):
   if (path === '/governance/audit') return has(snapshot, 'governance.audit.read');
   if (path === '/governance/model') return has(snapshot, 'governance.models.bind');
 
-  const workspace = path.match(/^\/workspace\/([^/]+)\/manage(?:\/(dashboard|members|invites|access|knowledge|quality|audit|settings|lifecycle))?$/);
+  // Standalone knowledge route — separated from workspace management console
+  const knowledge = path.match(/^\/workspace\/([^/]+)\/knowledge$/);
+  if (knowledge) {
+    if (!snapshot.scopes.space_ids.includes(knowledge[1])) return false;
+    return has(snapshot, 'knowledge.read');
+  }
+
+  const workspace = path.match(/^\/workspace\/([^/]+)\/manage(?:\/(dashboard|members|invites|access|quality|audit|settings|lifecycle))?$/);
   if (!workspace || !snapshot.scopes.space_ids.includes(workspace[1])) return false;
   const requiredByPage: Record<string, Capability> = {
     dashboard: 'workspace.manage',
     members: 'workspace.members.manage',
     invites: 'workspace.invites.manage',
     access: 'workspace.access_requests.manage',
-    knowledge: 'knowledge.read',
     quality: 'quality.read',
     audit: 'audit.read',
     settings: 'workspace.settings.manage',

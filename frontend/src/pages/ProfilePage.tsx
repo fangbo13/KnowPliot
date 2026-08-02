@@ -84,8 +84,8 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
-      <div className="page-inner" style={{ maxWidth: 820 }}>
+    <div className="page kp-profile-page">
+      <div className="page-inner kp-profile-page__inner" style={{ maxWidth: 820 }}>
         <div className="page-head" style={{ marginBottom: 20 }}>
           <h1 className="page-title">{t('account_info')}</h1>
           <p className="page-subtitle" style={{ marginTop: 8 }}>{t('account_info_desc', 'Manage your personal information and preferences.')}</p>
@@ -98,7 +98,7 @@ export default function ProfilePage() {
             </span>
           }
           styles={{ body: { padding: '24px 28px 28px' } }}
-          className="glass-panel hover-lift section-enter"
+          className="glass-panel hover-lift section-enter kp-profile-card kp-profile-card--identity"
           style={{ marginBottom: 16, borderRadius: 'var(--radius-lg)' }}
         >
           {/* Avatar + Username header */}
@@ -109,7 +109,7 @@ export default function ProfilePage() {
               style={{
                 background: 'var(--gradient-accent)',
                 fontSize: 32,
-                color: '#FFFFFF',
+                color: 'var(--color-text-on-accent)',
                 boxShadow: 'var(--shadow-sm), 0 0 24px rgba(var(--accent-rgb), 0.4)',
               }}
             >
@@ -144,7 +144,7 @@ export default function ProfilePage() {
             <Col xs={24} sm={12}>
               <div>
                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <EnvironmentOutlined /> {t('office_location')} <span style={{ color: 'var(--color-error, #c0392b)' }}>*</span>
+                  <EnvironmentOutlined /> {t('office_location')} <span style={{ color: 'var(--color-error)' }}>*</span>
                 </Typography.Text>
                 <Select
                   size="middle"
@@ -196,7 +196,7 @@ export default function ProfilePage() {
             </span>
           }
           styles={{ body: { padding: '24px 28px 20px' } }}
-          className="glass-panel hover-lift section-enter"
+          className="glass-panel hover-lift section-enter kp-profile-card kp-profile-card--preferences"
           style={{ borderRadius: 'var(--radius-lg)' }}
         >
           <Form
@@ -211,7 +211,7 @@ export default function ProfilePage() {
             onFinish={handleFinish}
           >
             <Row gutter={[16, 12]}>
-              <Col xs={24} sm={12} lg={6}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item label={t('language_pref')} name="language_preference" style={{ marginBottom: 12 }}>
                   <Select size="middle" popupClassName="menu-pop-dropdown" style={{ borderRadius: 10 }}>
                     <Select.Option value="en">English</Select.Option>
@@ -219,7 +219,7 @@ export default function ProfilePage() {
                   </Select>
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={12} lg={6}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item label={t('theme')} name="theme_preference" style={{ marginBottom: 12 }}>
                   <Select size="middle" options={[
                     { value: 'system', label: t('system') },
@@ -228,18 +228,20 @@ export default function ProfilePage() {
                   ]} style={{ borderRadius: 10 }} />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={12} lg={6}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item label={t('default_space')} name="default_space" style={{ marginBottom: 12 }}>
                   <Select size="middle" allowClear options={spaces.map((space) => ({ value: space.id, label: space.name }))} style={{ borderRadius: 10 }} />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={12} lg={6} style={{ display: 'flex', alignItems: 'center', gap: 20, paddingTop: 28 }}>
-                <Form.Item label={t('notification_announcements')} name="announcements" valuePropName="checked" style={{ marginBottom: 0 }}>
-                  <Switch size="small" />
-                </Form.Item>
-                <Form.Item label={t('notification_quality')} name="quality" valuePropName="checked" style={{ marginBottom: 0 }}>
-                  <Switch size="small" />
-                </Form.Item>
+              <Col xs={24} lg={24} className="kp-profile-notifications-col">
+                <div className="kp-profile-notifications">
+                  <Form.Item label={t('notification_announcements')} name="announcements" valuePropName="checked" style={{ marginBottom: 0 }}>
+                    <Switch size="small" />
+                  </Form.Item>
+                  <Form.Item label={t('notification_quality')} name="quality" valuePropName="checked" style={{ marginBottom: 0 }}>
+                    <Switch size="small" />
+                  </Form.Item>
+                </div>
               </Col>
             </Row>
 
@@ -255,7 +257,7 @@ export default function ProfilePage() {
         </Card>
         <Card 
           title={<><SafetyCertificateOutlined style={{ marginRight: 8, color: 'var(--accent)' }}/>{t('account_security')}</>} 
-          className="glass-panel hover-lift section-enter" 
+          className="glass-panel hover-lift section-enter kp-profile-card kp-profile-card--security"
           style={{ marginTop: 16, borderRadius: 'var(--radius-lg)' }}
         >
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>

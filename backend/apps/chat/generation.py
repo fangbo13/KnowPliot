@@ -7,7 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from django.db import close_old_connections, transaction
+from django.conf import settings
+from django.db import close_old_connections, connection, transaction
 from django.db.models import Max
 from django.utils import timezone
 
@@ -20,6 +21,7 @@ from .coordination import (
     RedisSessionLease,
     create_redis_client,
 )
+from .memory import build_memory_context, estimate_tokens
 from .metrics import ChatStreamMetrics, merge_turn_metrics
 from .models import ChatSession, ChatTurn, Citation, Message, ModelInvocation
 from .services import InvalidTurnTransitionError, transition_chat_turn
@@ -112,37 +114,133 @@ def _make_lease(turn):
     return RedisSessionLease(create_redis_client(), turn.session_id)
 
 
-def _conversation_history(session, question_message, window_rounds=10):
-    history = list(
-        Message.objects.filter(session=session)
-        .exclude(pk=question_message.pk)
-        .order_by("-created_at")[: window_rounds * 2]
-        .values_list("role", "content")
-    )
-    history.reverse()
-    return history
+def _refresh_db_connections() -> None:
+    """close_old_connections, but never inside an atomic block.
+
+    Long-lived SSE generators recycle stale connections between phases. In
+    tests, however, the whole request runs inside the TestCase transaction —
+    closing the shared connection there kills the test's own transaction
+    (psycopg "the connection is closed"). Django's request signals skip this
+    for the same reason; our explicit calls must too.
+    """
+    if connection.in_atomic_block:
+        return
+    close_old_connections()
+
+
+def _maybe_open_knowledge_gap(turn, message) -> None:
+    """KB/RAG audit spec P2 §B3: auto-open a gap ticket for insufficient answers.
+
+    Idempotent per (space, normalized question) while a ticket is still in an
+    open lifecycle. Matched taxonomy terms are recorded in suggested_source so
+    term owners know where the gap sits. Best-effort — never breaks the turn.
+    """
+    try:
+        if message.confidence_label != "insufficient" or turn.space_id is None:
+            return
+        from .models import KnowledgeGapTicket
+
+        question = (turn.question_message.content or "").strip()[:2000]
+        if not question:
+            return
+        question_hash = KnowledgeGapTicket.hash_question(question)
+        if KnowledgeGapTicket.objects.filter(
+            space_id=turn.space_id,
+            normalized_question_hash=question_hash,
+            status__in=[
+                KnowledgeGapTicket.STATUS_OPEN,
+                KnowledgeGapTicket.STATUS_IN_PROGRESS,
+            ],
+        ).exists():
+            return
+        suggested = "auto-created from an insufficient-confidence answer"
+        try:
+            from apps.rag.query_understanding import analyze_query
+
+            signals = analyze_query(question, space_id=str(turn.space_id))
+            if signals and signals.term_codes:
+                suggested += " · matched terms: " + ", ".join(signals.term_codes)
+        except Exception:
+            pass
+        ticket = KnowledgeGapTicket.objects.create(
+            space=turn.space,
+            question_snapshot=question,
+            normalized_question_hash=question_hash,
+            priority="medium",
+            suggested_source=suggested,
+        )
+        from apps.audit.views import create_audit_log
+
+        create_audit_log(
+            user=turn.user,
+            action="knowledge_gap_create",
+            target_type="KnowledgeGapTicket",
+            target_id=str(ticket.id),
+            details={"auto": True, "space_id": str(turn.space_id)},
+            space_id=turn.space_id,
+        )
+    except Exception:  # pragma: no cover — quality loop must not break chat
+        logger.warning("auto_knowledge_gap_failed", exc_info=True)
+
+
+def _conversation_history(session, question_message):
+    """Layered session memory context (kept under the legacy name so existing
+    test patches keep working). Single implementation: apps.chat.memory."""
+    return build_memory_context(session, question_message)
 
 
 def _estimate_token_count(text: str) -> int:
-    try:
-        import tiktoken
+    return estimate_tokens(text)
 
-        encoding = tiktoken.get_encoding("cl100k_base")
-        return len(encoding.encode(text))
+
+def _schedule_memory_update(session_id) -> None:
+    """Best-effort dispatch of the rolling-summary task after a turn lands."""
+    if not getattr(settings, "CHAT_MEMORY_ENABLED", False):
+        return
+    try:
+        from .tasks import update_session_memory
+
+        update_session_memory.delay(str(session_id))
     except Exception:
-        return max(1, len(text) // 4)
+        # A broker outage must never break a completed chat turn.
+        logger.warning(
+            "session_memory_dispatch_failed session_id=%s code=coordination_unavailable",
+            session_id,
+        )
 
 
 def _save_citations(assistant_message, citations_data, space=None):
-    from apps.knowledge.models import Document, DocumentChunk
+    from apps.knowledge.models import (
+        Document,
+        DocumentChunk,
+        ReferenceLibrary,
+        SpaceLibraryReference,
+    )
 
-    for citation in citations_data:
+    # KB spec §3.3: documents from opted-in published reference libraries are
+    # legitimate citations — skipping them shifted the persisted Sources list
+    # out of alignment with the answer's [文档 N] numbering.
+    allowed_space_ids = None
+    if space is not None:
+        allowed_space_ids = {space.id}
+        try:
+            allowed_space_ids.update(
+                SpaceLibraryReference.objects.filter(
+                    space=space,
+                    enabled=True,
+                    library__status=ReferenceLibrary.STATUS_PUBLISHED,
+                ).values_list("library__space_id", flat=True)
+            )
+        except Exception:
+            logger.warning("citation_reference_space_lookup_failed", exc_info=True)
+
+    for position, citation in enumerate(citations_data, start=1):
         try:
             document = Document.objects.get(id=citation.get("document_id"))
             if (
-                space is not None
+                allowed_space_ids is not None
                 and document.space_id is not None
-                and document.space_id != space.id
+                and document.space_id not in allowed_space_ids
             ):
                 logger.warning(
                     "citation_scope_mismatch message_id=%s code=persistence_error",
@@ -162,6 +260,7 @@ def _save_citations(assistant_message, citations_data, space=None):
                 page_number=citation.get("page_number"),
                 quoted_text=citation.get("quoted_text", ""),
                 space=space,
+                position=position,
             )
         except Exception:
             logger.warning(
@@ -178,6 +277,11 @@ def _build_pipeline(turn):
     pipeline.answer_mode = turn.answer_mode
     pipeline.thinking_enabled = turn.thinking_enabled
     pipeline.thinking_budget = turn.thinking_budget
+    # External retrieval is explicit-only. The turn snapshot is authoritative;
+    # an empty selection searches the active space alone.
+    pipeline.selected_library_ids = list(
+        getattr(turn, "reference_library_ids", None) or []
+    )
     return pipeline
 
 
@@ -333,6 +437,9 @@ def _persist_completed_turn(
             **version_values,
         )
         citation_saver(assistant_message, citations_data, locked_turn.space)
+        # KB/RAG audit spec P2 §B3: quality loop — insufficient answers
+        # automatically open a knowledge-gap ticket (idempotent, best-effort).
+        _maybe_open_knowledge_gap(locked_turn, assistant_message)
         _record_invocation(
             locked_turn,
             pipeline,
@@ -357,6 +464,9 @@ def _persist_completed_turn(
     timings = stream_metrics.snapshot(now=time.monotonic())
     timings["routing_decision"] = "retrieve"
     _record_metrics(turn, **timings)
+    # Session memory: fold older rounds into the rolling summary off the
+    # critical path (default queue, never chat_generation capacity).
+    _schedule_memory_update(turn.session_id)
     return CompletedTurnPersistence(assistant_message, token_count, timings)
 
 
@@ -433,7 +543,7 @@ def iter_chat_turn(
         language = _language
         if language is None:
             language = resolve_reply_language(query, turn.user, turn.space)
-        close_old_connections()
+        _refresh_db_connections()
         raw_events = pipeline.retrieve_and_generate(
             query=query,
             user_profile=turn.user,
@@ -604,4 +714,4 @@ def iter_chat_turn(
                 "cancel_probe_clear_failed turn_id=%s code=coordination_unavailable",
                 turn.id,
             )
-        close_old_connections()
+        _refresh_db_connections()

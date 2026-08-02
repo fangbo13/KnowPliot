@@ -6,8 +6,9 @@
 
 import { useTranslation } from 'react-i18next';
 import {
-  LaptopOutlined, DollarOutlined, CalendarOutlined,
-  BookOutlined, EnvironmentOutlined, TeamOutlined,
+  SafetyCertificateOutlined, AuditOutlined, WarningOutlined,
+  FileSearchOutlined, FileTextOutlined, CheckCircleOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { useChatStore } from '../../store/chatStore';
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -35,20 +36,20 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
   const defaultQuickActions = useMemo(() => (
     isChinese
       ? [
-          { icon: <LaptopOutlined />, question: '如何设置公司邮箱和电脑？', label: 'IT 设置' },
-          { icon: <DollarOutlined />, question: '报销流程是什么？', label: '报销流程' },
-          { icon: <CalendarOutlined />, question: '我有多少年假？', label: '年假天数' },
-          { icon: <BookOutlined />, question: '入职培训包含哪些课程？', label: '培训课程' },
-          { icon: <EnvironmentOutlined />, question: '办公室在哪里，怎么去？', label: '办公位置' },
-          { icon: <TeamOutlined />, question: '我的导师或搭档是谁？', label: '我的导师' },
+          { icon: <SafetyCertificateOutlined />, question: '审计适用哪些准则和规范？', label: '审计准则' },
+          { icon: <AuditOutlined />, question: '如何进行内部控制评价？', label: '内控评价' },
+          { icon: <WarningOutlined />, question: '风险评估的流程是什么？', label: '风险评估' },
+          { icon: <FileSearchOutlined />, question: '本次审计需要执行哪些程序？', label: '审计程序' },
+          { icon: <FileTextOutlined />, question: '审计报告应包含哪些内容？', label: '审计报告' },
+          { icon: <CheckCircleOutlined />, question: '关键合规要求有哪些？', label: '合规要求' },
         ]
       : [
-          { icon: <LaptopOutlined />, question: 'How do I set up my company email and laptop?', label: 'IT setup' },
-          { icon: <DollarOutlined />, question: 'What is the expense reimbursement process?', label: 'Expenses' },
-          { icon: <CalendarOutlined />, question: 'How many annual leave days do I have?', label: 'Annual leave' },
-          { icon: <BookOutlined />, question: 'What courses are included in onboarding training?', label: 'Training' },
-          { icon: <EnvironmentOutlined />, question: 'Where is the office and how do I get there?', label: 'Office location' },
-          { icon: <TeamOutlined />, question: 'Who is my mentor or buddy?', label: 'Mentor' },
+          { icon: <SafetyCertificateOutlined />, question: 'What audit standards and regulations apply?', label: 'Standards' },
+          { icon: <AuditOutlined />, question: 'How do I assess internal controls?', label: 'Controls' },
+          { icon: <WarningOutlined />, question: 'What is the risk assessment process?', label: 'Risk' },
+          { icon: <FileSearchOutlined />, question: 'What audit procedures are required for this engagement?', label: 'Procedures' },
+          { icon: <FileTextOutlined />, question: 'What should the audit report include?', label: 'Report' },
+          { icon: <CheckCircleOutlined />, question: 'What are the key compliance requirements?', label: 'Compliance' },
         ]
   ), [isChinese]);
 
@@ -79,7 +80,7 @@ export default function WelcomeScreen({ onQuickAction, onSendMessage, templateQu
     <div className="welcome">
       <div className="welcome-head section-enter">
         <div className="welcome-mark ambient-glow">K</div>
-        <h1 className="welcome-greeting">{t('welcome_greeting', { defaultValue: 'How can I help with your onboarding?' })}</h1>
+        <h1 className="welcome-greeting">{t('welcome_greeting', { defaultValue: 'How can I help with your audit?' })}</h1>
         <p className="welcome-sub">{t('welcome_tip')}</p>
       </div>
 

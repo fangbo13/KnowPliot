@@ -11,6 +11,7 @@ import {
   Card,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -27,10 +28,12 @@ import {
   InboxOutlined,
   RollbackOutlined,
   ExclamationCircleOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
-import { adminApi, type AdminSpaceListItem } from '../../api/admin';
+import { adminApi, type AdminSpaceListItem, type BusinessLine } from '../../api/admin';
+import { libraryApi } from '../../api/knowledge';
 import { spacesApi, type WorkspaceDeletionImpact } from '../../api/spaces';
 import { getRateLimitDetails, isAbortError } from '../../api/client';
 
@@ -61,6 +64,10 @@ export default function AdminSpacesPage() {
   // --- Archive/restore action loading ---
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+  // --- Business line filter ---
+  const [businessLineFilter, setBusinessLineFilter] = useState<string | undefined>(undefined);
+  const [businessLines, setBusinessLines] = useState<BusinessLine[]>([]);
+
   const loadSpaces = useCallback(async () => {
     const seq = ++seqRef.current;
     abortRef.current?.abort();
@@ -74,8 +81,9 @@ export default function AdminSpacesPage() {
       };
       if (statusFilter !== 'all') params.status = statusFilter;
       if (searchQuery.trim()) params.q = searchQuery.trim();
+      if (businessLineFilter) params.business_line = businessLineFilter;
       const data = await adminApi.listSpaces(
-        params as { status?: 'active' | 'archived'; q?: string; page?: number; page_size?: number },
+        params as { status?: 'active' | 'archived'; q?: string; business_line?: string; page?: number; page_size?: number },
         controller.signal,
       );
       if (controller.signal.aborted || seq !== seqRef.current) return;
@@ -94,7 +102,7 @@ export default function AdminSpacesPage() {
     } finally {
       if (seq === seqRef.current && !controller.signal.aborted) setLoading(false);
     }
-  }, [page, statusFilter, searchQuery, t]);
+  }, [page, statusFilter, searchQuery, businessLineFilter, t]);
 
   useEffect(() => {
     void loadSpaces();
@@ -103,7 +111,12 @@ export default function AdminSpacesPage() {
       abortRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, statusFilter]);
+  }, [page, statusFilter, businessLineFilter]);
+
+  // Load business lines for filter dropdown
+  useEffect(() => {
+    adminApi.businessLines().then(setBusinessLines).catch(() => {});
+  }, []);
 
   // Debounced search
   useEffect(() => {
@@ -151,6 +164,53 @@ export default function AdminSpacesPage() {
     }
   };
 
+  // --- Official library certification ---
+  const handleCertify = async (record: AdminSpaceListItem) => {
+    setActionLoadingId(record.id);
+    try {
+      await libraryApi.create({
+        space: record.id,
+        name: record.name,
+        status: 'published',
+      });
+      message.success(isEn ? 'Certified as official library' : '已认证为官方参考库');
+      await loadSpaces();
+    } catch {
+      message.error(isEn ? 'Failed to certify' : '认证失败');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleUncertify = async (record: AdminSpaceListItem) => {
+    if (!record.reference_library_info) return;
+    setActionLoadingId(record.id);
+    try {
+      await libraryApi.remove(record.reference_library_info.id);
+      message.success(isEn ? 'Certification removed' : '已取消官方库认证');
+      await loadSpaces();
+    } catch {
+      message.error(isEn ? 'Failed to remove certification' : '取消认证失败');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleTogglePublish = async (record: AdminSpaceListItem) => {
+    if (!record.reference_library_info) return;
+    const newStatus = record.reference_library_info.status === 'published' ? 'unpublished' : 'published';
+    setActionLoadingId(record.id);
+    try {
+      await libraryApi.update(record.reference_library_info.id, { status: newStatus });
+      message.success(isEn ? `Library ${newStatus}` : `库已${newStatus === 'published' ? '发布' : '下架'}`);
+      await loadSpaces();
+    } catch {
+      message.error(isEn ? 'Failed to update status' : '状态更新失败');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   // --- GitHub-style deletion flow ---
   const openDeleteModal = async (record: AdminSpaceListItem) => {
     setDeleteTarget(record);
@@ -185,7 +245,7 @@ export default function AdminSpacesPage() {
   const handleConfirmDelete = async () => {
     if (!deleteTarget || !deletionImpact) return;
     if (confirmInput.trim() !== deletionImpact.confirmation_phrase) {
-      message.error('Confirmation phrase does not match');
+      message.error(t('deletion_phrase_mismatch'));
       return;
     }
     setDeleting(true);
@@ -268,13 +328,20 @@ export default function AdminSpacesPage() {
       title: isEn ? 'Status' : '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
-      render: (status: string) => {
+      width: 120,
+      render: (status: string, record: AdminSpaceListItem) => {
         const isActive = status === 'active';
         return (
-          <Tag color={isActive ? 'success' : 'default'} style={{ borderRadius: '999px', fontSize: 11.5, fontWeight: 500 }}>
-            {isActive ? 'ACTIVE' : 'ARCHIVED'}
-          </Tag>
+          <Space direction="vertical" size={2}>
+            <Tag color={isActive ? 'success' : 'default'} style={{ borderRadius: '999px', fontSize: 11.5, fontWeight: 500 }}>
+              {isActive ? 'ACTIVE' : 'ARCHIVED'}
+            </Tag>
+            {record.reference_library_info && (
+              <Tag color={record.reference_library_info.status === 'published' ? 'blue' : 'orange'} style={{ borderRadius: '999px', fontSize: 10, fontWeight: 500 }}>
+                {isEn ? 'Official Library' : '官方库'}
+              </Tag>
+            )}
+          </Space>
         );
       },
     },
@@ -306,12 +373,48 @@ export default function AdminSpacesPage() {
     {
       title: isEn ? 'Actions' : '操作',
       key: 'actions',
-      width: 200,
+      width: 280,
       fixed: 'right' as const,
       render: (_: unknown, record: AdminSpaceListItem) => {
         const isActive = record.status === 'active';
+        const refLib = record.reference_library_info;
         return (
-          <Space size={8}>
+          <Space size={8} wrap>
+            {/* Official library certification controls */}
+            {refLib ? (
+              <>
+                <Button
+                  size="small"
+                  loading={actionLoadingId === record.id}
+                  onClick={() => void handleTogglePublish(record)}
+                  style={{ borderRadius: 6 }}
+                >
+                  {refLib.status === 'published'
+                    ? (isEn ? 'Unpublish' : '下架')
+                    : (isEn ? 'Publish' : '发布')}
+                </Button>
+                <Popconfirm
+                  title={isEn ? 'Remove official library certification?' : '取消官方库认证？'}
+                  description={isEn ? 'Other spaces will no longer reference this library.' : '其他空间将无法再引用此库。'}
+                  onConfirm={() => void handleUncertify(record)}
+                >
+                  <Button size="small" danger style={{ borderRadius: 6 }}>
+                    {isEn ? 'Uncertify' : '取消认证'}
+                  </Button>
+                </Popconfirm>
+              </>
+            ) : (
+              <Button
+                size="small"
+                icon={<SafetyCertificateOutlined />}
+                loading={actionLoadingId === record.id}
+                onClick={() => void handleCertify(record)}
+                style={{ borderRadius: 6 }}
+              >
+                {isEn ? 'Set Official' : '设为官方库'}
+              </Button>
+            )}
+            {/* Archive / Restore */}
             {isActive ? (
               <Button
                 size="small"
@@ -363,7 +466,7 @@ export default function AdminSpacesPage() {
         <Alert
           type="error"
           showIcon
-          message="Failed to load deletion impact data"
+          message={t('deletion_impact_load_failed')}
         />
       );
     }
@@ -466,7 +569,7 @@ export default function AdminSpacesPage() {
     !deletionImpact.blockers?.length;
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-head" style={{ marginBottom: 24 }}>
         <h1 className="page-title">
           {isEn ? 'Workspace Management' : '工作空间管理'}
@@ -497,6 +600,17 @@ export default function AdminSpacesPage() {
                 { value: 'active', label: isEn ? 'Active' : '活跃' },
                 { value: 'archived', label: isEn ? 'Archived' : '已归档' },
               ]}
+            />
+            <Select
+              allowClear
+              placeholder={isEn ? 'Business Line' : '业务线'}
+              value={businessLineFilter}
+              onChange={(val) => {
+                setBusinessLineFilter(val ?? undefined);
+                setPage(1);
+              }}
+              style={{ width: 160 }}
+              options={businessLines.map((bl) => ({ value: bl.id, label: bl.name }))}
             />
             <Input
               placeholder={isEn ? 'Search by name or code...' : '按名称或代码搜索...'}
@@ -554,6 +668,7 @@ export default function AdminSpacesPage() {
       >
         {renderDeleteModalContent()}
       </Modal>
+
     </div>
   );
 }

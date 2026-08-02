@@ -13,7 +13,7 @@ export interface ScenarioTemplate {
   name: string;
   code: string;
   description: string;
-  scenario_type: 'onboarding' | 'audit' | 'tax' | 'consulting' | 'core_services' | 'standards_qa' | 'project_ai';
+  scenario_type: 'onboarding' | 'audit' | 'tax' | 'consulting' | 'core_services' | 'standards_qa' | 'project_ai' | 'enablement';
   default_language: string;
   icon: string;
   category?: { id: string; name: string; slug: string } | null;

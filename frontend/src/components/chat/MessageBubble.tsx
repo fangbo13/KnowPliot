@@ -381,31 +381,51 @@ function MessageBubble({ message, isStreaming = false, disableActions = false, c
           {sourcesExpanded && (
             <div className="citation-list">
               {message.citations.map((cit: Citation, i: number) => {
-                const sourceUrl = cit.source_url?.startsWith('/api/v1/chat/citations/')
-                  ? cit.source_url
-                  : null;
                 return (
                   <div key={cit.source_id ?? `${cit.document_id}-${i}`} className="citation-item">
                     <span className="citation-index">{i + 1}.</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {sourceUrl ? (
-                        <a
-                          className="citation-title"
-                          href={sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={cit.document_title}
-                        >
-                          {cit.document_title}
-                        </a>
-                      ) : (
-                        <div className="citation-title" title={cit.document_title}>
-                          {cit.document_title}
-                        </div>
-                      )}
+                      {/* Citation titles render as plain text — source links are
+                          intentionally disabled (no navigation from citations). */}
+                      <div className="citation-title" title={cit.document_title}>
+                        {cit.document_title}
+                      </div>
                       {cit.snippet && <div className="citation-snippet">{cit.snippet}</div>}
                       <div className="citation-meta">
+                        {/* KB optimization spec §3.3: reference-library provenance badge */}
+                        {cit.source_library && (
+                          <span
+                            className="citation-library-badge"
+                            style={{
+                              color: 'var(--color-accent)',
+                              border: '1px solid rgba(var(--color-accent-rgb), 0.35)',
+                              borderRadius: 4,
+                              padding: '0 6px',
+                              fontSize: 11,
+                            }}
+                          >
+                            {t('citation_library_badge', { name: cit.source_library, defaultValue: '参考库 · {{name}}' })}
+                          </span>
+                        )}
                         {cit.page_number != null && <span>{t('page_label', { n: cit.page_number, defaultValue: 'Page {{n}}' })}</span>}
+                        {/* P2 §A7: heading path from structure-aware chunking */}
+                        {cit.section && (
+                          <span style={{ color: 'var(--color-text-tertiary)' }}>§ {cit.section}</span>
+                        )}
+                        {/* Spec §3: updater watermark "v{N} · {name} · {date}" on citation cards */}
+                        {cit.version != null && (
+                          <span className="citation-watermark" style={{ color: 'var(--color-text-tertiary)' }}>
+                            v{cit.version}
+                            {cit.updated_by ? ` · ${cit.updated_by}` : ''}
+                            {cit.updated_at ? ` · ${new Date(cit.updated_at).toLocaleDateString()}` : ''}
+                          </span>
+                        )}
+                        {/* Spec §4 L3: stale documents carry a "may be outdated" badge */}
+                        {cit.stale && (
+                          <span style={{ color: 'var(--color-warning)' }}>
+                            {t('citation_stale_badge', { defaultValue: 'May be outdated' })}
+                          </span>
+                        )}
                         <span className="relevance-badge" style={{ color: getRelevanceColor(cit.score) }}>
                           {getRelevanceLabel(cit.score, t)}
                         </span>

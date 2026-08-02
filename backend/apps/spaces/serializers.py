@@ -47,7 +47,8 @@ class KnowledgeSpaceSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "description", "icon", "language",
             "visibility", "status", "organization", "organization_name",
-            "business_line", "business_line_name",
+            "business_line", "business_line_name", "review_policy",
+            "taxonomy_mode",
             "my_role", "member_count", "settings", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -71,13 +72,14 @@ class SpaceCreateSerializer(serializers.ModelSerializer):
         model = KnowledgeSpace
         fields = [
             "id", "name", "code", "description", "icon", "language",
-            "visibility", "organization", "business_line",
+            "visibility", "organization", "business_line", "review_policy",
         ]
         read_only_fields = ["id"]
         extra_kwargs = {
             "organization": {"required": False},
             "business_line": {"required": False},
             "visibility": {"required": False},
+            "review_policy": {"required": False},
         }
 
     def validate_code(self, value):
@@ -112,8 +114,8 @@ class InviteCodeSerializer(serializers.ModelSerializer):
 
 class InviteCodeCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(
-        choices=[c[0] for c in SpaceMembership.ROLE_CHOICES],
-        default=SpaceMembership.ROLE_MEMBER,
+        choices=[SpaceMembership.ROLE_GUEST],
+        default=SpaceMembership.ROLE_GUEST,
     )
     expires_at = serializers.DateTimeField(required=False, allow_null=True)
     max_uses = serializers.IntegerField(required=False, min_value=0, default=0)
@@ -173,6 +175,11 @@ class AdminRegistrationCodeCreateSerializer(serializers.Serializer):
 # ── V7.0 Space email invites ─────────────────────────────────────────
 
 class SpaceEmailInviteSerializer(serializers.ModelSerializer):
+    role = serializers.ChoiceField(
+        choices=[SpaceMembership.ROLE_GUEST],
+        default=SpaceMembership.ROLE_GUEST,
+    )
+
     class Meta:
         model = SpaceEmailInvite
         fields = ["id", "email", "space", "role", "status", "expires_at", "created_at"]
@@ -182,8 +189,8 @@ class SpaceEmailInviteSerializer(serializers.ModelSerializer):
 class AddMemberByEmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(
-        choices=[c[0] for c in SpaceMembership.ROLE_CHOICES if c[0] != SpaceMembership.ROLE_OWNER],
-        default=SpaceMembership.ROLE_MEMBER,
+        choices=[SpaceMembership.ROLE_GUEST],
+        default=SpaceMembership.ROLE_GUEST,
     )
 
 
@@ -209,7 +216,7 @@ class SpaceAccessRequestSerializer(serializers.ModelSerializer):
 
 
 class SpaceAccessRequestCreateSerializer(serializers.Serializer):
-    role = serializers.ChoiceField(choices=[SpaceMembership.ROLE_MEMBER, SpaceMembership.ROLE_GUEST])
+    role = serializers.ChoiceField(choices=[SpaceMembership.ROLE_GUEST], required=False, default=SpaceMembership.ROLE_GUEST)
     reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
 
 

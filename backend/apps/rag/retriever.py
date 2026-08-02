@@ -11,7 +11,9 @@ V3.7 P0.2: Added retrieval timing logs for pgvector performance verification.
 
 import time
 import math
+import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
@@ -35,12 +37,44 @@ def _validated_uuid(value, *, field_name: str) -> str:
         raise ValueError(f"{field_name} must contain valid UUID values") from exc
 
 
+def _metadata_dict(value) -> dict:
+    """Normalize chunk metadata from raw SQL rows.
+
+    Django + psycopg3 returns jsonb columns from raw cursors as JSON strings
+    (the ORM's from_db_value decoding does not apply), so downstream consumers
+    (§4 L4 term boosting, rerank signals) must always receive a dict.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (str, bytes, bytearray)):
+        try:
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+_TERM_CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_\-.]{0,63}$")
+
+
+def _validated_term_code(value) -> str:
+    """Spec §4 L4: term codes are slugs from the controlled vocabulary."""
+    code = str(value).strip().lower()
+    if not _TERM_CODE_PATTERN.match(code):
+        raise ValueError("term_codes must contain valid taxonomy term codes")
+    return code
+
+
 @dataclass(frozen=True)
 class RetrievalFilters:
     """The complete allowlist of caller-controlled retrieval filters."""
 
     document_ids: tuple[str, ...] = ()
     category_ids: tuple[str, ...] = ()
+    # Spec §4 L4: restrict to chunks whose document carries any of these
+    # controlled taxonomy terms (metadata["terms"] written at ingest time).
+    term_codes: tuple[str, ...] = ()
 
     def normalized(self) -> "RetrievalFilters":
         return RetrievalFilters(
@@ -51,6 +85,9 @@ class RetrievalFilters:
             category_ids=tuple(
                 _validated_uuid(value, field_name="category_ids")
                 for value in self.category_ids
+            ),
+            term_codes=tuple(
+                _validated_term_code(value) for value in self.term_codes
             ),
         )
 
@@ -84,6 +121,7 @@ class PgVectorRetriever:
         query: str,
         *,
         space_id: str,
+        space_ids: list[str] | None = None,
         top_k: int | None = None,
         similarity_threshold: float | None = None,
         filters: RetrievalFilters | None = None,
@@ -95,16 +133,30 @@ class PgVectorRetriever:
             top_k: Number of results to return.
             similarity_threshold: Minimum similarity score.
             filters: Django ORM filters to apply before search.
-            space_id: V6.0 — restrict retrieval to a single knowledge space.
-                Enforces space isolation: answers can only cite documents in the
-                active space. Handled explicitly (not via ``filters``) so the
-                pgvector SQL qualifies the column as ``dc.space_id`` and avoids
-                ambiguity with the joined document table.
+            space_id: V6.0 — the primary knowledge space. Enforces space
+                isolation: answers can only cite documents in this space unless
+                the caller explicitly widens the scope via ``space_ids``.
+            space_ids: KB optimization spec §3.3 — the full allowlist of spaces
+                to retrieve from (primary space + opted-in reference libraries).
+                When omitted, defaults to ``[space_id]`` (single-space isolation).
+                Every id is validated; retrieval is strictly limited to this set.
 
         Returns:
-            List of dicts with 'content', 'document', 'score', 'page_number', 'metadata', 'id'.
+            List of dicts with 'content', 'document', 'score', 'page_number',
+            'metadata', 'id', 'space_id'.
         """
-        normalized_space_id = _validated_uuid(space_id, field_name="space_id")
+        primary_space_id = _validated_uuid(space_id, field_name="space_id")
+        if space_ids:
+            normalized_space_ids = list(
+                dict.fromkeys(
+                    _validated_uuid(value, field_name="space_ids")
+                    for value in space_ids
+                )
+            )
+            if primary_space_id not in normalized_space_ids:
+                normalized_space_ids.insert(0, primary_space_id)
+        else:
+            normalized_space_ids = [primary_space_id]
         if filters is not None and not isinstance(filters, RetrievalFilters):
             raise ValueError("filters must be a RetrievalFilters instance")
         normalized_filters = filters.normalized() if filters else RetrievalFilters()
@@ -124,36 +176,37 @@ class PgVectorRetriever:
 
         if is_postgres:
             results = self._search_pgvector(
-                query, top_k, threshold, normalized_filters, normalized_space_id
+                query, top_k, threshold, normalized_filters, normalized_space_ids
             )
         else:
             results = self._search_sqlite(
-                query, top_k, threshold, normalized_filters, normalized_space_id
+                query, top_k, threshold, normalized_filters, normalized_space_ids
             )
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         search_mode = "pgvector" if is_postgres else "sqlite"
         logger.info(
-            "[Retriever] %s search completed in %dms — query='%s...' top_k=%d results=%d",
-            search_mode, elapsed_ms, query[:50], top_k, len(results),
+            "[Retriever] %s search completed in %dms — query='%s...' top_k=%d spaces=%d results=%d",
+            search_mode, elapsed_ms, query[:50], top_k, len(normalized_space_ids), len(results),
         )
 
         return results
 
     def _search_sqlite(
         self, query: str, top_k: int, threshold: float,
-        filters: RetrievalFilters | None, space_id: str,
+        filters: RetrievalFilters | None, space_ids: list[str],
     ) -> list[dict]:
         """SQLite fallback: compute cosine similarity in Python."""
         query_embedding = self._embed(query)
 
         normalized_filters = (filters or RetrievalFilters()).normalized()
         # Part 1 (§1.5): Only retrieve from currently effective documents.
+        # Spec §4 L3: stale documents stay retrievable (downweighted at rerank).
         today = date.today()
         qs = DocumentChunk.objects.filter(
             embedding__isnull=False,
-            space_id=space_id,
-            document__status="active",
+            space_id__in=space_ids,
+            document__status__in=["active", "stale"],
         ).filter(
             Q(document__effective_from__isnull=True) | Q(document__effective_from__lte=today),
             Q(document__effective_to__isnull=True) | Q(document__effective_to__gte=today),
@@ -168,6 +221,10 @@ class PgVectorRetriever:
         for chunk in qs.select_related("document"):
             if chunk.embedding is None:
                 continue
+            if normalized_filters.term_codes:
+                chunk_terms = set((chunk.metadata or {}).get("terms") or [])
+                if not chunk_terms.intersection(normalized_filters.term_codes):
+                    continue
             sim = cosine_similarity(query_embedding, chunk.embedding)
             if sim >= threshold:
                 scored.append((sim, chunk))
@@ -185,13 +242,15 @@ class PgVectorRetriever:
                 "score": round(sim, 4),
                 "page_number": chunk.page_number,
                 "metadata": chunk.metadata,
+                "document_status": chunk.document.status,
+                "space_id": str(chunk.space_id) if chunk.space_id else None,
             }
             for sim, chunk in results
         ]
 
     def _search_pgvector(
         self, query: str, top_k: int, threshold: float,
-        filters: RetrievalFilters | None, space_id: str,
+        filters: RetrievalFilters | None, space_ids: list[str],
     ) -> list[dict]:
         """PostgreSQL + pgvector: use native vector similarity.
 
@@ -211,14 +270,16 @@ class PgVectorRetriever:
             # Only allow known column names that are safe to interpolate into raw SQL.
             normalized_filters = (filters or RetrievalFilters()).normalized()
             # Part 1 (§1.5): Only retrieve from currently effective documents —
-            # excludes superseded (status != 'active') and future/expired versions.
+            # excludes superseded and future/expired versions. Spec §4 L3: stale
+            # documents stay retrievable (rerank downweights them instead).
             today = date.today()
+            space_placeholders = ", ".join(["%s"] * len(space_ids))
             filter_parts = [
-                "dc.space_id = %s", "d.status = %s",
+                f"dc.space_id IN ({space_placeholders})", "d.status IN (%s, %s)",
                 "(d.effective_from IS NULL OR d.effective_from <= %s)",
                 "(d.effective_to IS NULL OR d.effective_to >= %s)",
             ]
-            filter_params: list = [space_id, "active", today, today]
+            filter_params: list = [*space_ids, "active", "stale", today, today]
             if normalized_filters.document_ids:
                 placeholders = ", ".join(["%s"] * len(normalized_filters.document_ids))
                 filter_parts.append(f"dc.document_id IN ({placeholders})")
@@ -227,6 +288,12 @@ class PgVectorRetriever:
                 placeholders = ", ".join(["%s"] * len(normalized_filters.category_ids))
                 filter_parts.append(f"d.category_id IN ({placeholders})")
                 filter_params.extend(normalized_filters.category_ids)
+            if normalized_filters.term_codes:
+                # Spec §4 L4: any-of match against metadata["terms"].
+                # jsonb_exists_any == the ?| operator, spelled as a function so the
+                # raw SQL stays free of driver-sensitive '?' characters.
+                filter_parts.append("jsonb_exists_any(dc.metadata->'terms', %s)")
+                filter_params.append(list(normalized_filters.term_codes))
             filter_sql = " AND " + " AND ".join(filter_parts)
 
             # V6.0 space isolation — qualified column (dc.space_id) avoids ambiguity
@@ -243,8 +310,8 @@ class PgVectorRetriever:
             cursor.execute(
                 f"""
                 SELECT dc.id, dc.content, dc.page_number, dc.metadata,
-                       dc.document_id, d.title AS document_title,
-                       (dc.embedding_vector <=> %s) AS distance
+                       dc.document_id, d.title AS document_title, d.status AS document_status,
+                       (dc.embedding_vector <=> %s) AS distance, dc.space_id
                 FROM knowledge_documentchunk dc
                 JOIN knowledge_document d ON dc.document_id = d.id
                 WHERE dc.embedding_vector IS NOT NULL
@@ -270,9 +337,11 @@ class PgVectorRetriever:
                 "content": row[1],
                 "document_id": str(row[4]),
                 "document_title": row[5],
-                "score": round(1 - float(row[6]), 4),
+                "score": round(1 - float(row[7]), 4),
                 "page_number": row[2],
-                "metadata": row[3],
+                "metadata": _metadata_dict(row[3]),
+                "document_status": row[6],
+                "space_id": str(row[8]) if row[8] else None,
             }
             for row in rows
         ]

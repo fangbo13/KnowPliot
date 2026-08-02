@@ -28,6 +28,9 @@ class Command(BaseCommand):
             / "phase8a_v1.json"
         )
         parser.add_argument("--dataset", default=str(default_path))
+        # RAG optimization spec Phase 0: baseline runs must report metrics
+        # without failing on the phase8a quality gate.
+        parser.add_argument("--no-threshold", action="store_true")
 
     def handle(self, *args, **options):
         dataset_path = Path(options["dataset"])
@@ -66,16 +69,28 @@ class Command(BaseCommand):
                 )
                 result_document_ids = [str(row["document_id"]) for row in rows]
                 quality = classify_confidence(rows)
+                # RAG optimization spec Phase 0: ALL answer snippets must
+                # co-occur inside ONE top-5 chunk — catches table shredding
+                # (data row separated from its header/section) that
+                # document-level recall cannot see.
+                snippets = case.get("answer_snippets") or []
+                answer_hit = None
+                if snippets:
+                    top_contents = [row.get("content") or "" for row in rows[:5]]
+                    answer_hit = any(
+                        all(snippet in content for snippet in snippets)
+                        for content in top_contents
+                    )
                 allowed_document_ids = {
                     str(value)
                     for value in Document.objects.filter(space=space).values_list(
                         "id", flat=True
                     )
                 }
-                reports.append(
-                    {
+                report_case = {
                         "id": case["id"],
                         "answerable": case["answerable"],
+                        "tags": case.get("tags") or [],
                         "expected_document_ids": [str(value) for value in expected_ids],
                         "result_document_ids": result_document_ids,
                         "confidence": quality.label,
@@ -85,8 +100,10 @@ class Command(BaseCommand):
                             value not in allowed_document_ids
                             for value in result_document_ids
                         ),
-                    }
-                )
+                }
+                if answer_hit is not None:
+                    report_case["answer_hit"] = answer_hit
+                reports.append(report_case)
             metrics = calculate_metrics(reports)
             run.status = "succeeded"
             run.metrics = metrics
@@ -101,6 +118,8 @@ class Command(BaseCommand):
             raise CommandError("RAG evaluation failed; inspect the persisted run.") from exc
 
         self.stdout.write(json.dumps(metrics, sort_keys=True))
+        if options["no_threshold"]:
+            return
         if (
             metrics["recall_at_5"] < 0.80
             or metrics["mrr"] < 0.65

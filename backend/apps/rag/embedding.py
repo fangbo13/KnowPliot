@@ -8,17 +8,29 @@ V3.7 P0.1 Performance optimizations:
 - TTL-based memory cache for query embeddings (5-minute TTL)
 - Module-level singleton httpx.Client connection pool (eliminates TLS handshake per request)
 - EmbeddingService reuses global client instead of creating per-instance
+
+KB/RAG audit spec P1:
+- §A5 embed_batch sends true batched API requests (was one call per text)
+- §A8 query embeddings are shared across workers via the Django cache (Redis
+  in production) as an L2 behind the in-process TTL cache
 """
 
+import hashlib
 import time
 import logging
 import threading
 import httpx
 from django.conf import settings
+from django.core.cache import cache as shared_cache
 
 from .config import EMBEDDING_MODEL, EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
+
+# P1 §A5: DashScope OpenAI-compatible embeddings accept small input arrays.
+EMBED_BATCH_SIZE = 10
+# P1 §A8: cross-worker cache TTL (seconds).
+SHARED_CACHE_TTL = 1800
 
 
 class EmbeddingCache:
@@ -239,30 +251,57 @@ class EmbeddingService:
                     continue
                 raise
 
+    def _shared_cache_key(self, text: str) -> str:
+        digest = hashlib.sha256(f"{self.model}:{text}".encode("utf-8")).hexdigest()
+        return f"rag:embed:{digest}"
+
+    def _shared_cache_get(self, text: str) -> list[float] | None:
+        """P1 §A8: L2 lookup in the Django cache (Redis in production)."""
+        try:
+            value = shared_cache.get(self._shared_cache_key(text))
+        except Exception:  # cache backend down — never block embedding
+            return None
+        return value if isinstance(value, list) and value else None
+
+    def _shared_cache_set(self, text: str, embedding: list[float]) -> None:
+        try:
+            shared_cache.set(
+                self._shared_cache_key(text), embedding, timeout=SHARED_CACHE_TTL
+            )
+        except Exception:
+            pass
+
     def embed(self, text: str) -> list[float]:
         """Generate embedding for a single text.
 
-        V3.7: Uses TTL cache — if the same text was embedded within
-        the last 5 minutes, returns cached result immediately
-        (eliminating ~1,000-1,500ms DashScope API latency).
+        V3.7: in-process TTL cache (L1). P1 §A8: Django/Redis shared cache
+        (L2) so cache hits survive across gunicorn workers and processes.
         """
         # Truncate very long texts to avoid API errors
         if len(text) > 8000:
             text = text[:8000]
 
-        # V3.7 P0.1: Check cache first
+        # V3.7 P0.1: Check L1 cache first
         cached = self._cache.get(text)
         self._cache.log_stats()  # Outside lock — see EmbeddingCache.log_stats()
         if cached is not None:
             logger.debug("[EmbeddingService] Cache hit for query: '%s...' (len=%d)", text[:50], len(text))
             return cached
 
+        # P1 §A8: L2 shared cache (cross-worker)
+        shared = self._shared_cache_get(text)
+        if shared is not None:
+            self._cache.set(text, shared)
+            logger.debug("[EmbeddingService] Shared-cache hit for query: '%s...'", text[:50])
+            return shared
+
         # Cache miss — call API
         result = self._make_request([text])
         embedding = result["data"][0]["embedding"]
 
-        # Store in cache for future requests
+        # Store in both cache layers for future requests
         self._cache.set(text, embedding)
+        self._shared_cache_set(text, embedding)
         logger.debug("[EmbeddingService] Cache miss — API call completed for query: '%s...'", text[:50])
 
         return embedding
@@ -270,30 +309,50 @@ class EmbeddingService:
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts.
 
-        Process one at a time for reliability with DashScope API.
-        V3.7: Each text is also cached individually.
+        P1 §A5: send true batched requests (EMBED_BATCH_SIZE inputs per API
+        call) instead of one call per text — a 500-chunk document now needs
+        ~50 requests with no fixed sleeps. A failed batch degrades to
+        per-item requests; items that still fail fall back to zero vectors
+        (detected downstream by BATCH-012).
         """
-        embeddings = []
-        for i, text in enumerate(texts):
-            # Truncate very long texts
-            if len(text) > 8000:
-                text = text[:8000]
-            try:
-                # V3.7: Check cache for each text in batch
-                cached = self._cache.get(text)
-                if cached is not None:
-                    embeddings.append(cached)
-                    continue
+        truncated = [t[:8000] if len(t) > 8000 else t for t in texts]
+        embeddings: list[list[float] | None] = [None] * len(truncated)
 
-                result = self._make_request([text])
-                embedding = result["data"][0]["embedding"]
-                self._cache.set(text, embedding)
-                embeddings.append(embedding)
-            except Exception as e:
-                logger.error(f"Failed to embed chunk {i}: {e}")
-                # Use zero vector as fallback
-                embeddings.append([0.0] * EMBEDDING_DIM)
-            # Rate limiting: small delay between requests
-            if i % 5 == 4:
-                time.sleep(0.5)
-        return embeddings
+        pending: list[tuple[int, str]] = []
+        for i, text in enumerate(truncated):
+            cached = self._cache.get(text)
+            if cached is not None:
+                embeddings[i] = cached
+            else:
+                pending.append((i, text))
+
+        for start in range(0, len(pending), EMBED_BATCH_SIZE):
+            window = pending[start : start + EMBED_BATCH_SIZE]
+            batch_texts = [text for _, text in window]
+            try:
+                result = self._make_request(batch_texts)
+                data = sorted(result["data"], key=lambda item: item.get("index", 0))
+                if len(data) != len(window):
+                    raise ValueError(
+                        f"embedding batch size mismatch: sent {len(window)}, got {len(data)}"
+                    )
+                for (i, text), item in zip(window, data):
+                    embedding = item["embedding"]
+                    self._cache.set(text, embedding)
+                    embeddings[i] = embedding
+            except Exception as exc:
+                logger.warning(
+                    "Batch embedding failed (%d items) — degrading to per-item calls: %s",
+                    len(window), exc,
+                )
+                for i, text in window:
+                    try:
+                        result = self._make_request([text])
+                        embedding = result["data"][0]["embedding"]
+                        self._cache.set(text, embedding)
+                        embeddings[i] = embedding
+                    except Exception as item_exc:
+                        logger.error(f"Failed to embed chunk {i}: {item_exc}")
+                        embeddings[i] = [0.0] * EMBEDDING_DIM
+
+        return [e if e is not None else [0.0] * EMBEDDING_DIM for e in embeddings]

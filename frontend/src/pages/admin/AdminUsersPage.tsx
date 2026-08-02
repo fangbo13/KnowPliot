@@ -36,6 +36,7 @@ export default function AdminUsersPage() {
   // Filter state
   const [roleFilter, setRoleFilter] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [businessLineFilter, setBusinessLineFilter] = useState<string | undefined>();
   const [emailSearch, setEmailSearch] = useState('');
   const sequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
@@ -215,6 +216,16 @@ export default function AdminUsersPage() {
     return [...roles].sort().map((r) => ({ value: r, label: r }));
   }, [users]);
 
+  const businessLineOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    users.forEach((u) => {
+      if (u.business_line && u.business_line_name) {
+        seen.set(u.business_line, u.business_line_name);
+      }
+    });
+    return [...seen.entries()].map(([value, label]) => ({ value, label }));
+  }, [users]);
+
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
       if (roleFilter) {
@@ -227,14 +238,15 @@ export default function AdminUsersPage() {
         }
       }
       if (statusFilter && (user.is_active ? 'active' : 'inactive') !== statusFilter) return false;
+      if (businessLineFilter && user.business_line !== businessLineFilter) return false;
       if (emailSearch && !user.email.toLowerCase().includes(emailSearch.toLowerCase())) return false;
       return true;
     });
-  }, [users, roleFilter, statusFilter, emailSearch]);
+  }, [users, roleFilter, statusFilter, businessLineFilter, emailSearch]);
 
   const columns = [
     { title: t('email_label') || 'Email', dataIndex: 'email', key: 'email', ellipsis: true },
-    { title: t('service_line_label'), dataIndex: 'service_line', key: 'service_line', render: (v: string | null) => v || '-' },
+    { title: t('service_line_label'), dataIndex: 'business_line_name', key: 'business_line_name', render: (v: string | null, rec: AdminUser) => v || rec.service_line || '-' },
     {
       title: t('member_role') || 'Roles', dataIndex: 'roles', key: 'roles',
       render: (roles: string[], rec: AdminUser) => {
@@ -275,10 +287,13 @@ export default function AdminUsersPage() {
   ];
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 className="page-title">{t('admin_users_title')}</h1>
+          <div>
+            <h1 className="page-title">{t('admin_users_title')}</h1>
+            <p className="page-sub">{t('admin_users_subtitle')}</p>
+          </div>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
         </div>
         <Card className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)', boxShadow: 'var(--shadow-sm)' }}>
@@ -304,7 +319,7 @@ export default function AdminUsersPage() {
             <Select
               showSearch
               allowClear
-              placeholder="Role"
+              placeholder={t('filter_role')}
               value={roleFilter}
               onChange={(value) => setRoleFilter(value ?? undefined)}
               options={roleOptions}
@@ -313,14 +328,22 @@ export default function AdminUsersPage() {
             />
             <Select
               allowClear
-              placeholder="Status"
+              placeholder={t('filter_status')}
               value={statusFilter}
               onChange={(value) => setStatusFilter(value ?? undefined)}
               options={[
-                { value: 'active', label: 'Active' },
-                { value: 'inactive', label: 'Inactive' },
+                { value: 'active', label: t('status_active') },
+                { value: 'inactive', label: t('status_inactive') },
               ]}
               style={{ width: 120 }}
+            />
+            <Select
+              allowClear
+              placeholder={t('service_line_label') || 'Business Line'}
+              value={businessLineFilter}
+              onChange={(value) => setBusinessLineFilter(value ?? undefined)}
+              options={businessLineOptions}
+              style={{ width: 160 }}
             />
           </Space>
           <Table rowKey="id" loading={loading} dataSource={filteredUsers} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
@@ -350,7 +373,7 @@ export default function AdminUsersPage() {
                 <div style={{ display: 'grid', gap: 8 }}>
                   <strong>{`admin - ${t('offboarding_platform_scope')}`}</strong>
                   <Select
-                    aria-label="Administrator successor for platform scope"
+                    aria-label={t('admin_successor_aria')}
                     value={adminSuccessors[platformAdminScopeKey]}
                     placeholder={t('offboarding_select_successor')}
                     options={(adminCandidates[platformAdminScopeKey] ?? []).map((candidate) => ({ value: candidate.id, label: candidate.display_name }))}

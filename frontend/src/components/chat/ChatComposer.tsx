@@ -5,9 +5,17 @@
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
-import { SendOutlined, ArrowUpOutlined } from '@ant-design/icons';
+import { SendOutlined, ArrowUpOutlined, BookOutlined } from '@ant-design/icons';
+import { Checkbox, Modal, Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { AnswerMode } from '../../store/chatStore';
+
+export interface LibraryOption {
+  id: string;
+  name: string;
+}
+
+const CAP_NOTICE_HIDE_KEY = 'kp.libpicker.hideCapNotice';
 
 type Props = {
   value: string;
@@ -33,6 +41,12 @@ type Props = {
   thinkingEnabled?: boolean;
   canUseThinking?: boolean;
   onThinkingChange?: (enabled: boolean) => void;
+  /** Reference-library picker (session-level selection). */
+  libraryOptions?: LibraryOption[];
+  selectedLibraryIds?: string[];
+  onSelectedLibraryChange?: (ids: string[]) => void;
+  /** Per-mode cap on how many libraries may be cited at once. */
+  maxLibraries?: number;
 };
 
 const MAX_LEN = 4000;
@@ -61,11 +75,61 @@ export default function ChatComposer({
   thinkingEnabled = false,
   canUseThinking = false,
   onThinkingChange,
+  libraryOptions = [],
+  selectedLibraryIds = [],
+  onSelectedLibraryChange,
+  maxLibraries = 1,
 }: Props) {
   const { t } = useTranslation('chat');
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const [focused, setFocused] = useState(false);
+  const [libOpen, setLibOpen] = useState(false);
+  const [capNoticeOpen, setCapNoticeOpen] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  const capNoticeSuppressed = () => {
+    try {
+      return localStorage.getItem(CAP_NOTICE_HIDE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  };
+
+  const toggleLibrary = (id: string) => {
+    if (!onSelectedLibraryChange) return;
+    const isSelected = selectedLibraryIds.includes(id);
+    if (isSelected) {
+      onSelectedLibraryChange(selectedLibraryIds.filter((value) => value !== id));
+      return;
+    }
+    if (selectedLibraryIds.length >= maxLibraries) {
+      if (!capNoticeSuppressed()) {
+        setDontShowAgain(false);
+        setCapNoticeOpen(true);
+      }
+      return;
+    }
+    const next = [...selectedLibraryIds, id];
+    onSelectedLibraryChange(next);
+    // Reaching the cap surfaces the friendly notice (with a don't-show-again
+    // option) so the user understands why the remaining options disable.
+    if (next.length >= maxLibraries && !capNoticeSuppressed()) {
+      setDontShowAgain(false);
+      setCapNoticeOpen(true);
+    }
+  };
+
+  const closeCapNotice = () => {
+    if (dontShowAgain) {
+      try {
+        localStorage.setItem(CAP_NOTICE_HIDE_KEY, '1');
+      } catch {
+        /* ignore storage failures */
+      }
+    }
+    setCapNoticeOpen(false);
+  };
 
   const setRefs = (node: HTMLTextAreaElement | null) => {
     innerRef.current = node;
@@ -131,6 +195,53 @@ export default function ChatComposer({
             </span>
           </button>
         )}
+        {libraryOptions.length > 0 && (
+          <Popover
+            open={libOpen}
+            onOpenChange={(next) => !isStreaming && setLibOpen(next)}
+            trigger="click"
+            placement="topLeft"
+            content={(
+              <div className="library-picker-panel" style={{ minWidth: 220, maxWidth: 300 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginBottom: 8 }}>
+                  {t('library_picker_hint', {
+                    max: maxLibraries,
+                    defaultValue: '最多可选 {{max}} 个引用库',
+                  })}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
+                  {libraryOptions.map((lib) => {
+                    const checked = selectedLibraryIds.includes(lib.id);
+                    const atCap = !checked && selectedLibraryIds.length >= maxLibraries;
+                    return (
+                      <Checkbox
+                        key={lib.id}
+                        checked={checked}
+                        disabled={atCap}
+                        onChange={() => toggleLibrary(lib.id)}
+                      >
+                        {lib.name}
+                      </Checkbox>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          >
+            <button
+              type="button"
+              className={`composer-mode-btn composer-library-btn${selectedLibraryIds.length > 0 ? ' is-enabled' : ''}`}
+              aria-label={t('library_picker_label', { defaultValue: '引用库' })}
+              disabled={disabled || isStreaming}
+            >
+              <BookOutlined />
+              <span style={{ marginLeft: 4 }}>
+                {t('library_picker_label', { defaultValue: '引用库' })}
+                {selectedLibraryIds.length > 0 ? ` ${selectedLibraryIds.length}/${maxLibraries}` : ''}
+              </span>
+            </button>
+          </Popover>
+        )}
       </div>
       <div className={`composer${focused ? ' is-focused' : ''}${disabled ? ' is-disabled' : ''}`}>
         <div className="composer-inner">
@@ -186,6 +297,29 @@ export default function ChatComposer({
           )}
         </div>
       )}
+
+      <Modal
+        open={capNoticeOpen}
+        onOk={closeCapNotice}
+        onCancel={closeCapNotice}
+        okText={t('confirm', { defaultValue: '知道了' })}
+        cancelButtonProps={{ style: { display: 'none' } }}
+        title={t('library_cap_title', { defaultValue: '引用库数量限制' })}
+      >
+        <p>
+          {t('library_cap_notice', {
+            mode: answerMode === 'deep' ? t('answer_mode_deep') : t('answer_mode_fast'),
+            max: maxLibraries,
+            defaultValue: '{{mode}} 模式最多同时引用 {{max}} 个知识库。如需引用更多，请切换到 Deep 模式。',
+          })}
+        </p>
+        <Checkbox
+          checked={dontShowAgain}
+          onChange={(e) => setDontShowAgain(e.target.checked)}
+        >
+          {t('dont_show_again', { defaultValue: '不再提示' })}
+        </Checkbox>
+      </Modal>
     </>
   );
 }

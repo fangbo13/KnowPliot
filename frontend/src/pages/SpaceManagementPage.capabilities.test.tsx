@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { spacesApi } from '../api/spaces';
 import { useAuthorization } from '../auth/CapabilityProvider';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import SpaceManagementPage from './SpaceManagementPage';
 
 const activeSpace = {
@@ -42,7 +42,7 @@ vi.mock('../auth/CapabilityProvider', () => ({ useAuthorization: vi.fn() }));
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
-  return { ...actual, useParams: vi.fn() };
+  return { ...actual, useLocation: vi.fn(), useParams: vi.fn() };
 });
 
 vi.mock('../store/spaceStore', () => ({
@@ -96,6 +96,9 @@ describe('SpaceManagementPage capability actions', () => {
     mockActiveSpaceId = 'space-1';
     mockActiveSpace = activeSpace;
     vi.mocked(useParams).mockReturnValue({});
+    vi.mocked(useLocation).mockReturnValue({
+      pathname: '/spaces/manage', search: '', hash: '', state: null, key: 'test',
+    });
     vi.mocked(useAuthorization).mockReturnValue({
       enabled: true,
       status: 'ready',

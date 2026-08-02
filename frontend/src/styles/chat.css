@@ -246,7 +246,23 @@
 /* ============================================================================
    Chat view
    ============================================================================ */
-.chat-view { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; width: 100%; }
+.chat-view { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; width: 100%; position: relative; }
+
+/* Bottom bar (status indicator + composer). Absolutely positioned inside
+   .chat-view — NOT fixed to the viewport — so its centering axis matches the
+   message column (.msg-col centers within app-main) and follows the sidebar
+   expand/collapse transition instead of drifting off-center. */
+.chat-bottom-bar {
+  position: absolute;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 100;
+  pointer-events: none;
+}
 
 .chat-titlebar { display: flex; align-items: center; gap: 10px; padding: 14px 24px 6px; max-width: var(--content-max); width: 100%; margin: 0 auto; }
 .chat-title-btn {
@@ -419,9 +435,19 @@
 
 /* thinking indicator */
 .thinking { display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; animation: fadeIn var(--dur) var(--ease-out); }
-.thinking-dots { display: flex; gap: 4px; }
-.thinking-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.7; }
-.thinking-label { color: var(--color-text-tertiary); font-size: 13.5px; }
+.thinking-dots { display: flex; gap: 5px; align-items: flex-end; }
+.thinking-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.35; animation: thinking-bounce 1.2s infinite ease-in-out both; }
+.thinking-dot:nth-child(1) { animation-delay: 0s; }
+.thinking-dot:nth-child(2) { animation-delay: 0.16s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.32s; }
+.thinking-label { color: var(--color-text-tertiary); font-size: 13.5px; animation: fadeIn var(--dur) var(--ease-out); }
+@keyframes thinking-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dot { animation: none; opacity: 0.7; }
+}
 
 /* message actions */
 .msg-actions {
@@ -510,8 +536,6 @@
 .citation-item:last-child { border-bottom: none; }
 .citation-index { font-size: 11px; color: var(--color-text-tertiary); min-width: 16px; padding-top: 2px; font-variant-numeric: tabular-nums; }
 .citation-title { font-size: 13px; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.citation-title[href] { display: block; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: color var(--motion-fast), text-decoration-color var(--motion-fast); }
-.citation-title[href]:hover { color: var(--color-primary); text-decoration-color: currentColor; }
 .citation-snippet { margin-top: 4px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; }
 .citation-meta { display: flex; gap: 10px; margin-top: 3px; font-size: 11.5px; color: var(--color-text-secondary); }
 .relevance-badge { font-weight: 600; }

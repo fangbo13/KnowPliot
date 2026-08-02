@@ -14,33 +14,36 @@ const access = (allowed: string[], enabled = true): AuthorizationAdapter => ({
 });
 
 describe('active management surface entries', () => {
-  it('builds command and shell destinations only from capabilities', () => {
+  it('provides a knowledge shortcut when the user can read and has an active space', () => {
     const entries = buildManagementEntries(
-      access(['governance.access', 'workspace.manage', 'knowledge.read']),
+      access(['knowledge.read']),
       'space-1',
     );
 
     expect(entries).toEqual([
-      { id: 'console', label: 'Management console', to: '/governance' },
-      { id: 'workspace', label: 'Workspace management', to: '/workspace/space-1/manage' },
-      { id: 'knowledge', label: 'Knowledge base', to: '/workspace/space-1/manage/knowledge' },
-    ]);
-  });
-
-  it('preserves one-release legacy destinations only while the flag is disabled', () => {
-    const entries = buildManagementEntries(
-      access(['governance.access', 'workspace.manage', 'knowledge.read'], false),
-      'space-1',
-    );
-
-    expect(entries.map((entry) => entry.to)).toEqual([
-      '/admin',
-      '/spaces/manage',
-      '/admin/knowledge',
+      { id: 'knowledge', label: 'Knowledge base', to: '/knowledge' },
     ]);
   });
 
   it('returns no privileged entry for an unprivileged capability set', () => {
-    expect(buildManagementEntries(access(['chat.ask']), 'space-1')).toEqual([]);
+    expect(buildManagementEntries(access(['unknown.cap']), 'space-1')).toEqual([]);
+  });
+
+  it('adds a reference-libraries shortcut for users who can ask', () => {
+    const entries = buildManagementEntries(
+      access(['knowledge.read', 'chat.ask']),
+      'space-1',
+    );
+
+    expect(entries).toEqual([
+      { id: 'knowledge', label: 'Knowledge base', to: '/knowledge' },
+      { id: 'reference-libraries', label: 'Reference libraries', to: '/reference-libraries' },
+    ]);
+  });
+
+  it('omits knowledge when no active space is set', () => {
+    expect(buildManagementEntries(access(['knowledge.read', 'chat.ask']), null)).toEqual([
+      { id: 'reference-libraries', label: 'Reference libraries', to: '/reference-libraries' },
+    ]);
   });
 });

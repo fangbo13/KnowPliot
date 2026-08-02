@@ -60,13 +60,83 @@ CREATE_ALLOWED_FIELDS = {
     "work_group_id",
     "office_location_ids",
     "template_version_id",
+    "taxonomy_init_mode",
+    "reference_library_ids",
 }
+
+# KB optimization spec §3.1: valid taxonomy initialization choices.
+TAXONOMY_INIT_MODES = {"default_seed", "custom", "none"}
+# Default seed preset applied when the requester chooses "default_seed".
+DEFAULT_TAXONOMY_PRESET = "audit_default"
+
+
+def _taxonomy_profile_for(template_revision) -> dict | None:
+    """KB spec §2.3: the template's taxonomy_profile from its snapshot, if any."""
+    if template_revision is None:
+        return None
+    try:
+        from apps.scenario_templates.contract import taxonomy_profile_from_snapshot
+
+        return taxonomy_profile_from_snapshot(template_revision.snapshot)
+    except Exception:
+        return None
+
+
+def _default_taxonomy_mode_for(template_revision) -> str:
+    """Derive the default taxonomy init mode from the template.
+
+    The snapshot's workspace_defaults.taxonomy_profile wins when present;
+    otherwise fall back to the scenario type — audit → default_seed (audit
+    account tree), enablement → none (no taxonomy), everything else → custom
+    (space admins self-manage).
+    """
+    if template_revision is None:
+        return "custom"
+    profile = _taxonomy_profile_for(template_revision)
+    if profile is not None:
+        return profile["mode"]
+    scenario_type = getattr(getattr(template_revision, "template", None), "scenario_type", None)
+    if scenario_type == "audit":
+        return "default_seed"
+    if scenario_type == "enablement":
+        return "none"
+    return "custom"
 
 
 def _reject_unknown(payload: dict, allowed: set[str] = CREATE_ALLOWED_FIELDS):
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ValidationError({"unknown_fields": unknown})
+
+
+def _normalize_reference_library_ids(raw) -> list[str]:
+    """Validate optional creator library opt-in into a list of published ids."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise ValidationError({"reference_library_ids": "Must be a list of library ids."})
+    wanted = []
+    for value in raw:
+        parsed = _uuid(value, "reference_library_ids")
+        if str(parsed) not in wanted:
+            wanted.append(str(parsed))
+    if not wanted:
+        return []
+    from apps.knowledge.models import ReferenceLibrary
+
+    valid = set(
+        str(value)
+        for value in ReferenceLibrary.objects.filter(
+            id__in=wanted,
+            status=ReferenceLibrary.STATUS_PUBLISHED,
+        ).values_list("id", flat=True)
+    )
+    invalid = [value for value in wanted if value not in valid]
+    if invalid:
+        raise ValidationError(
+            {"reference_library_ids": "Unknown or unpublished library id(s)."}
+        )
+    return [value for value in wanted if value in valid]
 
 
 def _uuid(value, field: str, *, required=True):
@@ -84,6 +154,24 @@ def _taxonomy_models():
     from .models import BusinessLine, OfficeLocation, WorkGroup
 
     return BusinessLine, WorkGroup, OfficeLocation
+
+
+def _apply_reference_library_optin(space, library_ids, added_by):
+    """Create SpaceLibraryReference rows for the creator-selected libraries."""
+    if not library_ids:
+        return
+    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+
+    published = ReferenceLibrary.objects.filter(
+        id__in=[str(value) for value in library_ids],
+        status=ReferenceLibrary.STATUS_PUBLISHED,
+    ).exclude(space_id=space.id)
+    for library in published:
+        SpaceLibraryReference.objects.get_or_create(
+            space=space,
+            library=library,
+            defaults={"enabled": True, "added_by": added_by},
+        )
 
 
 def _resolve_template_revision(template_version_id, *, business_line):
@@ -222,6 +310,21 @@ def _normalize_creation_payload(payload: dict, *, actor):
         business_line=business_line,
     )
 
+    # KB optimization spec §3.1: taxonomy initialization choice. Defaults to the
+    # template's scenario-derived mode, else "custom".
+    taxonomy_init_mode = payload.get("taxonomy_init_mode")
+    if taxonomy_init_mode in (None, ""):
+        taxonomy_init_mode = _default_taxonomy_mode_for(template_revision)
+    if taxonomy_init_mode not in TAXONOMY_INIT_MODES:
+        raise ValidationError({"taxonomy_init_mode": "Unsupported taxonomy initialization mode."})
+
+    # Session-library-selection spec §4: optional creator opt-in of published
+    # reference libraries (forms the new space's selectable pool). Only valid
+    # published library ids survive; unknown ids are rejected.
+    reference_library_ids = _normalize_reference_library_ids(
+        payload.get("reference_library_ids")
+    )
+
     normalized = {
         "name": name,
         "code": code,
@@ -233,6 +336,8 @@ def _normalize_creation_payload(payload: dict, *, actor):
         "work_group_id": work_group.id,
         "office_location_ids": [location.id for location in locations],
         "template_version_id": template_version_id,
+        "taxonomy_init_mode": taxonomy_init_mode,
+        "reference_library_ids": reference_library_ids,
         "template_id": template_revision.template_id if template_revision else None,
         "template_version": template_revision.version if template_revision else None,
         "template_snapshot_hash": (
@@ -295,6 +400,7 @@ def _request_body(request: GovernedActionRequest):
             "template_version_id": (
                 str(detail.template_version_id) if detail.template_version_id else None
             ),
+            "taxonomy_init_mode": detail.taxonomy_init_mode,
         }
     if request.result_uuid:
         body["space"] = {
@@ -399,6 +505,8 @@ def submit_creation_request(*, actor, payload: dict, idempotency_key: uuid.UUID)
                 work_group_id=work_group.id,
                 office_location_ids=[str(location.id) for location in locations],
                 template_version_id=normalized["template_version_id"],
+                taxonomy_init_mode=normalized["taxonomy_init_mode"],
+                reference_library_ids=normalized["reference_library_ids"],
             )
             # The reservation has a one-to-one-ish active request pointer; set
             # it after the request exists through the FK id so no unsaved
@@ -457,6 +565,7 @@ def refresh_creation_impact(*, actor, request_id, reviewer=True):
             "work_group_id": str(detail.work_group_id),
             "office_location_ids": detail.office_location_ids,
             "template_version_id": str(detail.template_version_id) if detail.template_version_id else None,
+            "taxonomy_init_mode": detail.taxonomy_init_mode,
         },
         actor=row.requester,
     )
@@ -576,6 +685,7 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                         if detail.template_version_id
                         else None
                     ),
+                    "taxonomy_init_mode": detail.taxonomy_init_mode,
                 },
                 actor=row.requester,
             )
@@ -604,6 +714,35 @@ def approve_creation_request(*, reviewer, request_id, expected_version: int, imp
                 space.office_locations.set(locations)
             except IntegrityError as exc:
                 raise GovernedWorkflowError("space_locator_conflict") from exc
+
+            # KB optimization spec §3.1: apply the requester's taxonomy choice.
+            #   default_seed → space-private mode + one-shot preset copy;
+            #   custom      → space-private mode, admins build their own tree;
+            #   none        → no taxonomy (enablement teams).
+            taxonomy_init_mode = normalized.get("taxonomy_init_mode", "custom")
+            space.taxonomy_mode = (
+                KnowledgeSpace.TAXONOMY_MODE_NONE
+                if taxonomy_init_mode == "none"
+                else KnowledgeSpace.TAXONOMY_MODE_SPACE
+            )
+            space.save(update_fields=["taxonomy_mode", "updated_at"])
+            if taxonomy_init_mode == "default_seed":
+                from apps.knowledge.taxonomy_presets import get_preset, seed_space_taxonomy
+
+                # Template taxonomy_profile may pin a specific preset (§2.3);
+                # unknown/absent presets fall back to the audit default.
+                profile = _taxonomy_profile_for(template_revision)
+                preset_code = (profile or {}).get("preset") or DEFAULT_TAXONOMY_PRESET
+                if get_preset(preset_code) is None:
+                    preset_code = DEFAULT_TAXONOMY_PRESET
+                seed_space_taxonomy(space, preset_code)
+
+            # Session-library-selection spec §4: opt the new space into the
+            # published reference libraries the creator selected, forming its
+            # selectable pool. Best-effort; unknown/unpublished ids skipped.
+            _apply_reference_library_optin(
+                space, getattr(detail, "reference_library_ids", None), row.requester
+            )
 
             old = row.status
             row.target_space = space

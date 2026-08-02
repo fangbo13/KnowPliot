@@ -21,7 +21,7 @@ describe('console navigation capability filtering', () => {
       '/platform-admin',
     );
 
-    expect(items.map((item) => item.segment)).toEqual(['dashboard', 'users', 'metrics']);
+    expect(items.map((item) => item.segment)).toEqual(['dashboard', 'users', 'metrics', 'spaces']);
   });
 
   it('keeps organization-only governance destinations away from business-line admins', () => {

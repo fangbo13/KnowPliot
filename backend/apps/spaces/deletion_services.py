@@ -222,7 +222,16 @@ def _impact_for_space(*, space: KnowledgeSpace, actor, issued_at=None) -> dict[s
             "id": manifest.get("manifest_digest", ""),
             "status": "ready" if manifest.get("ready") else "not_ready",
             "version": manifest.get("version", 0),
-            "resources": manifest.get("resources", []),
+            # ``manifest_digest`` (see build_deletion_manifest) is the frozen
+            # fingerprint of eligible content, blockers, and retention dates and
+            # deliberately EXCLUDES append-only retained evidence (audit / outbox /
+            # notification lineage). Embedding the raw ``resources`` list here put
+            # that volatile retained evidence back into ``impact_version``, so a
+            # single audit/outbox/notification row appended between impact issuance
+            # and submit/confirm flipped the digest and raised a spurious
+            # ``impact_changed`` (worst for empty workspaces whose manifest is only
+            # retained lineage). Rely on the frozen digest so a still-valid impact
+            # survives that legitimate growth.
         },
     ]
     for blocker in manifest.get("blockers", []):

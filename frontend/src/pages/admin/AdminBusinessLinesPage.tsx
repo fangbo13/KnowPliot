@@ -124,21 +124,24 @@ export default function AdminBusinessLinesPage() {
 
   const columns = [
     { title: t('kb_title') || 'Name', dataIndex: 'name', key: 'name' },
-    { title: 'Code', dataIndex: 'code', key: 'code', render: (c: string) => <Tag>{c}</Tag> },
-    { title: 'Organization', dataIndex: 'organization', key: 'organization', render: (o: string) => orgName(o) },
-    { title: t('kb_status') || 'Status', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag> },
-    { title: 'Lifecycle', key: 'lifecycle', render: (_: unknown, line: BusinessLine) => (
+    { title: t('space_code'), dataIndex: 'code', key: 'code', render: (c: string) => <Tag>{c}</Tag> },
+    { title: t('filter_organization'), dataIndex: 'organization', key: 'organization', render: (o: string) => orgName(o) },
+    { title: t('kb_status'), dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag> },
+    { title: t('admin_col_lifecycle'), key: 'lifecycle', render: (_: unknown, line: BusinessLine) => (
       <Button size="small" onClick={() => changeLifecycle(line)}>
-        {line.status === 'active' ? 'Archive' : 'Restore'}
+        {line.status === 'active' ? t('archive') : t('restore')}
       </Button>
     ) },
   ];
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 className="page-title">{t('admin_business_lines_title')}</h1>
+          <div>
+            <h1 className="page-title">{t('admin_business_lines_title')}</h1>
+            <p className="page-sub">{t('admin_business_lines_subtitle')}</p>
+          </div>
           <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)} style={{ borderRadius: 8 }}>{t('admin_create_business_line')}</Button>
@@ -167,7 +170,7 @@ export default function AdminBusinessLinesPage() {
           <Select
             showSearch
             allowClear
-            placeholder="Organization"
+            placeholder={t('filter_organization')}
             value={orgFilter}
             onChange={(value) => setOrgFilter(value ?? undefined)}
             options={orgs.map((o) => ({ value: o.id, label: o.name }))}
@@ -176,12 +179,12 @@ export default function AdminBusinessLinesPage() {
           />
           <Select
             allowClear
-            placeholder="Status"
+            placeholder={t('filter_status')}
             value={statusFilter}
             onChange={(value) => setStatusFilter(value ?? undefined)}
             options={[
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
+              { value: 'active', label: t('status_active') },
+              { value: 'inactive', label: t('status_inactive') },
             ]}
             style={{ width: 120 }}
           />
@@ -189,16 +192,16 @@ export default function AdminBusinessLinesPage() {
         <Table rowKey="id" loading={loading} dataSource={filteredLines} columns={columns} pagination={{ pageSize: 12 }} size="middle" scroll={{ x: 'max-content' }} />
       </Card>
 
-      <Card title="Organizations" className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ marginTop: 24, borderRadius: 'var(--radius-lg)' }}>
+      <Card title={t('admin_organizations_title')} className="glass-panel section-enter" styles={{ body: { padding: 20 } }} style={{ marginTop: 24, borderRadius: 'var(--radius-lg)' }}>
         <Space wrap style={{ marginBottom: 16 }}>
           <Select
             allowClear
-            placeholder="Status"
+            placeholder={t('filter_status')}
             value={orgStatusFilter}
             onChange={(value) => setOrgStatusFilter(value ?? undefined)}
             options={[
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
+              { value: 'active', label: t('status_active') },
+              { value: 'inactive', label: t('status_inactive') },
             ]}
             style={{ width: 120 }}
           />
@@ -210,19 +213,19 @@ export default function AdminBusinessLinesPage() {
           pagination={false}
           size="small"
           columns={[
-            { title: 'Name', dataIndex: 'name', key: 'name' },
-            { title: 'Status', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag> },
-            { title: 'Lifecycle', key: 'lifecycle', render: (_: unknown, org: Organization) => <Button size="small" onClick={() => changeOrganizationLifecycle(org)}>{org.status === 'active' ? 'Archive' : 'Restore'}</Button> },
+            { title: t('space_name'), dataIndex: 'name', key: 'name' },
+            { title: t('kb_status'), dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'default'}>{s}</Tag> },
+            { title: t('admin_col_lifecycle'), key: 'lifecycle', render: (_: unknown, org: Organization) => <Button size="small" onClick={() => changeOrganizationLifecycle(org)}>{org.status === 'active' ? t('archive') : t('restore')}</Button> },
           ]}
         />
       </Card>
 
       <Modal styles={{ mask: { backdropFilter: 'blur(6px)' } }} transitionName="fade" title={t('admin_create_business_line')} open={open} onOk={create} confirmLoading={creating} onCancel={() => setOpen(false)} okText={t('create') || 'Create'}>
         <Space direction="vertical" style={{ width: '100%', padding: '12px 0' }} size="middle">
-          <Select value={orgId || undefined} onChange={setOrgId} style={{ width: '100%' }} placeholder="Organization"
+          <Select value={orgId || undefined} onChange={setOrgId} style={{ width: '100%' }} placeholder={t('filter_organization')}
             options={orgs.map((o) => ({ value: o.id, label: o.name }))} />
-          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input placeholder="Code (e.g. risk)" value={code} onChange={(e) => setCode(e.target.value)} />
+          <Input placeholder={t('space_name')} value={name} onChange={(e) => setName(e.target.value)} />
+          <Input placeholder={t('admin_bl_code_placeholder')} value={code} onChange={(e) => setCode(e.target.value)} />
         </Space>
       </Modal>
       </div>

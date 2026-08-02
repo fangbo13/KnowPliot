@@ -9,9 +9,12 @@ import ScopedUsersPage from './ScopedUsersPage';
 
 const originalGetComputedStyle = window.getComputedStyle;
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key }),
-}));
+vi.mock('react-i18next', () => {
+  // Stable t reference: the page's load() depends on t, so a fresh function
+  // per render would re-trigger the fetch effect and break call-count asserts.
+  const t = (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key;
+  return { useTranslation: () => ({ t }) };
+});
 
 vi.mock('../../api/client', () => ({ default: { get: vi.fn() } }));
 
@@ -56,7 +59,7 @@ describe('ScopedUsersPage', () => {
     await waitFor(() => expect(scopedConsoleApi.users).toHaveBeenCalledWith(''));
     expect(apiClient.get).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search scoped users' }), {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'scoped_users_search_aria' }), {
       target: { value: 'member' },
     });
     expect(scopedConsoleApi.users).toHaveBeenCalledTimes(1);

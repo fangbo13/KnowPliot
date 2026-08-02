@@ -101,7 +101,11 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         # V6.0: uploads land in the active space (header) or default 'general'.
         space = _active_doc_space(self.request)
         ensure_workspace_writable(space)
-        doc = serializer.save(uploaded_by=self.request.user, space=space)
+        doc = serializer.save(
+            uploaded_by=self.request.user,
+            updated_by=self.request.user,  # spec §3.5 watermark
+            space=space,
+        )
         create_audit_log(
             user=self.request.user,
             action="document_upload",
@@ -111,7 +115,23 @@ class DocumentListCreateView(generics.ListCreateAPIView):
                      "space": str(space.id) if space else None},
             request=self.request,
         )
-        # Trigger async ingestion
+        # Knowledge iteration spec §3.2: in a require_review space, uploads
+        # stop at pending_review — approval is the only path into the index.
+        from apps.knowledge.review_views import (
+            create_review_request,
+            owner_bypasses_review,
+            space_requires_review,
+        )
+        if space_requires_review(space) and not owner_bypasses_review(
+            self.request.user, space
+        ):
+            doc.status = "pending_review"
+            doc.save(update_fields=["status", "updated_at"])
+            create_review_request(
+                document=doc, submitted_by=self.request.user, request=self.request
+            )
+            return
+        # Trigger async ingestion (direct_publish spaces)
         from apps.knowledge.ingestion import enqueue_document_ingestion
         enqueue_document_ingestion(
             doc,
@@ -133,6 +153,29 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
         if space is not None:
             qs = qs.filter(space=space)
         return qs
+
+    def perform_update(self, serializer):
+        # P3 §B1: propagate title renames into referencing [[wikilinks]].
+        instance = serializer.instance
+        old_title = instance.title
+        document = serializer.save()
+        new_title = document.title
+        if old_title and new_title and old_title != new_title:
+            from apps.knowledge.links import propagate_title_rename
+
+            updated = propagate_title_rename(document, old_title, new_title)
+            create_audit_log(
+                user=self.request.user,
+                action="document_rename_propagate",
+                target_type="Document",
+                target_id=str(document.id),
+                details={
+                    "old_title": old_title,
+                    "new_title": new_title,
+                    "updated_documents": updated,
+                },
+                request=self.request,
+            )
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -467,6 +510,11 @@ class DocumentTextEditView(APIView):
             )
         document.text_content = new_text
         document.save(update_fields=["text_content", "updated_at"])
+        # KB optimization spec §3.4: keep wikilink-derived DocumentLink rows in
+        # sync so Backlinks / Local Graph reflect edits immediately.
+        from apps.knowledge.links import sync_document_links
+
+        sync_document_links(document)
         create_audit_log(
             user=request.user,
             action="document_text_edit",
@@ -566,11 +614,22 @@ def _create_version_atomically(
         tags=current_doc.tags,
         space=current_doc.space,
         uploaded_by=actor,
+        updated_by=actor,  # spec §3.5 watermark — author of THIS version
         status="active",
         version=current_doc.version + 1,
         parent_document=current_doc,
         effective_from=effective_from,
         content_hash="",
+    )
+
+    # Spec §2: carry taxonomy tags forward across versions.
+    from apps.knowledge.models import DocumentTag
+    DocumentTag.objects.bulk_create(
+        [
+            DocumentTag(document=new_doc, term_id=tag.term_id, tagged_by=tag.tagged_by)
+            for tag in DocumentTag.objects.filter(document=current_doc)
+        ],
+        ignore_conflicts=True,
     )
 
     is_immediate = effective_from <= timezone.now()
@@ -580,6 +639,10 @@ def _create_version_atomically(
         current_doc.effective_to = effective_from
         current_doc.status = "superseded"
         current_doc.save(update_fields=["effective_to", "status", "updated_at"])
+        # Detach Citation references before deleting chunks to avoid
+        # ProtectedError from Citation.chunk (on_delete=PROTECT).
+        from apps.chat.models import Citation
+        Citation.objects.filter(chunk__document=current_doc).update(chunk=None)
         DocumentChunk.objects.filter(document=current_doc).delete()
     else:
         # Scheduled: old version stays active, but effective_to caps at new version
@@ -595,6 +658,13 @@ def _create_version_atomically(
         new_doc.chunk_count = len(chunks)
         new_doc.status = "active"
         new_doc.save(update_fields=["chunk_count", "status"])
+
+    # Spec §2.4 / §5.1: denormalize term codes into chunk metadata and
+    # refresh explicit markdown links for the graph.
+    from apps.knowledge.links import sync_document_links
+    from apps.knowledge.taxonomy_views import sync_chunk_term_metadata
+    sync_chunk_term_metadata(new_doc)
+    sync_document_links(new_doc)
 
     create_audit_log(
         user=actor,
@@ -727,6 +797,34 @@ class DocumentVersionCreateView(APIView):
         effective_from_raw = request.data.get("effective_from")
         effective_from = _parse_effective_from(effective_from_raw)
         reason = request.data.get("reason", "")
+
+        # Knowledge iteration spec §3.2: require_review spaces stage the new
+        # version as pending_review instead of publishing it — the approval
+        # endpoint later runs the same atomic switch.
+        from apps.knowledge.review_views import (
+            create_pending_version,
+            owner_bypasses_review,
+            space_requires_review,
+        )
+        if (
+            document.space is not None
+            and space_requires_review(document.space)
+            and not owner_bypasses_review(request.user, document.space)
+        ):
+            with transaction.atomic():
+                current_doc = (
+                    Document.objects
+                    .select_for_update(of=("self",))
+                    .get(id=pk)
+                )
+                _, response_body = create_pending_version(
+                    current_doc=current_doc,
+                    new_text=new_text,
+                    reason=reason,
+                    actor=request.user,
+                    request=request,
+                )
+            return Response(response_body, status=status.HTTP_202_ACCEPTED)
 
         # Idempotency (§1.13)
         idem_key = require_idempotency_key(request)
@@ -1118,3 +1216,90 @@ class DocumentConvertView(APIView):
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
+
+
+# ── KB/RAG audit spec P3 §B1: Obsidian-style link tooling ──
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def link_suggest(request):
+    """Wikilink autocomplete: titles from this space + enabled libraries.
+
+    GET /documents/link-suggest/?q=<fragment>  — empty ``q`` returns the most
+    recently updated titles so editors can seed their candidate list.
+    """
+    space = resolve_request_space(request)
+    query = (request.query_params.get("q") or "").strip()
+
+    space_ids = [space.id]
+    library_name_by_space: dict[str, str] = {}
+    try:
+        from .library_views import resolve_reference_space_ids
+        from .models import ReferenceLibrary
+
+        reference_ids = resolve_reference_space_ids(space)
+        space_ids.extend(reference_ids)
+        for lib in ReferenceLibrary.objects.filter(space_id__in=reference_ids).only(
+            "space_id", "name"
+        ):
+            library_name_by_space[str(lib.space_id)] = lib.name
+    except Exception:
+        pass
+
+    qs = Document.objects.filter(
+        space_id__in=space_ids,
+        status__in=["active", "pending_review", "stale"],
+    )
+    if query:
+        qs = qs.filter(title__icontains=query)
+    qs = qs.order_by("-updated_at")[:50]
+    return Response(
+        {
+            "suggestions": [
+                {
+                    "id": str(doc.id),
+                    "title": doc.title,
+                    "space_id": str(doc.space_id),
+                    "source_library": library_name_by_space.get(str(doc.space_id)),
+                }
+                for doc in qs
+            ]
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def document_links(request, pk):
+    """Outgoing links of a document — resolved edges + unresolved gray links."""
+    space = resolve_request_space(request)
+    try:
+        document = Document.objects.get(pk=pk, space=space)
+    except Document.DoesNotExist:
+        raise NotFound("Document not found in this space.")
+    from .models import DocumentLink
+
+    links = DocumentLink.objects.filter(source=document).select_related("target")
+    resolved = []
+    unresolved = []
+    for link in links:
+        if link.target_id is None:
+            unresolved.append(link.unresolved_title)
+        else:
+            resolved.append(
+                {
+                    "id": str(link.target_id),
+                    "title": link.target.title,
+                    "status": link.target.status,
+                    "anchor_text": link.anchor_text,
+                    "space_id": str(link.target.space_id),
+                }
+            )
+    return Response(
+        {
+            "document_id": str(document.id),
+            "links": resolved,
+            "unresolved": sorted(unresolved),
+        }
+    )

@@ -39,7 +39,10 @@ export type SpaceRole =
   | 'org_admin'
   | 'business_admin'
   | 'owner'
+  | 'space_admin'
+  /** @deprecated canonical server role is space_admin */
   | 'knowledge_admin'
+  /** @deprecated canonical server role is space_admin */
   | 'reviewer'
   | 'member'
   | 'guest';
@@ -55,6 +58,10 @@ export interface KnowledgeSpace {
   language: string;
   visibility: 'private' | 'business_line' | 'organization' | 'public_demo';
   join_policy: JoinPolicy;
+    // Spec §3: space-level review gate (default require_review)
+    review_policy?: 'direct_publish' | 'require_review';
+  // KB optimization spec §2.1: taxonomy sourcing mode (inherit/space/none)
+  taxonomy_mode?: 'inherit' | 'space' | 'none';
   join_code: string | null;
   allow_member_invite: boolean;
   join_code_updated_at: string | null;
@@ -487,6 +494,11 @@ export const spacesApi = {
     return data;
   },
 
+  async completeOnboarding(id: string): Promise<{ role: SpaceRole; completed: boolean }> {
+    const { data } = await apiClient.post(`/spaces/${id}/onboarding/complete/`, {});
+    return data;
+  },
+
   async join(code: string, signal?: AbortSignal): Promise<JoinResult> {
     const response = signal
       ? await apiClient.post('/spaces/join-by-code/', { join_code: code }, {
@@ -612,7 +624,7 @@ export const spacesApi = {
 
   async revokeInvite(id: string, invite: InviteCode): Promise<void> {
     await apiClient.post(`/spaces/${id}/access-codes/${invite.id}/revoke/`, {
-      expected_version: invite.version,
+      expected_code_version: invite.version,
       reason_code: 'owner_revoked',
     }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
   },

@@ -138,10 +138,50 @@ class RetrievalSafetyTest(TestCase):
             )
 
         sql, params = cursor.execute.call_args.args
-        self.assertIn("dc.space_id = %s", sql)
-        self.assertIn("d.status = %s", sql)
+        # KB optimization spec §3.3: single-space callers now compile to an IN
+        # allowlist with exactly one parameterized member.
+        self.assertIn("dc.space_id IN (%s)", sql)
+        # Spec §4 L3: stale documents stay retrievable (down-weighted), so the
+        # status filter is now an IN over (active, stale).
+        self.assertIn("d.status IN (%s, %s)", sql)
         self.assertIn("dc.document_id IN (%s)", sql)
         self.assertIn("d.category_id IN (%s)", sql)
         self.assertNotIn(str(self.space_a.id), sql)
         self.assertIn(str(self.space_a.id), params)
         self.assertIn("active", params)
+        self.assertIn("stale", params)
+
+    def test_pgvector_rows_decode_json_string_metadata(self):
+        """Raw-cursor jsonb comes back as a JSON string under psycopg3; the
+        retriever must normalize it to a dict so §4 L4 term boosting and the
+        hybrid rerank never crash (browser-verified regression)."""
+        chunk_id = uuid4()
+        doc_id = uuid4()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [
+            (
+                chunk_id, "content", 1, '{"terms": ["revenue"]}',
+                doc_id, "Doc", "active", 0.2, str(self.space_a.id),
+            ),
+            (chunk_id, "content", 1, None, doc_id, "Doc", "active", 0.2, None),
+        ]
+        context = MagicMock()
+        context.__enter__.return_value = cursor
+        context.__exit__.return_value = False
+
+        with (
+            patch.dict(
+                settings.DATABASES["default"],
+                {"ENGINE": "django.db.backends.postgresql"},
+            ),
+            patch("apps.rag.retriever.EmbeddingService") as embedder,
+            patch("apps.rag.retriever.connection.cursor", return_value=context),
+        ):
+            embedder.return_value.embed.return_value = [1.0, 1.0]
+            rows = PgVectorRetriever().search(
+                "policy", space_id=str(self.space_a.id)
+            )
+
+        self.assertEqual(rows[0]["metadata"], {"terms": ["revenue"]})
+        self.assertEqual(rows[1]["metadata"], {})
+        self.assertEqual(rows[0]["space_id"], str(self.space_a.id))

@@ -24,8 +24,6 @@ from apps.rbac.models import UserRole
 from apps.spaces.models import OrganizationMembership, SpaceMembership
 from apps.spaces.permissions import active_spaces, effective_space_memberships
 
-BASE_CHAT_CAPABILITIES = frozenset({"chat.ask", "chat.history"})
-
 MEMBER_CAPABILITIES = frozenset(
     {
         "chat.ask",
@@ -33,28 +31,28 @@ MEMBER_CAPABILITIES = frozenset(
         "chat.history",
         "chat.share",
         "workspace.ownership.transfer.accept",
+        "space.view",
+        "document.view",
     }
 )
 
 SPACE_ROLE_CAPABILITIES: Mapping[str, frozenset[str]] = {
-    "guest": frozenset({"chat.ask"}),
-    "member": MEMBER_CAPABILITIES,
-    "reviewer": BASE_CHAT_CAPABILITIES
+    "guest": frozenset({"space.view", "document.view", "knowledge.read"}),
+    "member": MEMBER_CAPABILITIES | {"knowledge.read", "knowledge.manage"},
+    "space_admin": MEMBER_CAPABILITIES
     | {
         "audit.read",
-        "quality.read",
-        "quality.review",
-        "workspace.manage",
-    },
-    "knowledge_admin": BASE_CHAT_CAPABILITIES
-    | {
         "knowledge.download",
         "knowledge.index",
         "knowledge.manage",
         "knowledge.read",
         "quality.read",
         "quality.review",
+        "taxonomy.manage",
+        "workspace.access_requests.manage",
+        "workspace.invites.manage",
         "workspace.manage",
+        "workspace.members.manage",
     },
     "owner": MEMBER_CAPABILITIES
     | {

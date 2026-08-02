@@ -60,7 +60,6 @@ export default function WorkspaceLifecyclePage() {
 
   const [space, setSpace] = useState<KnowledgeSpace | null>(null);
   const [ownership, setOwnership] = useState<OwnershipDetail | null>(null);
-  const [ownerCandidates, setOwnerCandidates] = useState<OwnershipCandidate[]>([]);
   const [forceCandidates, setForceCandidates] = useState<OwnershipCandidate[]>([]);
   const [candidateNext, setCandidateNext] = useState<Record<CandidatePurpose, number | null>>({
     voluntary: null,
@@ -78,7 +77,6 @@ export default function WorkspaceLifecyclePage() {
   const [cloneName, setCloneName] = useState('');
   const [cloneCode, setCloneCode] = useState('');
   const [businessLine, setBusinessLine] = useState('');
-  const [ownerUser, setOwnerUser] = useState<string>();
   const [forcedOwnerUser, setForcedOwnerUser] = useState<string>();
   const [forceReason, setForceReason] = useState('administrative_continuity');
   const [busy, setBusy] = useState('');
@@ -96,10 +94,9 @@ export default function WorkspaceLifecyclePage() {
       const sequence = ++requestSequence.current;
       setLoadError(false);
       try {
-        const [nextSpace, detail, candidates, forced, impact] = await Promise.all([
+        const [nextSpace, detail, forced, impact] = await Promise.all([
           spacesApi.get(spaceId, signal),
           spacesApi.ownership(spaceId, signal),
-          spacesApi.ownershipCandidatePage(spaceId, '', 'voluntary', 0, signal),
           canForceTransfer
             ? spacesApi.ownershipCandidatePage(spaceId, '', 'forced', 0, signal)
             : Promise.resolve({ results: [], next: null }),
@@ -110,9 +107,8 @@ export default function WorkspaceLifecyclePage() {
         if (signal?.aborted || sequence !== requestSequence.current) return;
         setSpace(nextSpace);
         setOwnership(detail);
-        setOwnerCandidates(candidates.results);
         setForceCandidates(forced.results);
-        setCandidateNext({ voluntary: candidates.next, forced: forced.next });
+        setCandidateNext({ voluntary: null, forced: forced.next });
         setCandidateQuery({ voluntary: '', forced: '' });
         setDeletionImpact(impact);
         setDeletionRequest(impact?.active_request ?? null);
@@ -180,9 +176,7 @@ export default function WorkspaceLifecyclePage() {
     setCandidateLoading((current) => ({ ...current, [purpose]: true }));
     try {
       const page = await spacesApi.ownershipCandidatePage(spaceId, query, purpose, offset);
-      if (purpose === 'voluntary') {
-        setOwnerCandidates((current) => (append ? [...current, ...page.results] : page.results));
-      } else {
+      if (purpose === 'forced') {
         setForceCandidates((current) => (append ? [...current, ...page.results] : page.results));
       }
       setCandidateNext((current) => ({ ...current, [purpose]: page.next }));
@@ -209,15 +203,6 @@ export default function WorkspaceLifecyclePage() {
     if (target.scrollTop + target.clientHeight >= target.scrollHeight - 12) {
       loadNextCandidates(purpose);
     }
-  };
-
-  const requestOwnershipTransfer = async () => {
-    if (!ownerUser || !ownership) return;
-    await spacesApi.requestOwnershipTransfer(spaceId, {
-      to_user_id: ownerUser,
-      expected_ownership_version: ownership.ownership_version,
-      reason_code: 'voluntary',
-    });
   };
 
   const forceOwnershipTransfer = async () => {
@@ -361,56 +346,6 @@ export default function WorkspaceLifecyclePage() {
               </Button>
             </Popconfirm>
           </div>
-        </Surface>
-
-        <Surface as="section" className="kp-lifecycle-section">
-          <div className="kp-lifecycle-kicker">{t('ownership_continuity')}</div>
-          <h2>{t('transfer_owner')}</h2>
-          <Typography.Text type="secondary">
-            {ownership?.owner
-              ? t('current_owner_name', { name: ownership.owner.display_name })
-              : t('current_owner_loading')}
-          </Typography.Text>
-          {ownership?.pending_transfer ? (
-            <Alert
-              type="info"
-              showIcon
-              message={t('ownership_transfer_pending')}
-              description={t('ownership_transfer_pending_description')}
-            />
-          ) : (
-            <>
-              <Select
-                showSearch
-                filterOption={false}
-                loading={candidateLoading.voluntary}
-                value={ownerUser}
-                onChange={setOwnerUser}
-                onSearch={(query) => void loadCandidatePage('voluntary', query)}
-                onPopupScroll={(event) => handleCandidatePopupScroll('voluntary', event)}
-                placeholder={t('select_eligible_member')}
-                options={ownerCandidates.map((candidate) => ({
-                  value: candidate.id,
-                  label: candidate.display_name,
-                }))}
-              />
-              <Popconfirm
-                title={t('ownership_transfer_confirm')}
-                onConfirm={() => run('owner', requestOwnershipTransfer)}
-              >
-                <Button
-                  danger
-                  disabled={!ownerUser || !ownership || space?.status === 'archived'}
-                  loading={busy === 'owner'}
-                >
-                  {t('transfer_owner')}
-                </Button>
-              </Popconfirm>
-            </>
-          )}
-          <Typography.Text type="secondary" className="kp-lifecycle-fine-print">
-            {t('ownership_transfer_acceptance_note')}
-          </Typography.Text>
         </Surface>
 
         {canForceTransfer ? (

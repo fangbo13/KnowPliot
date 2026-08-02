@@ -1,0 +1,1 @@
+{"answer_hit_rate": 0.7692, "cross_space_leaks": 0, "latency_p95_ms": 63, "mrr": 1.0, "recall_at_5": 1.0, "recall_by_tag": {"conflict": 1.0, "en": 1.0, "numeric": 1.0, "table": 1.0, "zh": 1.0}, "refusal_accuracy": 1.0}

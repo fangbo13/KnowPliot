@@ -9,8 +9,8 @@ Two permission layers stack:
 1. **Platform/governance RBAC** (``apps.rbac``): controls platform metadata and
    governed workflows, but never synthesizes workspace content access.
 
-2. **Space roles** (``SpaceMembership.role``): owner / knowledge_admin /
-   reviewer / member / guest, granting a fixed set of space-scoped permission
+2. **Space roles** (``SpaceMembership.role``): owner / space_admin /
+   member / guest, granting a fixed set of space-scoped permission
    codes per the matrix below.
 
 The access code (``InviteCode``) only creates or re-activates a membership — it
@@ -59,27 +59,24 @@ _OWNER_PERMS = {
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     SpaceMembership.ROLE_OWNER: set(_OWNER_PERMS),
-    SpaceMembership.ROLE_KNOWLEDGE_ADMIN: {
-        SPACE_VIEW,
+    SpaceMembership.ROLE_SPACE_ADMIN: {
+        SPACE_VIEW, SPACE_INVITE, SPACE_MANAGE_MEMBERS,
         DOCUMENT_VIEW, DOCUMENT_UPLOAD, DOCUMENT_UPDATE, DOCUMENT_DELETE,
         DOCUMENT_REINDEX, DOCUMENT_DOWNLOAD,
-        CHAT_ASK, CHAT_VIEW_HISTORY,
-    },
-    SpaceMembership.ROLE_REVIEWER: {
-        SPACE_VIEW,
-        DOCUMENT_VIEW, DOCUMENT_DOWNLOAD,
-        CHAT_ASK, CHAT_VIEW_HISTORY,
+        CHAT_ASK, CHAT_VIEW_HISTORY, CHAT_SHARE, CHAT_EXPORT,
         AUDIT_VIEW,
     },
     SpaceMembership.ROLE_MEMBER: {
         SPACE_VIEW,
-        DOCUMENT_VIEW,
+        # KB read-only access spec (amended): members hold knowledge.manage, so
+        # the server grants the matching document mutation codes. Reindex and
+        # download remain owner/knowledge_admin capabilities.
+        DOCUMENT_VIEW, DOCUMENT_UPLOAD, DOCUMENT_UPDATE, DOCUMENT_DELETE,
         CHAT_ASK, CHAT_VIEW_HISTORY, CHAT_SHARE, CHAT_EXPORT,
     },
     SpaceMembership.ROLE_GUEST: {
         SPACE_VIEW,
         DOCUMENT_VIEW,
-        CHAT_ASK,
     },
 }
 

@@ -9,6 +9,15 @@ import ScopedConsoleLayout from './ScopedConsoleLayout';
 
 vi.mock('../auth/CapabilityProvider', () => ({ useAuthorization: vi.fn() }));
 
+// The console shell now carries the theme/language top bar; stub its deps.
+vi.mock('../hooks/useTheme', () => ({
+  useTheme: () => ({ effective: 'light', setThemeMode: vi.fn() }),
+}));
+vi.mock('../auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { email: 'gov@test.ey.com' } }),
+}));
+vi.mock('../components/NotificationBell', () => ({ default: () => <div /> }));
+
 describe('ScopedConsoleLayout', () => {
   afterEach(cleanup);
 

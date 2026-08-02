@@ -58,9 +58,18 @@ export interface Citation {
   document_id: string;
   document_title: string;
   page_number?: number;
+  // KB/RAG audit spec P2 §A7: heading path from structure-aware chunking.
+  section?: string | null;
   score: number;
   snippet?: string;
   quoted_text: string;
+  // Spec §3/§4 L5: version watermark + stale badge on citation cards
+  version?: number;
+  updated_by?: string | null;
+  updated_at?: string | null;
+  stale?: boolean;
+  // KB optimization spec §3.3: reference-library provenance badge
+  source_library?: string | null;
 }
 
 export interface ChatSession {
@@ -190,6 +199,8 @@ export interface SendMessageOptions {
   retryClientRequestId?: string;
   /** Persisted assistant message whose answer version should be regenerated. */
   regenerateMessageId?: string;
+  /** Session-level reference-library selection; undefined = leave unchanged. */
+  selectedLibraryIds?: string[];
 }
 
 export const CHAT_STREAM_TIMEOUTS = Object.freeze({
@@ -1500,6 +1511,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             clientRequestId,
             answerMode,
             thinkingEnabled: requestedThinkingEnabled,
+            ...(options.selectedLibraryIds !== undefined
+              ? { selectedLibraryIds: options.selectedLibraryIds }
+              : {}),
             ...(regenerateMessageId ? { regenerateMessageId } : {}),
           }, controller.signal);
           set((current) => withTurnUpdate(current, sessionId, generationId, {
@@ -1589,6 +1603,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             answer_mode: answerMode,
             thinking_enabled: requestedThinkingEnabled,
             protocol_version: 2,
+            ...(options.selectedLibraryIds !== undefined
+              ? { selected_library_ids: options.selectedLibraryIds }
+              : {}),
           }),
           signal: controller.signal, // V3.5: AbortController signal
         });

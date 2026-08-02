@@ -41,6 +41,8 @@ const AdminQualityPage = lazy(() => import('./pages/admin/AdminQualityPage'));
 const AdminTemplatesPage = lazy(() => import('./pages/admin/AdminTemplatesPage'));
 const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage'));
 const KnowledgeBasePage = lazy(() => import('./pages/admin/KnowledgeBasePage'));
+const KnowledgeSpacesPage = lazy(() => import('./pages/KnowledgeSpacesPage'));
+const ReferenceLibrariesPage = lazy(() => import('./pages/ReferenceLibrariesPage'));
 const AccessRequestsPage = lazy(() => import('./pages/console/AccessRequestsPage'));
 const ConsoleOverviewPage = lazy(() => import('./pages/console/ConsoleOverviewPage'));
 const ScopedAuditPage = lazy(() => import('./pages/console/ScopedAuditPage'));
@@ -111,7 +113,7 @@ function App({
         />
         <Route
           path="/admintest"
-          element={isAuthenticated ? <Navigate to="/platform-admin/dashboard" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
+          element={isAuthenticated ? <Navigate to="/knowledge" replace /> : <SuspendedRoute><AdminLoginPage /></SuspendedRoute>}
         />
         <Route path="/reset-password" element={<SuspendedRoute><ResetPasswordPage /></SuspendedRoute>} />
         <Route
@@ -129,7 +131,25 @@ function App({
           <Route path="spaces/discover" element={<SuspendedRoute><SpaceDiscoveryPage /></SuspendedRoute>} />
           <Route path="spaces/create" element={<CapabilityGate required="workspace.creation.request"><SuspendedRoute><WorkspaceCreationPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="profile" element={<SuspendedRoute><ProfilePage /></SuspendedRoute>} />
+          <Route path="knowledge" element={<SuspendedRoute><KnowledgeSpacesPage /></SuspendedRoute>} />
+          <Route path="reference-libraries" element={<CapabilityGate required="chat.ask"><SuspendedRoute><ReferenceLibrariesPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="ownership-transfers" element={<SuspendedRoute><OwnershipTransfersPage /></SuspendedRoute>} />
+          {/* Management center merged into knowledge base — /console redirects to /knowledge. */}
+          <Route path="console" element={<Navigate to="/knowledge" replace />} />
+          <Route
+            path="workspace/:spaceId/knowledge"
+            element={(
+              <NavigationModeBoundary expected={expectedNavigationMode}>
+                {capabilityNavigationEnabled ? (
+                  <WorkspaceCapabilityBoundary>
+                    <CapabilityGate required="knowledge.read">
+                      <SuspendedRoute><KnowledgeBasePage /></SuspendedRoute>
+                    </CapabilityGate>
+                  </WorkspaceCapabilityBoundary>
+                ) : <Navigate to="/spaces/manage" replace />}
+              </NavigationModeBoundary>
+            )}
+          />
           <Route
             path="spaces/manage"
             element={(
@@ -219,7 +239,7 @@ function App({
           )}
         >
           <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<CapabilityGate required="governance.access"><SuspendedRoute><ConsoleOverviewPage title="Governance" description="Organization and business-line work is limited to your assigned scope." /></SuspendedRoute></CapabilityGate>} />
+          <Route path="dashboard" element={<CapabilityGate required="governance.access"><SuspendedRoute><ConsoleOverviewPage title="console_title_governance" description="console_overview_governance_desc" /></SuspendedRoute></CapabilityGate>} />
           <Route path="users" element={<CapabilityGate required="governance.users.manage"><SuspendedRoute><ScopedUsersPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="business-lines" element={<CapabilityGate required="governance.business_lines.manage"><SuspendedRoute><AdminBusinessLinesPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="templates" element={<CapabilityGate required="governance.templates.manage"><SuspendedRoute><AdminTemplatesPage /></SuspendedRoute></CapabilityGate>} />
@@ -243,11 +263,10 @@ function App({
           )}
         >
           <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<CapabilityGate required="workspace.manage"><SuspendedRoute><ConsoleOverviewPage title="Workspace" description="Manage only the selected workspace and its governed resources." /></SuspendedRoute></CapabilityGate>} />
+          <Route path="dashboard" element={<CapabilityGate required="workspace.manage"><SuspendedRoute><ConsoleOverviewPage title="console_title_workspace" description="console_overview_workspace_desc" /></SuspendedRoute></CapabilityGate>} />
           <Route path="members" element={<CapabilityGate required="workspace.members.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="invites" element={<CapabilityGate required="workspace.invites.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="access" element={<CapabilityGate required="workspace.access_requests.manage"><SuspendedRoute><AccessRequestsPage /></SuspendedRoute></CapabilityGate>} />
-          <Route path="knowledge" element={<CapabilityGate required="knowledge.read"><SuspendedRoute><KnowledgeBasePage /></SuspendedRoute></CapabilityGate>} />
           <Route path="quality" element={<CapabilityGate required="quality.read"><SuspendedRoute><ScopedQualityPage /></SuspendedRoute></CapabilityGate>} />
           <Route path="audit" element={<CapabilityGate required="audit.read"><SuspendedRoute><WorkspaceAuditRoute /></SuspendedRoute></CapabilityGate>} />
           <Route path="settings" element={<CapabilityGate required="workspace.settings.manage"><SuspendedRoute><SpaceManagementPage /></SuspendedRoute></CapabilityGate>} />

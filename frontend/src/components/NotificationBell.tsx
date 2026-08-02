@@ -22,9 +22,9 @@ import { getAuthToken, getRateLimitDetails, isAbortError } from '../api/client';
 
 const LEVEL_COLOR: Record<string, string> = {
   info: 'var(--accent)',
-  success: 'var(--color-success, #3f9142)',
-  warning: 'var(--color-warning, #c8881b)',
-  error: 'var(--color-error, #c0392b)',
+  success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
+  error: 'var(--color-error)',
 };
 
 function timeAgo(iso: string | null, _zh: boolean, t: (key: string, options?: Record<string, unknown>) => string): string {
@@ -251,7 +251,7 @@ export default function NotificationBell() {
       <div style={{ maxHeight: 380, overflowY: 'auto' }}>
         {error ? (
           <div style={{ padding: 24 }}>
-            <div role="alert" style={{ color: 'var(--color-error, #c0392b)', marginBottom: 12 }}>
+            <div role="alert" style={{ color: 'var(--color-error)', marginBottom: 12 }}>
               {error.code === 'rate_limited'
                 ? `${t('rate_limited') || 'Too many requests'}${error.retryAfterSeconds == null ? '' : ` — retry in ${error.retryAfterSeconds}s`}`
                 : (t('load_error') || 'Unable to load notifications')}

@@ -14,11 +14,16 @@ import { useSpaceStore } from '../store/spaceStore';
 import WelcomeScreen from '../components/chat/WelcomeScreen';
 import ChatComposer from '../components/chat/ChatComposer';
 import { chatApi } from '../api/chat';
+import { libraryApi, type ReferenceLibrary } from '../api/knowledge';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { notify } from '../utils/notifications';
 
 const VirtualizedMessageList = lazy(() => import('../components/chat/VirtualizedMessageList'));
-const ProcessingPanel = lazy(() => import('../components/chat/ProcessingPanel'));
+
+// Per-mode reference-library caps (mirror backend CHAT_LIBRARY_MAX_*).
+const LIBRARY_MAX_FAST = 1;
+const LIBRARY_MAX_DEEP = 3;
+const libraryCapForMode = (mode: AnswerMode) => (mode === 'deep' ? LIBRARY_MAX_DEEP : LIBRARY_MAX_FAST);
 
 function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -72,9 +77,39 @@ export default function ChatPageContainer() {
   const activeSpace = useSpaceStore((s) => s.getActiveSpace());
   const templateQuickQuestions = activeSpace?.settings?.quick_questions;
 
+  // The official catalog is managed on the reference-libraries page. Chat may
+  // only select from this user's five favorite shortcuts.
+  const [libraryRefs, setLibraryRefs] = useState<ReferenceLibrary[]>([]);
+  useEffect(() => {
+    if (!activeSpace?.id) {
+      setLibraryRefs([]);
+      return;
+    }
+    let cancelled = false;
+    libraryApi
+      .catalog()
+      .then((refs) => {
+        if (!cancelled) {
+          setLibraryRefs(refs.filter((library) => (
+            library.is_official
+            && library.is_favorite
+            && library.space !== activeSpace.id
+          )));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryRefs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSpace?.id]);
+
   const [inputValue, setInputValue] = useState('');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('fast');
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  // Session-level reference-library selection (default none = space-only).
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
   const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
@@ -131,6 +166,7 @@ export default function ChatPageContainer() {
       previousSessionRef.current = activeSessionId;
       setAnswerMode('fast');
       setThinkingEnabled(false);
+      setSelectedLibraryIds([]);
     }
   }, [activeSessionId]);
 
@@ -161,13 +197,11 @@ export default function ChatPageContainer() {
     }
     isSendingRef.current = true;
     const options = thinkingEnabled
-      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true }
-      : { answerMode, canUseDeep };
+      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true, selectedLibraryIds }
+      : { answerMode, canUseDeep, selectedLibraryIds };
     sendMessage(inputValue.trim(), options);
-    // Each newly submitted logical question starts from the safe defaults;
-    // the captured options above remain attached to its owning Turn.
-    setAnswerMode('fast');
-    setThinkingEnabled(false);
+    // The Deep/Thinking toggles are sticky: they keep the user's choice across
+    // turns in the same conversation instead of resetting to fast/off.
     setModeNotice(null);
     setInputValue('');
     inputRef.current?.focus();
@@ -175,9 +209,10 @@ export default function ChatPageContainer() {
   };
 
   const handleQuickAction = (question: string) => {
-    sendMessage(question, { answerMode: 'fast' });
-    setAnswerMode('fast');
-    setThinkingEnabled(false);
+    const options = thinkingEnabled
+      ? { answerMode, canUseDeep, thinkingEnabled: true, canUseThinking: true, selectedLibraryIds }
+      : { answerMode, canUseDeep, selectedLibraryIds };
+    sendMessage(question, options);
     inputRef.current?.focus();
   };
 
@@ -261,13 +296,18 @@ export default function ChatPageContainer() {
   };
   const cancelRenameTitle = () => { setRenameDraft(activeSessionTitle); setIsRenamingTitle(false); };
 
+  // In-flight lock: Enter + input blur can both fire handleRenameSession for
+  // the same draft — the second call must not send a duplicate PATCH.
+  const renameInFlightRef = useRef(false);
   const handleRenameSession = async (nextTitle: string) => {
-    if (!activeSessionId) return;
+    if (!activeSessionId || renameInFlightRef.current) return;
     const trimmed = nextTitle.trim();
     if (!trimmed) {
       void notify('warning', t('rename_empty_warning', { defaultValue: 'Please enter a title' }));
       return;
     }
+    if (trimmed === activeSessionTitle) { setIsRenamingTitle(false); return; }
+    renameInFlightRef.current = true;
     try {
       await chatApi.renameSession(activeSessionId, trimmed);
       await loadSessions();
@@ -276,6 +316,8 @@ export default function ChatPageContainer() {
     } catch (error) {
       console.error('Failed to rename session:', error);
       void notify('error', t('session_renamed_failed', { defaultValue: 'Rename failed. Please try again' }));
+    } finally {
+      renameInFlightRef.current = false;
     }
   };
 
@@ -290,7 +332,7 @@ export default function ChatPageContainer() {
           onSendMessage={(m, opts) => sendMessage(m, { answerMode: opts?.answerMode ?? 'fast', ...(opts?.thinkingEnabled ? { thinkingEnabled: true, canUseThinking: true } : {}), canUseDeep: true })}
           templateQuickQuestions={templateQuickQuestions}
         />
-        <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
+        <div className="chat-bottom-bar">
           <div style={{
             opacity: visibleAiStatusText ? 1 : 0,
             transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
@@ -351,6 +393,30 @@ export default function ChatPageContainer() {
             {!!activeSessionId && <EditOutlined className="chat-title-edit-icon" />}
           </button>
         )}
+        {selectedLibraryIds.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginLeft: 8 }}>
+            {libraryRefs
+              .filter((ref) => selectedLibraryIds.includes(ref.id))
+              .map((ref) => (
+              <span
+                key={ref.id}
+                title={t('library_chip_tooltip', { defaultValue: '本会话已引用该参考库，回答可结合其内容' })}
+                style={{
+                  fontSize: 11,
+                  lineHeight: '18px',
+                  padding: '0 8px',
+                  borderRadius: 9,
+                  color: 'var(--color-accent)',
+                  background: 'rgba(var(--color-accent-rgb), 0.08)',
+                  border: '1px solid rgba(var(--color-accent-rgb), 0.3)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {ref.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="chat-stream-wrap">
@@ -362,17 +428,8 @@ export default function ChatPageContainer() {
               : t('thinking_generating'))}
         </div>
 
-        {isStreaming && activeTurn?.safePhase ? (
-          <Suspense fallback={null}>
-            <ProcessingPanel
-              answerMode={activeTurn.answerMode ?? 'fast'}
-              phase={activeTurn.safePhase}
-              timings={activeTurn.timings}
-              citations={activeTurn.citations}
-              executionSnapshot={activeTurn.executionSnapshot}
-            />
-          </Suspense>
-        ) : null}
+        {/* The "Answer processing" panel is intentionally not rendered anymore:
+            processing feedback lives inline in the typing indicator instead. */}
 
         {isLoadingMessages && messages.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px 0' }}>
@@ -439,6 +496,7 @@ export default function ChatPageContainer() {
               streamContent={visibleStreamContent}
               citations={visibleCitations}
               streamPhase={visibleStreamPhase}
+              streamSafePhase={isStreaming ? activeTurn?.safePhase ?? null : null}
               onRegenerate={handleRetry}
               onBranch={handleBranch}
               onShare={handleShare}
@@ -455,7 +513,7 @@ export default function ChatPageContainer() {
         </div>
       </div>
 
-      <div style={{ position: 'fixed', bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 100, pointerEvents: 'none' }}>
+      <div className="chat-bottom-bar">
         <div style={{
           opacity: visibleAiStatusText ? 1 : 0,
           transform: visibleAiStatusText ? 'translateY(0)' : 'translateY(8px)',
@@ -490,14 +548,25 @@ export default function ChatPageContainer() {
             canUseDeep={canUseDeep}
             thinkingEnabled={thinkingEnabled}
             canUseThinking={canUseThinking}
+            libraryOptions={libraryRefs.map((ref) => ({ id: ref.id, name: ref.name }))}
+            selectedLibraryIds={selectedLibraryIds}
+            onSelectedLibraryChange={setSelectedLibraryIds}
+            maxLibraries={libraryCapForMode(answerMode)}
             onAnswerModeChange={(mode) => {
               if (mode === 'deep' && !canUseDeep) {
                 setAnswerMode('fast');
                 setModeNotice('error_deep_unavailable');
                 return;
               }
+              // Truncate the selection when the new mode's cap is smaller.
+              const cap = libraryCapForMode(mode);
+              if (selectedLibraryIds.length > cap) {
+                setSelectedLibraryIds((prev) => prev.slice(0, cap));
+                setModeNotice('library_selection_trimmed');
+              } else {
+                setModeNotice(null);
+              }
               setAnswerMode(mode);
-              setModeNotice(null);
             }}
             onThinkingChange={(enabled) => {
               if (enabled && !canUseThinking) {

@@ -19,6 +19,20 @@ vi.mock('../../api/scopedConsole', () => ({
   },
 }));
 
+// antd Table (ScopedAuditPage) relies on matchMedia, which jsdom lacks.
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
 describe('scoped console pages', () => {
   beforeEach(() => {
     vi.mocked(scopedConsoleApi.metrics).mockReset().mockResolvedValue({

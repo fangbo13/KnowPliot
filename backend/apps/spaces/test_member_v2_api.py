@@ -112,7 +112,7 @@ class WorkspaceMemberV2ApiTests(TestCase):
             self._detail_url(),
             {
                 "expected_membership_version": 1,
-                "role": "reviewer",
+                "role": "space_admin",
                 "status": "active",
                 "expires_at": expires_at.isoformat(),
                 "reason_code": "role_change",
@@ -122,7 +122,7 @@ class WorkspaceMemberV2ApiTests(TestCase):
             **self._key(),
         )
         self.assertEqual(changed.status_code, 200, changed.data)
-        self.assertEqual(changed.data["role"], "reviewer")
+        self.assertEqual(changed.data["role"], "space_admin")
         self.assertEqual(changed.data["membership_version"], 2)
 
         stale = self.client.patch(
@@ -163,7 +163,7 @@ class WorkspaceMemberV2ApiTests(TestCase):
             self._detail_url(),
             {
                 "expected_membership_version": 1,
-                "role": "reviewer",
+                "role": "space_admin",
                 "reason_code": "role_change",
                 "reason_text": "Must be fenced",
             },

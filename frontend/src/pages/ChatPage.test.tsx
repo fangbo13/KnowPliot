@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   canShare: false,
   canDeep: false,
   composerProps: {} as Record<string, unknown>,
+  activeSpace: null as null | { id: string; settings?: Record<string, unknown> },
+  libraryCatalog: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -40,8 +42,12 @@ vi.mock('../store/chatStore', () => ({
 }));
 
 vi.mock('../store/spaceStore', () => ({
-  useSpaceStore: (selector: (state: { getActiveSpace: () => null }) => unknown) =>
-    selector({ getActiveSpace: () => null }),
+  useSpaceStore: (selector: (state: { getActiveSpace: () => typeof mocks.activeSpace }) => unknown) =>
+    selector({ getActiveSpace: () => mocks.activeSpace }),
+}));
+
+vi.mock('../api/knowledge', () => ({
+  libraryApi: { catalog: mocks.libraryCatalog },
 }));
 
 vi.mock('../auth/CapabilityProvider', () => ({
@@ -87,6 +93,8 @@ describe('ChatPage stream ownership gating', () => {
     mocks.canShare = false;
     mocks.canDeep = false;
     mocks.composerProps = {};
+    mocks.activeSpace = null;
+    mocks.libraryCatalog.mockResolvedValue([]);
     Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
     mocks.chatState = {
       sessions: [{ id: 'session-b', title: 'Session B' }],
@@ -119,6 +127,20 @@ describe('ChatPage stream ownership gating', () => {
       streamPhase: 'streaming',
       isSendLocked: true,
     };
+  });
+
+  it('offers only favorite official libraries in the chat picker', async () => {
+    mocks.activeSpace = { id: 'space-1' };
+    mocks.libraryCatalog.mockResolvedValue([
+      { id: 'favorite', name: 'Favorite library', is_official: true, is_favorite: true },
+      { id: 'official-only', name: 'Official only', is_official: true, is_favorite: false },
+    ]);
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mocks.composerProps.libraryOptions).toEqual([
+      { id: 'favorite', name: 'Favorite library' },
+    ]));
   });
 
   it('does not expose or lock session A stream while session B is active', async () => {
@@ -201,6 +223,7 @@ describe('ChatPage stream ownership gating', () => {
     expect(mocks.chatState.sendMessage).toHaveBeenCalledWith('Question', {
       answerMode: 'deep',
       canUseDeep: true,
+      selectedLibraryIds: [],
     });
   });
 

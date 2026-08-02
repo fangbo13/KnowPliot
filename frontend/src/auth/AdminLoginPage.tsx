@@ -78,7 +78,8 @@ export default function AdminLoginPage() {
         localStorage.setItem('ey-language', pref);
       }
 
-      navigate('/platform-admin/dashboard', { replace: true });
+      // Management center merged into knowledge base — admins land on knowledge.
+      navigate('/knowledge', { replace: true });
     } catch {
       setError(t('login_failed'));
     } finally {

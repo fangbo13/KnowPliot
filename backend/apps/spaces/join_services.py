@@ -40,8 +40,7 @@ from .permissions import ensure_workspace_writable
 ROLE_STRENGTH = {
     SpaceMembership.ROLE_GUEST: 1,
     SpaceMembership.ROLE_MEMBER: 2,
-    SpaceMembership.ROLE_REVIEWER: 3,
-    SpaceMembership.ROLE_KNOWLEDGE_ADMIN: 4,
+    SpaceMembership.ROLE_SPACE_ADMIN: 3,
     SpaceMembership.ROLE_OWNER: 5,
 }
 
@@ -374,8 +373,8 @@ def _access_code_body(code, *, raw=None):
 def issue_access_code(*, actor, space, payload, idempotency_key):
     _strict(payload, {"role_ceiling", "expires_at", "max_uses", "max_pending"})
     role = payload.get("role_ceiling")
-    if role not in {SpaceMembership.ROLE_MEMBER, SpaceMembership.ROLE_GUEST}:
-        raise ValidationError({"role_ceiling": "Only member or guest is supported."})
+    if role != SpaceMembership.ROLE_GUEST:
+        raise ValidationError({"role_ceiling": "Only guest is supported."})
     from rest_framework.fields import DateTimeField
 
     expires_at = DateTimeField().run_validation(payload.get("expires_at"))
@@ -580,8 +579,8 @@ def create_discovery_request(*, actor, space, reason, idempotency_key):
                 row = SpaceAccessRequest.objects.create(
                     space=space,
                     user=actor,
-                    role=SpaceMembership.ROLE_MEMBER,
-                    role_ceiling=SpaceMembership.ROLE_MEMBER,
+                    role=SpaceMembership.ROLE_GUEST,
+                    role_ceiling=SpaceMembership.ROLE_GUEST,
                     source_kind=SpaceAccessRequest.SOURCE_DISCOVERY,
                     discovery_policy_version=1,
                     reason=reason,
@@ -697,10 +696,21 @@ def decide_access_request(*, actor, space, request_id, expected_version, action,
         with operation_record(actor=actor, operation_code=f"space_access_request.{action}", key=idempotency_key, request_digest=digest, target_uuid=space.id, request_uuid=request_id) as (operation, replay):
             if replay:
                 return replay_response(operation)
-            space = _lock_active_owner_space(
-                actor=actor,
-                space_id=space.id,
-                allow_archived=(action == "reject"),
+            is_owner = SpaceMembership.objects.filter(
+                space=space,
+                user=actor,
+                role=SpaceMembership.ROLE_OWNER,
+                status="active",
+                expires_at__isnull=True,
+            ).exists()
+            space = (
+                _lock_active_owner_space(
+                    actor=actor,
+                    space_id=space.id,
+                    allow_archived=(action == "reject"),
+                )
+                if is_owner
+                else _lock_manage_space(actor=actor, space_id=space.id)
             )
             try:
                 reference = SpaceAccessRequest.objects.only("user_id", "access_code_id").get(pk=request_id, space=space)
@@ -769,10 +779,7 @@ def decide_access_request(*, actor, space, request_id, expected_version, action,
             if not row.user.is_active:
                 raise GovernedWorkflowError("requester_not_active")
             if action == "approve":
-                selected_role = role or row.role_ceiling
-                allowed = {SpaceMembership.ROLE_GUEST} if row.role_ceiling == SpaceMembership.ROLE_GUEST else {SpaceMembership.ROLE_GUEST, SpaceMembership.ROLE_MEMBER}
-                if selected_role not in allowed:
-                    raise ValidationError({"role": "Role exceeds the request ceiling."})
+                selected_role = SpaceMembership.ROLE_GUEST
                 if membership is None:
                     membership = SpaceMembership.objects.create(
                         space=space,
@@ -847,9 +854,9 @@ def create_invitation(*, actor, space, payload, idempotency_key):
     target_email = payload.get("target_email")
     if bool(target_user_id) == bool(target_email):
         raise ValidationError({"target": "Exactly one target is required."})
-    role = payload.get("role")
-    if role not in {SpaceMembership.ROLE_KNOWLEDGE_ADMIN, SpaceMembership.ROLE_REVIEWER, SpaceMembership.ROLE_MEMBER, SpaceMembership.ROLE_GUEST}:
-        raise ValidationError({"role": "A non-owner role is required."})
+    role = payload.get("role", SpaceMembership.ROLE_GUEST)
+    if role != SpaceMembership.ROLE_GUEST:
+        raise ValidationError({"role": "Only guest invitations are supported."})
     try:
         days = int(payload.get("expires_in_days", 7))
     except (TypeError, ValueError) as exc:
@@ -887,12 +894,7 @@ def create_invitation(*, actor, space, payload, idempotency_key):
         with operation_record(actor=actor, operation_code="space_invitation.create", key=idempotency_key, request_digest=digest, target_uuid=space.id) as (operation, replay):
             if replay:
                 return replay_response(operation)
-            # Relax permission: owner-only by default, but any active member
-            # can invite when space.allow_member_invite is True (spec §2.3).
-            if space.allow_member_invite:
-                space = _lock_active_member_space(actor=actor, space_id=space.id)
-            else:
-                space = _lock_active_owner_space(actor=actor, space_id=space.id)
+            space = _lock_manage_space(actor=actor, space_id=space.id)
             if target_user is not None:
                 target_user = (
                     get_user_model()
@@ -1159,14 +1161,14 @@ def respond_invitation(
                     membership = SpaceMembership.objects.create(
                         space=space,
                         user=actor,
-                        role=invitation.role,
+                        role=SpaceMembership.ROLE_GUEST,
                         status="active",
                         source_kind=SpaceMembership.SOURCE_INVITATION,
                         invited_by=invitation.inviter,
                     )
                 elif membership.role != SpaceMembership.ROLE_OWNER:
                     if not membership.is_effective:
-                        membership.role = invitation.role
+                        membership.role = SpaceMembership.ROLE_GUEST
                         membership.status = "active"
                         membership.expires_at = None
                         membership.source_kind = SpaceMembership.SOURCE_INVITATION
@@ -1409,12 +1411,12 @@ def join_by_code(*, actor, join_code, idempotency_key):
                 membership = SpaceMembership.objects.create(
                     space=space,
                     user=actor,
-                    role=SpaceMembership.ROLE_MEMBER,
+                    role=SpaceMembership.ROLE_GUEST,
                     status="active",
                     source_kind=SpaceMembership.SOURCE_JOIN_CODE,
                 )
             else:
-                existing.role = SpaceMembership.ROLE_MEMBER
+                existing.role = SpaceMembership.ROLE_GUEST
                 existing.status = "active"
                 existing.expires_at = None
                 existing.source_kind = SpaceMembership.SOURCE_JOIN_CODE
@@ -1437,6 +1439,11 @@ def join_by_code(*, actor, join_code, idempotency_key):
                 resource=membership,
                 details={"join_policy": space.join_policy},
             )
+            # Bug fix: first joined space becomes the user's default so the
+            # frontend no longer treats the new member as spaceless.
+            from .services import ensure_default_space
+
+            ensure_default_space(actor, space)
             body = {
                 "space_id": str(space.id),
                 "space_name": space.name,
@@ -1494,12 +1501,12 @@ def global_join(*, actor, space_id, idempotency_key):
                 membership = SpaceMembership.objects.create(
                     space=space,
                     user=actor,
-                    role=SpaceMembership.ROLE_MEMBER,
+                    role=SpaceMembership.ROLE_GUEST,
                     status="active",
                     source_kind=SpaceMembership.SOURCE_DISCOVERY,
                 )
             else:
-                existing.role = SpaceMembership.ROLE_MEMBER
+                existing.role = SpaceMembership.ROLE_GUEST
                 existing.status = "active"
                 existing.expires_at = None
                 existing.source_kind = SpaceMembership.SOURCE_DISCOVERY
@@ -1522,6 +1529,11 @@ def global_join(*, actor, space_id, idempotency_key):
                 resource=membership,
                 details={"join_policy": space.join_policy},
             )
+            # Bug fix: first joined space becomes the user's default so the
+            # frontend no longer treats the new member as spaceless.
+            from .services import ensure_default_space
+
+            ensure_default_space(actor, space)
             body = {
                 "space_id": str(space.id),
                 "space_name": space.name,
@@ -1554,7 +1566,7 @@ def regenerate_join_code(*, actor, space_id, custom_code=None, idempotency_key):
         ) as (operation, replay):
             if replay:
                 return replay_response(operation)
-            space = _lock_manage_space(actor=actor, space_id=space_id)
+            space = _lock_active_owner_space(actor=actor, space_id=space_id)
             if custom_code:
                 new_code = validate_custom_join_code(custom_code)
                 if (
@@ -1617,7 +1629,7 @@ def switch_join_policy(*, actor, space_id, new_policy, idempotency_key):
         ) as (operation, replay):
             if replay:
                 return replay_response(operation)
-            space = _lock_manage_space(actor=actor, space_id=space_id)
+            space = _lock_active_owner_space(actor=actor, space_id=space_id)
             if space.join_policy == new_policy:
                 raise GovernedWorkflowError("join_policy_unchanged", status_code=409)
             if (

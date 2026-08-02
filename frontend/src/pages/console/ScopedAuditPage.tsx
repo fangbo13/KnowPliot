@@ -4,12 +4,19 @@
  * See LICENSE file in the project root for full license details.
  */
 
+// Dark/i18n/Layout spec §B2/§C: i18n-driven, bare <table> replaced with the
+// standard antd Table inside a Surface.
+
 import { useEffect, useState } from 'react';
+import { Table } from 'antd';
+import { useTranslation } from 'react-i18next';
 
 import type { AuditLog } from '../../api/admin';
 import { scopedConsoleApi } from '../../api/scopedConsole';
+import { PageHeader, Status, Surface } from '../../design/primitives';
 
 export default function ScopedAuditPage({ spaceId }: { spaceId?: string }) {
+  const { t } = useTranslation('common');
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -35,30 +42,33 @@ export default function ScopedAuditPage({ spaceId }: { spaceId?: string }) {
   }, [spaceId]);
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-head"><h1 className="page-title">Audit</h1></header>
-        {loading && <p role="status">Loading audit events…</p>}
-        {error && <p role="alert">Audit events are temporarily unavailable.</p>}
-        {!loading && !error && (
-          <div className="glass-panel" style={{ marginTop: 24, overflowX: 'auto', borderRadius: 14 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th>Time</th><th>Action</th><th>Result</th><th>Target</th></tr></thead>
-              <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id}>
-                    <td>{new Date(log.created_at).toLocaleString()}</td>
-                    <td>{log.action}</td>
-                    <td>{log.result}</td>
-                    <td>{log.target_type}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {logs.length === 0 && <p style={{ padding: 24 }}>No audit events in this scope.</p>}
-          </div>
-        )}
-      </div>
+    <div className="page section-enter">
+      <PageHeader title={t('scoped_audit_title')} description={t('scoped_audit_description')} />
+      {error && <Status role="alert" tone="error">{t('scoped_audit_unavailable')}</Status>}
+      {!error && (
+        <Surface>
+          <Table<AuditLog>
+            rowKey="id"
+            loading={loading}
+            dataSource={logs}
+            locale={{ emptyText: t('scoped_audit_empty') }}
+            columns={[
+              {
+                title: t('audit_col_time'),
+                dataIndex: 'created_at',
+                key: 'created_at',
+                render: (value: string) => new Date(value).toLocaleString(),
+              },
+              { title: t('audit_col_action'), dataIndex: 'action', key: 'action' },
+              { title: t('audit_col_result'), dataIndex: 'result', key: 'result' },
+              { title: t('audit_col_target'), dataIndex: 'target_type', key: 'target_type' },
+            ]}
+            pagination={{ pageSize: 15 }}
+            size="middle"
+            scroll={{ x: 'max-content' }}
+          />
+        </Surface>
+      )}
     </div>
   );
 }

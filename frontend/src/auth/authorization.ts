@@ -99,6 +99,8 @@ export function safeConsolePath(
     if (path === '/admin' || path === '/spaces/manage') return path;
     return '/chat';
   }
+  // Management center merged into knowledge base — /console redirects to /knowledge.
+  if (path === '/console') return '/knowledge';
   if (path === '/platform-admin' || path === '/governance') return path;
   if (/^\/workspace\/[^/]+\/manage$/.test(path)) return path;
   return '/chat';

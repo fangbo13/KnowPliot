@@ -62,6 +62,10 @@ class KBVersioningTestBase(TransactionTestCase):
             code="kb-test-ws",
             visibility="private",
         )
+        # These suites cover versioning mechanics; the review-gate flow has its
+        # own suite (test_review_flow), so publish directly here.
+        self.space.review_policy = "direct_publish"
+        self.space.save(update_fields=["review_policy"])
         SpaceMembership.objects.create(
             space=self.space,
             user=self.member,

@@ -367,7 +367,7 @@ class AdminUserListView(generics.ListAPIView):
         return [permissions.IsAuthenticated(), HasPermission("user.read")]
 
     def get_queryset(self):
-        return User.objects.all().order_by("email")
+        return User.objects.select_related("business_line").order_by("email")
 
 
 class AdminUserCreateView(generics.CreateAPIView):

@@ -40,6 +40,8 @@ export interface WorkspaceCreationSubmission {
   office_location_ids: string[];
   office_location_names?: string[];
   template_version_id: string | null;
+  // KB optimization spec §3.1: taxonomy initialization choice.
+  taxonomy_init_mode?: 'default_seed' | 'custom' | 'none';
 }
 
 export interface WorkspaceCreationRequest {

@@ -4,17 +4,22 @@
  * See LICENSE file in the project root for full license details.
  */
 
+// Dark/i18n/Layout spec §B2/§C: i18n-driven, migrated to PageHeader/Surface.
+
+import { useTranslation } from 'react-i18next';
+
+import { PageHeader, Surface } from '../../design/primitives';
+
 export default function ConsolePlaceholderPage({ title }: { title: string }) {
+  const { t } = useTranslation('common');
   return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-head"><h1 className="page-title">{title}</h1></header>
-        <section className="glass-panel" style={{ marginTop: 24, padding: 28, borderRadius: 16 }}>
-          <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
-            This capability is available in your scope. Its governed workflow is completed in the product-closure phase.
-          </p>
-        </section>
-      </div>
+    <div className="page section-enter">
+      <PageHeader title={t(title, title)} />
+      <Surface as="section" tone="subtle">
+        <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+          {t('console_placeholder_desc')}
+        </p>
+      </Surface>
     </div>
   );
 }

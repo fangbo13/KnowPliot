@@ -114,7 +114,9 @@ class SessionCursorPagination(CursorPagination):
 
 # V3.5 HIGH-004: Cursor pagination for messages
 class MessageCursorPagination(CursorPagination):
-    ordering = '-created_at'
+    # Branch-order fix: copied messages can share a created_at value, so the
+    # cursor needs a unique tie-breaker to keep pagination stable.
+    ordering = ('-created_at', '-id')
     page_size = 40  # ~20 rounds
 
 
@@ -256,9 +258,20 @@ class ChatSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
 
     def perform_update(self, serializer):
-        """Only update title field — preserve updated_at so session stays in
-        its original position in the sidebar list instead of jumping to the top."""
-        serializer.save(update_fields=list(serializer.validated_data))
+        """Only update the submitted fields — preserve updated_at so the session
+        stays in its original position in the sidebar list instead of jumping
+        to the top.
+
+        Note: passing update_fields through serializer.save() does NOT work —
+        DRF merges extra kwargs into validated_data, so the previous version
+        silently ran a full save() and refreshed the auto_now updated_at.
+        """
+        instance = serializer.instance
+        updated_fields = list(serializer.validated_data)
+        for attr, value in serializer.validated_data.items():
+            setattr(instance, attr, value)
+        if updated_fields:
+            instance.save(update_fields=updated_fields)
 
 
 @api_view(["GET"])
@@ -395,6 +408,15 @@ def branch_from_message(request, message_id):
             if message.pk == source_message.pk:
                 break
         Message.objects.bulk_create(copied)
+        # Branch-order fix: bulk_create stamps every copy with "now()"
+        # (auto_now_add), so all copies share one created_at and the read-side
+        # ordering (created_at) returns them in arbitrary order — user/AI
+        # turns could flip. Restore the source chronology by rewriting each
+        # copy's created_at with the original message's timestamp (distinct
+        # and ordered); bulk_update bypasses auto_now_add on update.
+        for source, destination in zip(source_messages, copied, strict=False):
+            destination.created_at = source.created_at
+        Message.objects.bulk_update(copied, ["created_at"])
         citation_copies = []
         for source, destination in zip(source_messages, copied, strict=False):
             for citation in source.citations.all():
@@ -458,7 +480,7 @@ class ChatSessionMessagesView(generics.ListAPIView):
         )
         if self.request.query_params.get("include_versions") != "true":
             queryset = queryset.exclude(role="assistant", is_current_version=False)
-        return queryset.select_related("assistant_turn").order_by("created_at").prefetch_related(
+        return queryset.select_related("assistant_turn").order_by("created_at", "id").prefetch_related(
             "citations__document",
             "citations__space__organization",
             "citations__space__business_line",
@@ -624,19 +646,53 @@ def citation_source(request, citation_id):
     })
 
 
+def _citation_allowed_space_ids(space):
+    """Spaces whose documents may legitimately be cited in this session.
+
+    KB optimization spec §3.3: retrieval spans the session space PLUS any
+    published reference library the space has opted into — the citation
+    persistence guard must accept the same set, otherwise reference-library
+    citations are dropped and the Sources list shifts out of alignment with
+    the answer's [文档 N] numbering.
+    """
+    from apps.knowledge.models import ReferenceLibrary, SpaceLibraryReference
+
+    allowed = {space.id}
+    try:
+        allowed.update(
+            SpaceLibraryReference.objects.filter(
+                space=space,
+                enabled=True,
+                library__status=ReferenceLibrary.STATUS_PUBLISHED,
+            ).values_list("library__space_id", flat=True)
+        )
+    except Exception:
+        logger.warning("citation_reference_space_lookup_failed", exc_info=True)
+    return allowed
+
+
 def _save_citations(assistant_message, citations_data, space=None):
     """Save citation records for an assistant message.
 
     V6.0: citations carry the message's space, and we defensively skip any
-    document that is not in the active space — retrieval is already space-scoped,
-    so this is a second line of defense against cross-space citation leakage.
+    document outside the allowed set — the session space plus its opted-in
+    published reference libraries (KB spec §3.3 cross-library retrieval).
+    ``position`` preserves the prompt order so the persisted Sources list
+    keeps matching the answer's [文档 N] numbering after reload.
     """
     from apps.knowledge.models import Document, DocumentChunk
 
-    for cit in citations_data:
+    allowed_space_ids = (
+        _citation_allowed_space_ids(space) if space is not None else None
+    )
+    for position, cit in enumerate(citations_data, start=1):
         try:
             doc = Document.objects.get(id=cit.get("document_id"))
-            if space is not None and doc.space_id is not None and doc.space_id != space.id:
+            if (
+                allowed_space_ids is not None
+                and doc.space_id is not None
+                and doc.space_id not in allowed_space_ids
+            ):
                 logger.warning(
                     "Skipping cross-space citation: doc %s (space %s) != session space %s",
                     doc.id, doc.space_id, space.id,
@@ -654,6 +710,7 @@ def _save_citations(assistant_message, citations_data, space=None):
                 page_number=cit.get("page_number"),
                 quoted_text=cit.get("quoted_text", ""),
                 space=space,
+                position=position,
             )
         except Exception:
             logger.warning(
@@ -687,6 +744,39 @@ def _request_generation_policy(
         requested_mode,
         requested_thinking_enabled,
     )
+
+
+def _library_cap_for_mode(requested_answer_mode):
+    """Session-library-selection spec §2: per-mode reference-library caps."""
+    if requested_answer_mode == ANSWER_MODE_DEEP:
+        return int(getattr(settings, "CHAT_LIBRARY_MAX_DEEP", 3))
+    return int(getattr(settings, "CHAT_LIBRARY_MAX_FAST", 1))
+
+
+def _canonical_selected_libraries(user, space, selected_ids, requested_answer_mode):
+    """Validate a selection against the user's five favorite official libraries.
+
+    The official catalog is only the place where users configure shortcuts;
+    chat may cite a library only after this user has marked it as a favorite.
+    Invalid or stale ids are silently dropped, then the per-mode cap keeps the
+    first N selections. Returns a list of library-id strings.
+    """
+    from apps.knowledge.models import ReferenceLibrary
+
+    wanted = list(dict.fromkeys(str(value) for value in (selected_ids or [])))
+    if not wanted or user is None or space is None:
+        return []
+    valid_ids = set(
+        str(value)
+        for value in ReferenceLibrary.objects.filter(
+            is_official=True,
+            id__in=wanted,
+            user_favorites__user=user,
+        ).exclude(space_id=space.id).values_list("id", flat=True)
+    )
+    canonical = [library_id for library_id in wanted if library_id in valid_ids]
+    cap = _library_cap_for_mode(requested_answer_mode)
+    return canonical[:cap]
 
 
 def _turn_execution_snapshot(turn):
@@ -919,15 +1009,12 @@ def _completed_turn_events_v2(turn, store):
     return events
 
 
-def _conversation_history(session, question_message, window_rounds=10):
-    history = list(
-        Message.objects.filter(session=session)
-        .exclude(pk=question_message.pk)
-        .order_by("-created_at")[: window_rounds * 2]
-        .values_list("role", "content")
-    )
-    history.reverse()
-    return history
+def _conversation_history(session, question_message):
+    """Layered session memory context (kept under the legacy name so existing
+    test patches keep working). Single implementation: apps.chat.memory."""
+    from .memory import build_memory_context
+
+    return build_memory_context(session, question_message)
 
 
 @api_view(["GET"])
@@ -1124,6 +1211,32 @@ def send_message(request, session_id=None, message_id=None):
         session.title = content[:50]
         session.save(update_fields=["title"])
 
+    # Session-library-selection spec §4: an explicit selection updates the
+    # session preference; an absent field keeps it (None = legacy auto-routing).
+    selection_supplied = (
+        bool(getattr(settings, "CHAT_SESSION_LIBRARY_SELECTION_ENABLED", True))
+        and "selected_library_ids" in serializer.validated_data
+    )
+    if selection_supplied:
+        turn_library_ids = _canonical_selected_libraries(
+            user,
+            space,
+            serializer.validated_data["selected_library_ids"],
+            requested_answer_mode,
+        )
+        if session.reference_library_ids != turn_library_ids:
+            session.reference_library_ids = turn_library_ids
+            session.save(update_fields=["reference_library_ids", "updated_at"])
+    elif session.reference_library_ids is not None:
+        turn_library_ids = _canonical_selected_libraries(
+            user,
+            space,
+            session.reference_library_ids,
+            requested_answer_mode,
+        )
+    else:
+        turn_library_ids = []
+
     try:
         begin_result = begin_chat_turn(
             session=session,
@@ -1138,6 +1251,7 @@ def send_message(request, session_id=None, message_id=None):
             model_id=generation_policy.model_id,
             protocol_version=protocol_version,
             question_message=question_message_override,
+            reference_library_ids=turn_library_ids,
         )
     except ChatTurnScopeError:
         return Response(
@@ -1587,21 +1701,21 @@ def quick_actions(request):
 
     if language == "zh":
         actions = [
-            {"id": "1", "question": "如何设置我的公司邮箱和电脑？", "category": "it"},
-            {"id": "2", "question": "报销流程是什么？", "category": "hr"},
-            {"id": "3", "question": "我的年假有多少天？", "category": "benefits"},
-            {"id": "4", "question": "入职培训有哪些课程？", "category": "training"},
-            {"id": "5", "question": "办公室在哪里？怎么去？", "category": "office"},
-            {"id": "6", "question": "我的导师/Buddy是谁？", "category": "team"},
+            {"id": "1", "question": "审计适用哪些准则和规范？", "category": "standards"},
+            {"id": "2", "question": "如何进行内部控制评价？", "category": "control"},
+            {"id": "3", "question": "风险评估的流程是什么？", "category": "risk"},
+            {"id": "4", "question": "本次审计需要执行哪些程序？", "category": "procedures"},
+            {"id": "5", "question": "审计报告应包含哪些内容？", "category": "report"},
+            {"id": "6", "question": "关键合规要求有哪些？", "category": "compliance"},
         ]
     else:
         actions = [
-            {"id": "1", "question": "How do I set up my company email and laptop?", "category": "it"},
-            {"id": "2", "question": "What is the expense reimbursement process?", "category": "hr"},
-            {"id": "3", "question": "How many annual leave days do I have?", "category": "benefits"},
-            {"id": "4", "question": "What training courses are included in onboarding?", "category": "training"},
-            {"id": "5", "question": "Where is the office and how do I get there?", "category": "office"},
-            {"id": "6", "question": "Who is my mentor/buddy?", "category": "team"},
+            {"id": "1", "question": "What audit standards and regulations apply?", "category": "standards"},
+            {"id": "2", "question": "How do I assess internal controls?", "category": "control"},
+            {"id": "3", "question": "What is the risk assessment process?", "category": "risk"},
+            {"id": "4", "question": "What audit procedures are required for this engagement?", "category": "procedures"},
+            {"id": "5", "question": "What should the audit report include?", "category": "report"},
+            {"id": "6", "question": "What are the key compliance requirements?", "category": "compliance"},
         ]
 
     return Response({"actions": actions})

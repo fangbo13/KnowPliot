@@ -38,6 +38,10 @@ class UserSerializer(serializers.ModelSerializer):
     is_org_admin = serializers.SerializerMethodField()
     is_business_admin = serializers.SerializerMethodField()
     admin_scope = serializers.SerializerMethodField()
+    # Spec §1: registered business line (drives discovery-layer isolation).
+    business_line_name = serializers.CharField(
+        source="business_line.name", read_only=True, default=None
+    )
 
     class Meta:
         model = User
@@ -47,6 +51,8 @@ class UserSerializer(serializers.ModelSerializer):
             "username",
             "employee_id",
             "service_line",
+            "business_line",
+            "business_line_name",
             "office_location",
             "role_level",
             "start_date",
@@ -67,6 +73,7 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "email", "username", "employee_id", "is_superuser", "roles",
             "permissions", "is_super_admin", "is_org_admin", "is_business_admin", "admin_scope",
+            "business_line", "business_line_name",
             "mfa_enabled",
         ]
 
@@ -158,6 +165,9 @@ class UserManageSerializer(serializers.ModelSerializer):
 
     roles = serializers.SerializerMethodField()
     is_active = serializers.SerializerMethodField()
+    business_line_name = serializers.CharField(
+        source="business_line.name", read_only=True, default=None
+    )
 
     class Meta:
         model = User
@@ -167,6 +177,8 @@ class UserManageSerializer(serializers.ModelSerializer):
             "username",
             "employee_id",
             "service_line",
+            "business_line",
+            "business_line_name",
             "office_location",
             "role_level",
             "is_hr_admin",
@@ -175,7 +187,7 @@ class UserManageSerializer(serializers.ModelSerializer):
             "start_date",
             "language_preference",
         ]
-        read_only_fields = ["id", "email", "roles", "is_active"]
+        read_only_fields = ["id", "email", "roles", "is_active", "business_line", "business_line_name"]
 
     def get_roles(self, obj):
         from apps.rbac.models import UserRole
@@ -230,6 +242,16 @@ class RegisterSerializer(serializers.Serializer):
             service_line=validated_data["service_line"],
             language_preference=validated_data.get("language_preference", "en"),
         )
+        # Spec §1: resolve the registered business line from the service line
+        # code so discovery-layer isolation applies from the first login.
+        try:
+            from apps.spaces.models import BusinessLine
+
+            user.business_line = BusinessLine.objects.filter(
+                code=validated_data["service_line"], status="active"
+            ).first()
+        except Exception:
+            pass
         user.set_password(validated_data["password"])
         # Approval gate: pending users are inactive until an admin approves them.
         from django.conf import settings

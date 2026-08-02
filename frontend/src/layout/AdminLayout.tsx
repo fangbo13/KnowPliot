@@ -49,6 +49,8 @@ export default function AdminLayout() {
   const location = useLocation();
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
+  const activeNav = NAV.find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`));
+  const activeTitle = activeNav ? t(activeNav.key) : t('admin_console');
 
   // Gate: only admins enter the console.
   if (!access.hasAny(['platform.access', 'governance.access'])) {
@@ -62,13 +64,13 @@ export default function AdminLayout() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100dvh', background: 'var(--color-bg-body)' }}>
+    <div className="kp-admin-layout" style={{ display: 'flex', height: '100dvh', background: 'var(--color-bg-body)' }}>
       {/* Sidebar */}
-      <aside style={{
+      <aside className="kp-admin-sidebar" style={{
         width: 248, flexShrink: 0, display: 'flex', flexDirection: 'column',
         background: 'var(--color-bg-sunken)', borderRight: '1px solid var(--color-border-secondary)',
       }}>
-        <div style={{ padding: '20px 20px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="kp-admin-brand" style={{ padding: '20px 20px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{
             width: 34, height: 34, borderRadius: 10, background: 'var(--gradient-accent)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -79,18 +81,19 @@ export default function AdminLayout() {
           </span>
         </div>
 
-        <nav style={{ flex: 1, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <nav className="kp-admin-nav" style={{ flex: 1, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
+              className="admin-nav-link"
               style={({ isActive }) => ({
                 position: 'relative',
                 display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px',
                 borderRadius: 10, fontSize: 14, textDecoration: 'none',
                 fontWeight: isActive ? 600 : 500,
                 color: isActive ? 'var(--accent-text)' : 'var(--color-text-secondary)',
-                background: isActive ? 'var(--accent-soft)' : 'transparent',
+                background: isActive ? 'var(--accent-soft)' : undefined,
                 transition: 'background var(--dur) var(--ease-out), color var(--dur) var(--ease-out)',
               })}
             >
@@ -111,7 +114,7 @@ export default function AdminLayout() {
         </nav>
 
         <button
-          className="icon-btn"
+          className="icon-btn kp-admin-back"
           onClick={() => navigate('/chat')}
           style={{
             margin: 12, width: 'auto', gap: 10, padding: '10px 12px', justifyContent: 'flex-start',
@@ -123,12 +126,16 @@ export default function AdminLayout() {
       </aside>
 
       {/* Main Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <header style={{
+      <div className="kp-admin-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <header className="kp-admin-topbar" style={{
           height: 56, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           padding: '0 24px', gap: 4, background: 'var(--color-bg-container)',
           borderBottom: '1px solid var(--color-border-secondary)'
         }}>
+          <div className="kp-admin-topbar__context">
+            <span>{t('admin_label', { defaultValue: 'ADMIN CONSOLE' })}</span>
+            <strong>{activeTitle}</strong>
+          </div>
           <NotificationBell />
           <button className="icon-btn" onClick={() => setThemeMode(isDark ? 'light' : 'dark')} aria-label={isDark ? t('switch_to_light') : t('switch_to_dark')} title={isDark ? t('switch_to_light') : t('switch_to_dark')}>
             {isDark ? <SunOutlined /> : <MoonOutlined />}
@@ -136,13 +143,17 @@ export default function AdminLayout() {
           <button className="icon-btn" onClick={toggleLanguage} aria-label={t('language_switch') || 'Switch language'}>
             <GlobalOutlined />
           </button>
-          <button className="icon-btn" style={{ width: 'auto', gap: 8, padding: '0 8px' }} aria-label={t('user_menu') || 'User'}>
-            <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{initials(user?.email)}</span>
+          <button
+            className="icon-btn"
+            style={{ width: 'auto', gap: 8, padding: '2px 12px 2px 4px', borderRadius: 999, border: '1px solid var(--color-border-secondary)', marginLeft: 6 }}
+            aria-label={t('user_menu') || 'User'}
+          >
+            <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12, background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)' }}>{initials(user?.email)}</span>
             <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>
           </button>
         </header>
 
-        <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '28px 32px', display: 'flex', flexDirection: 'column' }}>
+        <main className="kp-admin-content" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '42px clamp(20px, 4vw, 56px) 80px', display: 'flex', flexDirection: 'column' }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

@@ -14,11 +14,21 @@
  */
 
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UpOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import MemoizedMessageBubble from './MessageBubble';
 import type { Message, Citation } from '../../store/chatStore';
+
+// Friendly stage labels cycled client-side while the assistant works, decoupled
+// from the exact backend phase so users always see progress (spec §6).
+const STAGE_KEYS = [
+  'thinking_stage_understanding',
+  'thinking_stage_searching',
+  'thinking_stage_analyzing',
+  'thinking_stage_composing',
+];
+const STAGE_INTERVAL_MS = 1600;
 
 interface VirtualizedMessageListProps {
   messages: Message[];
@@ -28,6 +38,8 @@ interface VirtualizedMessageListProps {
   streamContent: string;
   citations: Citation[];
   streamPhase: string;
+  /** Server-safe processing phase (accepted/searching/thinking/generating/finalizing). */
+  streamSafePhase?: string | null;
   onRegenerate: (message: Message) => void;
   onBranch: (message: Message) => void;
   onShare: (message: Message) => void;
@@ -43,7 +55,8 @@ export default function VirtualizedMessageList({
   isStreaming,
   streamContent,
   citations: _citations,
-  streamPhase,
+  streamPhase: _streamPhase,
+  streamSafePhase: _streamSafePhase = null,
   onRegenerate,
   onBranch,
   onShare,
@@ -53,13 +66,27 @@ export default function VirtualizedMessageList({
 }: VirtualizedMessageListProps) {
   const { t } = useTranslation('chat');
 
+  // Cycle friendly stage labels while streaming has not produced text yet.
+  const [stageIndex, setStageIndex] = useState(0);
+  const showingIndicator = isStreaming && !streamContent;
+  useEffect(() => {
+    if (!showingIndicator) {
+      setStageIndex(0);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setStageIndex((prev) => (prev + 1) % STAGE_KEYS.length);
+    }, STAGE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [showingIndicator]);
+
   const streamContentRef = useRef(streamContent);
   streamContentRef.current = streamContent;
   const citationsRef = useRef(_citations);
   citationsRef.current = _citations;
 
   const data = useMemo(() => {
-    const items: (Message | { id: 'load-older-marker'; role: 'system'; content: '' })[] = [];
+    const items: (Message | { id: 'load-older-marker' | 'thinking'; role: 'system'; content: '' })[] = [];
     if (hasOlderMessages) {
       items.push({ id: 'load-older-marker', role: 'system', content: '' });
     }
@@ -73,6 +100,12 @@ export default function VirtualizedMessageList({
         createdAt: new Date().toISOString(),
       });
     }
+    // P2 fix: the thinking indicator rides as a real list item instead of
+    // Virtuoso's Footer — headless/automated browsers skip Footer painting,
+    // while data items always render (and screenshot) reliably.
+    if (isStreaming && !streamContent) {
+      items.push({ id: 'thinking', role: 'system', content: '' });
+    }
     return items;
   }, [messages, hasOlderMessages, isStreaming, streamContent]);
 
@@ -83,6 +116,24 @@ export default function VirtualizedMessageList({
           <button className="msg-action-btn" style={{ margin: '0 auto' }} onClick={onLoadOlder}>
             <UpOutlined />{t('load_older_messages') || 'Load earlier messages'}
           </button>
+        </div>
+      );
+    }
+
+    if (item.id === 'thinking') {
+      // Stage label cycles through friendly phases (understanding → searching →
+      // analyzing → composing) regardless of the exact backend phase, so it is
+      // never tied to whether retrieval is literally happening (spec §6).
+      return (
+        <div className="msg-col">
+          <div className="thinking">
+            <div className="thinking-dots">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="thinking-dot" />
+              ))}
+            </div>
+            <span className="thinking-label">{t(STAGE_KEYS[stageIndex])}</span>
+          </div>
         </div>
       );
     }
@@ -106,27 +157,7 @@ export default function VirtualizedMessageList({
         />
       </div>
     );
-  }, [canShare, isStreaming, onBranch, onRegenerate, onLoadOlder, onShare, t]);
-
-  const thinkingIndicator = useMemo(() => {
-    if (!isStreaming || streamContent) return null;
-    return (
-      <div className="msg-col">
-        <div className="thinking">
-          <div className="thinking-dots">
-            {[0, 1, 2].map((i) => (
-              <span key={i} className="thinking-dot" />
-            ))}
-          </div>
-          <span className="thinking-label">
-            {streamPhase === 'connecting' ? t('thinking_connecting')
-              : streamPhase === 'searching' ? t('thinking_searching')
-              : t('thinking_generating')}
-          </span>
-        </div>
-      </div>
-    );
-  }, [isStreaming, streamContent, streamPhase, t]);
+  }, [canShare, isStreaming, onBranch, onRegenerate, onLoadOlder, onShare, stageIndex, t]);
 
   return (
     <Virtuoso
@@ -140,12 +171,7 @@ export default function VirtualizedMessageList({
       defaultItemHeight={90}
       atBottomStateChange={(isAtBottom) => onScrollToBottomChange?.(!isAtBottom)}
       components={{
-        Footer: () => (
-          <>
-            {thinkingIndicator}
-            <div style={{ height: 150 }} />
-          </>
-        ),
+        Footer: () => <div style={{ height: 150 }} />,
       }}
       style={{ flex: 1, minHeight: 0 }}
     />

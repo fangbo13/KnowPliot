@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
+import { StatCard } from '../../design/primitives';
 import apiClient, { getRateLimitDetails, isAbortError, withRequestSignal } from '../../api/client';
 import {
   adminApi,
@@ -137,10 +138,10 @@ export default function AdminDashboardPage() {
     setRetryingJobId(jobId);
     try {
       await adminApi.retryIngestionJob(jobId);
-      message.success('Ingestion retry queued');
+      message.success(t('ingestion_retry_queued'));
       await loadSystemStatus();
     } catch {
-      message.error('Failed to retry ingestion job');
+      message.error(t('ingestion_retry_failed'));
     } finally {
       setRetryingJobId(null);
     }
@@ -246,7 +247,7 @@ export default function AdminDashboardPage() {
       width: 120,
     },
     {
-      title: 'Role',
+      title: t('admin_col_role'),
       dataIndex: 'roles',
       key: 'roles',
       width: 120,
@@ -330,29 +331,18 @@ export default function AdminDashboardPage() {
   ];
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-head" style={{ marginBottom: 24 }}>
         <h1 className="page-title">{t('admin_dashboard') || 'Admin Dashboard'}</h1>
+        <p className="page-sub">{t('admin_dashboard_subtitle')}</p>
       </div>
       
       {systemMetrics && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
-            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Users</div>
-            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.users.total}</div>
-          </Card>
-          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
-            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Users</div>
-            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)', color: 'var(--color-success)' }}>{systemMetrics.users.active}</div>
-          </Card>
-          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
-            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Documents</div>
-            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.documents.total}</div>
-          </Card>
-          <Card className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }} styles={{ body: { padding: '20px' } }}>
-            <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generated Tokens</div>
-            <div style={{ fontSize: 28, fontWeight: 600, fontFamily: 'var(--font-family-display)' }}>{systemMetrics.model_api.total_tokens.toLocaleString()}</div>
-          </Card>
+          <StatCard label={t('metric_total_users')} value={systemMetrics.users.total} />
+          <StatCard label={t('metric_active_users')} value={systemMetrics.users.active} valueColor="var(--color-success)" />
+          <StatCard label={t('metric_documents')} value={systemMetrics.documents.total} />
+          <StatCard label={t('metric_generated_tokens')} value={systemMetrics.model_api.total_tokens.toLocaleString()} />
         </div>
       )}
 
@@ -407,7 +397,7 @@ export default function AdminDashboardPage() {
             <Space size="middle">
               <DashboardOutlined style={{ color: 'var(--accent)' }} />
               <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
-                System Health
+                {t('system_health_title')}
               </span>
             </Space>
           }
@@ -440,7 +430,7 @@ export default function AdminDashboardPage() {
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Redis</span>}>
                 {renderHealthTag(systemHealth.services.redis.status)}
               </Descriptions.Item>
-              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Vector DB</span>}>
+              <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>{t('health_vector_db')}</span>}>
                 {renderHealthTag(systemHealth.services.vector_db.status)}
               </Descriptions.Item>
               <Descriptions.Item label={<span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>LLM</span>}>
@@ -450,7 +440,7 @@ export default function AdminDashboardPage() {
             </Descriptions>
           ) : (
             <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
-              No status data available
+              {t('no_status_data')}
             </div>
           )}
 
@@ -469,8 +459,8 @@ export default function AdminDashboardPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24, marginTop: 24 }}>
         <Card
-          title="Ingestion queue"
-          extra={<Button icon={<ReloadOutlined />} onClick={loadSystemStatus}>Refresh</Button>}
+          title={t('ingestion_queue_title')}
+          extra={<Button icon={<ReloadOutlined />} onClick={loadSystemStatus}>{t('refresh')}</Button>}
           className="glass-panel hover-lift"
           style={{ borderRadius: 'var(--radius-lg)' }}
         >
@@ -480,16 +470,16 @@ export default function AdminDashboardPage() {
             pagination={{ pageSize: 5 }}
             dataSource={ingestionJobs}
             columns={[
-              { title: 'Document', dataIndex: 'document_title', key: 'document_title', ellipsis: true },
-              { title: 'Space', dataIndex: 'space_name', key: 'space_name', ellipsis: true },
+              { title: t('kb_col_document'), dataIndex: 'document_title', key: 'document_title', ellipsis: true },
+              { title: t('kb_col_space'), dataIndex: 'space_name', key: 'space_name', ellipsis: true },
               {
-                title: 'Status',
+                title: t('kb_status'),
                 dataIndex: 'status',
                 key: 'status',
                 render: (value: string) => renderHealthTag(value === 'succeeded' ? 'up' : value === 'failed' ? 'down' : 'degraded'),
               },
               {
-                title: 'Action',
+                title: t('kb_actions'),
                 key: 'action',
                 render: (_value, record) => record.status === 'failed' ? (
                   <Button
@@ -497,7 +487,7 @@ export default function AdminDashboardPage() {
                     loading={retryingJobId === record.id}
                     onClick={() => retryIngestion(record.id)}
                   >
-                    Retry
+                    {t('error_retry')}
                   </Button>
                 ) : null,
               },
@@ -506,7 +496,7 @@ export default function AdminDashboardPage() {
         </Card>
 
         <Card
-          title="Knowledge quality"
+          title={t('knowledge_quality_title')}
           className="glass-panel hover-lift"
           style={{ borderRadius: 'var(--radius-lg)' }}
         >
@@ -516,22 +506,22 @@ export default function AdminDashboardPage() {
             pagination={{ pageSize: 5 }}
             dataSource={documentQuality}
             columns={[
-              { title: 'Document', dataIndex: 'title', key: 'title', ellipsis: true },
-              { title: 'Status', dataIndex: 'status', key: 'status' },
-              { title: 'Citations', dataIndex: 'citation_count', key: 'citation_count' },
+              { title: t('kb_col_document'), dataIndex: 'title', key: 'title', ellipsis: true },
+              { title: t('kb_status'), dataIndex: 'status', key: 'status' },
+              { title: t('quality_col_citations'), dataIndex: 'citation_count', key: 'citation_count' },
               {
-                title: 'Avg relevance',
+                title: t('quality_col_avg_relevance'),
                 dataIndex: 'average_relevance',
                 key: 'average_relevance',
                 render: (value: number | null) => value == null ? '-' : value.toFixed(2),
               },
               {
-                title: 'Risk',
+                title: t('quality_col_risk'),
                 key: 'risk',
                 render: (_value, record) => (
-                  record.flags.stale_source ? 'Stale source'
-                    : record.flags.unused ? 'Unused'
-                      : record.flags.high_usage ? 'High use'
+                  record.flags.stale_source ? t('quality_risk_stale')
+                    : record.flags.unused ? t('quality_risk_unused')
+                      : record.flags.high_usage ? t('quality_risk_high_use')
                         : '-'
                 ),
               },

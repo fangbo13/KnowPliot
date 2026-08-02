@@ -25,5 +25,10 @@ CELERY_TASK_EAGER_PROPAGATES = True
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []  # noqa: F405
 
+# Hermetic tests must not depend on the host WORKSPACE_PERMANENT_DELETE env var
+# (base.py defaults it to True). Tests that need permanent delete enabled
+# override this locally via @override_settings(WORKSPACE_PERMANENT_DELETE=True).
+WORKSPACE_PERMANENT_DELETE = False
+
 DEBUG = True
 ALLOWED_HOSTS = ["*"]

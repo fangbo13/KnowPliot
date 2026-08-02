@@ -60,6 +60,7 @@ def identity_payload(user) -> dict:
         "notification_preferences": getattr(user, "notification_preferences", None) or {},
         "mfa_enabled": getattr(user, "mfa_enabled", False),
         "service_line": user.service_line,
+        "business_line": str(user.business_line_id) if getattr(user, "business_line_id", None) else None,
         "office_location": user.office_location,
         "role_level": user.role_level,
     }

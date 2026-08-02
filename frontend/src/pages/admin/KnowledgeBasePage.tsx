@@ -4,8 +4,8 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip, Select } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip, Select, Switch } from 'antd';
 import {
   InboxOutlined,
   DownloadOutlined,
@@ -19,6 +19,15 @@ import {
   FileAddOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
+  TagsOutlined,
+  SendOutlined,
+  CheckCircleOutlined,
+  ApartmentOutlined,
+  FieldTimeOutlined,
+  DashboardOutlined,
+  AuditOutlined,
+  TagOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
@@ -27,10 +36,23 @@ import {
   documentApi,
   isSupportedDocumentFile,
 } from '../../api/documents';
-import { useAuthorization } from '../../auth/CapabilityProvider';
+import { reviewApi, taxonomyApi } from '../../api/knowledge';
+import type { TaxonomyDimension } from '../../api/knowledge';
+import { useAuthorization, useCapabilities } from '../../auth/CapabilityProvider';
 import { MarkdownEditor } from '../../components/knowledge/MarkdownEditor';
 import { DiffPreview } from '../../components/knowledge/DiffPreview';
 import type { DiffPreviewData } from '../../components/knowledge/DiffPreview';
+import { TagSelector, missingRequiredDimensions } from '../../components/knowledge/TagSelector';
+import { TaxonomyFilterPanel } from '../../components/knowledge/TaxonomyFilterPanel';
+import { ReviewQueuePanel } from '../../components/knowledge/ReviewQueuePanel';
+import { KnowledgeGraphPanel } from '../../components/knowledge/KnowledgeGraphPanel';
+import { TimelinePanel } from '../../components/knowledge/TimelinePanel';
+import { DashboardPanel } from '../../components/knowledge/DashboardPanel';
+import { TaxonomyManagerPanel } from '../../components/knowledge/TaxonomyManagerPanel';
+import { BacklinksPanel } from '../../components/knowledge/BacklinksPanel';
+import GuestOnboardingBanner from '../../components/knowledge/GuestOnboardingBanner';
+import { useSpaceStore } from '../../store/spaceStore';
+import { spacesApi } from '../../api/spaces';
 
 interface Document {
   id: string;
@@ -46,6 +68,11 @@ interface Document {
   parent_document?: string | null;
   effective_from?: string;
   effective_to?: string | null;
+  // Knowledge iteration spec §3: watermark + taxonomy metadata
+  updated_at?: string;
+  updated_by_name?: string | null;
+  uploaded_by_name?: string | null;
+  taxonomy_terms?: Array<{ id: string; code: string; label: string; dimension: string }>;
 }
 
 /** KB-12-Features §2: Version info returned by GET /documents/{id}/versions/ */
@@ -69,11 +96,21 @@ const tagStyleMap: Record<string, { bg: string; text: string; border: string }> 
   expired: { bg: 'var(--color-fill)', text: 'var(--color-text-tertiary)', border: 'var(--color-border-secondary)' },
   stale: { bg: 'rgba(var(--color-warning-rgb), 0.12)', text: 'var(--color-warning)', border: 'rgba(var(--color-warning-rgb), 0.3)' },
   archived: { bg: 'var(--color-fill)', text: 'var(--color-text-tertiary)', border: 'var(--color-border)' },
+  // Knowledge iteration spec §3: review-gate states
+  pending_review: { bg: 'rgba(var(--color-accent-rgb), 0.12)', text: 'var(--color-accent)', border: 'rgba(var(--color-accent-rgb), 0.3)' },
+  rejected: { bg: 'rgba(var(--color-error-rgb), 0.12)', text: 'var(--color-error)', border: 'rgba(var(--color-error-rgb), 0.3)' },
+  superseded: { bg: 'var(--color-fill)', text: 'var(--color-text-tertiary)', border: 'var(--color-border-secondary)' },
 };
 
 export default function KnowledgeBasePage() {
   const { t } = useTranslation('common');
   const access = useAuthorization();
+  const capabilityState = useCapabilities();
+  const { getActiveSpace, loadSpaces } = useSpaceStore();
+  const activeSpace = getActiveSpace();
+  const spaceId = activeSpace?.id;
+  // KB optimization spec §2.1/§3.2: taxonomy mode + platform admin flag.
+  const taxonomyMode = activeSpace?.taxonomy_mode ?? 'inherit';
   const canRead = access.has('knowledge.read');
   const canManage = access.has('knowledge.manage');
   const canIndex = access.has('knowledge.index');
@@ -99,6 +136,8 @@ export default function KnowledgeBasePage() {
   const [versionReason, setVersionReason] = useState('');
   const [rollbackSaving, setRollbackSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('content');
+  // KB/RAG audit spec P3 §B1: wikilink candidates incl. reference-library titles.
+  const [linkTitles, setLinkTitles] = useState<string[]>([]);
   // KB-12-Features §7: Create from text state
   const [createTextOpen, setCreateTextOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState('');
@@ -116,6 +155,43 @@ export default function KnowledgeBasePage() {
     failed_count: number;
     results: Array<{ status: string; title: string; document_id?: string; existing_document_id?: string; error?: string }>;
   } | null>(null);
+  // Knowledge iteration spec §2: taxonomy dimensions + pivot filter + tag editor
+  const [dimensions, setDimensions] = useState<TaxonomyDimension[]>([]);
+  const [dimensionsLoading, setDimensionsLoading] = useState(false);
+  const [filterCodes, setFilterCodes] = useState<string[]>([]);
+  const [tagTarget, setTagTarget] = useState<Document | null>(null);
+  const [tagValue, setTagValue] = useState<string[]>([]);
+  const [tagSaving, setTagSaving] = useState(false);
+  // Spec §3: contributors watermark shown in the version drawer
+  const [contributors, setContributors] = useState<Array<{ id: string; name: string }>>([]);
+  const [pageTab, setPageTab] = useState('documents');
+  // KB settings: review policy toggle (direct_publish | require_review)
+  const [reviewPolicy, setReviewPolicy] = useState<'direct_publish' | 'require_review'>(
+    activeSpace?.review_policy ?? 'direct_publish',
+  );
+  const [policySaving, setPolicySaving] = useState(false);
+  
+  useEffect(() => {
+    setReviewPolicy(activeSpace?.review_policy ?? 'direct_publish');
+  }, [activeSpace?.review_policy]);
+
+  // KB settings: save review policy toggle (direct_publish ↔ require_review)
+  const saveReviewPolicy = useCallback(async (next: 'direct_publish' | 'require_review') => {
+    if (!spaceId) return;
+    setPolicySaving(true);
+    try {
+      await spacesApi.update(spaceId, { review_policy: next });
+      await loadSpaces();
+      setReviewPolicy(next);
+      message.success(t('kb_policy_saved'));
+    } catch {
+      message.error(t('kb_policy_save_failed'));
+      // revert local state to server value
+      setReviewPolicy(activeSpace?.review_policy ?? 'direct_publish');
+    } finally {
+      setPolicySaving(false);
+    }
+  }, [spaceId, loadSpaces, t, activeSpace?.review_policy]);
 
   const loadDocuments = useCallback(async () => {
     if (!canRead) return;
@@ -133,6 +209,90 @@ export default function KnowledgeBasePage() {
   useEffect(() => {
     void loadDocuments();
   }, [loadDocuments]);
+
+  const loadDimensions = useCallback(() => {
+    if (!canRead) return;
+    setDimensionsLoading(true);
+    taxonomyApi.getDimensions()
+      .then(setDimensions)
+      .catch(() => setDimensions([]))
+      .finally(() => setDimensionsLoading(false));
+  }, [canRead]);
+
+  useEffect(() => {
+    loadDimensions();
+  }, [loadDimensions]);
+
+  // P3 §B1: seed wikilink autocomplete with space + reference-library titles.
+  useEffect(() => {
+    if (!canRead) return;
+    documentApi.getLinkSuggestions('')
+      .then((data) => setLinkTitles(
+        ((data?.suggestions || []) as Array<{ title: string }>).map((s) => s.title),
+      ))
+      .catch(() => setLinkTitles([]));
+  }, [canRead]);
+
+  // Spec §2: pivot filter — a document must carry every selected term (AND).
+  const filteredDocuments = useMemo(() => {
+    if (!filterCodes.length) return documents;
+    return documents.filter((doc) =>
+      filterCodes.every((code) => (doc.taxonomy_terms || []).some((term) => term.code === code)),
+    );
+  }, [documents, filterCodes]);
+
+  // Spec §2: tag editor handlers
+  const openTagEditor = async (record: Document) => {
+    setTagTarget(record);
+    setTagValue((record.taxonomy_terms || []).map((term) => term.id));
+    try {
+      const tags = await taxonomyApi.getDocumentTags(record.id);
+      setTagValue(tags.map((tag) => tag.term_id));
+    } catch { /* fall back to list data */ }
+  };
+
+  const handleTagSave = async () => {
+    if (!tagTarget) return;
+    const missing = missingRequiredDimensions(dimensions, tagValue);
+    if (missing.length) {
+      message.error(t('taxonomy_required_missing', { names: missing.map((d) => d.name).join(', ') }));
+      return;
+    }
+    setTagSaving(true);
+    try {
+      await taxonomyApi.setDocumentTags(tagTarget.id, tagValue);
+      message.success(t('taxonomy_tags_saved'));
+      setTagTarget(null);
+      loadDocuments();
+    } catch {
+      message.error(t('taxonomy_tags_failed'));
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  // Spec §3: explicit (re)submission for draft / rejected versions
+  const handleSubmitReview = async (record: Document) => {
+    try {
+      await reviewApi.submitReview(record.id);
+      message.success(t('review_submit_success'));
+      loadDocuments();
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || t('review_submit_failed'));
+    }
+  };
+
+  // Spec §4 L3: owner confirms the document is still fresh (resets stale clock)
+  const handleConfirmFresh = async (record: Document) => {
+    try {
+      await taxonomyApi.confirmFresh(record.id);
+      message.success(t('kb_confirm_fresh_success'));
+      loadDocuments();
+    } catch {
+      message.error(t('kb_confirm_fresh_failed'));
+    }
+  };
 
   const handleReindex = async (id: string) => {
     if (!canIndex) return;
@@ -277,7 +437,12 @@ export default function KnowledgeBasePage() {
     setDiffError(null);
     setVersionReason('');
     setActiveTab('content');
+    setContributors([]);
     void loadVersions(record.id);
+    // Spec §3: contributors watermark aggregated across the version chain
+    documentApi.getDocument(record.id)
+      .then((doc) => setContributors(doc.contributors || []))
+      .catch(() => undefined);
   };
 
   const closeVersionDrawer = () => {
@@ -321,6 +486,17 @@ export default function KnowledgeBasePage() {
         text_content: editText,
         reason: versionReason || undefined,
       });
+      // Spec §3: in require_review spaces the new version is parked at
+      // pending_review and only enters the AI index after approval.
+      if (resp && resp.pending_review) {
+        message.info(t('kb_version_pending_review'));
+        setVersionReason('');
+        setDiffData(null);
+        setOriginalText(editText);
+        void loadVersions(versionDrawer.id);
+        loadDocuments();
+        return;
+      }
       message.success(t('kb_version_created'));
       setVersionReason('');
       setDiffData(null);
@@ -424,6 +600,17 @@ export default function KnowledgeBasePage() {
       message.warning(t('kb_create_from_text_empty'));
       return;
     }
+    // Prevent creating a document with a duplicate title
+    const trimmedTitle = createTitle.trim();
+    if (trimmedTitle) {
+      const isDuplicate = documents.some(
+        (doc) => doc.title.toLowerCase() === trimmedTitle.toLowerCase(),
+      );
+      if (isDuplicate) {
+        message.warning(t('kb_create_from_text_duplicate'));
+        return;
+      }
+    }
     setCreateFromTextSaving(true);
     try {
       const result = await documentApi.createFromText({
@@ -483,6 +670,9 @@ export default function KnowledgeBasePage() {
     expired: t('status_expired'),
     stale: t('status_stale'),
     archived: t('status_archived'),
+    pending_review: t('status_pending_review'),
+    rejected: t('status_rejected'),
+    superseded: t('status_superseded'),
   };
 
   const columns: ColumnsType<Document> = [
@@ -517,6 +707,32 @@ export default function KnowledgeBasePage() {
         );
       },
     },
+    {
+      // Spec §2: controlled-vocabulary tags (科目 × FY × 阶段 × SCOT)
+      title: t('kb_tags'),
+      key: 'taxonomy_terms',
+      width: 220,
+      render: (_: unknown, record: Document) => (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {(record.taxonomy_terms || []).map((term) => (
+            <Tooltip key={term.id} title={term.dimension}>
+              <Tag style={{ marginInlineEnd: 0 }}>{term.label}</Tag>
+            </Tooltip>
+          ))}
+        </div>
+      ),
+    },
+    {
+      // Spec §3: updater watermark "v{N} · {name} · {date}"
+      title: t('kb_watermark'),
+      key: 'watermark',
+      width: 200,
+      render: (_: unknown, record: Document) => (
+        <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+          v{record.version ?? 1} · {record.updated_by_name || record.uploaded_by_name || '—'} · {record.updated_at ? new Date(record.updated_at).toLocaleDateString() : '—'}
+        </span>
+      ),
+    },
     { title: t('kb_created'), dataIndex: 'created_at', key: 'created_at', width: 180 },
   ];
 
@@ -524,9 +740,9 @@ export default function KnowledgeBasePage() {
     columns.push({
       title: t('kb_actions'),
       key: 'actions',
-      width: 250,
+      width: 320,
       render: (_: unknown, record: Document) => (
-        <Space size="middle">
+        <Space size="small">
           {canDownload && (
             <Button
               size="small"
@@ -573,6 +789,36 @@ export default function KnowledgeBasePage() {
           {canManage && (
             <Button
               size="small"
+              icon={<TagsOutlined />}
+              onClick={() => void openTagEditor(record)}
+              aria-label={t('kb_tags')}
+              title={t('kb_tags')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canManage && (record.status === 'draft' || record.status === 'rejected') && (
+            <Button
+              size="small"
+              icon={<SendOutlined />}
+              onClick={() => void handleSubmitReview(record)}
+              aria-label={t('kb_submit_review')}
+              title={t('kb_submit_review')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canManage && (record.status === 'stale' || record.status === 'active') && (
+            <Button
+              size="small"
+              icon={<CheckCircleOutlined />}
+              onClick={() => void handleConfirmFresh(record)}
+              aria-label={t('kb_confirm_fresh')}
+              title={t('kb_confirm_fresh')}
+              style={{ borderRadius: 6 }}
+            />
+          )}
+          {canManage && (
+            <Button
+              size="small"
               icon={<InboxOutlined />}
               onClick={() => confirmArchive(record.id, record.title)}
               disabled={record.status === 'archived'}
@@ -598,11 +844,127 @@ export default function KnowledgeBasePage() {
   }
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
-        <div className="page-head" style={{ marginBottom: 32 }}>
+        <div className="page-head" style={{ marginBottom: 24 }}>
           <h1 className="page-title">{t('nav_knowledge')}</h1>
+          <p className="page-sub">{t('admin_knowledge_subtitle')}</p>
         </div>
+        {activeSpace?.my_role === 'guest' && spaceId ? (
+          <GuestOnboardingBanner
+            spaceId={spaceId}
+            onCompleted={async () => {
+              await loadSpaces();
+              capabilityState.refresh();
+            }}
+          />
+        ) : null}
+        {/* Spec §2/§3/§5: documents / review queue / graph / timeline / dashboard.
+            KB read-only access spec: browse-only roles (guest/reviewer) see the
+            read tabs; management tabs require quality/manage capabilities. */}
+        <Tabs
+          activeKey={pageTab}
+          onChange={setPageTab}
+          style={{ marginBottom: 8 }}
+          items={[
+            { key: 'documents', label: (<span><AuditOutlined /> {t('kb_tab_documents')}</span>) },
+            ...(access.has('quality.review') || canManage
+              ? [{ key: 'review', label: (<span><CheckCircleOutlined /> {t('kb_tab_review')}</span>) }]
+              : []),
+            { key: 'graph', label: (<span><ApartmentOutlined /> {t('kb_tab_graph')}</span>) },
+            { key: 'timeline', label: (<span><FieldTimeOutlined /> {t('kb_tab_timeline')}</span>) },
+            ...(access.has('quality.read') || canManage
+              ? [{ key: 'dashboard', label: (<span><DashboardOutlined /> {t('kb_tab_dashboard')}</span>) }]
+              : []),
+            // Taxonomy remains space-scoped; reference libraries moved to a
+            // top-level personal entry.
+            ...(canManage
+              ? [{ key: 'taxonomy', label: (<span><TagOutlined /> {t('kb_tab_taxonomy')}</span>) }]
+              : []),
+            // KB settings tab: visible to space owners / knowledge managers
+            ...(canManage
+              ? [{ key: 'settings', label: (<span><SettingOutlined /> {t('kb_tab_settings')}</span>) }]
+              : []),
+          ]}
+        />
+        {!canManage && (
+          <Alert
+            type="info"
+            showIcon
+            message={t('kb_readonly_notice')}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        {pageTab === 'review' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <ReviewQueuePanel onDecided={loadDocuments} />
+          </Card>
+        )}
+        {pageTab === 'graph' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <KnowledgeGraphPanel dimensions={dimensions} />
+          </Card>
+        )}
+        {pageTab === 'timeline' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <TimelinePanel />
+          </Card>
+        )}
+        {pageTab === 'dashboard' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <DashboardPanel />
+          </Card>
+        )}
+        {pageTab === 'taxonomy' && (
+          <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <TaxonomyManagerPanel
+              taxonomyMode={taxonomyMode}
+              canManage={canManage}
+              onChanged={loadDimensions}
+            />
+          </Card>
+        )}
+        {pageTab === 'settings' && (
+          <Card styles={{ body: { padding: '28px 28px 24px' } }} className="glass-panel hover-lift" style={{ borderRadius: 'var(--radius-lg)' }}>
+            <div style={{ marginBottom: 24 }}>
+              <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
+                {t('kb_settings_title')}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 24,
+                padding: '20px 0',
+                borderTop: '1px solid var(--color-border-secondary)',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--color-text)', marginBottom: 6 }}>
+                  {t('kb_review_switch_label')}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+                  {t('kb_review_switch_desc')}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 8 }}>
+                  {reviewPolicy === 'require_review'
+                    ? t('kb_review_switch_on')
+                    : t('kb_review_switch_off')}
+                </div>
+              </div>
+              <Switch
+                checked={reviewPolicy === 'require_review'}
+                loading={policySaving}
+                onChange={(checked) => {
+                  void saveReviewPolicy(checked ? 'require_review' : 'direct_publish');
+                }}
+              />
+            </div>
+          </Card>
+        )}
+        {pageTab === 'documents' && (
         <Card
           styles={{ body: { padding: '28px 28px 24px' } }}
           className="glass-panel hover-lift"
@@ -705,23 +1067,37 @@ export default function KnowledgeBasePage() {
             />
           )}
 
-          <Table
-            columns={columns}
-            dataSource={documents}
-            loading={loading}
-            rowKey="id"
-            pagination={{ pageSize: 10 }}
-            scroll={{ x: 'max-content' }}
-            locale={{
-              emptyText: (
-                <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
-                  <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-                  <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('no_documents') || 'No documents'}</div>
-                </div>
-              ),
-            }}
-          />
+          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+            {/* Spec §2: multi-dimension pivot filter (科目 × FY × 阶段 × SCOT) */}
+            <div style={{ width: 230, flexShrink: 0 }}>
+              <TaxonomyFilterPanel
+                dimensions={dimensions}
+                loading={dimensionsLoading}
+                selectedCodes={filterCodes}
+                onChange={setFilterCodes}
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Table
+                columns={columns}
+                dataSource={filteredDocuments}
+                loading={loading}
+                rowKey="id"
+                pagination={{ pageSize: 10 }}
+                scroll={{ x: 'max-content' }}
+                locale={{
+                  emptyText: (
+                    <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
+                      <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
+                      <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('no_documents') || 'No documents'}</div>
+                    </div>
+                  ),
+                }}
+              />
+            </div>
+          </div>
         </Card>
+        )}
 
         {editTarget && (
           <Modal
@@ -744,6 +1120,21 @@ export default function KnowledgeBasePage() {
           </Modal>
         )}
 
+        {/* Spec §2: controlled-vocabulary tag editor (required dimensions enforced) */}
+        {tagTarget && (
+          <Modal
+            open
+            title={`${tagTarget.title} — ${t('kb_tags')}`}
+            okText={t('kb_save')}
+            cancelText={t('cancel')}
+            confirmLoading={tagSaving}
+            onOk={handleTagSave}
+            onCancel={() => setTagTarget(null)}
+          >
+            <TagSelector dimensions={dimensions} value={tagValue} onChange={setTagValue} />
+          </Modal>
+        )}
+
         {versionDrawer && (
           <Drawer
             title={`${versionDrawer.title} — ${t('kb_versions')}`}
@@ -752,6 +1143,15 @@ export default function KnowledgeBasePage() {
             onClose={closeVersionDrawer}
             destroyOnClose
           >
+            {/* Spec §3: updater watermark + contributors across the version chain */}
+            <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 13, color: 'var(--color-text-secondary)' }}>
+              <Tag color="blue">
+                v{versionDrawer.version ?? 1} · {versionDrawer.updated_by_name || versionDrawer.uploaded_by_name || '—'} · {versionDrawer.updated_at ? new Date(versionDrawer.updated_at).toLocaleDateString() : '—'}
+              </Tag>
+              {contributors.length > 0 && (
+                <span>{t('kb_contributors')}: {contributors.map((c) => c.name).join(', ')}</span>
+              )}
+            </div>
             <Tabs
               activeKey={activeTab}
               onChange={setActiveTab}
@@ -767,7 +1167,24 @@ export default function KnowledgeBasePage() {
                         readOnly={!canManage}
                         placeholder={t('kb_editor_placeholder')}
                         minHeight={280}
+                        linkCandidates={Array.from(new Set([
+                          ...documents
+                            .filter((d) => d.id !== versionDrawer?.id)
+                            .map((d) => d.title),
+                          ...linkTitles,
+                        ]))}
                       />
+                      {/* KB optimization spec §5.4: Obsidian-style backlinks */}
+                      {versionDrawer && (
+                        <BacklinksPanel
+                          documentId={versionDrawer.id}
+                          refreshKey={versions.length}
+                          onOpenDocument={(docId) => {
+                            const target = documents.find((d) => d.id === docId);
+                            if (target) void openVersionDrawer(target);
+                          }}
+                        />
+                      )}
                       {canManage && (
                         <>
                           <div style={{ display: 'flex', gap: 8 }}>
@@ -902,6 +1319,7 @@ export default function KnowledgeBasePage() {
                   onChange={setCreateText}
                   placeholder={t('kb_editor_placeholder')}
                   minHeight={300}
+                  linkCandidates={Array.from(new Set([...documents.map((d) => d.title), ...linkTitles]))}
                 />
               </div>
             </Spin>

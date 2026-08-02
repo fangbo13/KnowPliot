@@ -242,12 +242,17 @@
 
 .kp-console-layout {
   display: flex;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--color-bg-body);
 }
 .kp-console-sidebar {
   width: 256px;
   flex: 0 0 256px;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 24px 16px 16px;
@@ -255,6 +260,75 @@
   background: var(--color-bg-sunken);
 }
 .kp-console-brand { padding: 0 8px 24px; }
+/* Console Entry Hub spec §2.4: console switcher dropdown in the brand area. */
+.kp-console-switcher { position: relative; }
+.kp-console-switcher > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--radius-control);
+  padding: 4px;
+  margin: -4px;
+}
+.kp-console-switcher > summary::-webkit-details-marker { display: none; }
+.kp-console-switcher > summary:hover { background: var(--color-fill); }
+.kp-console-switcher__caret {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.kp-console-switcher[open] .kp-console-switcher__caret { transform: rotate(180deg); }
+.kp-console-switcher__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  min-width: 210px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+.kp-console-switcher__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.kp-console-switcher__item:hover {
+  background: var(--color-fill);
+  color: var(--color-text);
+}
+/* Console top-bar account menu items (profile / logout). */
+.kp-console-usermenu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.kp-console-usermenu__item:hover {
+  background: var(--color-fill);
+  color: var(--color-text);
+}
 .kp-console-title {
   color: var(--color-text);
   font-family: var(--font-family-display);
@@ -273,14 +347,178 @@
   transition: color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
 }
 .kp-console-nav__item:hover,
-.kp-console-back:hover { color: var(--color-text); }
+.kp-console-back:hover { color: var(--color-text); background: var(--color-fill); }
 .kp-console-nav__item.is-active {
   background: var(--accent-soft);
   color: var(--accent-text);
   font-weight: 600;
 }
 .kp-console-sidebar__spacer { flex: 1; }
-.kp-console-main { flex: 1; min-width: 0; overflow: auto; }
+.kp-console-main { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
+/* Dark/i18n/Layout spec §C: console top bar — mirrors the AdminLayout header
+   (notifications / theme / language / user pill). */
+.kp-console-topbar {
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 24px;
+  background: var(--color-bg-container);
+  border-bottom: 1px solid var(--color-border-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+/* Dark/i18n/Layout spec §C: shared stat card (uppercase label + serif value). */
+.kp-stat-card {
+  padding: 20px;
+  border-radius: var(--radius-lg);
+}
+.kp-stat-card__label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.kp-stat-card__value {
+  font-size: 28px;
+  font-weight: 600;
+  font-family: var(--font-family-display);
+  color: var(--color-text);
+}
+/* Console Entry Hub spec §2.2/§3: settings-hub card grid. */
+.kp-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.kp-hub-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  min-width: 0;
+  transition: box-shadow var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+.kp-hub-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-color: var(--accent-border, var(--color-border));
+}
+.kp-hub-card__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.kp-hub-card__badge {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 14px;
+}
+.kp-hub-card__title {
+  margin: 0;
+  flex: 1;
+  font-family: var(--font-family-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.kp-hub-card__enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.kp-hub-card__enter:hover { color: var(--accent-hover); }
+.kp-hub-card__desc {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.kp-hub-card__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kp-hub-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-fill);
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.kp-hub-chip:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.kp-hub-card__spaces {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.kp-hub-space-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-fill-quaternary, transparent);
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+.kp-hub-space-row:hover {
+  background: var(--color-fill);
+  border-color: var(--accent-border, var(--color-border));
+}
+.kp-hub-space-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.kp-hub-space-row__manage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent-text);
+  text-decoration: none;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: var(--radius-control);
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.kp-hub-space-row__manage:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
 .kp-console-content {
   width: 100%;
   max-width: calc(var(--management-max) + 64px);
@@ -465,12 +703,13 @@
   .kp-action-bar__secondary,
   .kp-action-bar__primary { width: 100%; flex-wrap: wrap; }
   .kp-action-bar__primary > * { flex: 1; }
-  .kp-console-layout { display: block; }
+  .kp-console-layout { display: block; height: auto; overflow: visible; }
   .kp-console-sidebar {
     position: sticky;
     top: 0;
     z-index: 20;
     width: 100%;
+    height: auto;
     padding: 12px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--color-border-secondary);
@@ -508,4 +747,1456 @@
 @media (prefers-reduced-motion: reduce) {
   .kp-surface { transition-duration: 0.01ms !important; transform: none !important; }
   .kp-login__card { animation: none; }
+}
+
+/* ============================================================================
+   Non-chat workspace shell
+
+   Chat keeps its bespoke conversation shell in chat.css. Every other route
+   uses this calmer command-desk treatment: navigation is task based, content
+   owns the scroll, and pages share one predictable reading width.
+   ============================================================================ */
+.app-shell--workspace .app-main {
+  background: var(--color-bg-body);
+}
+
+.app-shell--workspace .app-header {
+  height: 68px;
+  padding: 0 28px;
+  background: color-mix(in srgb, var(--color-bg-body) 92%, var(--accent-soft));
+  border-bottom-color: var(--color-border-secondary);
+}
+
+.app-shell--workspace .sidebar {
+  width: 248px;
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.055), transparent 220px),
+    var(--color-bg-sunken);
+  border-right-color: var(--color-border-secondary);
+}
+
+.app-shell--workspace .sidebar-header {
+  padding: 22px 18px 16px;
+}
+
+.app-shell--workspace .sidebar-brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  font-size: 15px;
+}
+
+.app-shell--workspace .sidebar-brand-name {
+  font-size: 19px;
+}
+
+.app-shell--workspace .workspace-sidebar-space {
+  padding: 8px 16px 18px;
+}
+
+.workspace-sidebar-nav-wrap {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0 12px 14px;
+}
+
+.workspace-sidebar-label {
+  padding: 8px 10px 7px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.workspace-sidebar-label--secondary {
+  margin-top: 20px;
+}
+
+.workspace-sidebar-nav {
+  display: grid;
+  gap: 3px;
+}
+
+.workspace-sidebar-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+  font-weight: 520;
+  text-decoration: none;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+
+.workspace-sidebar-item .anticon {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  font-size: 16px;
+}
+
+.workspace-sidebar-item:hover {
+  border-color: var(--color-border-secondary);
+  background: var(--color-fill);
+  color: var(--color-text);
+  transform: translateX(2px);
+}
+
+.workspace-sidebar-item.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 650;
+}
+
+.workspace-sidebar-item.is-active::before {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: -13px;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  content: '';
+}
+
+.workspace-sidebar-item.is-active .anticon {
+  color: var(--accent-text);
+}
+
+.workspace-sidebar-cta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: auto 2px 4px;
+  padding: 11px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 11px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+  transition: background var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+
+.workspace-sidebar-cta:hover {
+  background: var(--accent-soft-strong);
+  color: var(--accent-text);
+  transform: translateY(-1px);
+}
+
+.workspace-sidebar-cta__icon {
+  margin-left: auto;
+  font-size: 11px;
+  transform: rotate(180deg);
+}
+
+.app-shell--workspace .sidebar-footer {
+  padding: 14px 18px 18px;
+  background: rgba(var(--accent-rgb), 0.025);
+}
+
+.app-shell--workspace #main-content {
+  overflow: auto !important;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(var(--accent-rgb), 0.075), transparent 320px),
+    var(--color-bg-body);
+}
+
+.app-shell--workspace #main-content > .page,
+.app-shell--workspace #main-content > .section-enter {
+  min-height: 100%;
+}
+
+.app-shell--workspace .page {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  padding: 42px clamp(20px, 4vw, 56px) 80px;
+}
+
+.app-shell--workspace .kp-app-shell {
+  width: 100%;
+  min-height: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 42px clamp(20px, 4vw, 56px) 80px;
+}
+
+.app-shell--workspace .kp-knowledge-spaces,
+.app-shell--workspace .kp-reference-libraries {
+  overflow: visible;
+}
+
+.app-shell--workspace .page-inner {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.app-shell--workspace .page-head {
+  max-width: 900px;
+  margin-bottom: 32px;
+}
+
+.app-shell--workspace .page-title {
+  font-size: clamp(28px, 3vw, 38px);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.app-shell--workspace .page-sub,
+.app-shell--workspace .page-subtitle {
+  max-width: 680px;
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+.app-shell--workspace .glass-panel,
+.app-shell--workspace .ant-card,
+.app-shell--workspace .kp-surface {
+  border-color: var(--color-border-secondary);
+  box-shadow: 0 1px 1px rgba(35, 31, 27, 0.02), var(--shadow-sm);
+}
+
+.app-shell--workspace .glass-panel:hover,
+.app-shell--workspace .ant-card:hover {
+  border-color: var(--accent-border);
+}
+
+.app-shell--workspace .ant-card-head {
+  min-height: 58px;
+  padding: 0 24px;
+  border-bottom-color: var(--color-border-secondary);
+}
+
+.app-shell--workspace .ant-card-head-title {
+  font-family: var(--font-family-display);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.app-shell--workspace .ant-card-body {
+  padding: 24px;
+}
+
+.app-shell--workspace .ant-btn {
+  min-height: 38px;
+  border-radius: 9px;
+  font-weight: 560;
+}
+
+.app-shell--workspace .ant-input,
+.app-shell--workspace .ant-input-affix-wrapper,
+.app-shell--workspace .ant-select-selector,
+.app-shell--workspace .ant-picker {
+  min-height: 40px;
+  border-radius: 9px !important;
+}
+
+.app-shell--workspace .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 12px;
+}
+
+.app-shell--workspace .ant-table-thead > tr > th {
+  padding: 13px 16px;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-shell--workspace .ant-table-tbody > tr > td {
+  padding: 14px 16px;
+}
+
+.app-shell--workspace .kp-page-header {
+  margin-bottom: 32px;
+}
+
+.app-shell--workspace .kp-page-header__title {
+  font-size: clamp(30px, 3vw, 40px);
+  font-weight: 500;
+}
+
+.app-shell--workspace .kp-page-header__description {
+  font-size: 14.5px;
+}
+
+.app-shell--workspace .kp-directory-toolbar {
+  min-height: 48px;
+  margin: 28px 0 22px;
+  border-color: var(--color-border-secondary);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg-container) 88%, var(--accent-soft));
+  box-shadow: var(--shadow-xs);
+}
+
+.app-shell--workspace .kp-directory-toolbar:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-xs);
+}
+
+.app-shell--workspace .kp-directory-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 18px;
+}
+
+.app-shell--workspace .kp-directory-card {
+  min-height: 224px;
+  padding: 22px;
+  border-radius: 14px;
+  background:
+    linear-gradient(140deg, rgba(var(--accent-rgb), 0.035), transparent 48%),
+    var(--color-bg-container);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.app-shell--workspace .kp-directory-card:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.app-shell--workspace .kp-directory-card__copy h2 {
+  font-size: 21px;
+  letter-spacing: -0.02em;
+}
+
+.app-shell--workspace .kp-directory-card__copy p {
+  min-height: 44px;
+  font-size: 13.5px;
+}
+
+.app-shell--workspace .kp-reference-favorites {
+  margin-top: -2px;
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* The three console surfaces share the same rhythm as the app workspace. */
+.kp-console-layout {
+  background: var(--color-bg-body);
+}
+
+.kp-console-sidebar {
+  width: 264px;
+  flex-basis: 264px;
+  padding: 28px 18px 18px;
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.055), transparent 260px),
+    var(--color-bg-sunken);
+}
+
+.kp-console-brand {
+  padding: 0 10px 28px;
+}
+
+.kp-console-nav {
+  gap: 5px;
+}
+
+.kp-console-nav__item,
+.kp-console-back {
+  min-height: 42px;
+  padding: 10px 13px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+}
+
+.kp-console-nav__item:hover,
+.kp-console-back:hover {
+  border-color: var(--color-border-secondary);
+}
+
+.kp-console-nav__item.is-active {
+  border-color: var(--accent-border);
+}
+
+.kp-console-topbar {
+  height: 68px;
+  padding: 0 32px;
+  background: color-mix(in srgb, var(--color-bg-body) 92%, var(--accent-soft));
+}
+
+.kp-console-content {
+  max-width: 1380px;
+  padding: 42px clamp(20px, 4vw, 56px) 80px;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(var(--accent-rgb), 0.075), transparent 320px),
+    var(--color-bg-body);
+}
+
+.kp-admin-layout {
+  background: var(--color-bg-body) !important;
+}
+
+.kp-admin-sidebar {
+  width: 264px !important;
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.055), transparent 260px),
+    var(--color-bg-sunken) !important;
+}
+
+.kp-admin-nav {
+  gap: 5px !important;
+}
+
+.kp-admin-nav .admin-nav-link {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 11px !important;
+}
+
+.kp-admin-nav .admin-nav-link:hover {
+  border-color: var(--color-border-secondary);
+}
+
+.kp-admin-back {
+  margin: 12px 18px 18px !important;
+  border: 1px solid transparent;
+}
+
+.kp-admin-back:hover {
+  border-color: var(--color-border-secondary);
+}
+
+.kp-admin-topbar {
+  height: 68px !important;
+  padding: 0 32px !important;
+  background: color-mix(in srgb, var(--color-bg-body) 92%, var(--accent-soft)) !important;
+}
+
+.kp-admin-content {
+  background:
+    radial-gradient(circle at 96% 0%, rgba(var(--accent-rgb), 0.075), transparent 320px),
+    var(--color-bg-body) !important;
+}
+
+@media (max-width: 768px) {
+  .app-shell--workspace .app-header {
+    height: 60px;
+    padding: 0 14px;
+  }
+
+  .app-shell--workspace .page {
+    padding: 28px 16px 56px;
+  }
+
+  .app-shell--workspace .kp-app-shell {
+    padding: 28px 16px 56px;
+  }
+
+  .app-shell--workspace .page-head {
+    margin-bottom: 24px;
+  }
+
+  .app-shell--workspace .page-title {
+    font-size: 29px;
+  }
+
+  .app-shell--workspace .ant-card-head {
+    padding: 0 18px;
+  }
+
+  .app-shell--workspace .ant-card-body {
+    padding: 18px;
+  }
+
+  .app-shell--workspace .ant-table-wrapper {
+    overflow-x: auto;
+  }
+
+  .kp-console-sidebar {
+    width: 100%;
+    flex-basis: auto;
+    padding: 14px 16px;
+  }
+
+  .kp-console-topbar {
+    height: 60px;
+    padding: 0 16px;
+  }
+
+  .kp-console-content {
+    padding: 28px 16px 56px;
+  }
+
+  .kp-admin-sidebar {
+    width: 220px !important;
+  }
+
+  .kp-admin-topbar {
+    height: 60px !important;
+    padding: 0 16px !important;
+  }
+
+  .kp-admin-content {
+    padding: 28px 16px 56px !important;
+  }
+}
+
+/* ============================================================================
+   Quiet workspace refinement
+
+   The workspace routes intentionally use a flatter, quieter visual language
+   than chat: one rail, one canvas, one surface elevation. This final layer
+   keeps the existing component contracts intact while correcting the common
+   failure modes of management UIs: oversized titles, empty header space,
+   heavy CTA blocks, and controls that collapse into each other.
+   ============================================================================ */
+.app-shell--workspace {
+  --workspace-surface: var(--color-bg-elevated);
+  --workspace-rail: var(--color-bg-sunken);
+  --workspace-line: var(--color-border-secondary);
+  --workspace-wash: rgba(var(--accent-rgb), 0.055);
+}
+
+.app-shell--workspace .app-header {
+  height: 64px;
+  padding: 0 28px;
+  background: var(--color-bg-body);
+  border-bottom: 1px solid var(--workspace-line);
+  box-shadow: none;
+}
+
+.app-shell--workspace .app-header .icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.app-shell--workspace .workspace-header-back {
+  margin-left: 2px;
+}
+
+.workspace-header-context {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 14px;
+  line-height: 1.1;
+}
+
+.workspace-header-context span,
+.kp-console-topbar__context span,
+.kp-admin-topbar__context span {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.workspace-header-context strong,
+.kp-console-topbar__context strong,
+.kp-admin-topbar__context strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell--workspace .sidebar {
+  width: 232px;
+  background: var(--workspace-rail);
+  border-right: 1px solid var(--workspace-line);
+}
+
+.app-shell--workspace .sidebar-header {
+  padding: 18px 16px 14px;
+}
+
+.app-shell--workspace .sidebar-brand {
+  gap: 10px;
+}
+
+.app-shell--workspace .sidebar-brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--accent);
+  box-shadow: none;
+  font-size: 14px;
+}
+
+.app-shell--workspace .sidebar-brand-name {
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.app-shell--workspace .workspace-sidebar-space {
+  padding: 6px 14px 10px;
+}
+
+.app-shell--workspace .workspace-sidebar-nav-wrap {
+  padding: 8px 10px 12px;
+}
+
+.app-shell--workspace .workspace-sidebar-label {
+  padding: 12px 10px 7px;
+  color: var(--color-text-tertiary);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.app-shell--workspace .workspace-sidebar-label--secondary {
+  margin-top: 16px;
+}
+
+.app-shell--workspace .workspace-sidebar-nav {
+  gap: 2px;
+}
+
+.app-shell--workspace .workspace-sidebar-item {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 560;
+  transform: none;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.app-shell--workspace .workspace-sidebar-item:hover {
+  border-color: transparent;
+  background: var(--color-fill);
+  color: var(--color-text);
+  transform: none;
+}
+
+.app-shell--workspace .workspace-sidebar-item.is-active {
+  border-color: transparent;
+  background: var(--workspace-surface);
+  color: var(--accent-text);
+  box-shadow: inset 3px 0 0 var(--accent), 0 1px 1px rgba(35, 31, 27, 0.025);
+  font-weight: 650;
+}
+
+.app-shell--workspace .workspace-sidebar-item.is-active::before {
+  display: none;
+}
+
+.app-shell--workspace .workspace-sidebar-item .anticon {
+  color: var(--color-text-tertiary);
+  font-size: 15px;
+}
+
+.app-shell--workspace .workspace-sidebar-item.is-active .anticon {
+  color: var(--accent-text);
+}
+
+.app-shell--workspace .workspace-sidebar-cta {
+  margin: auto 14px 10px;
+  padding: 13px 3px 12px;
+  border: 0;
+  border-top: 1px solid var(--workspace-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  transform: none;
+}
+
+.app-shell--workspace .workspace-sidebar-cta:hover {
+  background: transparent;
+  color: var(--accent-text);
+  transform: none;
+}
+
+.app-shell--workspace .workspace-sidebar-cta__icon {
+  color: var(--color-text-tertiary);
+}
+
+.app-shell--workspace .sidebar-footer {
+  min-height: 58px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--workspace-line);
+  background: transparent;
+}
+
+.app-shell--workspace .sidebar-footer .sidebar-avatar {
+  width: 27px;
+  height: 27px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+}
+
+.app-shell--workspace #main-content {
+  overflow: auto !important;
+  background: var(--color-bg-body);
+}
+
+.app-shell--workspace .page {
+  min-height: 100%;
+  padding: 38px clamp(22px, 4vw, 56px) 72px;
+}
+
+.app-shell--workspace .kp-app-shell {
+  max-width: 1120px;
+  padding: 38px clamp(22px, 4vw, 56px) 72px;
+}
+
+.app-shell--workspace .page-inner {
+  max-width: 1040px;
+}
+
+.app-shell--workspace .page-head,
+.app-shell--workspace .kp-page-header {
+  margin-bottom: 26px;
+}
+
+.app-shell--workspace .page-title,
+.app-shell--workspace .kp-page-header__title {
+  padding-bottom: 0;
+  color: var(--color-text);
+  font-family: var(--font-family) !important;
+  font-size: clamp(28px, 3vw, 34px);
+  font-weight: 680;
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+}
+
+.app-shell--workspace .page-title::after {
+  display: none;
+}
+
+.app-shell--workspace .page-subtitle,
+.app-shell--workspace .page-sub,
+.app-shell--workspace .kp-page-header__description {
+  max-width: 650px;
+  margin-top: 9px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.app-shell--workspace .kp-page-header__eyebrow {
+  margin-bottom: 9px;
+  color: var(--accent-text);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.app-shell--workspace .kp-surface,
+.app-shell--workspace .glass-panel,
+.app-shell--workspace .ant-card {
+  border: 1px solid var(--workspace-line);
+  border-radius: 14px;
+  background: var(--workspace-surface);
+  box-shadow: 0 1px 2px rgba(35, 31, 27, 0.025);
+}
+
+.app-shell--workspace .kp-surface:hover,
+.app-shell--workspace .glass-panel:hover,
+.app-shell--workspace .ant-card:hover {
+  border-color: var(--accent-border);
+}
+
+.app-shell--workspace .hover-lift:hover {
+  box-shadow: 0 8px 24px rgba(35, 31, 27, 0.055);
+  transform: translateY(-2px);
+}
+
+.app-shell--workspace .ant-card-head {
+  min-height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--workspace-line);
+  background: transparent;
+}
+
+.app-shell--workspace .ant-card-head-title {
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.app-shell--workspace .ant-card-body {
+  padding: 24px;
+}
+
+.app-shell--workspace .ant-btn,
+.app-shell--workspace .primary-btn,
+.app-shell--workspace .secondary-btn {
+  min-height: 36px;
+  border-radius: 8px;
+  font-weight: 620;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.app-shell--workspace .ant-btn:hover,
+.app-shell--workspace .primary-btn:hover,
+.app-shell--workspace .secondary-btn:hover {
+  transform: translateY(-1px);
+}
+
+.app-shell--workspace .primary-btn {
+  padding: 0 14px;
+  background: var(--accent-active);
+  color: var(--color-text-on-accent);
+}
+
+.app-shell--workspace .primary-btn:hover {
+  background: var(--accent-hover);
+}
+
+.app-shell--workspace .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--workspace-line);
+  background: transparent;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.app-shell--workspace .secondary-btn:hover {
+  border-color: var(--accent-border);
+  background: var(--workspace-wash);
+  color: var(--accent-text);
+}
+
+.app-shell--workspace .ant-input,
+.app-shell--workspace .ant-input-affix-wrapper,
+.app-shell--workspace .ant-select-selector,
+.app-shell--workspace .ant-picker {
+  min-height: 40px;
+  border-radius: 9px !important;
+  border-color: var(--workspace-line) !important;
+  background: var(--workspace-surface) !important;
+  box-shadow: none !important;
+}
+
+.app-shell--workspace .ant-input:focus,
+.app-shell--workspace .ant-input-affix-wrapper-focused,
+.app-shell--workspace .ant-select-focused .ant-select-selector {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+.app-shell--workspace .kp-directory-toolbar {
+  min-height: 46px;
+  margin: 22px 0 18px;
+  padding: 0 13px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 10px;
+  background: var(--workspace-surface);
+  box-shadow: none;
+}
+
+.app-shell--workspace .kp-directory-toolbar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.app-shell--workspace .kp-directory-toolbar input {
+  font-size: 13.5px;
+}
+
+.app-shell--workspace .kp-directory-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 14px;
+}
+
+.app-shell--workspace .kp-directory-card {
+  min-height: 196px;
+  padding: 20px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 14px;
+  background: var(--workspace-surface);
+  box-shadow: none;
+  transition: border-color var(--motion-base) var(--motion-ease), box-shadow var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease);
+}
+
+.app-shell--workspace .kp-directory-card:hover {
+  border-color: var(--accent-border);
+  box-shadow: 0 10px 26px rgba(35, 31, 27, 0.065);
+  transform: translateY(-2px);
+}
+
+.app-shell--workspace .kp-directory-card.is-favorite::after {
+  width: 48px;
+  height: 3px;
+}
+
+.app-shell--workspace .kp-directory-card__mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: var(--accent-text);
+  background: var(--workspace-wash);
+}
+
+.app-shell--workspace .kp-directory-card__copy h2 {
+  margin: 5px 0 7px;
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.app-shell--workspace .kp-directory-card__copy p {
+  min-height: 42px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.app-shell--workspace .kp-directory-card__meta {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.app-shell--workspace .kp-directory-card > .secondary-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.app-shell--workspace .kp-reference-favorites {
+  margin-top: 2px;
+  padding: 20px;
+  border-color: var(--workspace-line);
+  border-left: 3px solid var(--accent);
+  background: var(--workspace-surface);
+  box-shadow: none;
+}
+
+.app-shell--workspace .kp-reference-favorites__intro strong {
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: 17px;
+  font-weight: 680;
+}
+
+.app-shell--workspace .kp-reference-favorites__intro p {
+  font-size: 12.5px;
+}
+
+.app-shell--workspace .kp-reference-favorites__slots {
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.app-shell--workspace .kp-reference-slot {
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-fill);
+}
+
+.app-shell--workspace .kp-empty-state {
+  min-height: 280px;
+  padding: 48px 24px;
+  border: 1px dashed var(--workspace-line);
+  border-radius: 14px;
+  background: var(--workspace-surface);
+}
+
+.app-shell--workspace .kp-empty-state__icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 15px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--workspace-wash);
+  color: var(--accent-text);
+  font-size: 20px;
+}
+
+.app-shell--workspace .kp-empty-state__title {
+  font-family: var(--font-family);
+  font-size: 17px;
+  font-weight: 680;
+}
+
+.app-shell--workspace .kp-empty-state__body {
+  max-width: 500px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.app-shell--workspace .space-discovery__surface {
+  padding: 22px;
+}
+
+.app-shell--workspace .space-discovery__empty {
+  min-height: 260px;
+}
+
+/* Profile: make the preference controls a two-row form instead of a cramped
+   five-column strip at desktop widths. */
+.app-shell--workspace .kp-profile-page__inner {
+  max-width: 920px !important;
+}
+
+.app-shell--workspace .kp-profile-page .page-head {
+  margin-bottom: 28px;
+}
+
+.app-shell--workspace .kp-profile-card {
+  margin-bottom: 16px !important;
+  overflow: hidden;
+}
+
+.app-shell--workspace .kp-profile-card .ant-card-body {
+  padding: 24px 26px 26px !important;
+}
+
+.app-shell--workspace .kp-profile-card--identity .ant-avatar {
+  box-shadow: none !important;
+  background: var(--accent) !important;
+}
+
+.app-shell--workspace .kp-profile-card .ant-form-item-label > label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-shell--workspace .kp-profile-notifications-col {
+  margin-top: 3px;
+  padding-top: 15px;
+  border-top: 1px solid var(--workspace-line);
+}
+
+.app-shell--workspace .kp-profile-notifications {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.app-shell--workspace .kp-profile-notifications .ant-form-item {
+  display: block;
+  min-height: 46px;
+  margin: 0 !important;
+  padding: 9px 12px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 9px;
+  background: var(--color-fill);
+}
+
+.app-shell--workspace .kp-profile-notifications .ant-form-item-row {
+  display: flex !important;
+  align-items: center;
+  width: 100%;
+}
+
+.app-shell--workspace .kp-profile-notifications .ant-form-item-label {
+  flex: 1;
+  width: auto !important;
+  max-width: none !important;
+  padding: 0 !important;
+  text-align: left;
+}
+
+.app-shell--workspace .kp-profile-notifications .ant-form-item-control {
+  flex: 0 0 auto;
+  width: auto !important;
+  max-width: none !important;
+}
+
+.app-shell--workspace .kp-profile-card--security .ant-card-body > div:last-child {
+  background: var(--workspace-wash) !important;
+  border-color: var(--workspace-line) !important;
+}
+
+/* Scoped consoles and the dedicated admin surface share the same shell
+   measurements, so switching context does not feel like entering another app. */
+.kp-console-layout,
+.kp-admin-layout {
+  background: var(--color-bg-body) !important;
+}
+
+.kp-console-sidebar,
+.kp-admin-sidebar {
+  width: 232px !important;
+  flex-basis: 232px;
+  padding: 20px 12px 14px;
+  background: var(--color-bg-sunken) !important;
+  border-right: 1px solid var(--color-border-secondary);
+}
+
+.kp-console-brand {
+  padding: 0 8px 24px;
+}
+
+.kp-console-switcher > summary {
+  padding: 5px;
+  margin: -5px;
+  border-radius: 9px;
+}
+
+.kp-console-switcher > summary:hover {
+  background: var(--color-fill);
+}
+
+.kp-console-title {
+  font-family: var(--font-family);
+  font-size: 16px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.kp-console-scope {
+  margin-top: 9px;
+  padding-left: 5px;
+  font-size: 11px;
+}
+
+.kp-console-nav,
+.kp-admin-nav {
+  gap: 2px !important;
+}
+
+.kp-console-nav__item,
+.kp-console-back,
+.kp-admin-nav .admin-nav-link,
+.kp-admin-back {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px !important;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.kp-console-nav__item:hover,
+.kp-console-back:hover,
+.kp-admin-nav .admin-nav-link:hover,
+.kp-admin-back:hover {
+  border-color: transparent;
+  background: var(--color-fill);
+  color: var(--color-text);
+}
+
+.kp-console-nav__item.is-active,
+.kp-admin-nav .admin-nav-link[aria-current='page'] {
+  background: var(--workspace-surface) !important;
+  color: var(--accent-text) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 650;
+}
+
+.kp-admin-nav .admin-nav-link[aria-current='page'] > div {
+  top: 0 !important;
+  left: 0 !important;
+  width: 3px !important;
+  height: 100% !important;
+  transform: none !important;
+  border-radius: 0 3px 3px 0 !important;
+}
+
+.kp-console-back,
+.kp-admin-back {
+  margin: 10px 6px 2px !important;
+  border-top: 1px solid var(--color-border-secondary);
+  border-radius: 0 !important;
+  padding-top: 15px;
+}
+
+.kp-console-topbar,
+.kp-admin-topbar {
+  height: 64px !important;
+  padding: 0 28px !important;
+  background: var(--color-bg-body) !important;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.kp-console-topbar__context,
+.kp-admin-topbar__context {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.kp-console-content,
+.kp-admin-content {
+  max-width: none;
+  padding: 38px clamp(22px, 4vw, 56px) 72px !important;
+  background: var(--color-bg-body) !important;
+}
+
+.kp-console-content > .page,
+.kp-admin-content .page {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.kp-console-content .page-head,
+.kp-admin-content .page-head {
+  margin-bottom: 26px;
+}
+
+.kp-console-content .page-title,
+.kp-admin-content .page-title {
+  padding-bottom: 0;
+  font-family: var(--font-family) !important;
+  font-size: clamp(28px, 3vw, 34px);
+  font-weight: 680;
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+}
+
+.kp-console-content .page-title::after,
+.kp-admin-content .page-title::after {
+  display: none;
+}
+
+.kp-console-content .page-subtitle,
+.kp-admin-content .page-subtitle,
+.kp-console-content .page-head > p,
+.kp-admin-content .page-head > p {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.kp-console-content .glass-panel,
+.kp-admin-content .glass-panel,
+.kp-console-content .ant-card,
+.kp-admin-content .ant-card {
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 14px;
+  background: var(--color-bg-elevated);
+  box-shadow: 0 1px 2px rgba(35, 31, 27, 0.025);
+}
+
+.kp-console-content .ant-card-head,
+.kp-admin-content .ant-card-head {
+  min-height: 56px;
+  border-bottom-color: var(--color-border-secondary);
+}
+
+.kp-console-content .ant-card-head-title,
+.kp-admin-content .ant-card-head-title {
+  font-family: var(--font-family);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.kp-console-content .ant-table-wrapper,
+.kp-admin-content .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.kp-console-content .ant-table-thead > tr > th,
+.kp-admin-content .ant-table-thead > tr > th {
+  padding: 12px 15px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kp-console-content .ant-table-tbody > tr > td,
+.kp-admin-content .ant-table-tbody > tr > td {
+  padding: 14px 15px;
+}
+
+.kp-console-content .ant-alert,
+.kp-admin-content .ant-alert,
+.app-shell--workspace .ant-alert {
+  border-radius: 10px;
+  border-color: var(--color-border-secondary);
+  background: var(--color-bg-elevated);
+}
+
+.app-shell--workspace .ant-list-item {
+  padding: 16px 0;
+  border-block-end-color: var(--workspace-line);
+}
+
+.app-shell--workspace .space-discovery__surface .ant-list-item:last-child {
+  border-block-end: 0;
+}
+
+.app-shell--workspace .space-discovery__join-bar .ant-btn {
+  min-width: 112px;
+}
+
+.kp-admin-brand {
+  padding: 18px 16px 14px !important;
+}
+
+.kp-admin-brand > span:last-child {
+  font-family: var(--font-family) !important;
+  font-size: 16px !important;
+  font-weight: 680 !important;
+  letter-spacing: -0.025em;
+}
+
+@media (max-width: 900px) {
+  .app-shell--workspace .sidebar {
+    width: 220px;
+  }
+
+  .app-shell--workspace .kp-profile-notifications {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell--workspace .app-header {
+    height: 58px;
+    padding: 0 14px;
+  }
+
+  .workspace-header-context {
+    max-width: min(45vw, 220px);
+    margin-left: 8px;
+  }
+
+  .workspace-header-context span {
+    display: none;
+  }
+
+  .workspace-header-context strong {
+    font-size: 12px;
+  }
+
+  .app-shell--workspace .page,
+  .app-shell--workspace .kp-app-shell {
+    padding: 28px 16px 56px;
+  }
+
+  .app-shell--workspace .page-title,
+  .app-shell--workspace .kp-page-header__title {
+    font-size: 28px;
+  }
+
+  .app-shell--workspace .ant-card-head {
+    padding: 0 18px;
+  }
+
+  .app-shell--workspace .kp-profile-card .ant-card-body {
+    padding: 20px 18px 22px !important;
+  }
+
+  .app-shell--workspace .kp-profile-notifications {
+    grid-template-columns: 1fr;
+  }
+
+  .kp-console-sidebar,
+  .kp-admin-sidebar {
+    width: 100% !important;
+    flex-basis: auto;
+    padding: 14px 16px;
+  }
+
+  .kp-console-topbar,
+  .kp-admin-topbar {
+    height: 58px !important;
+    padding: 0 16px !important;
+  }
+
+  .kp-console-content,
+  .kp-admin-content {
+    padding: 28px 16px 56px !important;
+  }
+}
+
+/* First-run guidance: a calm sheet keeps the app visible without turning the
+   whole viewport into a noisy blur wall. */
+.onboarding-modal {
+  background: rgba(35, 31, 27, 0.36) !important;
+  backdrop-filter: blur(10px) saturate(0.82);
+}
+
+.onboarding-modal .onboarding-card {
+  padding: 32px 32px 28px !important;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 20px;
+  background: var(--color-bg-elevated);
+  box-shadow: 0 24px 70px rgba(35, 31, 27, 0.18);
+}
+
+.onboarding-modal .onboarding-mark {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 18px;
+  border-radius: 12px;
+  background: var(--accent);
+  box-shadow: none;
+  font-size: 20px;
+}
+
+.onboarding-modal .onboarding-title {
+  font-family: var(--font-family);
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.035em;
+}
+
+.onboarding-modal .onboarding-grid {
+  gap: 10px;
+  margin: 22px 0 24px;
+}
+
+.onboarding-modal .onboarding-feature {
+  min-height: 138px;
+  padding: 15px 12px;
+  border-color: var(--color-border-secondary);
+  border-radius: 12px;
+  background: var(--color-bg-container);
+  transition: border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.onboarding-modal .onboarding-feature:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-2px);
+}
+
+.onboarding-modal .onboarding-feature-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 16px;
+}
+
+@media (max-width: 560px) {
+  .onboarding-modal .onboarding-card {
+    padding: 26px 18px 22px !important;
+  }
 }

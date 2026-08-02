@@ -255,7 +255,27 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.sweep_action_outbox",
         "schedule": 60.0,
     },
+    # Knowledge iteration spec §4 L3: nightly stale-document scan.
+    "knowledge-stale-document-scan": {
+        "task": "apps.knowledge.tasks.scan_stale_documents",
+        "schedule": 60.0 * 60 * 24,
+    },
+    # KB/RAG audit spec P3 §B4: reclaim chunks of superseded/archived versions.
+    "knowledge-superseded-chunk-purge": {
+        "task": "apps.knowledge.tasks.purge_superseded_chunks",
+        "schedule": 60.0 * 60 * 24,
+    },
 }
+
+# ── KB/RAG audit spec P2/P3 knobs ──
+# §A1: route reference libraries by query signals (False = search all).
+RAG_LIBRARY_ROUTING_ENABLED = env_bool("RAG_LIBRARY_ROUTING_ENABLED", default=True)
+# §A8: optional LLM rerank of the final top-k (adds one LLM call per question).
+RAG_LLM_RERANK_ENABLED = env_bool("RAG_LLM_RERANK_ENABLED", default=False)
+# §B4: how long superseded/archived versions keep their chunks.
+KNOWLEDGE_SUPERSEDED_CHUNK_RETENTION_DAYS = int(
+    os.environ.get("KNOWLEDGE_SUPERSEDED_CHUNK_RETENTION_DAYS", "30")
+)
 ACTION_OUTBOX_DELIVERY_ADAPTER = os.environ.get(
     "ACTION_OUTBOX_DELIVERY_ADAPTER",
     "",
@@ -315,6 +335,38 @@ PROVIDER_HTTP_MAX_KEEPALIVE_CONNECTIONS = int(
 PROVIDER_MAX_OUTPUT_TOKENS = int(
     os.environ.get("PROVIDER_MAX_OUTPUT_TOKENS", "2000")
 )
+
+# ── Session memory (short/long-term conversation memory) ──
+# Master switch: rolling session summary + key facts injection.
+CHAT_MEMORY_ENABLED = env_bool("CHAT_MEMORY_ENABLED", default=True)
+# Token budget for the verbatim recent-history window sent to the LLM.
+CHAT_HISTORY_TOKEN_BUDGET = int(os.environ.get("CHAT_HISTORY_TOKEN_BUDGET", "2000"))
+# Per-message token cap — overly long messages are middle-truncated so one
+# message cannot evict the whole window.
+CHAT_HISTORY_MESSAGE_TOKEN_CAP = int(
+    os.environ.get("CHAT_HISTORY_MESSAGE_TOKEN_CAP", "600")
+)
+# Summarize only when at least this many messages sit beyond the watermark.
+CHAT_MEMORY_SUMMARY_TRIGGER = int(
+    os.environ.get("CHAT_MEMORY_SUMMARY_TRIGGER", "8")
+)
+# Rewrite context-dependent follow-up questions into standalone queries
+# before retrieval (embedding + FTS only — the raw query still goes to the LLM).
+CHAT_QUERY_REWRITE_ENABLED = env_bool("CHAT_QUERY_REWRITE_ENABLED", default=True)
+# Send recent history as a standard multi-turn messages array instead of
+# flattening it into the system prompt.
+CHAT_MULTI_TURN_MESSAGES = env_bool("CHAT_MULTI_TURN_MESSAGES", default=True)
+
+# ── Session-level reference-library selection ──
+# When enabled, users pick which opted-in public libraries a session may cite;
+# the explicit choice overrides keyword auto-routing for that session.
+CHAT_SESSION_LIBRARY_SELECTION_ENABLED = env_bool(
+    "CHAT_SESSION_LIBRARY_SELECTION_ENABLED", default=True
+)
+# Max reference libraries a single turn may cite, per answer mode (the space's
+# own knowledge base is always searched and does not count toward the cap).
+CHAT_LIBRARY_MAX_FAST = int(os.environ.get("CHAT_LIBRARY_MAX_FAST", "1"))
+CHAT_LIBRARY_MAX_DEEP = int(os.environ.get("CHAT_LIBRARY_MAX_DEEP", "3"))
 validate_capacity_settings(
     target_active=CHAT_GENERATION_TARGET_ACTIVE,
     max_outstanding=CHAT_GENERATION_MAX_OUTSTANDING,
@@ -369,6 +421,9 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # Previous: all tasks in single default queue, competing for 4 slots equally.
 CELERY_TASK_ROUTES = {
     "apps.chat.tasks.generate_chat_turn_v3": {"queue": "chat_generation"},
+    # apps.chat.tasks.update_session_memory is intentionally NOT routed: it
+    # lands on the default "celery" queue (which the standard worker consumes)
+    # and must never compete for chat_generation capacity.
     "apps.knowledge.tasks.*": {"queue": "default"},
     "apps.rag.tasks.*": {"queue": "default"},
 }
@@ -400,6 +455,15 @@ SERVICE_LINE_DEFAULT_SPACE = {
 }
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "8"))
 RAG_SIMILARITY_THRESHOLD = float(os.environ.get("RAG_SIMILARITY_THRESHOLD", "0.55"))
+# ── RAG optimization spec (Phase 5/6) ──
+# Bounded agentic retrieval: deep mode may run ONE refinement round when the
+# first pass is weak; fast mode stays strictly single-pass (zero added latency).
+RAG_RETRIEVAL_MAX_ROUNDS_DEEP = int(os.environ.get("RAG_RETRIEVAL_MAX_ROUNDS_DEEP", "2"))
+RAG_RETRIEVAL_MAX_ROUNDS_FAST = int(os.environ.get("RAG_RETRIEVAL_MAX_ROUNDS_FAST", "1"))
+# Deep-mode draft→critique→revise quality pass (fail-open, one round).
+RAG_SELF_CRITIQUE_ENABLED = (
+    os.environ.get("RAG_SELF_CRITIQUE_ENABLED", "true").lower() == "true"
+)
 QWEN_CHAT_MODEL = os.environ.get("QWEN_CHAT_MODEL", "qwen3.6-flash")
 RAG_LLM_MODEL = QWEN_CHAT_MODEL
 RAG_EMBEDDING_MODEL = os.environ.get("QWEN_EMBEDDING_MODEL", "text-embedding-v4")

@@ -1,0 +1,99 @@
+flowchart TB
+  subgraph UX["1. Experience & Entry Layer"]
+    ChatUI["Chat Workspace<br/>Sessions · Fast/Deep · Library Picker"]
+    KBUI["Knowledge Workbench<br/>Documents · Markdown · Taxonomy · Graph · Timeline"]
+    CreateUI["Workspace Creation<br/>Template · Taxonomy Mode · Reference Libraries"]
+    Hub["Console Hub / Scoped Consoles<br/>Platform · Governance · Workspace"]
+  end
+
+  subgraph Control["2. Identity, Capability & Request Scope"]
+    Auth["Auth / JWT / 2FA"] --> Caps["Capability Snapshot<br/>Route + Action Gates"]
+    Caps --> Scope["Organization → Business Line<br/>→ Knowledge Space → Membership"]
+    Scope --> RequestScope["X-Space-Id + Object Permissions<br/>Space-isolated Docs / Chat / Media"]
+  end
+
+  UX --> Auth
+
+  subgraph Provision["3A. Workflow A — Governed Workspace Provisioning"]
+    P1["Select business line, work group, office,<br/>template revision, join policy"]
+    P2["Submit creation request<br/>Idempotency key"]
+    P3["Governed validation<br/>Policy/taxonomy recheck · locator reservation · impact snapshot"]
+    P4["Platform review<br/>Separation of duties · approve/reject/cancel"]
+    P5["Create space + owner<br/>Organization / BL / locations / memberships"]
+    P6["Initialize<br/>taxonomy seed|custom|none · published library opt-in"]
+    P7["Workspace ready"]
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
+  end
+
+  subgraph Knowledge["3B. Workflow B — Knowledge Lifecycle, Versioning & Indexing"]
+    K1["Create/upload<br/>Markdown · PDF · DOCX · TXT · ZIP"] --> K2{"review_policy"}
+    K2 -->|direct_publish| K4["Durable IngestionJob<br/>queued → processing/retrying → succeeded/failed"]
+    K2 -->|require_review| K3["Optional review gate<br/>Diff · conflict hints · reviewer decision"]
+    K3 -->|approved| K4
+    K3 -. rejected / revise .-> K1
+    K4 -. Celery .-> K5["Parse · sanitize · structure-aware chunk<br/>CJK tokens · embed · zero-vector checks"]
+    K5 --> K6["Hybrid search index<br/>pgvector HNSW + PostgreSQL CJK FTS"]
+    K6 --> K7["Current effective knowledge<br/>active/stale; future & superseded excluded"]
+
+    K7 --> E1["Edit canonical Markdown<br/>wikilinks + taxonomy tags"]
+    E1 --> E2["Preview diff<br/>no persistence / embedding"]
+    E2 --> E3["Create version / rollback<br/>row lock + idempotent transaction"]
+    E3 --> E4["Atomic authority switch<br/>supersede old · remove old live chunks · re-index"]
+    E4 --> K7
+    K7 --> Views["Backlinks · Local Graph · Timeline<br/>Review Queue · Health Dashboard"]
+  end
+
+  subgraph Chat["3C. Workflow C — Durable Chat Turn & Agentic RAG"]
+    C1["Ask question<br/>answer mode + optional libraries"]
+    C2["Resolve session + ChatTurn<br/>space authority · client_request_id · policy snapshot"]
+    C3["Redis coordination<br/>renewable session lease · replayable SSE store"]
+    C4["Layered memory<br/>recent token window + rolling summary + key facts"]
+    C5["Guardrails + query condensation<br/>query understanding / synonyms / FY"]
+    C6["Retrieval scope<br/>primary space + selected/auto-routed published libraries"]
+    C7["Hybrid retrieval<br/>vector + CJK FTS → RRF<br/>freshness/FY/status penalties · reference quota"]
+    C8["Deep mode<br/>bounded refinement · optional LLM rerank"]
+    C9["Evidence quality<br/>high / medium / low / insufficient"]
+    C10["Prompt Builder + Qwen/DashScope<br/>circuit breaker · streaming generation"]
+    C11["SSE phases<br/>retrieving → answering → saving<br/>citations · quality · tokens · usage"]
+    C12["Persist result<br/>Message · ordered Citations · ModelInvocation · metrics"]
+    C13["Async rolling-memory update"]
+    C14["Turn complete<br/>replay · regenerate · feedback · durable history"]
+    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8 --> C9 --> C10 --> C11 --> C12 --> C13 --> C14
+  end
+
+  subgraph Quality["3D. Workflow D — Quality, Freshness & Knowledge Improvement"]
+    Q1["User feedback"] --> Q5["Human action<br/>confirm fresh · revise · new version · taxonomy update"]
+    Q2["Insufficient answer"] --> Q3["Auto KnowledgeGapTicket"] --> Q5
+    Q4["Nightly freshness scan<br/>active → stale"] --> Q6["Notify term owners / reviewers"] --> Q5
+    Q5 --> Q7["Audit · quality dashboards · RAG evaluation · health metrics"]
+  end
+
+  subgraph Data["4. Runtime Services & Data Plane"]
+    DB["PostgreSQL 16 + pgvector<br/>documents · versions · chunks · HNSW · CJK FTS"]
+    Redis["Redis 7<br/>Celery broker · leases · SSE replay · cancellation"]
+    Celery["Celery workers<br/>ingestion · memory · freshness · backfill"]
+    Media["Authenticated media<br/>original files · protected downloads"]
+    Qwen["Qwen / DashScope<br/>generation + embeddings"]
+  end
+
+  RequestScope --> P1
+  RequestScope --> K1
+  RequestScope --> C1
+  RequestScope --> Q7
+  P7 -. enter workspace .-> K1
+  K7 -. retrievable evidence .-> C6
+  C12 -. feedback .-> Q1
+  C9 -. insufficient .-> Q2
+  Q5 -. close loop .-> E1
+
+  P3 -.-> DB
+  K4 -.-> Celery
+  K5 -.-> Qwen
+  K6 -.-> DB
+  K1 -.-> Media
+  C3 -.-> Redis
+  C7 -.-> DB
+  C10 -.-> Qwen
+  C12 -.-> DB
+  C13 -.-> Celery
+  Q4 -.-> Celery

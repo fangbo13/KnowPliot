@@ -132,10 +132,13 @@ export default function AdminCodesPage() {
   const scopedLines = lines.filter((l) => l.organization === orgId);
 
   return (
-    <div className="page" style={{ background: 'transparent' }}>
+    <div className="page">
       <div className="page-inner">
         <div className="page-head" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 className="page-title">{t('admin_codes_title')}</h1>
+          <div>
+            <h1 className="page-title">{t('admin_codes_title')}</h1>
+            <p className="page-sub">{t('admin_codes_subtitle')}</p>
+          </div>
           <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh} style={{ borderRadius: 8 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)} style={{ borderRadius: 8 }}>{t('admin_issue_code')}</Button>
@@ -164,7 +167,7 @@ export default function AdminCodesPage() {
           />
           <Select
             allowClear
-            placeholder="Grants Role"
+            placeholder={t('admin_grants_role')}
             value={roleFilter}
             onChange={(value) => setRoleFilter(value ?? undefined)}
             options={[
@@ -175,19 +178,19 @@ export default function AdminCodesPage() {
           />
           <Select
             allowClear
-            placeholder="Status"
+            placeholder={t('filter_status')}
             value={statusFilter}
             onChange={(value) => setStatusFilter(value ?? undefined)}
             options={[
-              { value: 'active', label: 'Active' },
-              { value: 'revoked', label: 'Revoked' },
+              { value: 'active', label: t('status_active') },
+              { value: 'revoked', label: t('status_revoked') },
             ]}
             style={{ width: 120 }}
           />
           <Select
             showSearch
             allowClear
-            placeholder="Organization"
+            placeholder={t('filter_organization')}
             value={orgFilter}
             onChange={(value) => setOrgFilter(value ?? undefined)}
             options={orgs.map((o) => ({ value: o.id, label: o.name }))}
@@ -206,7 +209,7 @@ export default function AdminCodesPage() {
             placeholder={t('service_line_placeholder')}
             options={orgs.map((o) => ({ value: o.id, label: o.name }))} />
           {grantsRole === 'business_admin' && (
-            <Select value={blId || undefined} onChange={setBlId} style={{ width: '100%' }} placeholder="Business line"
+            <Select value={blId || undefined} onChange={setBlId} style={{ width: '100%' }} placeholder={t('admin_nav_business_lines')}
               options={scopedLines.map((l) => ({ value: l.id, label: l.name }))} />
           )}
           <Input type="number" min={0} value={maxUses} onChange={(e) => setMaxUses(Number(e.target.value) || 0)}

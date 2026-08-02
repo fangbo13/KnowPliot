@@ -4,6 +4,40 @@ const fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pin
 const displayFamily = "'Fraunces', 'Calistoga', Georgia, 'Songti SC', serif";
 const monoFamily = "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace";
 
+// Local Graph palette — deep-space blue/violet + neon cyan (tech accent zone,
+// intentionally decoupled from the warm Claude palette).
+const graphLight = {
+  bgStart: '#F5F7FC',
+  bgEnd: '#E9EDF7',
+  nodeFresh: '#0E7490',
+  nodeMid: '#2563EB',
+  nodeStale: '#B45309',
+  nodeInactive: '#64748B',
+  nodeStroke: '#FFFFFF',
+  edgeLink: '#0E7490',
+  edgeTerm: '#94A3B8',
+  edgeSimilar: '#6366F1',
+  halo: '#0E7490',
+  haloRgb: '14, 116, 144',
+  label: '#475569',
+} as const;
+
+const graphDark = {
+  bgStart: '#0E1220',
+  bgEnd: '#161A2E',
+  nodeFresh: '#22D3EE',
+  nodeMid: '#60A5FA',
+  nodeStale: '#F59E0B',
+  nodeInactive: '#5B6B84',
+  nodeStroke: '#0E1220',
+  edgeLink: '#22D3EE',
+  edgeTerm: '#3B4863',
+  edgeSimilar: '#818CF8',
+  halo: '#22D3EE',
+  haloRgb: '34, 211, 238',
+  label: '#9FB0C9',
+} as const;
+
 const light = {
   accent: '#B85B35',
   accentHover: '#A04A27',
@@ -33,37 +67,42 @@ const light = {
   fillStrong: 'rgba(35, 31, 27, 0.10)',
 } as const;
 
+// Dark palette — Claude warm-paper base, rebuilt for contrast (Dark/i18n/Layout
+// spec §A): background steps pulled apart (sunken→background→surface→elevated),
+// four text tiers ≥ WCAG AA on their host surfaces, semantic colors tuned for
+// dark tint chips. Verified pairs live in the spec's contrast matrix.
 const dark = {
-  accent: '#E27B55',
-  accentHover: '#EC8A65',
-  accentActive: '#D16C46',
-  accentSecondary: '#E5A07C',
-  accentText: '#EC8A65',
-  accentRgb: '226, 123, 85',
-  text: '#ECE6DE',
-  textSecondary: '#B5ADA3',
-  textTertiary: '#988F84',
-  background: '#161513',
-  sunken: '#100F0E',
-  surface: '#1C1B19',
-  elevated: '#252320',
-  border: '#756B60',
-  borderSecondary: '#6B6259',
-  success: '#86B875',
-  successRgb: '134, 184, 117',
-  warning: '#E0B05C',
-  warningRgb: '224, 176, 92',
-  error: '#E07B6B',
-  errorRgb: '224, 123, 107',
-  onAccent: '#16100B',
-  userMessage: '#2C2925',
-  fill: 'rgba(236, 230, 222, 0.08)',
-  fillSecondary: 'rgba(236, 230, 222, 0.12)',
-  fillStrong: 'rgba(236, 230, 222, 0.18)',
+  accent: '#E9855F',
+  accentHover: '#F0936E',
+  accentActive: '#D97450',
+  accentSecondary: '#E8A583',
+  accentText: '#F09B7A',
+  accentRgb: '233, 133, 95',
+  text: '#F1ECE4',
+  textSecondary: '#C6BDB1',
+  textTertiary: '#A39A8E',
+  background: '#141210',
+  sunken: '#0D0B09',
+  surface: '#1E1B18',
+  elevated: '#2B2723',
+  border: '#403B35',
+  borderSecondary: '#322E29',
+  success: '#95C285',
+  successRgb: '149, 194, 133',
+  warning: '#E7BC70',
+  warningRgb: '231, 188, 112',
+  error: '#EB8D7D',
+  errorRgb: '235, 141, 125',
+  onAccent: '#1A120C',
+  userMessage: '#332E29',
+  fill: 'rgba(241, 236, 228, 0.10)',
+  fillSecondary: 'rgba(241, 236, 228, 0.15)',
+  fillStrong: 'rgba(241, 236, 228, 0.22)',
 } as const;
 
 export const designTokens = {
   color: { light, dark },
+  graph: { light: graphLight, dark: graphDark },
   typography: {
     body: fontFamily,
     display: displayFamily,
@@ -105,6 +144,7 @@ export const designTokens = {
 
 export function getCssVariables(theme: DesignTheme): Record<`--${string}`, string> {
   const color = designTokens.color[theme];
+  const graph = designTokens.graph[theme];
   const shadow = theme === 'dark'
     ? { xs: designTokens.shadow.darkXs, sm: designTokens.shadow.darkSm, md: designTokens.shadow.darkMd }
     : designTokens.shadow;
@@ -116,10 +156,10 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--accent-secondary': color.accentSecondary,
     '--accent-text': color.accentText,
     '--accent-rgb': color.accentRgb,
-    '--accent-soft': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.14' : '0.07'})`,
-    '--accent-soft-strong': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.22' : '0.12'})`,
-    '--accent-bg': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.14' : '0.07'})`,
-    '--accent-border': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.22' : '0.12'})`,
+    '--accent-soft': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.17' : '0.07'})`,
+    '--accent-soft-strong': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.26' : '0.12'})`,
+    '--accent-bg': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.17' : '0.07'})`,
+    '--accent-border': `rgba(${color.accentRgb}, ${theme === 'dark' ? '0.26' : '0.12'})`,
     '--color-overlay': theme === 'dark' ? 'rgba(0, 0, 0, 0.60)' : 'rgba(0, 0, 0, 0.45)',
     '--gradient-accent': color.accent,
     '--foreground': color.text,
@@ -131,11 +171,15 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--border-secondary': color.borderSecondary,
     '--color-primary': color.accent,
     '--color-primary-rgb': color.accentRgb,
+    '--color-accent': color.accent,
+    '--color-accent-rgb': color.accentRgb,
     '--color-text': color.text,
+    '--color-text-primary': color.text,
     '--color-text-secondary': color.textSecondary,
     '--color-text-tertiary': color.textTertiary,
     '--color-text-placeholder': color.textTertiary,
     '--color-bg-body': color.background,
+    '--color-bg-rgb': theme === 'dark' ? '20, 18, 16' : '247, 246, 240',
     '--color-bg-sunken': color.sunken,
     '--color-bg-container': color.surface,
     '--color-bg-container-secondary': color.sunken,
@@ -152,6 +196,7 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--color-fill': color.fill,
     '--color-fill-secondary': color.fillSecondary,
     '--color-fill-strong': color.fillStrong,
+    '--color-bg-hover': color.fill,
     '--color-text-on-accent': color.onAccent,
     '--font-family': designTokens.typography.body,
     '--font-family-display': designTokens.typography.display,
@@ -221,6 +266,21 @@ export function getCssVariables(theme: DesignTheme): Record<`--${string}`, strin
     '--header-blur': 'none',
     '--shadow-subtle-glow': 'none',
     '--gemini-gradient': 'none',
+    // Local Graph palette (deep-space blue/violet + neon cyan)
+    '--graph-bg': graph.bgEnd,
+    '--graph-bg-start': graph.bgStart,
+    '--graph-bg-end': graph.bgEnd,
+    '--graph-node-fresh': graph.nodeFresh,
+    '--graph-node-mid': graph.nodeMid,
+    '--graph-node-stale': graph.nodeStale,
+    '--graph-node-inactive': graph.nodeInactive,
+    '--graph-node-stroke': graph.nodeStroke,
+    '--graph-edge-link': graph.edgeLink,
+    '--graph-edge-term': graph.edgeTerm,
+    '--graph-edge-similar': graph.edgeSimilar,
+    '--graph-halo': graph.halo,
+    '--graph-halo-rgb': graph.haloRgb,
+    '--graph-label': graph.label,
     // hljs syntax highlighting token colors (managed centrally for both themes)
     '--hljs-keyword': theme === 'dark' ? '#E0A07C' : '#d73a49',
     '--hljs-string': theme === 'dark' ? '#9ECE8E' : '#032f62',

@@ -130,7 +130,8 @@ describe('WorkspaceCapabilityBoundary', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Access denied' })).toBeTruthy();
+      // ForbiddenPage renders i18n keys in the test environment.
+      expect(screen.getByRole('heading', { name: 'forbidden_title' })).toBeTruthy();
     });
     expect(setActiveSpace).not.toHaveBeenCalled();
     expect(useSpaceStore.getState().activeSpaceId).toBe('space-a');

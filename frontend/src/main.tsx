@@ -10,6 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { CapabilityProvider } from './auth/CapabilityProvider';
+import { ThemeBridge } from './design/ThemeBridge';
 import './hooks/useTheme';
 import './i18n';
 import './styles/tokens.css';
@@ -21,11 +22,13 @@ import './styles/design-system.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <CapabilityProvider>
-          <App />
-        </CapabilityProvider>
-      </AuthProvider>
+      <ThemeBridge>
+        <AuthProvider>
+          <CapabilityProvider>
+            <App />
+          </CapabilityProvider>
+        </AuthProvider>
+      </ThemeBridge>
     </BrowserRouter>
   </React.StrictMode>
 );

@@ -24,6 +24,7 @@ from apps.core.circuit_breaker import dashscope_breaker  # V4.2 SYS-V4.2-014
 from apps.knowledge.batch import is_zero_vector, sanitize_metadata  # V4.2 BATCH-009/012
 
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, SIMILARITY_THRESHOLD, TOP_K
+from .cjk import cjk_token_text
 from .embedding import EmbeddingService
 from .errors import ProviderGenerationError
 from .guardrails import GuardrailsService, get_llm_service
@@ -32,6 +33,21 @@ from .prompt_builder import PromptBuilder
 from .retriever import PgVectorRetriever
 
 logger = logging.getLogger(__name__)
+
+
+def _document_term_codes(document) -> list[str]:
+    """Spec §2: sorted controlled-term codes for chunk metadata (best-effort)."""
+    try:
+        from apps.knowledge.models import DocumentTag
+
+        return sorted(
+            DocumentTag.objects.filter(
+                document=document, term__status="active"
+            ).values_list("term__code", flat=True)
+        )
+    except Exception:
+        logger.warning("document_term_codes_lookup_failed", exc_info=True)
+        return []
 
 
 @dataclass(frozen=True)
@@ -44,6 +60,30 @@ class _SharedChatServices:
 
 _shared_chat_services = None
 _shared_chat_services_lock = threading.Lock()
+
+
+def _sync_pgvector_column(pairs: list[tuple[str, list[float]]]) -> None:
+    """Batch-sync JSON embeddings into the pgvector ``embedding_vector`` column.
+
+    V4.3 UAT FIX kept the retriever's HNSW index in sync but issued one raw
+    UPDATE per chunk (N round-trips). P1 §B4: a single ``executemany`` batch
+    (psycopg3 pipelines it) replaces the loop. No-op on SQLite, where the
+    vector column does not exist.
+    """
+    if not pairs:
+        return
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
+            [
+                ("[" + ",".join(str(v) for v in embedding) + "]", chunk_id)
+                for chunk_id, embedding in pairs
+            ],
+        )
 
 
 def get_shared_chat_services() -> _SharedChatServices:
@@ -78,6 +118,9 @@ class RAGPipeline:
         self.answer_mode = "fast"
         self.thinking_enabled = False
         self.thinking_budget = None
+        # None = legacy keyword auto-routing; list = explicit user selection
+        # (already capped per answer mode by the chat layer).
+        self.selected_library_ids = None
         if ingestion:
             from .chunker import LangChainChunker
 
@@ -121,8 +164,18 @@ class RAGPipeline:
             document.processing_error = "Extracted text exceeds size limit — truncated."
             document.save(update_fields=["processing_error"])
 
-        # Chunk
-        chunks = self.chunker.split(raw_text, page_metadata)
+        # Chunk — P2 §A7 + RAG optimization spec Phase 1: markdown files AND
+        # Docling-parsed PDF/DOCX (Docling emits Markdown) use structure-aware
+        # splits with atomic tables; only non-markdown fallbacks stay plain.
+        from .chunker import chunk_document_text
+
+        chunks = chunk_document_text(
+            self.chunker,
+            raw_text,
+            document.file_type,
+            parsed_as_markdown=getattr(self.parser, "parsed_as_markdown", False),
+            page_metadata=page_metadata,
+        )
 
         # V4.2 KB-V4.2-BATCH-006: Chunk count limit per document
         max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
@@ -165,10 +218,16 @@ class RAGPipeline:
 
         # Store chunks with sanitized metadata
         document_chunks = []
+        vector_sync_pairs: list[tuple[str, list[float]]] = []
+        # Spec §2: redundantly write controlled term codes onto every chunk so
+        # retrieval can filter/boost without extra joins.
+        document_term_codes = _document_term_codes(document)
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             # V4.2 KB-V4.2-BATCH-009: Sanitize metadata before storing
             raw_metadata = chunk.get("metadata", {})
             clean_metadata = sanitize_metadata(raw_metadata)
+            if document_term_codes:
+                clean_metadata["terms"] = document_term_codes
 
             # V4.2 KB-V4.2-BATCH-012: Mark individual failed embeddings
             if is_zero_vector(embedding):
@@ -183,28 +242,23 @@ class RAGPipeline:
                 # retriever can filter by space_id directly (isolation).
                 space_id=document.space_id,
                 content=chunk["text"],
+                # P1 §A6: CJK-bigram token text for Chinese-capable FTS.
+                content_tokens=cjk_token_text(f"{document.title}\n{chunk['text']}"),
                 chunk_index=i,
                 page_number=clean_metadata.get("page"),
                 metadata=clean_metadata,
                 embedding=embedding,
             )
-            # V4.3 UAT FIX: Sync JSON embedding to pgvector embedding_vector column.
-            # The ingest creates chunks with the JSON embedding field, but the retriever's
-            # _search_pgvector() queries the embedding_vector (VectorField) column which
-            # has an HNSW index. Without this sync, newly ingested chunks are invisible
-            # to the retriever — it returns 0 results even when chunks exist.
-            # Migration 0004 handles existing data, but new ingests need this immediate sync.
             if embedding and not is_zero_vector(embedding):
-                from django.db import connection
-                with connection.cursor() as cursor:
-                    vector_str = '[' + ','.join(str(v) for v in embedding) + ']'
-                    cursor.execute(
-                        "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
-                        [vector_str, str(doc_chunk.id)]
-                    )
+                vector_sync_pairs.append((str(doc_chunk.id), embedding))
             document_chunks.append(doc_chunk)
 
+        # V4.3 UAT FIX + P1 §B4: sync JSON embeddings to the pgvector column in
+        # ONE batched round-trip (was one raw UPDATE per chunk).
+        _sync_pgvector_column(vector_sync_pairs)
+
         logger.info(f"Ingested {len(document_chunks)} chunks from {document.title}")
+        self._refresh_similarity(document)
         return document_chunks
 
     # ── Part 1 (KB version化): text_content-based ingest ──────────────
@@ -234,7 +288,6 @@ class RAGPipeline:
             raise RuntimeError("ingestion_pipeline_required")
 
         raw_text = document.text_content or ""
-        page_metadata: dict = {}  # Inline text has no page boundaries.
 
         # V4.2 KB-V4.2-BATCH-006: Extracted text size limit
         max_text_size = getattr(settings, "MAX_EXTRACTED_TEXT_SIZE", 10_000_000)
@@ -248,8 +301,9 @@ class RAGPipeline:
             document.processing_error = "text_content exceeds size limit — truncated."
             document.save(update_fields=["processing_error"])
 
-        # Chunk (no parser — text_content is already canonical markdown)
-        chunks = self.chunker.split(raw_text, page_metadata)
+        # Chunk — P2 §A7: text_content is canonical markdown, use
+        # structure-aware heading splits (falls back when no headings).
+        chunks = self.chunker.split_markdown(raw_text)
 
         max_chunks = getattr(settings, "MAX_CHUNKS_PER_DOCUMENT", 500)
         if len(chunks) > max_chunks:
@@ -284,9 +338,14 @@ class RAGPipeline:
 
         # Store chunks with sanitized metadata + pgvector sync
         document_chunks = []
+        vector_sync_pairs: list[tuple[str, list[float]]] = []
+        # Spec §2: redundantly write controlled term codes onto every chunk.
+        document_term_codes = _document_term_codes(document)
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             raw_metadata = chunk.get("metadata", {})
             clean_metadata = sanitize_metadata(raw_metadata)
+            if document_term_codes:
+                clean_metadata["terms"] = document_term_codes
             if is_zero_vector(embedding):
                 clean_metadata["embedding_failed"] = True
                 logger.warning(
@@ -296,25 +355,47 @@ class RAGPipeline:
                 document=document,
                 space_id=document.space_id,
                 content=chunk["text"],
+                # P1 §A6: CJK-bigram token text for Chinese-capable FTS.
+                content_tokens=cjk_token_text(f"{document.title}\n{chunk['text']}"),
                 chunk_index=i,
                 page_number=clean_metadata.get("page"),
                 metadata=clean_metadata,
                 embedding=embedding,
             )
             if embedding and not is_zero_vector(embedding):
-                from django.db import connection
-                with connection.cursor() as cursor:
-                    vector_str = '[' + ','.join(str(v) for v in embedding) + ']'
-                    cursor.execute(
-                        "UPDATE knowledge_documentchunk SET embedding_vector = %s::vector WHERE id = %s",
-                        [vector_str, str(doc_chunk.id)]
-                    )
+                vector_sync_pairs.append((str(doc_chunk.id), embedding))
             document_chunks.append(doc_chunk)
+
+        # P1 §B4: one batched pgvector sync instead of per-chunk UPDATEs.
+        _sync_pgvector_column(vector_sync_pairs)
 
         logger.info(
             f"Ingested {len(document_chunks)} chunks from text_content of {document.title}"
         )
+        self._refresh_similarity(document)
         return document_chunks
+
+    @staticmethod
+    def _refresh_similarity(document) -> None:
+        """P1 §B2: refresh pooled embedding + precomputed graph similarity edges.
+
+        Best-effort — the helper swallows its own errors, and this wrapper
+        guards against import-time failures so ingest never breaks.
+        P3 §B1: also resolves other documents' gray links pointing at this
+        document's title now that it exists in the index.
+        """
+        try:
+            from apps.knowledge.similarity import refresh_document_similarity
+
+            refresh_document_similarity(document)
+        except Exception:
+            logger.warning("similarity_refresh_failed", exc_info=True)
+        try:
+            from apps.knowledge.links import resolve_unresolved_links_to
+
+            resolve_unresolved_links_to(document)
+        except Exception:
+            logger.warning("unresolved_link_resolution_failed", exc_info=True)
 
     def retrieve_and_generate(
         self,
@@ -328,6 +409,9 @@ class RAGPipeline:
         """Full RAG: retrieve context, build prompt, call LLM, stream response.
 
         Args:
+            conversation_history: either a legacy list of (role, content)
+                tuples or an ``apps.chat.memory.MemoryContext`` carrying the
+                token-budgeted recent window + rolling session summary.
             space_id: V6.0 — restrict retrieval (and therefore citations) to the
                 active knowledge space. The pipeline no longer supports
                 unscoped callers.
@@ -335,6 +419,17 @@ class RAGPipeline:
         Yields:
             Dicts with 'event' and 'data' keys for SSE streaming.
         """
+        # Session memory: accept MemoryContext (duck-typed to avoid a hard
+        # cross-app import) or a plain history list from legacy callers.
+        if hasattr(conversation_history, "recent_history"):
+            recent_history = list(conversation_history.recent_history)
+            session_summary = conversation_history.summary
+            key_facts = tuple(conversation_history.key_facts)
+        else:
+            recent_history = list(conversation_history or [])
+            session_summary = ""
+            key_facts = ()
+
         # Step 1: Guardrails - check for injection
         try:
             if not self.guardrails.check_input(query):
@@ -353,13 +448,80 @@ class RAGPipeline:
         # return graceful degraded response instead of uncaught exception that
         # causes SSE "error" event → frontend shows "当前无法获取响应".
         retrieval_started = time.monotonic()
+        # Session memory: condense context-dependent follow-ups ("那第二条呢？")
+        # into standalone questions for retrieval ONLY — the user's original
+        # wording still goes to the answer LLM.
+        retrieval_query = query
         try:
-            chunks = self.retriever.search(
-                query=query,
-                top_k=TOP_K,
-                similarity_threshold=SIMILARITY_THRESHOLD,
-                space_id=space_id,  # V6.0 space isolation
+            from .query_condense import condense_query
+
+            retrieval_query = condense_query(
+                query,
+                summary=session_summary,
+                recent_history=recent_history,
+                language=language,
             )
+        except Exception:
+            logger.warning("query_condense_unavailable", exc_info=True)
+            retrieval_query = query
+        # KB optimization spec §3.3 + P2 §A1 + session-library-selection spec
+        # §5: external retrieval is explicit-only. Empty/legacy selections
+        # search the active space alone; keyword auto-routing is deprecated.
+        reference_space_ids: list[str] = []
+        library_name_by_space: dict[str, str] = {}
+        selected_library_ids = getattr(self, "selected_library_ids", None)
+        try:
+            from apps.spaces.models import KnowledgeSpace
+
+            from .library_routing import (
+                resolve_selected_libraries,
+            )
+
+            active_space = KnowledgeSpace.objects.filter(pk=space_id).first()
+            if active_space is not None:
+                if selected_library_ids:
+                    max_count = (
+                        int(getattr(settings, "CHAT_LIBRARY_MAX_DEEP", 3))
+                        if getattr(self, "answer_mode", "fast") == "deep"
+                        else int(getattr(settings, "CHAT_LIBRARY_MAX_FAST", 1))
+                    )
+                    reference_space_ids, library_name_by_space = (
+                        resolve_selected_libraries(
+                            active_space, selected_library_ids, max_count
+                        )
+                    )
+        except Exception:
+            logger.warning("reference_library_resolve_failed", exc_info=True)
+            reference_space_ids = []
+            library_name_by_space = {}
+        space_ids = [space_id, *reference_space_ids]
+        retrieval_refined = False
+        try:
+            search_kwargs = {
+                "top_k": TOP_K,
+                "similarity_threshold": SIMILARITY_THRESHOLD,
+                "space_id": space_id,  # V6.0 space isolation
+                "space_ids": space_ids,  # KB spec §3.3 cross-library retrieval
+            }
+            # Phase 5: deep mode gets ONE bounded refinement round when the
+            # first pass is weak; fast mode stays strictly single-pass.
+            max_rounds = (
+                int(getattr(settings, "RAG_RETRIEVAL_MAX_ROUNDS_DEEP", 2))
+                if getattr(self, "answer_mode", "fast") == "deep"
+                else int(getattr(settings, "RAG_RETRIEVAL_MAX_ROUNDS_FAST", 1))
+            )
+            if max_rounds > 1:
+                from .iterative import retrieve_with_refinement
+
+                chunks, _rounds, retrieval_refined = retrieve_with_refinement(
+                    self.retriever,
+                    retrieval_query,
+                    llm=getattr(self, "llm", None),
+                    max_rounds=max_rounds,
+                    search_kwargs=search_kwargs,
+                )
+            else:
+                chunks = self.retriever.search(query=retrieval_query, **search_kwargs)
         except Exception:
             logger.error("chat_retrieval_failed code=retrieval_error")
             dashscope_breaker.record_failure()  # Count as failure for circuit breaker
@@ -406,9 +568,19 @@ class RAGPipeline:
             content = chunk["content"]
             if not self.guardrails.check_input(content):
                 content = self._sanitize_content(content)
-            sanitized_chunks.append({**chunk, "content": content})
+            # KB optimization spec §3.3: attach reference-library provenance.
+            source_library = library_name_by_space.get(str(chunk.get("space_id")))
+            sanitized_chunks.append({**chunk, "content": content, "source_library": source_library})
         chunks = sanitized_chunks
+        # P2 §A8: optional LLM rerank of the final top-k (default off).
+        if getattr(settings, "RAG_LLM_RERANK_ENABLED", False) and chunks:
+            from .llm_rerank import llm_rerank
+
+            chunks = llm_rerank(retrieval_query, chunks, self.llm)
         retrieval_latency_ms = int((time.monotonic() - retrieval_started) * 1000)
+        # Phase 5: tell the frontend a refinement round actually ran.
+        if retrieval_refined:
+            yield {"event": "phase", "data": {"phase": "retrying_retrieval"}}
         quality = classify_confidence(chunks)
         yield {
             "event": "quality",
@@ -421,35 +593,72 @@ class RAGPipeline:
             },
         }
 
-        # Step 2b: Refuse when evidence is absent or too weak. Low-confidence
-        # retrieval must never be promoted into an uncited deterministic claim.
-        if not chunks or quality.label in {"low", "insufficient"}:
-            fallback = (
-                "我没有足够的信息来回答此问题，请联系您的人力资源伙伴或HR团队。"
-                if language == "zh"
-                else "I don't have enough information to answer this question. Please contact your HR buddy or HR team."
+        # Step 2b: Zero retrieval hits no longer hard-refuse. General
+        # definition / concept / small-talk questions ("CCT是啥") are answered
+        # by the LLM under a no-context prompt that opens with a "general
+        # knowledge, not from the KB" disclaimer and bans fabricated
+        # citations; engagement-specific questions still get the refusal copy
+        # from the prompt itself. P1 fix (E2E refusal audit): a "low" score
+        # also never hard-refuses — retrieved chunks still go to the LLM.
+        if not chunks:
+            yield {"event": "citations", "data": []}
+            yield from self._general_knowledge_fallback(
+                query,
+                language=language,
+                recent_history=recent_history,
+                session_summary=session_summary,
+                key_facts=key_facts,
             )
-            yield {"event": "token", "data": {"token": fallback}}
-            yield {
-                "event": "citations",
-                "data": self._build_citations(chunks) if chunks else [],
-            }
-            yield {"event": "done", "data": {}}
             return
+        if quality.label == "low":
+            logger.info(
+                "rag_low_confidence_proceed score=%s chunks=%d",
+                quality.score,
+                len(chunks),
+            )
 
         # Step 3: Build citations data
         citations = self._build_citations(chunks)
         yield {"event": "citations", "data": citations}
+        # RAG optimization spec Phase 3: surface version/date on each chunk so
+        # the prompt renders a recency watermark — Rule 6 conflict resolution
+        # needs machine-readable recency, not model guesses.
+        chunks = [
+            {
+                **chunk,
+                "doc_version": citation.get("version"),
+                "doc_updated_at": citation.get("updated_at"),
+                "doc_stale": citation.get("stale", False),
+            }
+            for chunk, citation in zip(chunks, citations)
+        ]
 
         # Step 4: Build system prompt
         # V4.3 UAT: Wrap prompt building in try/except — if prompt builder fails,
         # return graceful degraded response instead of uncaught exception.
+        # Session memory: with multi-turn enabled the recent window rides as a
+        # real messages array; the system prompt carries only the rolling
+        # summary + key facts. Legacy mode keeps the flattened-history slot.
+        multi_turn = getattr(settings, "CHAT_MULTI_TURN_MESSAGES", False)
+        history_messages = None
+        if multi_turn and recent_history:
+            history_messages = [
+                {
+                    "role": role if role in ("user", "assistant") else "user",
+                    "content": content,
+                }
+                for role, content in recent_history
+                if content
+            ]
+        prompt_history = [] if multi_turn else recent_history[-8:]
         try:
             system_prompt = self.prompt_builder.build(
                 context_chunks=chunks,
-                conversation_history=conversation_history[-8:],  # Last 8 turns
+                conversation_history=prompt_history,
                 user_profile=user_profile,
                 language=language,
+                session_summary=session_summary,
+                key_facts=key_facts,
             )
         except Exception:
             logger.error("chat_prompt_build_failed code=prompt_build_error")
@@ -472,17 +681,40 @@ class RAGPipeline:
         # Step 5: Stream LLM response — V4.2 SYS-V4.2-014: circuit breaker wraps the call
         # On success: record_success() closes the circuit.
         # On failure: record_failure() counts toward opening the circuit.
+        # Phase 6: deep mode buffers the draft, runs one bounded critique
+        # round against the retrieved context, then streams the revision.
+        critique_enabled = (
+            getattr(self, "answer_mode", "fast") == "deep"
+            and getattr(settings, "RAG_SELF_CRITIQUE_ENABLED", True)
+            and callable(getattr(self.llm, "complete", None))
+        )
+        draft_parts: list[str] = []
         llm_success = False
         try:
             stream_parts = getattr(self.llm, "stream_chat_parts", None)
             if callable(stream_parts):
-                for part in stream_parts(
-                    system_prompt,
-                    query,
-                    model_id=self.model_name,
-                    thinking_enabled=getattr(self, "thinking_enabled", False),
-                    thinking_budget=getattr(self, "thinking_budget", None),
-                ):
+                stream_kwargs = {
+                    "model_id": self.model_name,
+                    "thinking_enabled": getattr(self, "thinking_enabled", False),
+                    "thinking_budget": getattr(self, "thinking_budget", None),
+                }
+                if history_messages:
+                    # Legacy test doubles may not accept the new kwarg — fall
+                    # back to the flat call rather than failing the turn.
+                    try:
+                        part_iterator = stream_parts(
+                            system_prompt,
+                            query,
+                            history_messages=history_messages,
+                            **stream_kwargs,
+                        )
+                    except TypeError:
+                        part_iterator = stream_parts(
+                            system_prompt, query, **stream_kwargs
+                        )
+                else:
+                    part_iterator = stream_parts(system_prompt, query, **stream_kwargs)
+                for part in part_iterator:
                     if part.kind == "reasoning_duration":
                         yield {
                             "event": "metrics",
@@ -490,14 +722,43 @@ class RAGPipeline:
                         }
                     elif part.kind == "answer_delta":
                         llm_success = True
-                        yield {"event": "token", "data": {"token": part.text}}
+                        if critique_enabled:
+                            draft_parts.append(part.text)
+                        else:
+                            yield {"event": "token", "data": {"token": part.text}}
             else:
                 for token in self.llm.stream_chat(system_prompt, query):
                     llm_success = True
-                    yield {"event": "token", "data": {"token": token}}
+                    if critique_enabled:
+                        draft_parts.append(token)
+                    else:
+                        yield {"event": "token", "data": {"token": token}}
             # Full success — record it to close/reset the circuit breaker
             if not llm_success:
                 raise ProviderGenerationError("provider_empty_answer")
+            if critique_enabled:
+                yield {"event": "phase", "data": {"phase": "reviewing"}}
+                draft = "".join(draft_parts)
+                final_answer = draft
+                try:
+                    from .self_critique import critique_and_revise
+
+                    final_answer = critique_and_revise(
+                        self.llm,
+                        question=query,
+                        context=self.prompt_builder._format_context(chunks),
+                        draft=draft,
+                    )
+                except Exception:
+                    logger.warning("self_critique_unavailable", exc_info=True)
+                    final_answer = draft
+                # Stream the final answer in small slices so the frontend
+                # keeps its incremental rendering behaviour.
+                for start in range(0, len(final_answer), 120):
+                    yield {
+                        "event": "token",
+                        "data": {"token": final_answer[start : start + 120]},
+                    }
             dashscope_breaker.record_success()
         except Exception as exc:
             # V4.2 SYS-V4.2-014: Record failure to count toward circuit opening
@@ -513,16 +774,139 @@ class RAGPipeline:
 
         yield {"event": "done", "data": {}}
 
+    def _general_knowledge_fallback(
+        self,
+        query,
+        *,
+        language,
+        recent_history,
+        session_summary,
+        key_facts,
+    ):
+        """Stream a no-context general-knowledge answer (zero retrieval hits).
+
+        Single-pass streaming under the GENERAL_PROMPT: no citations, no deep
+        critique. Any failure degrades to the legacy refusal copy so a chat
+        turn can never break on the fallback path.
+        """
+        refusal = (
+            "我没有足够的信息来回答此问题，请补充相关知识文档或联系知识库管理员。"
+            if language == "zh"
+            else "I don't have enough information to answer this question. Please add the relevant knowledge documents or contact your knowledge base administrator."
+        )
+        multi_turn = getattr(settings, "CHAT_MULTI_TURN_MESSAGES", False)
+        history_messages = None
+        if multi_turn and recent_history:
+            history_messages = [
+                {
+                    "role": role if role in ("user", "assistant") else "user",
+                    "content": content,
+                }
+                for role, content in recent_history
+                if content
+            ]
+        try:
+            system_prompt = self.prompt_builder.build_general(
+                conversation_history=[] if multi_turn else recent_history[-8:],
+                language=language,
+                session_summary=session_summary,
+                key_facts=key_facts,
+            )
+        except Exception:
+            logger.error("general_fallback_prompt_failed", exc_info=True)
+            yield {"event": "token", "data": {"token": refusal}}
+            yield {"event": "done", "data": {}}
+            return
+        logger.info("rag_general_fallback query_len=%d", len(query))
+        llm_success = False
+        try:
+            stream_parts = getattr(self.llm, "stream_chat_parts", None)
+            if callable(stream_parts):
+                stream_kwargs = {
+                    "model_id": self.model_name,
+                    "thinking_enabled": getattr(self, "thinking_enabled", False),
+                    "thinking_budget": getattr(self, "thinking_budget", None),
+                }
+                if history_messages:
+                    try:
+                        part_iterator = stream_parts(
+                            system_prompt,
+                            query,
+                            history_messages=history_messages,
+                            **stream_kwargs,
+                        )
+                    except TypeError:
+                        part_iterator = stream_parts(
+                            system_prompt, query, **stream_kwargs
+                        )
+                else:
+                    part_iterator = stream_parts(system_prompt, query, **stream_kwargs)
+                for part in part_iterator:
+                    if part.kind == "reasoning_duration":
+                        yield {
+                            "event": "metrics",
+                            "data": {"reasoning_ms": part.duration_ms or 0},
+                        }
+                    elif part.kind == "answer_delta":
+                        llm_success = True
+                        yield {"event": "token", "data": {"token": part.text}}
+            else:
+                for token in self.llm.stream_chat(system_prompt, query):
+                    llm_success = True
+                    yield {"event": "token", "data": {"token": token}}
+            if not llm_success:
+                raise ProviderGenerationError("provider_empty_answer")
+            dashscope_breaker.record_success()
+        except Exception:
+            dashscope_breaker.record_failure()
+            logger.error("general_fallback_stream_failed code=provider_unavailable")
+            yield {"event": "token", "data": {"token": refusal}}
+        yield {"event": "done", "data": {}}
+
     def _build_citations(self, chunks):
-        """Build citation data from retrieved chunks."""
+        """Build citation data from retrieved chunks.
+
+        Spec §3/§4 L5: citations carry version + updated_by + updated_at so the
+        frontend renders the "v{N} · {更新人} · {日期}" watermark, and a stale
+        flag drives the "内容可能过期" badge.
+        """
+        doc_meta: dict[str, dict] = {}
+        try:
+            from apps.knowledge.models import Document
+
+            from .hybrid import _valid_uuid_subset
+
+            # Guard: synthetic/legacy chunk ids must not break the UUID query.
+            doc_ids = _valid_uuid_subset(
+                str(chunk["document_id"]) for chunk in chunks
+            )
+            for doc in Document.objects.filter(id__in=doc_ids).select_related(
+                "updated_by", "uploaded_by"
+            ):
+                editor = doc.updated_by or doc.uploaded_by
+                doc_meta[str(doc.id)] = {
+                    "version": doc.version,
+                    "updated_by": (editor.username or editor.email) if editor else None,
+                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                    "stale": doc.status == "stale",
+                }
+        except Exception:
+            logger.warning("citation_version_lookup_failed", exc_info=True)
         return [
             {
                 "document_id": chunk["document_id"],
                 "document_title": chunk["document_title"],
                 "page_number": chunk.get("page_number"),
+                # P2 §A7: heading path for structure-aware chunks ("H1 > H2").
+                "section": (chunk.get("metadata") or {}).get("section"),
                 "score": round(chunk["score"], 3),
                 "quoted_text": chunk["content"][:200],
                 "chunk_id": chunk["id"],
+                "source_library": chunk.get("source_library"),
+                **doc_meta.get(
+                    str(chunk["document_id"]),
+                    {"version": None, "updated_by": None, "updated_at": None, "stale": False},
+                ),
             }
             for chunk in chunks
         ]
@@ -545,6 +929,12 @@ class RAGPipeline:
 class DocumentParser:
     """Parse documents using Docling with Unstructured fallback."""
 
+    def __init__(self):
+        # RAG optimization spec Phase 1: records whether the LAST parse
+        # produced Markdown (Docling) so ingestion can pick the
+        # structure-aware chunking path.
+        self.parsed_as_markdown = False
+
     def parse(self, file_path: str, file_type: str) -> tuple[str, list[dict]]:
         """Parse a document file.
 
@@ -555,21 +945,37 @@ class DocumentParser:
         Returns:
             Tuple of (full_text, list_of_page_metadata).
         """
+        self.parsed_as_markdown = False
         try:
-            return self._parse_with_docling(file_path)
+            result = self._parse_with_docling(file_path)
+            self.parsed_as_markdown = True
+            return result
         except Exception as e:
             logger.warning(f"Docling failed: {e}, falling back to Unstructured")
             try:
                 return self._parse_with_unstructured(file_path)
             except Exception as e2:
                 logger.error(f"Both parsers failed: {e2}")
+                if file_type == "pdf":
+                    # Raw-text reading a PDF yields binary syntax (%PDF, endobj...)
+                    # which would be chunked and embedded as garbage. Use pypdf
+                    # as the last-resort text extractor instead.
+                    return self._parse_with_pypdf(file_path)
                 return self._parse_as_text(file_path)
 
     def _parse_with_docling(self, file_path: str) -> tuple[str, list[dict]]:
         """Parse using Docling (best for PDF/DOCX)."""
-        from docling.document_converter import DocumentConverter
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
 
-        converter = DocumentConverter()
+        # OCR disabled: no OCR engine is installed in the worker image and
+        # rapidocr tries to download models into read-only site-packages
+        # (worker runs as nobody). Digital-text PDFs parse fine without OCR.
+        pdf_options = PdfPipelineOptions(do_ocr=False)
+        converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)}
+        )
         result = converter.convert(file_path)
 
         # Get markdown text
@@ -601,6 +1007,26 @@ class DocumentParser:
             metadata = [{"page": None}]
 
         return text, metadata
+
+    def _parse_with_pypdf(self, file_path: str) -> tuple[str, list[dict]]:
+        """Last-resort PDF text extraction via pypdf.
+
+        Raises if no text layer is found (e.g. scanned PDF) so the document
+        is marked failed instead of ingesting raw PDF syntax as chunks.
+        """
+        from pypdf import PdfReader
+
+        reader = PdfReader(file_path)
+        page_texts = []
+        metadata = []
+        for i, page in enumerate(reader.pages):
+            page_texts.append(page.extract_text() or "")
+            metadata.append({"page": i + 1})
+        text = "\n\n".join(page_texts).strip()
+        if not text:
+            raise ValueError("pypdf extracted no text (scanned PDF without OCR?)")
+        logger.info(f"Parsed PDF with pypdf fallback: {len(reader.pages)} pages")
+        return text, metadata or [{"page": None}]
 
     def _parse_as_text(self, file_path: str) -> tuple[str, list[dict]]:
         """Read as plain text file."""
