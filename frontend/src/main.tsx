@@ -1,34 +1,10 @@
-/*
- * Copyright (c) 2026 Haibo Fang.
- * Licensed under the CC BY-NC-SA 4.0 License.
- * See LICENSE file in the project root for full license details.
- */
-
-﻿import React from 'react';
+import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
-import { AuthProvider } from './auth/AuthProvider';
-import { CapabilityProvider } from './auth/CapabilityProvider';
-import { ThemeBridge } from './design/ThemeBridge';
-import './hooks/useTheme';
-import './i18n';
-import './styles/tokens.css';
-import './styles/globals.css';
-import './styles/animations.css';
-import './styles/chat.css';
-import './styles/design-system.css';
+import StaticShowcaseApp from './StaticShowcaseApp';
+import './static-showcase.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <ThemeBridge>
-        <AuthProvider>
-          <CapabilityProvider>
-            <App />
-          </CapabilityProvider>
-        </AuthProvider>
-      </ThemeBridge>
-    </BrowserRouter>
-  </React.StrictMode>
+    <StaticShowcaseApp />
+  </React.StrictMode>,
 );

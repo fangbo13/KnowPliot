@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
   // Docker overrides this with VITE_PROXY_TARGET=http://backend:8000.
   const env = loadEnv(mode, process.cwd(), '');
   const proxyTarget = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000';
+  const base = env.VITE_BASE_PATH || (env.GITHUB_ACTIONS === 'true' ? '/KnowPliot/' : '/');
   const apiProxy = {
     '/api': {
       target: proxyTarget,
@@ -22,6 +23,7 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
+    base,
     plugins: [antDesignDirectImports(), react()],
     build: {
       manifest: true,
