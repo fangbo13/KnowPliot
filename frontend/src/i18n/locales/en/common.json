@@ -1,5 +1,9 @@
 {
   "app_name": "KnowPilot",
+  "workspace_label": "Workspace",
+  "account_label": "Account",
+  "console_label": "Control room",
+  "admin_label": "Admin console",
   "nav_chat": "Chat",
   "nav_history": "History",
   "nav_knowledge": "Knowledge Base",

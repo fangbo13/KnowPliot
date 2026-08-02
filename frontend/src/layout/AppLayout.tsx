@@ -5,7 +5,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   MessageOutlined, BookOutlined, UserOutlined, LogoutOutlined,
   SunOutlined, MoonOutlined, GlobalOutlined, SettingOutlined, PlusOutlined,
@@ -51,6 +51,7 @@ function initials(email?: string) {
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const access = useAuthorization();
+  const location = useLocation();
   const navigate = useNavigate();
   const { t } = useTranslation('common');
   const { sessions, activeSessionId, loadSessions, setActiveSession, resetSession } = useChatStore();
@@ -59,6 +60,8 @@ export default function AppLayout() {
   const canAsk = access.has('chat.ask');
   const canUseHistory = access.has('chat.history');
   const canExport = access.has('chat.export');
+  const isChatSurface = location.pathname === '/chat' || location.pathname.startsWith('/shared/');
+  const isWorkspaceSurface = !isChatSurface;
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
   const [shellEnhancementsReady, setShellEnhancementsReady] = useState(false);
@@ -185,6 +188,28 @@ export default function AppLayout() {
 
   const currentLang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const handleLangChange = useCallback((lang: 'zh' | 'en') => { i18n.changeLanguage(lang); localStorage.setItem('ey-language', lang); }, []);
+  const workspaceHeader = useMemo(() => {
+    const path = location.pathname;
+    if (path.startsWith('/knowledge')) {
+      return { eyebrow: t('nav_knowledge', { defaultValue: 'Knowledge' }), title: t('knowledge_spaces_title', { defaultValue: 'Knowledge spaces' }) };
+    }
+    if (path.startsWith('/reference-libraries')) {
+      return { eyebrow: t('nav_reference_libraries', { defaultValue: 'Reference' }), title: t('reference_libraries_title', { defaultValue: 'Reference libraries' }) };
+    }
+    if (path.startsWith('/spaces/discover')) {
+      return { eyebrow: t('workspace_label', { defaultValue: 'Workspace' }), title: t('space_discovery', { defaultValue: 'Discover workspaces' }) };
+    }
+    if (path.startsWith('/ownership-transfers')) {
+      return { eyebrow: t('workspace_label', { defaultValue: 'Workspace' }), title: t('ownership_transfers_title', { defaultValue: 'Ownership transfers' }) };
+    }
+    if (path.startsWith('/profile')) {
+      return { eyebrow: t('account_label', { defaultValue: 'Account' }), title: t('account_info', { defaultValue: 'Account information' }) };
+    }
+    if (path.startsWith('/workspace/')) {
+      return { eyebrow: t('workspace_label', { defaultValue: 'Workspace' }), title: t('space_management', { defaultValue: 'Space management' }) };
+    }
+    return { eyebrow: t('workspace_label', { defaultValue: 'Workspace' }), title: 'KnowPilot' };
+  }, [location.pathname, t]);
   const langMenu = useMemo(() => ({
     items: [
       { key: 'zh', label: '中文', icon: currentLang === 'zh' ? <span style={{ color: 'var(--accent)' }}>●</span> : null, onClick: () => handleLangChange('zh') },
@@ -383,8 +408,59 @@ export default function AppLayout() {
         </button>
   ));
 
+  const renderWorkspaceNavigation = () => (
+    <div className="workspace-sidebar-nav-wrap">
+      <div className="workspace-sidebar-label">{currentLang === 'zh' ? '工作台' : 'WORKSPACE'}</div>
+      <nav className="workspace-sidebar-nav" aria-label={currentLang === 'zh' ? '工作台导航' : 'Workspace navigation'}>
+        {managementEntries.map((entry) => (
+          <NavLink
+            key={entry.id}
+            to={entry.to}
+            className={({ isActive }) => `workspace-sidebar-item${isActive ? ' is-active' : ''}`}
+            onClick={() => setMobileDrawerOpen(false)}
+          >
+            {entry.id === 'reference-libraries' ? <FileTextOutlined /> : <BookOutlined />}
+            <span>{entry.label}</span>
+          </NavLink>
+        ))}
+        {canUseHistory && (
+          <NavLink to="/history" className={({ isActive }) => `workspace-sidebar-item${isActive ? ' is-active' : ''}`} onClick={() => setMobileDrawerOpen(false)}>
+            <HistoryOutlined />
+            <span>{t('nav_history')}</span>
+          </NavLink>
+        )}
+        <NavLink to="/spaces/discover" className={({ isActive }) => `workspace-sidebar-item${isActive ? ' is-active' : ''}`} onClick={() => setMobileDrawerOpen(false)}>
+          <CompassOutlined />
+          <span>{t('space_discovery')}</span>
+        </NavLink>
+        <NavLink to="/ownership-transfers" className={({ isActive }) => `workspace-sidebar-item${isActive ? ' is-active' : ''}`} onClick={() => setMobileDrawerOpen(false)}>
+          <TeamOutlined />
+          <span>{t('ownership_transfers_title')}</span>
+        </NavLink>
+        {activeSpaceId && access.has('workspace.manage') && (
+          <NavLink to={`/workspace/${activeSpaceId}/manage`} className={({ isActive }) => `workspace-sidebar-item${isActive ? ' is-active' : ''}`} onClick={() => setMobileDrawerOpen(false)}>
+            <SettingOutlined />
+            <span>{t('space_management')}</span>
+          </NavLink>
+        )}
+      </nav>
+      <div className="workspace-sidebar-label workspace-sidebar-label--secondary">{currentLang === 'zh' ? '账户' : 'ACCOUNT'}</div>
+      <nav className="workspace-sidebar-nav" aria-label={currentLang === 'zh' ? '账户导航' : 'Account navigation'}>
+        <NavLink to="/profile" className={({ isActive }) => `workspace-sidebar-item${isActive ? ' is-active' : ''}`} onClick={() => setMobileDrawerOpen(false)}>
+          <SettingOutlined />
+          <span>{t('user_settings')}</span>
+        </NavLink>
+      </nav>
+      <Link to="/chat" className="workspace-sidebar-cta" onClick={() => setMobileDrawerOpen(false)}>
+        <MessageOutlined />
+        <span>{t('back_to_app')}</span>
+        <ArrowLeftOutlined className="workspace-sidebar-cta__icon" />
+      </Link>
+    </div>
+  );
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${isWorkspaceSurface ? ' app-shell--workspace' : ''}`}>
       {/* Onboarding */}
       {onboardingVisible && (
         <div
@@ -423,20 +499,39 @@ export default function AppLayout() {
       {/* Desktop sidebar */}
       {!isMobile && (
         <aside className={`sidebar${sidebarCollapsed ? ' is-collapsed' : ''}`}>
-          <div className="sidebar-header">
-            <div className="sidebar-brand">
-              <span className="sidebar-brand-mark">K</span>
-              <span className="sidebar-brand-name">KnowPilot</span>
-            </div>
-            <button className="icon-btn" title={t('collapse_sidebar') || 'Collapse sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('collapse_sidebar') || 'Collapse sidebar'}><MenuFoldOutlined /></button>
-          </div>
-          <div className="sidebar-section">
-            {shellEnhancementsReady ? <Suspense fallback={<div className="sidebar-switcher-placeholder" aria-hidden="true" />}><SpaceSwitcher collapsed={false} /></Suspense> : <div className="sidebar-switcher-placeholder" aria-hidden="true" />}
-          </div>
-          {newChatBtn}
-          {canUseHistory && renderSearch()}
-          {canUseHistory && renderList()}
-          {renderFooter()}
+          {isWorkspaceSurface ? (
+            <>
+              <div className="sidebar-header">
+                <div className="sidebar-brand">
+                  <span className="sidebar-brand-mark">K</span>
+                  <span className="sidebar-brand-name">KnowPilot</span>
+                </div>
+                <button className="icon-btn" title={t('collapse_sidebar') || 'Collapse sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('collapse_sidebar') || 'Collapse sidebar'}><MenuFoldOutlined /></button>
+              </div>
+              <div className="sidebar-section workspace-sidebar-space">
+                {shellEnhancementsReady ? <Suspense fallback={<div className="sidebar-switcher-placeholder" aria-hidden="true" />}><SpaceSwitcher collapsed={false} /></Suspense> : <div className="sidebar-switcher-placeholder" aria-hidden="true" />}
+              </div>
+              {renderWorkspaceNavigation()}
+              {renderFooter()}
+            </>
+          ) : (
+            <>
+              <div className="sidebar-header">
+                <div className="sidebar-brand">
+                  <span className="sidebar-brand-mark">K</span>
+                  <span className="sidebar-brand-name">KnowPilot</span>
+                </div>
+                <button className="icon-btn" title={t('collapse_sidebar') || 'Collapse sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('collapse_sidebar') || 'Collapse sidebar'}><MenuFoldOutlined /></button>
+              </div>
+              <div className="sidebar-section">
+                {shellEnhancementsReady ? <Suspense fallback={<div className="sidebar-switcher-placeholder" aria-hidden="true" />}><SpaceSwitcher collapsed={false} /></Suspense> : <div className="sidebar-switcher-placeholder" aria-hidden="true" />}
+              </div>
+              {newChatBtn}
+              {canUseHistory && renderSearch()}
+              {canUseHistory && renderList()}
+              {renderFooter()}
+            </>
+          )}
         </aside>
       )}
 
@@ -451,10 +546,19 @@ export default function AppLayout() {
           <div className="sidebar-section">
             {shellEnhancementsReady ? <Suspense fallback={<div className="sidebar-switcher-placeholder" aria-hidden="true" />}><SpaceSwitcher collapsed={false} /></Suspense> : <div className="sidebar-switcher-placeholder" aria-hidden="true" />}
           </div>
-          {newChatBtn}
-          {canUseHistory && renderSearch()}
-          {canUseHistory && renderList()}
-          {renderFooter()}
+          {isWorkspaceSurface ? (
+            <>
+              {renderWorkspaceNavigation()}
+              {renderFooter()}
+            </>
+          ) : (
+            <>
+              {newChatBtn}
+              {canUseHistory && renderSearch()}
+              {canUseHistory && renderList()}
+              {renderFooter()}
+            </>
+          )}
           </aside>
         </div>
       )}
@@ -466,8 +570,15 @@ export default function AppLayout() {
             <button className="icon-btn" title={t('expand_sidebar') || 'Expand sidebar'} onClick={toggleSidebarCollapsed} aria-label={t('expand_sidebar') || 'Expand sidebar'}><MenuUnfoldOutlined /></button>
           )}
           {isMobile && <button className="icon-btn" onClick={() => setMobileDrawerOpen(true)} aria-label={t('mobile_menu') || 'Open menu'}><MenuOutlined /></button>}
-          <button className="icon-btn" title={t('go_back') || 'Go back'} onClick={() => navigate(-1)} aria-label={t('go_back') || 'Go back'}><ArrowLeftOutlined /></button>
+          <button className={`icon-btn${isWorkspaceSurface ? ' workspace-header-back' : ''}`} title={t('go_back') || 'Go back'} onClick={() => navigate(-1)} aria-label={t('go_back') || 'Go back'}><ArrowLeftOutlined /></button>
           <button className="icon-btn" title="⌘K" onClick={() => setCmdkOpen(true)} aria-label={t('cmdk_placeholder', { defaultValue: 'Search' })}><SearchOutlined /></button>
+
+          {isWorkspaceSurface && (
+            <div className="workspace-header-context" aria-live="polite">
+              <span>{workspaceHeader.eyebrow}</span>
+              <strong>{workspaceHeader.title}</strong>
+            </div>
+          )}
 
           <span className="spacer" />
 

@@ -1,5 +1,9 @@
 {
   "app_name": "KnowPilot",
+  "workspace_label": "\u5de5\u4f5c\u53f0",
+  "account_label": "\u8d26\u6237",
+  "console_label": "\u63a7\u5236\u53f0",
+  "admin_label": "\u7ba1\u7406\u63a7\u5236\u53f0",
   "nav_chat": "对话",
   "nav_history": "历史",
   "nav_knowledge": "知识库",

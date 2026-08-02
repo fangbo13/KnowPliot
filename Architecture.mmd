@@ -1,0 +1,76 @@
+flowchart TB
+  subgraph UX["1. Experience & Console Layer"]
+    WEB[React Web App]
+    HUB[Console Hub]
+    CONSOLES[Scoped Consoles<br/>Platform · Governance · Workspace]
+    CHAT[Chat Workspace]
+    KBUI[Knowledge Workspace<br/>Markdown · Graph · Review · Dashboard]
+  end
+
+  API["Django 5 + DRF API<br/>SimpleJWT · SSE · Gunicorn · Nginx"]
+
+  subgraph IAM["2. Identity, Capability & Logical Isolation"]
+    AUTH[Auth / JWT / 2FA]
+    CAP[Capability Snapshot & Gates]
+    SCOPE[Organization → Business Line<br/>→ Knowledge Space → Membership]
+    ACCESS[Invites · Access Requests · Ownership]
+    ISO[Space-scoped Documents · Chunks · Media]
+  end
+
+  subgraph PROV["3. Workspace Provisioning & Replication"]
+    TPL[Scenario Templates]
+    TAXP[Taxonomy Profiles<br/>Preset · Custom · None]
+    APPROVAL[Creation Approval]
+    CREATE[Space Creation · Fork · Roll-forward]
+    LIBSEL[Reference Library Selection<br/>Published · Opt-in · Read-only]
+  end
+
+  subgraph GOV["4. Knowledge Lifecycle & Governance"]
+    DOCS[Documents + Markdown]
+    REVIEW[Review Gate<br/>Approved-only Indexing]
+    TAX[Taxonomy + Term Ownership]
+    FRESH[Freshness + Health]
+    LINKS[Wikilinks + Backlinks]
+    VIZ[Graph · Timeline · Dashboard · Diff]
+  end
+
+  subgraph RAG["5. Agentic RAG Runtime"]
+    MEM[Session Memory]
+    QP[Query Condense + Understanding]
+    ROUTE[Library Routing]
+    RET[Hybrid Retrieval<br/>pgvector + CJK FTS]
+    REFINE[Iterative Retrieval + LLM Rerank]
+    SAFE[Guardrails + Prompt Builder]
+    LLM[Qwen / DashScope<br/>Circuit Breaker]
+    SSE[Citations + Quality SSE<br/>Self-critique]
+  end
+
+  subgraph DATA["6. Async Processing & Data Plane"]
+    CELERY[Celery Workers]
+    REDIS[Redis 7]
+    INGEST[Docling / LangChain<br/>Parse · Chunk · Embed]
+    PG[PostgreSQL 16 + pgvector<br/>HNSW + CJK FTS]
+    MEDIA[Authenticated Media Volume]
+    BACKFILL[Similarity + Link Backfill]
+  end
+
+  subgraph OPS["7. Operations, Quality & Feedback"]
+    AUDIT[Audit Logs]
+    METRICS[Metrics & Health]
+    FEEDBACK[Feedback + RAG Evaluation]
+  end
+
+  UX --> API --> IAM
+  IAM --> PROV
+  IAM --> GOV
+  IAM --> RAG
+  PROV --> GOV
+  LIBSEL --> ROUTE
+  REVIEW -->|approved versions only| INGEST
+  GOV --> PG
+  RAG --> PG
+  CELERY --> INGEST --> PG
+  REDIS --> CELERY
+  RAG -->|SSE tokens · citations · quality| API
+  OPS -. telemetry .-> API
+  OPS -. quality loop .-> RAG

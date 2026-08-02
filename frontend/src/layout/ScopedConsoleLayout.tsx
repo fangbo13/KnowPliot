@@ -126,6 +126,10 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
 
       <main className="kp-console-main">
         <header className="kp-console-topbar">
+          <div className="kp-console-topbar__context">
+            <span>{t('console_label', { defaultValue: 'CONTROL ROOM' })}</span>
+            <strong>{title}</strong>
+          </div>
           <NotificationBell />
           <button
             className="icon-btn"
