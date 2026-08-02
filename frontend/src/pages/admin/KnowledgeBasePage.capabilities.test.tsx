@@ -109,6 +109,9 @@ describe('KnowledgeBasePage capability actions', () => {
     render(<KnowledgeBasePage />);
 
     await waitFor(() => expect(screen.getByText('Employee handbook')).toBeTruthy());
+    const heading = screen.getByRole('heading', { name: 'nav_knowledge' });
+    expect(heading.closest('.kp-page-header')).toBeTruthy();
+    expect(heading.closest('.kp-app-shell--management')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'refresh' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'upload' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'download' })).toBeNull();

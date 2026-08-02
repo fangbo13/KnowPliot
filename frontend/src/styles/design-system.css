@@ -2200,3 +2200,303 @@
     padding: 26px 18px 22px !important;
   }
 }
+
+/* ========================================================================== */
+/* Responsive workbench shell                                                 */
+/* One contract owns AdminLayout and every scoped console.                    */
+/* ========================================================================== */
+.kp-workbench-layout {
+  display: flex;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--color-bg-body);
+}
+
+.kp-workbench-sidebar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 232px;
+  flex-direction: column;
+  width: 232px !important;
+  height: 100dvh;
+  padding: 20px 12px 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--color-bg-sunken) !important;
+  border-right: 1px solid var(--color-border-secondary);
+}
+
+.kp-workbench-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kp-workbench-topbar {
+  display: flex;
+  flex: 0 0 64px;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 64px !important;
+  min-width: 0;
+  padding: 0 28px !important;
+  background: var(--color-bg-body) !important;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.kp-workbench-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  padding: 38px clamp(22px, 4vw, 56px) 72px !important;
+  overflow: auto;
+  background: var(--color-bg-body) !important;
+  scrollbar-gutter: stable;
+}
+
+.kp-workbench-content > .kp-app-shell,
+.kp-admin-route > .kp-app-shell {
+  max-width: calc(var(--management-max) + 64px);
+  padding: 0;
+}
+
+.kp-admin-route {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100%;
+}
+
+.kp-knowledge-workbench,
+.kp-space-workbench {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.kp-knowledge-documents {
+  padding: 24px;
+  background: var(--color-bg-container);
+}
+
+.kp-knowledge-actions {
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.kp-knowledge-actions h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-family-display);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.kp-knowledge-task-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 230px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.kp-knowledge-filter-rail,
+.kp-knowledge-table-region {
+  min-width: 0;
+}
+
+.kp-knowledge-filter-rail {
+  position: sticky;
+  top: 0;
+}
+
+.kp-space-task-grid {
+  min-width: 0;
+  margin-bottom: 24px;
+}
+
+.kp-space-member-actions {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 170px auto;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.kp-space-workbench--empty {
+  justify-content: center;
+}
+
+.kp-workbench-menu-toggle,
+.kp-workbench-drawer__close,
+.kp-workbench-drawer-layer {
+  display: none;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .kp-workbench-sidebar {
+    flex-basis: 208px;
+    width: 208px !important;
+    padding: 18px 10px 14px;
+  }
+
+  .kp-workbench-topbar {
+    padding: 0 20px !important;
+  }
+
+  .kp-workbench-content {
+    padding: 30px 22px 56px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .kp-knowledge-task-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .kp-knowledge-filter-rail {
+    position: static;
+  }
+}
+
+@media (max-width: 767px) {
+  .kp-workbench-layout {
+    display: flex;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .kp-workbench-drawer-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: block;
+  }
+
+  .kp-workbench-drawer__backdrop {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 0;
+    cursor: default;
+    background: rgba(35, 31, 27, 0.42);
+    border: 0;
+    backdrop-filter: blur(3px);
+  }
+
+  .kp-workbench-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 1;
+    display: flex;
+    width: min(304px, calc(100vw - 48px)) !important;
+    height: 100dvh;
+    padding: 16px 12px 14px;
+    border-right: 1px solid var(--color-border-secondary);
+    border-bottom: 0;
+    box-shadow: 18px 0 48px rgba(35, 31, 27, 0.16);
+    animation: kp-workbench-drawer-in var(--motion-base) var(--motion-ease);
+  }
+
+  .kp-workbench-drawer__close {
+    display: inline-flex;
+    align-self: flex-end;
+    margin: 0 2px 8px;
+  }
+
+  .kp-workbench-menu-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    margin-right: 4px;
+  }
+
+  .kp-workbench-topbar {
+    flex-basis: 58px;
+    height: 58px !important;
+    padding: 0 14px !important;
+  }
+
+  .kp-workbench-content {
+    padding: 28px 16px 56px !important;
+    scrollbar-gutter: auto;
+  }
+
+  .kp-knowledge-documents {
+    padding: 18px;
+  }
+
+  .kp-space-member-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .kp-space-member-actions .ant-select {
+    width: 100% !important;
+  }
+
+  .kp-console-brand {
+    padding-bottom: 18px;
+  }
+
+  .kp-console-scope,
+  .kp-console-sidebar__spacer,
+  .kp-console-back {
+    display: revert;
+  }
+
+  .kp-console-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: visible;
+  }
+
+  .kp-console-nav__item {
+    flex: none;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 640px) {
+  .kp-knowledge-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .kp-knowledge-actions .kp-action-bar__primary,
+  .kp-knowledge-actions .ant-space {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .kp-workbench-topbar {
+    gap: 2px;
+  }
+
+  .kp-console-topbar__context span,
+  .kp-admin-topbar__context span,
+  .kp-workbench-topbar .sidebar-avatar + span {
+    display: none;
+  }
+
+  .kp-workbench-content {
+    padding: 24px 12px 44px !important;
+  }
+}
+
+@keyframes kp-workbench-drawer-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kp-workbench-sidebar { animation: none; }
+}

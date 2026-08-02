@@ -6,6 +6,7 @@ import adminLayoutSource from '../layout/AdminLayout.tsx?raw';
 import appLayoutSource from '../layout/AppLayout.tsx?raw';
 import loginSource from '../auth/LoginPage.tsx?raw';
 import scopedConsoleSource from '../layout/ScopedConsoleLayout.tsx?raw';
+import responsiveWorkbenchSource from '../layout/ResponsiveWorkbenchShell.tsx?raw';
 import historySource from '../pages/HistoryPage.tsx?raw';
 import adminQualitySource from '../pages/admin/AdminQualityPage.tsx?raw';
 import adminTemplatesSource from '../pages/admin/AdminTemplatesPage.tsx?raw';
@@ -25,8 +26,11 @@ describe('design-system convergence', () => {
   });
 
   it('uses the shared management workbench shell', () => {
-    expect(scopedConsoleSource).toContain('kp-console-layout');
-    expect(scopedConsoleSource).toContain('kp-console-content');
+    expect(scopedConsoleSource).toContain('ResponsiveWorkbenchShell');
+    expect(adminLayoutSource).toContain('ResponsiveWorkbenchShell');
+    expect(responsiveWorkbenchSource).toContain('useBreakpoint');
+    expect(appLayoutSource).toContain('useBreakpoint');
+    expect(responsiveWorkbenchSource).toContain("variant: WorkbenchVariant");
   });
 
   it('keeps application transitions inside the 120/180/240ms motion scale', () => {

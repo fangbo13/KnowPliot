@@ -21,6 +21,7 @@ import { useAuthorization } from '../auth/CapabilityProvider';
 import { useTheme } from '../hooks/useTheme';
 import NotificationBell from '../components/NotificationBell';
 import { designTokens } from '../design/tokens';
+import ResponsiveWorkbenchShell from './ResponsiveWorkbenchShell';
 
 const PAGE_TRANSITION_SECONDS = designTokens.motion.duration.base / 1000;
 
@@ -64,12 +65,14 @@ export default function AdminLayout() {
   };
 
   return (
-    <div className="kp-admin-layout" style={{ display: 'flex', height: '100dvh', background: 'var(--color-bg-body)' }}>
-      {/* Sidebar */}
-      <aside className="kp-admin-sidebar" style={{
-        width: 248, flexShrink: 0, display: 'flex', flexDirection: 'column',
-        background: 'var(--color-bg-sunken)', borderRight: '1px solid var(--color-border-secondary)',
-      }}>
+    <ResponsiveWorkbenchShell
+      variant="admin"
+      routeKey={location.pathname}
+      navigationLabel={`${t('admin_console')} navigation`}
+      menuLabel={t('mobile_menu') || 'Open mobile menu'}
+      closeLabel={t('close') || 'Close'}
+      sidebar={(
+        <>
         <div className="kp-admin-brand" style={{ padding: '20px 20px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{
             width: 34, height: 34, borderRadius: 10, background: 'var(--gradient-accent)',
@@ -123,15 +126,10 @@ export default function AdminLayout() {
         >
           <ArrowLeftOutlined /> {t('back_to_app')}
         </button>
-      </aside>
-
-      {/* Main Content */}
-      <div className="kp-admin-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <header className="kp-admin-topbar" style={{
-          height: 56, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          padding: '0 24px', gap: 4, background: 'var(--color-bg-container)',
-          borderBottom: '1px solid var(--color-border-secondary)'
-        }}>
+        </>
+      )}
+      topbar={(
+        <>
           <div className="kp-admin-topbar__context">
             <span>{t('admin_label', { defaultValue: 'ADMIN CONSOLE' })}</span>
             <strong>{activeTitle}</strong>
@@ -151,23 +149,21 @@ export default function AdminLayout() {
             <span className="sidebar-avatar" style={{ width: 26, height: 26, fontSize: 12, background: 'var(--gradient-accent)', color: 'var(--color-text-on-accent)' }}>{initials(user?.email)}</span>
             <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--color-text-secondary)' }}>{user?.email}</span>
           </button>
-        </header>
-
-        <main className="kp-admin-content" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '42px clamp(20px, 4vw, 56px) 80px', display: 'flex', flexDirection: 'column' }}>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: PAGE_TRANSITION_SECONDS, ease: [0.25, 0.8, 0.25, 1] }}
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
-        </main>
-      </div>
-    </div>
+        </>
+      )}
+    >
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={location.pathname}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: PAGE_TRANSITION_SECONDS, ease: [0.25, 0.8, 0.25, 1] }}
+          className="kp-admin-route"
+        >
+          <Outlet />
+        </motion.div>
+      </AnimatePresence>
+    </ResponsiveWorkbenchShell>
   );
 }

@@ -43,6 +43,7 @@ import {
 } from '../api/spaces';
 import { useAuthorization } from '../auth/CapabilityProvider';
 import { getRateLimitDetails, isAbortError, withRequestSignal } from '../api/client';
+import { AppShell, EmptyState, PageHeader } from '../design/primitives';
 
 const { Text, Paragraph } = Typography;
 
@@ -441,28 +442,26 @@ export default function SpaceManagementPage() {
 
   if (!active) {
     return (
-      <div className="page section-enter" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-        <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 16 }}>
-          {spaceLoading
+      <AppShell as="section" width="management" className="kp-space-workbench kp-space-workbench--empty section-enter">
+        <EmptyState
+          title={spaceLoading
             ? (t('loading') || 'Loading workspace…')
             : spaceLoadFailed
               ? (t('load_error') || 'Unable to load workspace data')
               : (t('no_active_space') || 'No active space selected')}
-        </div>
-      </div>
+        />
+      </AppShell>
     );
   }
 
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <div className="page-head" style={{ marginBottom: 32 }}>
-          <h1 className="page-title">
-            {t('space_management') || 'Space Management'} — {active.name}
-          </h1>
-        </div>
+    <AppShell as="section" width="management" className="kp-space-workbench">
+        <PageHeader
+          eyebrow={t('workspace_management')}
+          title={`${t('space_management') || 'Space Management'} — ${active.name}`}
+          description={active.description || t('space_management')}
+        />
         {loadError && (
           <Alert
             type="error"
@@ -476,7 +475,7 @@ export default function SpaceManagementPage() {
           />
         )}
 
-        <div className={useGrid ? 'kp-mgmt-grid' : ''} style={{ marginBottom: 24 }}>
+        <div className={useGrid ? 'kp-mgmt-grid kp-space-task-grid' : 'kp-space-task-grid'}>
         {showSettings && (
         <Card
           title={
@@ -669,7 +668,7 @@ export default function SpaceManagementPage() {
           extra={<Button icon={<ReloadOutlined />} size="middle" onClick={refresh} style={{ borderRadius: 8 }} />}
         >
           {canManageMembers && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div className="kp-space-member-actions">
               <Input
                 placeholder={t('member_email_placeholder') || 'Add member by email…'}
                 value={memberEmail}
@@ -982,7 +981,6 @@ export default function SpaceManagementPage() {
             />
           </div>
         </Modal>
-      </div>
-    </div>
+    </AppShell>
   );
 }

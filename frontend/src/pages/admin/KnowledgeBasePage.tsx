@@ -53,6 +53,7 @@ import { BacklinksPanel } from '../../components/knowledge/BacklinksPanel';
 import GuestOnboardingBanner from '../../components/knowledge/GuestOnboardingBanner';
 import { useSpaceStore } from '../../store/spaceStore';
 import { spacesApi } from '../../api/spaces';
+import { ActionBar, AppShell, EmptyState, PageHeader, Surface } from '../../design/primitives';
 
 interface Document {
   id: string;
@@ -844,12 +845,12 @@ export default function KnowledgeBasePage() {
   }
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <div className="page-head" style={{ marginBottom: 24 }}>
-          <h1 className="page-title">{t('nav_knowledge')}</h1>
-          <p className="page-sub">{t('admin_knowledge_subtitle')}</p>
-        </div>
+    <AppShell as="section" width="management" className="kp-knowledge-workbench">
+        <PageHeader
+          eyebrow={t('workspace_management')}
+          title={t('nav_knowledge')}
+          description={t('admin_knowledge_subtitle')}
+        />
         {activeSpace?.my_role === 'guest' && spaceId ? (
           <GuestOnboardingBanner
             spaceId={spaceId}
@@ -965,16 +966,12 @@ export default function KnowledgeBasePage() {
           </Card>
         )}
         {pageTab === 'documents' && (
-        <Card
-          styles={{ body: { padding: '28px 28px 24px' } }}
-          className="glass-panel hover-lift"
-          style={{ borderRadius: 'var(--radius-lg)' }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
-            <span style={{ fontFamily: 'var(--font-family-display)', fontWeight: 500, fontSize: 18, color: 'var(--color-text)' }}>
-              {t('document_list') || 'Document List'}
-            </span>
-            <Space size="middle">
+        <Surface as="section" className="kp-knowledge-documents glass-panel">
+          <ActionBar
+            className="kp-knowledge-actions"
+            secondary={<h2>{t('document_list') || 'Document List'}</h2>}
+            primary={(
+              <Space size="middle" wrap>
               {canManage && (
                 <Upload
                   customRequest={async ({ file, onError, onSuccess }) => {
@@ -1046,8 +1043,9 @@ export default function KnowledgeBasePage() {
               <Button icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={loadDocuments} style={{ borderRadius: 8 }} className="btn-press">
                 {t('refresh')}
               </Button>
-            </Space>
-          </div>
+              </Space>
+            )}
+          />
 
           {showTutorial && canManage && (
             <Alert
@@ -1067,17 +1065,17 @@ export default function KnowledgeBasePage() {
             />
           )}
 
-          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+          <div className="kp-knowledge-task-layout">
             {/* Spec §2: multi-dimension pivot filter (科目 × FY × 阶段 × SCOT) */}
-            <div style={{ width: 230, flexShrink: 0 }}>
+            <aside className="kp-knowledge-filter-rail" aria-label={t('kb_tags')}>
               <TaxonomyFilterPanel
                 dimensions={dimensions}
                 loading={dimensionsLoading}
                 selectedCodes={filterCodes}
                 onChange={setFilterCodes}
               />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            </aside>
+            <div className="kp-knowledge-table-region">
               <Table
                 columns={columns}
                 dataSource={filteredDocuments}
@@ -1087,16 +1085,17 @@ export default function KnowledgeBasePage() {
                 scroll={{ x: 'max-content' }}
                 locale={{
                   emptyText: (
-                    <div className="section-enter" style={{ padding: '60px 0', textAlign: 'center' }}>
-                      <div style={{ fontSize: 48, color: 'var(--color-border-secondary)', fontFamily: "'Fraunces', serif" }}>K</div>
-                      <div style={{ marginTop: 16, color: 'var(--color-text-secondary)', fontSize: 15 }}>{t('no_documents') || 'No documents'}</div>
-                    </div>
+                    <EmptyState
+                      className="section-enter"
+                      icon={<FileTextOutlined />}
+                      title={t('no_documents') || 'No documents'}
+                    />
                   ),
                 }}
               />
             </div>
           </div>
-        </Card>
+        </Surface>
         )}
 
         {editTarget && (
@@ -1375,7 +1374,6 @@ export default function KnowledgeBasePage() {
             )}
           </Modal>
         )}
-      </div>
-    </div>
+    </AppShell>
   );
 }

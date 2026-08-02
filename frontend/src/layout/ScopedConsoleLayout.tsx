@@ -14,7 +14,7 @@ import {
   SettingOutlined, SunOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthProvider';
 import { useAuthorization } from '../auth/CapabilityProvider';
@@ -25,6 +25,7 @@ import {
   type ConsoleKind,
   visibleConsoleNavigation,
 } from './consoleNavigation';
+import ResponsiveWorkbenchShell from './ResponsiveWorkbenchShell';
 
 const TITLE_KEYS: Record<ConsoleKind, string> = {
   platform: 'console_title_platform',
@@ -41,6 +42,7 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
   const { t, i18n } = useTranslation('common');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const access = useAuthorization();
   const { effective, setThemeMode } = useTheme();
   const isDark = effective === 'dark';
@@ -74,8 +76,14 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
   };
 
   return (
-    <div className="kp-console-layout">
-      <aside className="kp-console-sidebar">
+    <ResponsiveWorkbenchShell
+      variant="console"
+      routeKey={location.pathname}
+      navigationLabel={`${title} navigation`}
+      menuLabel={t('mobile_menu') || 'Open mobile menu'}
+      closeLabel={t('close') || 'Close'}
+      sidebar={(
+        <>
         <div className="kp-console-brand">
           <details className="kp-console-switcher">
             <summary aria-label={t('console_switcher_aria')}>
@@ -122,10 +130,10 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
         <Link to="/chat" className="kp-console-back">
           {t('back_to_app')}
         </Link>
-      </aside>
-
-      <main className="kp-console-main">
-        <header className="kp-console-topbar">
+        </>
+      )}
+      topbar={(
+        <>
           <div className="kp-console-topbar__context">
             <span>{t('console_label', { defaultValue: 'CONTROL ROOM' })}</span>
             <strong>{title}</strong>
@@ -169,11 +177,10 @@ export default function ScopedConsoleLayout({ kind }: { kind: ConsoleKind }) {
               </button>
             </div>
           </details>
-        </header>
-        <div className="kp-console-content">
-          <Outlet />
-        </div>
-      </main>
-    </div>
+        </>
+      )}
+    >
+      <Outlet />
+    </ResponsiveWorkbenchShell>
   );
 }

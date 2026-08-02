@@ -515,18 +515,13 @@ h1, h2, h3, h4, h5 {
   .ant-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .ant-table { min-width: 500px; }
 
-  /* C1: Multi-column grids collapse to single column on mobile */
-  .ant-row { flex-direction: column !important; }
-  .ant-col { max-width: 100% !important; flex: 0 0 100% !important; }
-
   /* C1: Descriptions/Stats grids become single column */
   .ant-descriptions-row { display: flex; flex-wrap: wrap; }
   .ant-descriptions-item { flex: 1 1 100%; }
 
-  /* C1: Card-based grids (stat cards, dashboard widgets) → single column */
+  /* Only named dashboard grids opt into a single-column mobile layout. */
   [class*="stat-grid"],
-  [class*="card-grid"],
-  [style*="grid-template-columns"] {
+  [class*="card-grid"] {
     grid-template-columns: 1fr !important;
   }
 

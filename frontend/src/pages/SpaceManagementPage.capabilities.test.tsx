@@ -118,7 +118,9 @@ describe('SpaceManagementPage capability actions', () => {
   it('does not inherit owner actions when fine-grained capabilities are absent', async () => {
     render(<SpaceManagementPage />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: /space_management/ })).toBeTruthy());
+    const heading = await screen.findByRole('heading', { name: /space_management/ });
+    expect(heading.closest('.kp-page-header')).toBeTruthy();
+    expect(heading.closest('.kp-app-shell--management')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'save' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'add_member' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'generate_code' })).toBeNull();
