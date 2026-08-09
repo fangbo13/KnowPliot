@@ -68,6 +68,13 @@ urlpatterns = [
     path("reviews/<uuid:pk>/reject/", review_views.review_reject, name="review-reject"),
     # Knowledge iteration spec §5: visualization
     path("graph/", viz_views.knowledge_graph, name="knowledge-graph"),
+    path("graph/query/", viz_views.knowledge_graph_query, name="knowledge-graph-query"),
+    path("graph/path/", viz_views.knowledge_graph_path, name="knowledge-graph-path"),
+    path("graph/expand/", viz_views.knowledge_graph_expand, name="knowledge-graph-expand"),
+    path("graph/evidence/<str:evidence_ref>/", viz_views.knowledge_graph_evidence, name="knowledge-graph-evidence"),
+    path("graph/scenes/", viz_views.knowledge_graph_scenes, name="knowledge-graph-scenes"),
+    path("graph/scenes/<uuid:pk>/", viz_views.knowledge_graph_scene_detail, name="knowledge-graph-scene-detail"),
+    path("graph/scenes/<uuid:pk>/<str:action>/", viz_views.knowledge_graph_scene_action, name="knowledge-graph-scene-action"),
     path("timeline/", viz_views.knowledge_timeline, name="knowledge-timeline"),
     path("dashboard/", viz_views.knowledge_dashboard, name="knowledge-dashboard"),
     # KB optimization spec §3.4: Obsidian-style backlinks

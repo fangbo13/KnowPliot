@@ -4,7 +4,7 @@
  * See LICENSE file in the project root for full license details.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, Table, Button, Space, Upload, message, Modal, Input, Alert, Tag, Drawer, Tabs, Spin, Tooltip, Select, Switch } from 'antd';
 import {
   InboxOutlined,
@@ -45,7 +45,6 @@ import type { DiffPreviewData } from '../../components/knowledge/DiffPreview';
 import { TagSelector, missingRequiredDimensions } from '../../components/knowledge/TagSelector';
 import { TaxonomyFilterPanel } from '../../components/knowledge/TaxonomyFilterPanel';
 import { ReviewQueuePanel } from '../../components/knowledge/ReviewQueuePanel';
-import { KnowledgeGraphPanel } from '../../components/knowledge/KnowledgeGraphPanel';
 import { TimelinePanel } from '../../components/knowledge/TimelinePanel';
 import { DashboardPanel } from '../../components/knowledge/DashboardPanel';
 import { TaxonomyManagerPanel } from '../../components/knowledge/TaxonomyManagerPanel';
@@ -53,6 +52,12 @@ import { BacklinksPanel } from '../../components/knowledge/BacklinksPanel';
 import GuestOnboardingBanner from '../../components/knowledge/GuestOnboardingBanner';
 import { useSpaceStore } from '../../store/spaceStore';
 import { spacesApi } from '../../api/spaces';
+
+const KnowledgeGraphPanel = lazy(() =>
+  import('../../components/knowledge/KnowledgeGraphPanel').then((module) => ({
+    default: module.KnowledgeGraphPanel,
+  })),
+);
 
 interface Document {
   id: string;
@@ -450,6 +455,20 @@ export default function KnowledgeBasePage() {
     setDiffData(null);
     setDiffError(null);
     setVersionReason('');
+  };
+
+  const openGraphDocument = async (documentId: string) => {
+    const loaded = documents.find((document) => document.id === documentId);
+    if (loaded) {
+      openVersionDrawer(loaded);
+      return;
+    }
+    try {
+      const document = await documentApi.getDocument(documentId);
+      openVersionDrawer(document as Document);
+    } catch {
+      message.error(t('graph_load_failed'));
+    }
   };
 
   const loadVersions = async (id: string) => {
@@ -902,7 +921,9 @@ export default function KnowledgeBasePage() {
         )}
         {pageTab === 'graph' && (
           <Card styles={{ body: { padding: '24px' } }} className="glass-panel" style={{ borderRadius: 'var(--radius-lg)' }}>
-            <KnowledgeGraphPanel dimensions={dimensions} />
+            <Suspense fallback={<Spin style={{ display: 'block', margin: '96px auto' }} />}>
+              <KnowledgeGraphPanel dimensions={dimensions} onOpenDocument={(id) => void openGraphDocument(id)} />
+            </Suspense>
           </Card>
         )}
         {pageTab === 'timeline' && (
@@ -1222,6 +1243,20 @@ export default function KnowledgeBasePage() {
                         </>
                       )}
                     </div>
+                  ),
+                },
+                {
+                  key: 'graph',
+                  label: t('graph_mode_local'),
+                  children: (
+                    <Suspense fallback={<Spin style={{ display: 'block', margin: '72px auto' }} />}>
+                      <KnowledgeGraphPanel
+                        dimensions={dimensions}
+                        initialCenterId={versionDrawer.id}
+                        compact
+                        onOpenDocument={(id) => void openGraphDocument(id)}
+                      />
+                    </Suspense>
                   ),
                 },
                 {

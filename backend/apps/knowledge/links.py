@@ -25,11 +25,12 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-WIKI_LINK_RE = re.compile(r"\[\[([^\[\]|]{1,255})(?:\|[^\[\]]*)?\]\]")
+WIKI_LINK_RE = re.compile(r"\[\[([^\[\]|]{1,255})(?:\|([^\[\]]*))?\]\]")
 DOC_ID_LINK_RE = re.compile(
     r"\[([^\]]{0,255})\]\((?:knowpilot://doc/|/documents/)"
     r"([0-9a-fA-F-]{36})\)?[^)]*\)?"
 )
+MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.MULTILINE)
 
 
 def extract_link_targets(text: str) -> tuple[list[str], list[tuple[str, str]]]:
@@ -44,6 +45,54 @@ def extract_link_targets(text: str) -> tuple[list[str], list[tuple[str, str]]]:
         except ValueError:
             continue
     return [t for t in titles if t], id_refs
+
+
+def extract_link_occurrences(text: str) -> list[dict]:
+    """Return every concrete link occurrence, including repeated targets."""
+    occurrences = []
+    for match in WIKI_LINK_RE.finditer(text or ""):
+        title = match.group(1).strip()
+        if not title:
+            continue
+        occurrences.append(
+            {
+                "syntax": "wikilink",
+                "title": title,
+                "anchor_text": (match.group(2) or title).strip(),
+                "char_start": match.start(),
+                "char_end": match.end(),
+            }
+        )
+    for match in DOC_ID_LINK_RE.finditer(text or ""):
+        try:
+            target_id = str(uuid.UUID(match.group(2)))
+        except ValueError:
+            continue
+        occurrences.append(
+            {
+                "syntax": "markdown",
+                "target_id": target_id,
+                "anchor_text": match.group(1).strip(),
+                "char_start": match.start(),
+                "char_end": match.end(),
+            }
+        )
+    occurrences = sorted(occurrences, key=lambda item: item["char_start"])
+    headings = [
+        (match.start(), len(match.group(1)), match.group(2).strip())
+        for match in MARKDOWN_HEADING_RE.finditer(text or "")
+    ]
+    for occurrence in occurrences:
+        path: list[str] = []
+        for position, level, title in headings:
+            if position >= occurrence["char_start"]:
+                break
+            path = path[: level - 1]
+            while len(path) < level - 1:
+                path.append("")
+            path.append(title)
+        occurrence["heading_path"] = [title for title in path if title]
+    return occurrences
 
 
 def _linkable_space_ids(document) -> list:
@@ -61,10 +110,16 @@ def _linkable_space_ids(document) -> list:
 
 def sync_document_links(document) -> int:
     """Rebuild DocumentLink rows for one source document. Best-effort."""
-    from .models import Document, DocumentLink
+    from .models import Document, DocumentLink, DocumentLinkOccurrence
 
     try:
-        titles, id_refs = extract_link_targets(document.text_content or "")
+        occurrences = extract_link_occurrences(document.text_content or "")
+        titles = [item["title"] for item in occurrences if item["syntax"] == "wikilink"]
+        id_refs = [
+            (item["anchor_text"], item["target_id"])
+            for item in occurrences
+            if item["syntax"] == "markdown"
+        ]
         space_ids = _linkable_space_ids(document)
         targets: dict = {}
         matched_titles: set[str] = set()
@@ -95,21 +150,22 @@ def sync_document_links(document) -> int:
                     targets[ref] = (by_id[ref], anchor or by_id[ref].title)
 
         DocumentLink.objects.filter(source=document).delete()
-        created = [
-            DocumentLink(
+        created_by_key = {
+            ("target", str(target.id)): DocumentLink(
                 space_id=document.space_id,
                 source=document,
                 target=target,
                 anchor_text=(anchor or "")[:255],
             )
             for target, anchor in targets.values()
-        ]
+        }
         # P3 §B1: record unresolved wiki titles (Obsidian gray links).
         unresolved = sorted(
             {t for t in titles if t not in matched_titles}
         )
-        created.extend(
-            DocumentLink(
+        created_by_key.update(
+            {
+                ("unresolved", title): DocumentLink(
                 space_id=document.space_id,
                 source=document,
                 target=None,
@@ -117,9 +173,41 @@ def sync_document_links(document) -> int:
                 anchor_text=title[:255],
             )
             for title in unresolved
+            }
         )
+        created = list(created_by_key.values())
         if created:
             DocumentLink.objects.bulk_create(created, ignore_conflicts=True)
+        occurrence_rows = []
+        target_by_title = {
+            target.title: target for target, _anchor in targets.values()
+        }
+        for ordinal, occurrence in enumerate(occurrences):
+            if occurrence["syntax"] == "wikilink":
+                target = target_by_title.get(occurrence["title"])
+                key = (
+                    ("target", str(target.id))
+                    if target is not None
+                    else ("unresolved", occurrence["title"])
+                )
+            else:
+                key = ("target", occurrence["target_id"])
+            link = created_by_key.get(key)
+            if link is None:
+                continue
+            occurrence_rows.append(
+                DocumentLinkOccurrence(
+                    link=link,
+                    ordinal=ordinal,
+                    syntax=occurrence["syntax"],
+                    anchor_text=occurrence["anchor_text"][:255],
+                    char_start=occurrence["char_start"],
+                    char_end=occurrence["char_end"],
+                    heading_path=occurrence.get("heading_path", []),
+                )
+            )
+        if occurrence_rows:
+            DocumentLinkOccurrence.objects.bulk_create(occurrence_rows)
         return len(created)
     except Exception as exc:  # pragma: no cover — link sync must never break ingest
         logger.warning("sync_document_links failed for %s: %s", document.id, exc)

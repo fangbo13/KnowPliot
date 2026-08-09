@@ -86,6 +86,8 @@ class Document(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Graph v1: stable across physical version rows.
+    lineage_id = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
     # V6.0: space isolation — every document belongs to one knowledge space.
     # Nullable so the additive migration is safe; a data migration backfills
     # existing rows to the default space, and the API always sets it on upload.
@@ -809,6 +811,100 @@ class DocumentSimilarity(models.Model):
 
     def __str__(self):
         return f"{self.source_id} ~ {self.target_id} ({self.score})"
+
+
+class DocumentLinkOccurrence(models.Model):
+    """One concrete markdown occurrence supporting an explicit graph edge."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    link = models.ForeignKey(
+        DocumentLink, on_delete=models.CASCADE, related_name="occurrences"
+    )
+    ordinal = models.PositiveIntegerField(default=0)
+    syntax = models.CharField(max_length=20, blank=True, default="wikilink")
+    anchor_text = models.CharField(max_length=255, blank=True, default="")
+    char_start = models.PositiveIntegerField(null=True, blank=True)
+    char_end = models.PositiveIntegerField(null=True, blank=True)
+    heading_path = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "knowledge_documentlinkoccurrence"
+        ordering = ["ordinal", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["link", "ordinal"],
+                name="knowledge_linkocc_link_ordinal_uniq",
+            )
+        ]
+
+
+class KnowledgeGraphState(models.Model):
+    """Monotonic revision used to invalidate graph cursors and saved scenes."""
+
+    space = models.OneToOneField(
+        "spaces.KnowledgeSpace",
+        primary_key=True,
+        on_delete=models.CASCADE,
+        related_name="knowledge_graph_state",
+    )
+    revision = models.PositiveBigIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_graphstate"
+
+
+class GraphScene(models.Model):
+    """Permission-aware saved graph query and investigation layout."""
+
+    VISIBILITY_PRIVATE = "private"
+    VISIBILITY_WORKSPACE = "workspace"
+    VISIBILITY_CHOICES = [
+        (VISIBILITY_PRIVATE, "Private"),
+        (VISIBILITY_WORKSPACE, "Workspace"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    space = models.ForeignKey(
+        "spaces.KnowledgeSpace",
+        on_delete=models.CASCADE,
+        related_name="graph_scenes",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="graph_scenes",
+    )
+    name = models.CharField(max_length=120)
+    visibility = models.CharField(
+        max_length=20,
+        choices=VISIBILITY_CHOICES,
+        default=VISIBILITY_PRIVATE,
+    )
+    canonical_query = models.JSONField(default=dict)
+    layout = models.JSONField(default=dict, blank=True)
+    resolved_versions = models.JSONField(default=dict, blank=True)
+    schema_version = models.CharField(max_length=40, default="graph.scene.v1")
+    graph_revision = models.PositiveBigIntegerField(default=1)
+    revision = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "knowledge_graphscene"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(
+                fields=["space", "visibility", "-updated_at"],
+                name="knowledge_g_space_i_4298ea_idx",
+            ),
+            models.Index(
+                fields=["owner", "-updated_at"],
+                name="knowledge_g_owner_i_b347be_idx",
+            ),
+        ]
 
 
 # ---------------------------------------------------------------------------

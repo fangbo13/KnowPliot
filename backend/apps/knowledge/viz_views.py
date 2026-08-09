@@ -18,11 +18,13 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db.models import Count, Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
+from rest_framework import status
 
 from apps.spaces.permissions import (
     effective_space_role,
@@ -35,15 +37,379 @@ from .models import (
     Document,
     DocumentChunk,
     DocumentLink,
+    DocumentSimilarity,
     DocumentTag,
     ReviewRequest,
     TaxonomyTerm,
+    GraphScene,
 )
 
 GRAPH_NODE_LIMIT = 300
 SIMILAR_EDGE_THRESHOLD = 0.8
 SIMILAR_EDGES_PER_NODE = 3
 DASHBOARD_ROLES = {"owner", "space_admin"}
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_query(request):
+    """Typed graph.query.v1 endpoint used by the interactive workspace."""
+    from .graph_service import GraphQueryError, query_graph
+
+    space = resolve_request_space(request)
+    try:
+        return Response(query_graph(space=space, payload=request.data))
+    except GraphQueryError as exc:
+        response_status = (
+            status.HTTP_409_CONFLICT
+            if exc.code == "graph_cursor_stale"
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(exc.as_payload(), status=response_status)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_path(request):
+    from .graph_service import GraphQueryError, find_paths
+
+    space = resolve_request_space(request)
+    try:
+        return Response(find_paths(space=space, payload=request.data))
+    except GraphQueryError as exc:
+        return Response(exc.as_payload(), status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_expand(request):
+    from .graph_service import GraphQueryError, query_graph
+
+    space = resolve_request_space(request)
+    if request.data.get("schema_version") != "graph.expand.v1":
+        return Response(
+            {"code": "unsupported_schema_version", "detail": "schema_version must be graph.expand.v1"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    payload = {
+        "schema_version": "graph.query.v1",
+        "scope": {
+            "mode": "local",
+            "center_id": request.data.get("center_id"),
+            "depth": request.data.get("depth", 1),
+            "direction": request.data.get("direction", "both"),
+        },
+        "edge_kinds": request.data.get("edge_kinds") or ["links_to"],
+        "include_ghosts": request.data.get("include_ghosts", False),
+        "query": request.data.get("query", ""),
+        "limits": {"nodes": request.data.get("limit", 25), "edges": 1500},
+    }
+    try:
+        return Response(query_graph(space=space, payload=payload))
+    except GraphQueryError as exc:
+        return Response(exc.as_payload(), status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_evidence(request, evidence_ref):
+    space = resolve_request_space(request)
+    kind, separator, raw_id = evidence_ref.partition(":")
+    if not separator:
+        return Response({"code": "evidence_not_found"}, status=status.HTTP_404_NOT_FOUND)
+    if kind == "tag":
+        tag = get_object_or_404(
+            DocumentTag.objects.select_related("document", "term", "term__dimension"),
+            id=raw_id,
+            document__space=space,
+        )
+        return Response(
+            {
+                "ref": evidence_ref,
+                "kind": "tagged_with",
+                "source": {
+                    "id": f"doc:{tag.document.lineage_id}",
+                    "resource_id": str(tag.document_id),
+                    "title": tag.document.title,
+                    "version": tag.document.version,
+                },
+                "term": {
+                    "id": f"term:{tag.term_id}",
+                    "code": tag.term.code,
+                    "label": tag.term.label,
+                    "dimension": tag.term.dimension.code,
+                },
+            }
+        )
+    if kind == "similarity":
+        similarity = get_object_or_404(
+            DocumentSimilarity.objects.select_related("source", "target"),
+            id=raw_id,
+            space=space,
+        )
+        return Response(
+            {
+                "ref": evidence_ref,
+                "kind": "similar_to",
+                "score": round(float(similarity.score), 4),
+                "algorithm_version": "pooled-cosine-v1",
+                "model_version": "source-embedding-unspecified",
+                "explanation": "Cosine similarity of the documents' pooled chunk embeddings.",
+                "source": {
+                    "id": f"doc:{similarity.source.lineage_id}",
+                    "resource_id": str(similarity.source_id),
+                    "title": similarity.source.title,
+                    "version": similarity.source.version,
+                },
+                "target": {
+                    "id": f"doc:{similarity.target.lineage_id}",
+                    "resource_id": str(similarity.target_id),
+                    "title": similarity.target.title,
+                    "version": similarity.target.version,
+                },
+            }
+        )
+    if kind != "link":
+        return Response({"code": "evidence_not_found"}, status=status.HTTP_404_NOT_FOUND)
+    link = get_object_or_404(
+        DocumentLink.objects.select_related("source", "target"),
+        id=raw_id,
+        space=space,
+    )
+    return Response(
+        {
+            "ref": evidence_ref,
+            "kind": "links_to",
+            "anchor_text": link.anchor_text,
+            "unresolved_title": link.unresolved_title,
+            "source": {
+                "id": f"doc:{link.source.lineage_id}",
+                "resource_id": str(link.source_id),
+                "title": link.source.title,
+                "version": link.source.version,
+            },
+            "target": (
+                {
+                    "id": f"doc:{link.target.lineage_id}",
+                    "resource_id": str(link.target_id),
+                    "title": link.target.title,
+                    "version": link.target.version,
+                }
+                if link.target_id
+                else {"id": f"ghost:{link.id}", "title": link.unresolved_title}
+            ),
+            "occurrences": [
+                {
+                    "ordinal": occurrence.ordinal,
+                    "syntax": occurrence.syntax,
+                    "anchor_text": occurrence.anchor_text,
+                    "char_start": occurrence.char_start,
+                    "char_end": occurrence.char_end,
+                    "heading_path": occurrence.heading_path,
+                }
+                for occurrence in link.occurrences.all()[:100]
+            ],
+        }
+    )
+
+
+def _serialize_scene(scene):
+    return {
+        "id": str(scene.id),
+        "name": scene.name,
+        "visibility": scene.visibility,
+        "owner_id": str(scene.owner_id) if scene.owner_id else None,
+        "canonical_query": scene.canonical_query,
+        "layout": scene.layout,
+        "resolved_versions": scene.resolved_versions,
+        "schema_version": scene.schema_version,
+        "graph_revision": scene.graph_revision,
+        "revision": scene.revision,
+        "created_at": scene.created_at,
+        "updated_at": scene.updated_at,
+    }
+
+
+def _validate_scene_payload(payload):
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return None, Response({"code": "name_required"}, status=status.HTTP_400_BAD_REQUEST)
+    layout = payload.get("layout") or {}
+    if len(str(layout).encode("utf-8")) > 256 * 1024:
+        return None, Response({"code": "layout_too_large"}, status=status.HTTP_400_BAD_REQUEST)
+    positions = layout.get("positions", {}) if isinstance(layout, dict) else {}
+    if isinstance(positions, dict) and len(positions) > 500:
+        return None, Response({"code": "layout_node_limit"}, status=status.HTTP_400_BAD_REQUEST)
+    visibility = payload.get("visibility", GraphScene.VISIBILITY_PRIVATE)
+    if visibility not in {GraphScene.VISIBILITY_PRIVATE, GraphScene.VISIBILITY_WORKSPACE}:
+        return None, Response({"code": "invalid_visibility"}, status=status.HTTP_400_BAD_REQUEST)
+    return {"name": name, "layout": layout, "visibility": visibility}, None
+
+
+def _project_scene_state(*, space, canonical_query, layout):
+    """Resolve a scene through current permissions and discard unknown node state."""
+    from .graph_service import query_graph
+
+    graph = query_graph(space=space, payload=canonical_query)
+    visible_ids = {node["id"] for node in graph["nodes"]}
+    projected_layout = dict(layout) if isinstance(layout, dict) else {}
+    positions = projected_layout.get("positions")
+    if isinstance(positions, dict):
+        projected_layout["positions"] = {
+            node_id: position
+            for node_id, position in positions.items()
+            if node_id in visible_ids
+        }
+    for key in ("hidden_node_ids", "pinned_node_ids", "expanded_node_ids"):
+        values = projected_layout.get(key)
+        if isinstance(values, list):
+            projected_layout[key] = [node_id for node_id in values if node_id in visible_ids]
+    if projected_layout.get("selected_id") not in visible_ids:
+        projected_layout.pop("selected_id", None)
+    resolved_versions = {
+        node["id"]: node.get("version")
+        for node in graph["nodes"]
+        if node["type"] == "document"
+    }
+    return graph, projected_layout, resolved_versions
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_scenes(request):
+    space = resolve_request_space(request)
+    if request.method == "GET":
+        scenes = GraphScene.objects.filter(space=space).filter(
+            Q(owner=request.user) | Q(visibility=GraphScene.VISIBILITY_WORKSPACE)
+        )
+        return Response({"results": [_serialize_scene(scene) for scene in scenes]})
+    validated, error = _validate_scene_payload(request.data)
+    if error:
+        return error
+    if validated["visibility"] == GraphScene.VISIBILITY_WORKSPACE:
+        role = effective_space_role(request.user, space)
+        if role not in {"owner", "space_admin", "member"}:
+            raise PermissionDenied("Publishing a workspace graph scene requires document update rights.")
+    from .graph_service import GraphQueryError, _current_revision
+
+    canonical_query = request.data.get("canonical_query") or {}
+    try:
+        _, projected_layout, resolved_versions = _project_scene_state(
+            space=space,
+            canonical_query=canonical_query,
+            layout=validated["layout"],
+        )
+    except GraphQueryError as exc:
+        return Response(exc.as_payload(), status=status.HTTP_400_BAD_REQUEST)
+
+    scene = GraphScene.objects.create(
+        space=space,
+        owner=request.user,
+        name=validated["name"],
+        visibility=validated["visibility"],
+        canonical_query=canonical_query,
+        layout=projected_layout,
+        resolved_versions=resolved_versions,
+        graph_revision=_current_revision(space),
+    )
+    return Response(_serialize_scene(scene), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_scene_detail(request, pk):
+    space = resolve_request_space(request)
+    visible = GraphScene.objects.filter(space=space).filter(
+        Q(owner=request.user) | Q(visibility=GraphScene.VISIBILITY_WORKSPACE)
+    )
+    scene = get_object_or_404(visible, pk=pk)
+    if request.method == "GET":
+        return Response(_serialize_scene(scene))
+    if scene.owner_id != request.user.id:
+        raise PermissionDenied("Shared graph scenes are read-only; copy the scene to continue.")
+    if request.method == "DELETE":
+        scene.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    expected = request.headers.get("If-Match")
+    if expected and expected.strip('"') != str(scene.revision):
+        return Response({"code": "scene_revision_conflict"}, status=status.HTTP_412_PRECONDITION_FAILED)
+    validated, error = _validate_scene_payload({**_serialize_scene(scene), **request.data})
+    if error:
+        return error
+    from .graph_service import GraphQueryError, _current_revision
+
+    canonical_query = request.data.get("canonical_query", scene.canonical_query)
+    try:
+        _, projected_layout, resolved_versions = _project_scene_state(
+            space=space,
+            canonical_query=canonical_query,
+            layout=validated["layout"],
+        )
+    except GraphQueryError as exc:
+        return Response(exc.as_payload(), status=status.HTTP_400_BAD_REQUEST)
+    scene.name = validated["name"]
+    scene.visibility = validated["visibility"]
+    scene.layout = projected_layout
+    scene.canonical_query = canonical_query
+    scene.resolved_versions = resolved_versions
+    scene.graph_revision = _current_revision(space)
+    scene.revision += 1
+    scene.save()
+    return Response(_serialize_scene(scene))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def knowledge_graph_scene_action(request, pk, action):
+    space = resolve_request_space(request)
+    visible = GraphScene.objects.filter(space=space).filter(
+        Q(owner=request.user) | Q(visibility=GraphScene.VISIBILITY_WORKSPACE)
+    )
+    scene = get_object_or_404(visible, pk=pk)
+    from .graph_service import GraphQueryError, _current_revision, query_graph
+
+    if action == "copy":
+        try:
+            _, projected_layout, resolved_versions = _project_scene_state(
+                space=space,
+                canonical_query=scene.canonical_query,
+                layout=scene.layout,
+            )
+        except GraphQueryError as exc:
+            return Response(exc.as_payload(), status=status.HTTP_400_BAD_REQUEST)
+        copied = GraphScene.objects.create(
+            space=space,
+            owner=request.user,
+            name=f"{scene.name} (copy)",
+            visibility=GraphScene.VISIBILITY_PRIVATE,
+            canonical_query=scene.canonical_query,
+            layout=projected_layout,
+            resolved_versions=resolved_versions,
+            graph_revision=_current_revision(space),
+        )
+        return Response(_serialize_scene(copied), status=status.HTTP_201_CREATED)
+    if action == "resolve":
+        try:
+            graph = query_graph(space=space, payload=scene.canonical_query)
+        except GraphQueryError as exc:
+            return Response(exc.as_payload(), status=status.HTTP_400_BAD_REQUEST)
+        current_versions = {
+            node["id"]: node.get("version")
+            for node in graph["nodes"]
+            if node["type"] == "document"
+        }
+        previous = scene.resolved_versions or {}
+        changes = {
+            "added": sorted(set(current_versions) - set(previous)),
+            "removed": sorted(set(previous) - set(current_versions)),
+            "version_changed": sorted(
+                node_id
+                for node_id in set(previous) & set(current_versions)
+                if previous[node_id] != current_versions[node_id]
+            ),
+        }
+        return Response({"scene": _serialize_scene(scene), "graph": graph, "changes": changes})
+    return Response({"code": "scene_action_not_found"}, status=status.HTTP_404_NOT_FOUND)
 
 
 def _cosine(a, b) -> float:

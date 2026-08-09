@@ -328,7 +328,7 @@ export const reviewApi = {
 
 // ── Visualization (spec §5) ──────────────────────────────────────────
 
-export interface GraphNode {
+export interface LegacyGraphNode {
   id: string;
   title: string;
   status: string;
@@ -339,13 +339,126 @@ export interface GraphNode {
   updated_at: string;
 }
 
-export interface GraphEdge {
+export interface LegacyGraphEdge {
   source: string;
   target: string;
   kind: 'link' | 'term' | 'similar';
   term?: string;
   anchor?: string;
   score?: number;
+}
+
+export type GraphNodeType = 'document' | 'term' | 'ghost' | 'cluster';
+export type GraphEdgeKind = 'links_to' | 'tagged_with' | 'similar_to';
+export type GraphEdgeProvenance = 'explicit' | 'taxonomy' | 'inferred';
+
+export interface GraphNode {
+  id: string;
+  type: GraphNodeType;
+  label: string;
+  resource_id?: string;
+  version?: number;
+  properties: {
+    status?: string;
+    file_type?: string;
+    updated_at?: string;
+    owner?: string;
+    freshness?: number;
+    code?: string;
+    unresolved?: boolean;
+    groups?: string[];
+    [key: string]: unknown;
+  };
+  metrics: {
+    incoming_links?: number;
+    document_count?: number;
+    [key: string]: number | undefined;
+  };
+}
+
+export interface GraphEdge {
+  id: string;
+  kind: GraphEdgeKind;
+  source: string;
+  target: string;
+  directed: boolean;
+  weight: number;
+  provenance: GraphEdgeProvenance;
+  evidence: { ref: string; summary: string; count: number };
+}
+
+export interface GraphQueryRequest {
+  schema_version: 'graph.query.v1';
+  scope: {
+    mode: 'global' | 'local';
+    center_id?: string;
+    depth?: 1 | 2 | 3;
+    direction?: 'in' | 'out' | 'both';
+  };
+  edge_kinds: GraphEdgeKind[];
+  include_ghosts?: boolean;
+  query?: string;
+  groups?: Array<{ id: string; name: string; query: string; color: string }>;
+  limits?: { nodes: number; edges: number };
+  cursor?: string;
+}
+
+export interface GraphMeta {
+  revision: number;
+  overview?: boolean;
+  total_documents?: number;
+  total_nodes: number;
+  total_edges: number;
+  returned_nodes: number;
+  returned_edges: number;
+  truncated: boolean;
+  reasons: string[];
+  continuations: Record<string, string>;
+  missing_node_ids: string[];
+}
+
+export interface GraphResponse {
+  schema_version: 'graph.response.v1';
+  scope: {
+    mode: 'global' | 'local';
+    center_id: string | null;
+    depth: number | null;
+    direction: 'in' | 'out' | 'both' | null;
+  };
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  meta: GraphMeta;
+}
+
+export interface GraphScene {
+  id: string;
+  name: string;
+  visibility: 'private' | 'workspace';
+  owner_id: string | null;
+  canonical_query: GraphQueryRequest;
+  layout: Record<string, unknown>;
+  resolved_versions: Record<string, string>;
+  schema_version: string;
+  graph_revision: number;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GraphPathRequest {
+  schema_version: 'graph.path.v1';
+  source_id: string;
+  target_id: string;
+  edge_kinds: GraphEdgeKind[];
+  include_inferred?: boolean;
+  max_paths?: 1 | 2 | 3;
+  max_depth?: number;
+}
+
+export interface GraphPathResponse {
+  schema_version: 'graph.path.response.v1';
+  paths: Array<{ nodes: GraphNode[]; edges: GraphEdge[] }>;
+  meta: GraphMeta & { search_truncated?: boolean };
 }
 
 export interface TimelineData {
@@ -401,8 +514,8 @@ export const vizApi = {
     term?: string,
     local?: { center: string; depth: number },
   ): Promise<{
-    nodes: GraphNode[];
-    edges: GraphEdge[];
+    nodes: LegacyGraphNode[];
+    edges: LegacyGraphEdge[];
     term_filter: string | null;
     mode?: 'global' | 'local';
     center?: string;
@@ -417,6 +530,62 @@ export const vizApi = {
     const { data } = await apiClient.get('/documents/graph/', {
       params: Object.keys(params).length ? params : undefined,
     });
+    return data;
+  },
+
+  async queryGraph(request: GraphQueryRequest): Promise<GraphResponse> {
+    const { data } = await apiClient.post('/documents/graph/query/', request);
+    return data;
+  },
+
+  async expandGraph(request: {
+    schema_version: 'graph.expand.v1';
+    center_id: string;
+    depth: 1 | 2 | 3;
+    direction: 'in' | 'out' | 'both';
+    edge_kinds: GraphEdgeKind[];
+    include_ghosts?: boolean;
+    query?: string;
+    limit?: number;
+  }): Promise<GraphResponse> {
+    const { data } = await apiClient.post('/documents/graph/expand/', request);
+    return data;
+  },
+
+  async getEvidence(reference: string): Promise<Record<string, unknown>> {
+    const { data } = await apiClient.get(`/documents/graph/evidence/${reference}/`);
+    return data;
+  },
+
+  async findGraphPaths(request: GraphPathRequest): Promise<GraphPathResponse> {
+    const { data } = await apiClient.post('/documents/graph/path/', request);
+    return data;
+  },
+
+  async listScenes(): Promise<{ results: GraphScene[] }> {
+    const { data } = await apiClient.get('/documents/graph/scenes/');
+    return data;
+  },
+
+  async createScene(request: Pick<GraphScene, 'name' | 'visibility' | 'canonical_query' | 'layout'>): Promise<GraphScene> {
+    const { data } = await apiClient.post('/documents/graph/scenes/', request);
+    return data;
+  },
+
+  async updateScene(id: string, request: Partial<Pick<GraphScene, 'name' | 'visibility' | 'canonical_query' | 'layout'>>, revision?: number): Promise<GraphScene> {
+    const { data } = await apiClient.patch(`/documents/graph/scenes/${id}/`, request, {
+      headers: revision === undefined ? undefined : { 'If-Match': `"${revision}"` },
+    });
+    return data;
+  },
+
+  async resolveScene(id: string): Promise<{ scene: GraphScene; graph: GraphResponse; changes: Record<string, string[]> }> {
+    const { data } = await apiClient.post(`/documents/graph/scenes/${id}/resolve/`, {});
+    return data;
+  },
+
+  async copyScene(id: string): Promise<GraphScene> {
+    const { data } = await apiClient.post(`/documents/graph/scenes/${id}/copy/`, {});
     return data;
   },
 

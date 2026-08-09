@@ -618,6 +618,7 @@ def _create_version_atomically(
         status="active",
         version=current_doc.version + 1,
         parent_document=current_doc,
+        lineage_id=current_doc.lineage_id,
         effective_from=effective_from,
         content_hash="",
     )
