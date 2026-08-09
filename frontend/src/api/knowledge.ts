@@ -351,6 +351,7 @@ export interface LegacyGraphEdge {
 export type GraphNodeType = 'document' | 'term' | 'ghost' | 'cluster';
 export type GraphEdgeKind = 'links_to' | 'tagged_with' | 'similar_to';
 export type GraphEdgeProvenance = 'explicit' | 'taxonomy' | 'inferred';
+export type GraphInsightPreset = 'isolated' | 'unclassified' | 'stale' | 'missing_sources_or_approval';
 
 export interface GraphNode {
   id: string;
@@ -401,6 +402,7 @@ export interface GraphQueryRequest {
   groups?: Array<{ id: string; name: string; query: string; color: string }>;
   limits?: { nodes: number; edges: number };
   cursor?: string;
+  insight_preset?: GraphInsightPreset;
 }
 
 export interface GraphMeta {
@@ -415,6 +417,7 @@ export interface GraphMeta {
   reasons: string[];
   continuations: Record<string, string>;
   missing_node_ids: string[];
+  insight_preset?: GraphInsightPreset | null;
 }
 
 export interface GraphResponse {
@@ -443,6 +446,7 @@ export interface GraphScene {
   revision: number;
   created_at: string;
   updated_at: string;
+  editable: boolean;
 }
 
 export interface GraphPathRequest {
@@ -552,8 +556,10 @@ export const vizApi = {
     return data;
   },
 
-  async getEvidence(reference: string): Promise<Record<string, unknown>> {
-    const { data } = await apiClient.get(`/documents/graph/evidence/${reference}/`);
+  async getEvidence(reference: string, pagination?: { offset: number; limit: number }): Promise<Record<string, unknown>> {
+    const { data } = await apiClient.get(`/documents/graph/evidence/${reference}/`, {
+      params: pagination,
+    });
     return data;
   },
 
@@ -577,6 +583,10 @@ export const vizApi = {
       headers: revision === undefined ? undefined : { 'If-Match': `"${revision}"` },
     });
     return data;
+  },
+
+  async deleteScene(id: string): Promise<void> {
+    await apiClient.delete(`/documents/graph/scenes/${id}/`);
   },
 
   async resolveScene(id: string): Promise<{ scene: GraphScene; graph: GraphResponse; changes: Record<string, string[]> }> {

@@ -15,12 +15,20 @@ export interface GraphRenderSettings {
   reducedMotion: boolean;
 }
 
+export interface GraphViewState {
+  positions: Record<string, { x: number; y: number }>;
+  viewport?: { x: number; y: number; ratio: number; angle: number };
+  fixedNodeIds: string[];
+}
+
 interface Props {
   nodes: GraphNode[];
   edges: GraphEdge[];
   selectedId: string | null;
   fitToken: number;
   settings: GraphRenderSettings;
+  initialViewState?: GraphViewState;
+  onViewStateChange?: (state: GraphViewState) => void;
   onSelectNode: (nodeId: string | null) => void;
   onCenterNode: (node: GraphNode) => void;
   onOpenNode: (node: GraphNode) => void;
@@ -88,25 +96,27 @@ export default function GraphRenderer(props: Props) {
     nodes,
     edges,
     fitToken,
+    initialViewState,
     settings,
     onCenterNode,
     onContextNode,
     onOpenNode,
     onSelectNode,
     onSelectEdge,
+    onViewStateChange,
     selectedId,
   } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<Sigma | null>(null);
-  const callbacksRef = useRef({ onCenterNode, onContextNode, onOpenNode, onSelectEdge, onSelectNode });
+  const callbacksRef = useRef({ onCenterNode, onContextNode, onOpenNode, onSelectEdge, onSelectNode, onViewStateChange });
   const selectedRef = useRef<string | null>(selectedId);
   const neighborsRef = useRef<Set<string>>(new Set());
   const [fallback, setFallback] = useState(false);
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
   useEffect(() => {
-    callbacksRef.current = { onCenterNode, onContextNode, onOpenNode, onSelectEdge, onSelectNode };
-  }, [onCenterNode, onContextNode, onOpenNode, onSelectEdge, onSelectNode]);
+    callbacksRef.current = { onCenterNode, onContextNode, onOpenNode, onSelectEdge, onSelectNode, onViewStateChange };
+  }, [onCenterNode, onContextNode, onOpenNode, onSelectEdge, onSelectNode, onViewStateChange]);
 
   useEffect(() => {
     selectedRef.current = selectedId;
@@ -135,6 +145,7 @@ export default function GraphRenderer(props: Props) {
     let layout: FA2Layout | null = null;
     let stopTimer: number | undefined;
     let renderer: Sigma | null = null;
+    let detachCameraListener: (() => void) | undefined;
 
     const setup = async () => {
       try {
@@ -147,25 +158,26 @@ export default function GraphRenderer(props: Props) {
         if (cancelled) return;
         const graph = new Graph({ multi: true, type: 'mixed' });
         nodes.forEach((node, index) => {
-      const position = fallbackPosition(index, nodes.length);
-      const freshness = Number(node.properties.freshness ?? 0.5);
-      const groupColor = typeof node.properties.group_color === 'string' ? node.properties.group_color : null;
-      const color = groupColor ?? (node.type === 'term'
-        ? cssColor(container, '--graph-node-mid', '#8b5cf6')
-        : node.type === 'ghost'
-          ? cssColor(container, '--color-text-tertiary', '#94a3b8')
-          : freshness >= 0.7
-            ? cssColor(container, '--graph-node-fresh', '#22d3ee')
-            : freshness >= 0.4
-              ? cssColor(container, '--graph-node-mid', '#3b82f6')
-              : cssColor(container, '--graph-node-stale', '#f59e0b'));
-      graph.addNode(node.id, {
-        ...position,
-        label: node.label,
-        color,
-        size: (5 + Math.min(node.metrics.incoming_links ?? 0, 8)) * settings.nodeScale,
-        nodeKind: node.type,
-      });
+          const position = initialViewState?.positions[node.id] ?? fallbackPosition(index, nodes.length);
+          const freshness = Number(node.properties.freshness ?? 0.5);
+          const groupColor = typeof node.properties.group_color === 'string' ? node.properties.group_color : null;
+          const color = groupColor ?? (node.type === 'term'
+            ? cssColor(container, '--graph-node-mid', '#8b5cf6')
+            : node.type === 'ghost'
+              ? cssColor(container, '--color-text-tertiary', '#94a3b8')
+              : freshness >= 0.7
+                ? cssColor(container, '--graph-node-fresh', '#22d3ee')
+                : freshness >= 0.4
+                  ? cssColor(container, '--graph-node-mid', '#3b82f6')
+                  : cssColor(container, '--graph-node-stale', '#f59e0b'));
+          graph.addNode(node.id, {
+            ...position,
+            label: node.label,
+            color,
+            size: (5 + Math.min(node.metrics.incoming_links ?? 0, 8)) * settings.nodeScale,
+            nodeKind: node.type,
+            fixed: initialViewState?.fixedNodeIds.includes(node.id) ?? false,
+          });
         });
         edges.forEach((edge) => {
       if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
@@ -208,6 +220,22 @@ export default function GraphRenderer(props: Props) {
         },
       });
       rendererRef.current = renderer;
+      if (initialViewState?.viewport) renderer.getCamera().setState(initialViewState.viewport);
+      const fixedNodeIds = new Set(initialViewState?.fixedNodeIds ?? []);
+      const emitViewState = () => {
+        const positions = Object.fromEntries(graph.nodes().map((node) => [node, {
+          x: Number(graph.getNodeAttribute(node, 'x')),
+          y: Number(graph.getNodeAttribute(node, 'y')),
+        }]));
+        callbacksRef.current.onViewStateChange?.({
+          positions,
+          viewport: renderer?.getCamera().getState(),
+          fixedNodeIds: [...fixedNodeIds],
+        });
+      };
+      const camera = renderer.getCamera();
+      camera.on('updated', emitViewState);
+      detachCameraListener = () => camera.off('updated', emitViewState);
       renderer.on('clickNode', ({ node }) => callbacksRef.current.onSelectNode(node));
       renderer.on('clickEdge', ({ edge }) => callbacksRef.current.onSelectEdge(edge));
       renderer.on('doubleClickNode', ({ node, preventSigmaDefault }) => {
@@ -225,6 +253,8 @@ export default function GraphRenderer(props: Props) {
       let draggedNode: string | null = null;
       renderer.on('downNode', ({ node, event }) => {
         draggedNode = node;
+        fixedNodeIds.add(node);
+        graph.setNodeAttribute(node, 'fixed', true);
         graph.setNodeAttribute(node, 'highlighted', true);
         renderer?.getCamera().disable();
         event.preventSigmaDefault();
@@ -239,6 +269,7 @@ export default function GraphRenderer(props: Props) {
         if (draggedNode) graph.removeNodeAttribute(draggedNode, 'highlighted');
         draggedNode = null;
         renderer?.getCamera().enable();
+        emitViewState();
       });
 
       if (!settings.reducedMotion && nodes.length > 1) {
@@ -252,7 +283,10 @@ export default function GraphRenderer(props: Props) {
           },
         });
         layout.start();
-        stopTimer = window.setTimeout(() => layout?.stop(), 1800);
+        stopTimer = window.setTimeout(() => {
+          layout?.stop();
+          emitViewState();
+        }, 1800);
       }
       container.querySelectorAll('canvas').forEach((canvas) => {
         canvas.addEventListener('webglcontextlost', (event) => {
@@ -268,6 +302,7 @@ export default function GraphRenderer(props: Props) {
     return () => {
       cancelled = true;
       if (stopTimer) window.clearTimeout(stopTimer);
+      detachCameraListener?.();
       layout?.kill();
       renderer?.kill();
       rendererRef.current = null;

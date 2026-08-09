@@ -1,7 +1,10 @@
 """Graph workspace v1 contract and semantic regression tests."""
 
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.spaces.models import BusinessLine, Organization, SpaceMembership
@@ -250,6 +253,30 @@ class GraphQueryV1Tests(TestCase):
         self.assertEqual(by_label["Doc A"]["group_color"], "#ef4444")
         self.assertEqual(by_label["Doc B"]["group_id"], "all-docs")
 
+    def test_deterministic_team_insight_presets_filter_before_projection(self):
+        Document.objects.filter(id=self.doc_d.id).update(
+            status="stale",
+            updated_at=timezone.now() - timedelta(days=500),
+        )
+        expectations = {
+            "isolated": {"Doc D"},
+            "unclassified": {"Doc A", "Doc B"},
+            "stale": {"Doc D"},
+            "missing_sources_or_approval": {"Doc C", "Doc D"},
+        }
+
+        for preset, expected in expectations.items():
+            with self.subTest(preset=preset):
+                response = self.query(
+                    insight_preset=preset,
+                    edge_kinds=["links_to", "tagged_with"] if preset == "isolated" else ["links_to"],
+                )
+                self.assertEqual(response.status_code, 200, getattr(response, "data", None))
+                self.assertEqual(
+                    {node["label"] for node in response.data["nodes"] if node["type"] == "document"},
+                    expected,
+                )
+
     def test_path_returns_explainable_explicit_route(self):
         response = self.api_client().post(
             "/api/v1/documents/graph/path/",
@@ -332,6 +359,7 @@ class GraphQueryV1Tests(TestCase):
         listing = self.api_client().get("/api/v1/documents/graph/scenes/")
         self.assertEqual(listing.status_code, 200, listing.data)
         self.assertEqual([scene["name"] for scene in listing.data["results"]], ["Shared investigation"])
+        self.assertFalse(listing.data["results"][0]["editable"])
         hidden = self.api_client().get(
             f"/api/v1/documents/graph/scenes/{private.data['id']}/"
         )
@@ -450,6 +478,62 @@ class GraphQueryV1Tests(TestCase):
         self.assertEqual(resolved.status_code, 200, getattr(resolved, "data", None))
         self.assertIn(a_id, resolved.data["changes"]["version_changed"])
 
+    def test_guest_cannot_publish_an_existing_private_scene_and_fixed_nodes_are_sanitized(self):
+        created = self.api_client().post(
+            "/api/v1/documents/graph/scenes/",
+            {
+                "name": "Private draft",
+                "visibility": "private",
+                "canonical_query": {
+                    "schema_version": "graph.query.v1",
+                    "scope": {"mode": "global"},
+                    "edge_kinds": ["links_to"],
+                },
+                "layout": {
+                    "fixed_node_ids": [
+                        f"doc:{self.doc_a.lineage_id}",
+                        "doc:forged-secret",
+                    ]
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, getattr(created, "data", None))
+        self.assertEqual(
+            created.data["layout"]["fixed_node_ids"],
+            [f"doc:{self.doc_a.lineage_id}"],
+        )
+        shared = self.api_client().post(
+            "/api/v1/documents/graph/scenes/",
+            {
+                "name": "Workspace draft",
+                "visibility": "workspace",
+                "canonical_query": {
+                    "schema_version": "graph.query.v1",
+                    "scope": {"mode": "global"},
+                    "edge_kinds": ["links_to"],
+                },
+                "layout": {},
+            },
+            format="json",
+        )
+        self.assertEqual(shared.status_code, 201, getattr(shared, "data", None))
+
+        membership = SpaceMembership.objects.get(space=self.space, user=self.member)
+        membership.role = SpaceMembership.ROLE_GUEST
+        membership.save(update_fields=["role"])
+        denied = self.api_client().patch(
+            f"/api/v1/documents/graph/scenes/{created.data['id']}/",
+            {"visibility": "workspace"},
+            format="json",
+        )
+
+        self.assertEqual(denied.status_code, 403, getattr(denied, "data", None))
+        denied_delete = self.api_client().delete(
+            f"/api/v1/documents/graph/scenes/{shared.data['id']}/"
+        )
+        self.assertEqual(denied_delete.status_code, 403, getattr(denied_delete, "data", None))
+
     def test_repeated_wikilinks_keep_each_source_occurrence_as_evidence(self):
         owner_client = APIClient()
         owner_client.force_authenticate(user=self.owner)
@@ -475,5 +559,8 @@ class GraphQueryV1Tests(TestCase):
 
         self.assertEqual(edge["evidence"]["count"], 2)
         self.assertEqual(len(evidence.data["occurrences"]), 2)
+        self.assertEqual(evidence.data["pagination"]["total"], 2)
+        self.assertIsNone(evidence.data["pagination"]["next_offset"])
         self.assertEqual(evidence.data["occurrences"][1]["anchor_text"], "primary source")
         self.assertEqual(evidence.data["occurrences"][1]["heading_path"], ["Sources"])
+        self.assertIn("primary source", evidence.data["occurrences"][1]["snippet"])

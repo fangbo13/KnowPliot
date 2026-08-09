@@ -176,6 +176,18 @@ def knowledge_graph_evidence(request, evidence_ref):
         id=raw_id,
         space=space,
     )
+    source_text = link.source.text_content or ""
+    try:
+        offset = max(0, int(request.query_params.get("offset", 0)))
+        limit = max(1, min(int(request.query_params.get("limit", 50)), 100))
+    except (TypeError, ValueError):
+        return Response(
+            {"code": "invalid_pagination", "detail": "offset and limit must be integers"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    occurrence_qs = link.occurrences.all().order_by("ordinal")
+    occurrence_total = occurrence_qs.count()
+    occurrence_page = occurrence_qs[offset : offset + limit]
     return Response(
         {
             "ref": evidence_ref,
@@ -206,14 +218,25 @@ def knowledge_graph_evidence(request, evidence_ref):
                     "char_start": occurrence.char_start,
                     "char_end": occurrence.char_end,
                     "heading_path": occurrence.heading_path,
+                    "snippet": source_text[
+                        max(0, occurrence.char_start - 80) : min(
+                            len(source_text), occurrence.char_end + 80
+                        )
+                    ],
                 }
-                for occurrence in link.occurrences.all()[:100]
+                for occurrence in occurrence_page
             ],
+            "pagination": {
+                "total": occurrence_total,
+                "offset": offset,
+                "limit": limit,
+                "next_offset": offset + limit if offset + limit < occurrence_total else None,
+            },
         }
     )
 
 
-def _serialize_scene(scene):
+def _serialize_scene(scene, actor=None):
     return {
         "id": str(scene.id),
         "name": scene.name,
@@ -227,7 +250,12 @@ def _serialize_scene(scene):
         "revision": scene.revision,
         "created_at": scene.created_at,
         "updated_at": scene.updated_at,
+        "editable": bool(actor and scene.owner_id == actor.id),
     }
+
+
+def _can_publish_workspace_scene(user, space):
+    return effective_space_role(user, space) in {"owner", "space_admin", "member"}
 
 
 def _validate_scene_payload(payload):
@@ -260,7 +288,7 @@ def _project_scene_state(*, space, canonical_query, layout):
             for node_id, position in positions.items()
             if node_id in visible_ids
         }
-    for key in ("hidden_node_ids", "pinned_node_ids", "expanded_node_ids"):
+    for key in ("hidden_node_ids", "pinned_node_ids", "fixed_node_ids", "expanded_node_ids"):
         values = projected_layout.get(key)
         if isinstance(values, list):
             projected_layout[key] = [node_id for node_id in values if node_id in visible_ids]
@@ -282,13 +310,12 @@ def knowledge_graph_scenes(request):
         scenes = GraphScene.objects.filter(space=space).filter(
             Q(owner=request.user) | Q(visibility=GraphScene.VISIBILITY_WORKSPACE)
         )
-        return Response({"results": [_serialize_scene(scene) for scene in scenes]})
+        return Response({"results": [_serialize_scene(scene, request.user) for scene in scenes]})
     validated, error = _validate_scene_payload(request.data)
     if error:
         return error
     if validated["visibility"] == GraphScene.VISIBILITY_WORKSPACE:
-        role = effective_space_role(request.user, space)
-        if role not in {"owner", "space_admin", "member"}:
+        if not _can_publish_workspace_scene(request.user, space):
             raise PermissionDenied("Publishing a workspace graph scene requires document update rights.")
     from .graph_service import GraphQueryError, _current_revision
 
@@ -312,7 +339,7 @@ def knowledge_graph_scenes(request):
         resolved_versions=resolved_versions,
         graph_revision=_current_revision(space),
     )
-    return Response(_serialize_scene(scene), status=status.HTTP_201_CREATED)
+    return Response(_serialize_scene(scene, request.user), status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -324,18 +351,28 @@ def knowledge_graph_scene_detail(request, pk):
     )
     scene = get_object_or_404(visible, pk=pk)
     if request.method == "GET":
-        return Response(_serialize_scene(scene))
+        return Response(_serialize_scene(scene, request.user))
     if scene.owner_id != request.user.id:
         raise PermissionDenied("Shared graph scenes are read-only; copy the scene to continue.")
+    if (
+        scene.visibility == GraphScene.VISIBILITY_WORKSPACE
+        and not _can_publish_workspace_scene(request.user, space)
+    ):
+        raise PermissionDenied("Modifying a workspace graph scene requires document update rights.")
     if request.method == "DELETE":
         scene.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     expected = request.headers.get("If-Match")
     if expected and expected.strip('"') != str(scene.revision):
         return Response({"code": "scene_revision_conflict"}, status=status.HTTP_412_PRECONDITION_FAILED)
-    validated, error = _validate_scene_payload({**_serialize_scene(scene), **request.data})
+    validated, error = _validate_scene_payload({**_serialize_scene(scene, request.user), **request.data})
     if error:
         return error
+    if (
+        validated["visibility"] == GraphScene.VISIBILITY_WORKSPACE
+        and not _can_publish_workspace_scene(request.user, space)
+    ):
+        raise PermissionDenied("Modifying a workspace graph scene requires document update rights.")
     from .graph_service import GraphQueryError, _current_revision
 
     canonical_query = request.data.get("canonical_query", scene.canonical_query)
@@ -355,7 +392,7 @@ def knowledge_graph_scene_detail(request, pk):
     scene.graph_revision = _current_revision(space)
     scene.revision += 1
     scene.save()
-    return Response(_serialize_scene(scene))
+    return Response(_serialize_scene(scene, request.user))
 
 
 @api_view(["POST"])
@@ -387,7 +424,7 @@ def knowledge_graph_scene_action(request, pk, action):
             resolved_versions=resolved_versions,
             graph_revision=_current_revision(space),
         )
-        return Response(_serialize_scene(copied), status=status.HTTP_201_CREATED)
+        return Response(_serialize_scene(copied, request.user), status=status.HTTP_201_CREATED)
     if action == "resolve":
         try:
             graph = query_graph(space=space, payload=scene.canonical_query)
@@ -408,7 +445,7 @@ def knowledge_graph_scene_action(request, pk, action):
                 if previous[node_id] != current_versions[node_id]
             ),
         }
-        return Response({"scene": _serialize_scene(scene), "graph": graph, "changes": changes})
+        return Response({"scene": _serialize_scene(scene, request.user), "graph": graph, "changes": changes})
     return Response({"code": "scene_action_not_found"}, status=status.HTTP_404_NOT_FOUND)
 
 

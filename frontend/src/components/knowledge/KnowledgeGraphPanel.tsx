@@ -16,6 +16,7 @@ import {
 import {
   Alert,
   Button,
+  Card,
   Checkbox,
   Collapse,
   Drawer,
@@ -41,20 +42,25 @@ import {
   DeleteOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RedoOutlined,
   SaveOutlined,
   SettingOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import { vizApi } from '../../api/knowledge';
 import type {
   GraphEdgeKind,
+  GraphInsightPreset,
   GraphNode,
+  GraphPathResponse,
   GraphQueryRequest,
   GraphResponse,
+  GraphScene,
   TaxonomyDimension,
 } from '../../api/knowledge';
-import type { GraphRenderSettings } from './GraphRenderer';
+import type { GraphRenderSettings, GraphViewState } from './GraphRenderer';
 import './KnowledgeGraphPanel.css';
 
 
@@ -74,6 +80,15 @@ const GRAPH_COPY: Record<'en' | 'zh', Record<string, string>> = {
     graph_nodes: 'nodes', graph_edges: 'relations', graph_truncated: 'Result truncated to budget', graph_load_more: 'Load more', graph_list_view: 'Accessible list view',
     graph_evidence: 'Relationship evidence',
     graph_expand_node: 'Expand up to 25 neighbors',
+    graph_dismiss: 'Dismiss from scene', graph_keep_only: 'Keep only this node', graph_undo: 'Undo investigation action', graph_redo: 'Redo investigation action',
+    graph_path_start: 'Use as path start', graph_path_find: 'Find paths to this node', graph_path_clear: 'Clear path investigation', graph_paths: 'Explainable paths',
+    graph_path_inferred: 'Allow inferred similarity paths', graph_path_none: 'No explainable path found with the selected relation types.',
+    graph_scenes: 'Investigation scenes', graph_scene_name: 'Scene name', graph_scene_visibility: 'Scene visibility', graph_scene_private: 'Private', graph_scene_workspace: 'Workspace read-only',
+    graph_scene_open: 'Open scene', graph_scene_copy: 'Copy scene', graph_scene_delete: 'Delete scene', graph_scene_publish: 'Share to workspace', graph_scene_unpublish: 'Make private',
+    graph_insights: 'Team insights', graph_insight_all: 'All documents', graph_insight_isolated: 'Isolated documents', graph_insight_unclassified: 'Unclassified documents',
+    graph_insight_stale: 'Stale knowledge', graph_insight_missing: 'Missing source or approval',
+    graph_evidence_more: 'Load more evidence',
+    graph_scene_update: 'Update current scene',
   },
   zh: {
     graph_query_placeholder: '搜索图谱：file:、content:、tag:、status:、owner:、updated:、links-to:…',
@@ -87,6 +102,15 @@ const GRAPH_COPY: Record<'en' | 'zh', Record<string, string>> = {
     graph_nodes: '节点', graph_edges: '关系', graph_truncated: '结果已按预算截断', graph_load_more: '继续加载', graph_list_view: '无障碍列表视图',
     graph_evidence: '关系证据',
     graph_expand_node: '展开最多 25 个邻居',
+    graph_dismiss: '从场景中隐藏', graph_keep_only: '仅保留此节点', graph_undo: '撤销调查操作', graph_redo: '重做调查操作',
+    graph_path_start: '设为路径起点', graph_path_find: '查找到此节点的路径', graph_path_clear: '清除路径调查', graph_paths: '可解释路径',
+    graph_path_inferred: '允许推断相似度路径', graph_path_none: '使用当前关系类型未找到可解释路径。',
+    graph_scenes: '调查场景', graph_scene_name: '场景名称', graph_scene_visibility: '场景可见性', graph_scene_private: '私有', graph_scene_workspace: '空间只读共享',
+    graph_scene_open: '打开场景', graph_scene_copy: '复制场景', graph_scene_delete: '删除场景', graph_scene_publish: '共享到空间', graph_scene_unpublish: '转为私有',
+    graph_insights: '团队洞察', graph_insight_all: '全部文档', graph_insight_isolated: '孤立文档', graph_insight_unclassified: '未分类文档',
+    graph_insight_stale: '陈旧知识', graph_insight_missing: '缺少来源或审批',
+    graph_evidence_more: '加载更多证据',
+    graph_scene_update: '更新当前场景',
   },
 };
 
@@ -100,6 +124,7 @@ interface Props {
 type GraphMode = 'global' | 'local';
 type Direction = 'in' | 'out' | 'both';
 type GraphGroup = { id: string; name: string; query: string; color: string };
+type InvestigationSnapshot = { result: GraphResponse | null; hiddenNodeIds: string[] };
 
 const DEFAULT_SETTINGS: GraphRenderSettings = {
   labelDensity: 1,
@@ -153,12 +178,15 @@ export function KnowledgeGraphPanel({
   const tRef = useRef(t);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const requestRef = useRef(0);
+  const deepLinkLoadedRef = useRef(false);
+  const skipNextLoadRef = useRef(false);
   const [mode, setMode] = useState<GraphMode>(initialCenterId ? 'local' : 'global');
   const [centerId, setCenterId] = useState(initialCenterId);
   const [depth, setDepth] = useState<1 | 2 | 3>(1);
   const [direction, setDirection] = useState<Direction>('both');
   const [edgeKinds, setEdgeKinds] = useState<GraphEdgeKind[]>(['links_to']);
   const [includeGhosts, setIncludeGhosts] = useState(false);
+  const [insightPreset, setInsightPreset] = useState<GraphInsightPreset | undefined>();
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<GraphResponse | null>(null);
@@ -175,6 +203,21 @@ export function KnowledgeGraphPanel({
   const [evidence, setEvidence] = useState<Record<string, unknown> | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [expanding, setExpanding] = useState(false);
+  const [hiddenNodeIds, setHiddenNodeIds] = useState<string[]>([]);
+  const [undoStack, setUndoStack] = useState<InvestigationSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<InvestigationSnapshot[]>([]);
+  const [pathStartId, setPathStartId] = useState<string | null>(null);
+  const [pathResult, setPathResult] = useState<GraphPathResponse | null>(null);
+  const [pathLoading, setPathLoading] = useState(false);
+  const [pathIncludeInferred, setPathIncludeInferred] = useState(false);
+  const [scenesOpen, setScenesOpen] = useState(false);
+  const [scenes, setScenes] = useState<GraphScene[]>([]);
+  const [scenesLoading, setScenesLoading] = useState(false);
+  const [sceneName, setSceneName] = useState('');
+  const [sceneVisibility, setSceneVisibility] = useState<'private' | 'workspace'>('private');
+  const [activeScene, setActiveScene] = useState<GraphScene | null>(null);
+  const [sceneSaving, setSceneSaving] = useState(false);
+  const [viewState, setViewState] = useState<GraphViewState>({ positions: {}, fixedNodeIds: [] });
 
   useEffect(() => {
     tRef.current = t;
@@ -205,8 +248,9 @@ export function KnowledgeGraphPanel({
     include_ghosts: includeGhosts,
     query: query || undefined,
     groups: groups.filter((group) => group.name.trim() && group.query.trim()),
+    insight_preset: insightPreset,
     limits: { nodes: compact ? 150 : 300, edges: compact ? 750 : 1500 },
-  }), [centerId, compact, depth, direction, edgeKinds, groups, includeGhosts, mode, query]);
+  }), [centerId, compact, depth, direction, edgeKinds, groups, includeGhosts, insightPreset, mode, query]);
 
   const load = useCallback(async () => {
     if (request.scope.mode === 'local' && !request.scope.center_id) {
@@ -222,6 +266,9 @@ export function KnowledgeGraphPanel({
       setResult(response);
       setSelectedId(null);
       setEvidence(null);
+      setHiddenNodeIds([]);
+      setUndoStack([]);
+      setRedoStack([]);
     } catch (caught) {
       if (requestId !== requestRef.current) return;
       setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
@@ -231,6 +278,10 @@ export function KnowledgeGraphPanel({
   }, [request]);
 
   useEffect(() => {
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      return;
+    }
     void load();
   }, [load]);
 
@@ -238,6 +289,47 @@ export function KnowledgeGraphPanel({
     () => result?.nodes.find((node) => node.id === selectedId) ?? null,
     [result?.nodes, selectedId],
   );
+
+  const visibleResult = useMemo(() => {
+    if (!result || hiddenNodeIds.length === 0) return result;
+    const hidden = new Set(hiddenNodeIds);
+    const nodes = result.nodes.filter((node) => !hidden.has(node.id));
+    const visible = new Set(nodes.map((node) => node.id));
+    const edges = result.edges.filter((edge) => visible.has(edge.source) && visible.has(edge.target));
+    return {
+      ...result,
+      nodes,
+      edges,
+      meta: { ...result.meta, returned_nodes: nodes.length, returned_edges: edges.length },
+    };
+  }, [hiddenNodeIds, result]);
+
+  const rememberAndApply = useCallback((next: InvestigationSnapshot) => {
+    setUndoStack((current) => [...current.slice(-19), { result, hiddenNodeIds }]);
+    setRedoStack([]);
+    setResult(next.result);
+    setHiddenNodeIds(next.hiddenNodeIds);
+  }, [hiddenNodeIds, result]);
+
+  const undoInvestigation = useCallback(() => {
+    const previous = undoStack[undoStack.length - 1];
+    if (!previous) return;
+    setUndoStack((current) => current.slice(0, -1));
+    setRedoStack((current) => [...current, { result, hiddenNodeIds }]);
+    setResult(previous.result);
+    setHiddenNodeIds(previous.hiddenNodeIds);
+    setSelectedId(null);
+  }, [hiddenNodeIds, result, undoStack]);
+
+  const redoInvestigation = useCallback(() => {
+    const next = redoStack[redoStack.length - 1];
+    if (!next) return;
+    setRedoStack((current) => current.slice(0, -1));
+    setUndoStack((current) => [...current, { result, hiddenNodeIds }]);
+    setResult(next.result);
+    setHiddenNodeIds(next.hiddenNodeIds);
+    setSelectedId(null);
+  }, [hiddenNodeIds, redoStack, result]);
 
   const openNode = useCallback((node: GraphNode) => {
     setSelectedId(node.id);
@@ -290,17 +382,88 @@ export function KnowledgeGraphPanel({
         query: query || undefined,
         limit: 25,
       });
-      setResult((current) => current ? mergeResponse(current, expanded) : expanded);
+      rememberAndApply({
+        result: result ? mergeResponse(result, expanded) : expanded,
+        hiddenNodeIds,
+      });
     } catch (caught) {
       setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
     } finally {
       setExpanding(false);
     }
-  }, [direction, edgeKinds, includeGhosts, query]);
+  }, [direction, edgeKinds, hiddenNodeIds, includeGhosts, query, rememberAndApply, result]);
+
+  const dismissSelected = useCallback(() => {
+    if (!selected) return;
+    rememberAndApply({ result, hiddenNodeIds: [...new Set([...hiddenNodeIds, selected.id])] });
+    setSelectedId(null);
+  }, [hiddenNodeIds, rememberAndApply, result, selected]);
+
+  const keepOnlySelected = useCallback(() => {
+    if (!selected || !result) return;
+    rememberAndApply({ result, hiddenNodeIds: result.nodes.filter((node) => node.id !== selected.id).map((node) => node.id) });
+  }, [rememberAndApply, result, selected]);
+
+  const findPathsToSelected = useCallback(async () => {
+    if (!pathStartId || !selected || selected.id === pathStartId) return;
+    setPathLoading(true);
+    try {
+      const edgeKindsForPath: GraphEdgeKind[] = ['links_to', 'tagged_with'];
+      if (pathIncludeInferred) edgeKindsForPath.push('similar_to');
+      const response = await vizApi.findGraphPaths({
+        schema_version: 'graph.path.v1',
+        source_id: pathStartId,
+        target_id: selected.id,
+        edge_kinds: edgeKindsForPath,
+        include_inferred: pathIncludeInferred,
+        max_paths: 3,
+        max_depth: 6,
+      });
+      setPathResult(response);
+      if (response.paths.length && result) {
+        const pathGraph: GraphResponse = {
+          ...result,
+          nodes: response.paths.flatMap((path) => path.nodes),
+          edges: response.paths.flatMap((path) => path.edges),
+          meta: { ...result.meta, returned_nodes: 0, returned_edges: 0 },
+        };
+        rememberAndApply({ result: mergeResponse(result, pathGraph), hiddenNodeIds });
+      }
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    } finally {
+      setPathLoading(false);
+    }
+  }, [hiddenNodeIds, pathIncludeInferred, pathStartId, rememberAndApply, result, selected]);
 
   const evidenceOccurrences = Array.isArray(evidence?.occurrences)
     ? evidence.occurrences as Array<Record<string, unknown>>
     : [];
+  const evidencePagination = typeof evidence?.pagination === 'object' && evidence.pagination
+    ? evidence.pagination as Record<string, unknown>
+    : null;
+
+  const loadMoreEvidence = useCallback(async () => {
+    const reference = typeof evidence?.ref === 'string' ? evidence.ref : null;
+    const nextOffset = typeof evidencePagination?.next_offset === 'number' ? evidencePagination.next_offset : null;
+    if (!reference || nextOffset === null) return;
+    setEvidenceLoading(true);
+    try {
+      const page = await vizApi.getEvidence(reference, { offset: nextOffset, limit: 50 });
+      setEvidence((current) => ({
+        ...current,
+        ...page,
+        occurrences: [
+          ...(Array.isArray(current?.occurrences) ? current.occurrences : []),
+          ...(Array.isArray(page.occurrences) ? page.occurrences : []),
+        ],
+      }));
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    } finally {
+      setEvidenceLoading(false);
+    }
+  }, [evidence?.ref, evidencePagination?.next_offset]);
 
   const loadMore = useCallback(async () => {
     const cursor = result?.meta.continuations.nodes;
@@ -335,19 +498,158 @@ export function KnowledgeGraphPanel({
     return () => document.removeEventListener('fullscreenchange', update);
   }, []);
 
-  const saveScene = useCallback(async () => {
+  const loadScenes = useCallback(async () => {
+    setScenesLoading(true);
     try {
-      await vizApi.createScene({
-        name: `${mode === 'local' ? t('graph_mode_local') : t('graph_mode_global')} ${new Date().toLocaleDateString()}`,
-        visibility: 'private',
-        canonical_query: request,
-        layout: { center_id: centerId, selected_id: selectedId, settings },
+      const response = await vizApi.listScenes();
+      setScenes(response.results);
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    } finally {
+      setScenesLoading(false);
+    }
+  }, []);
+
+  const openScenes = useCallback(() => {
+    setScenesOpen(true);
+    void loadScenes();
+  }, [loadScenes]);
+
+  const applyScene = useCallback(async (scene: Pick<GraphScene, 'id'>) => {
+    setScenesLoading(true);
+    try {
+      const resolved = await vizApi.resolveScene(scene.id);
+      const canonical = resolved.scene.canonical_query;
+      skipNextLoadRef.current = true;
+      setMode(canonical.scope.mode);
+      setCenterId(canonical.scope.center_id);
+      setDepth(canonical.scope.depth ?? 1);
+      setDirection(canonical.scope.direction ?? 'both');
+      setEdgeKinds(canonical.edge_kinds);
+      setIncludeGhosts(Boolean(canonical.include_ghosts));
+      setQuery(canonical.query ?? '');
+      setQueryInput(canonical.query ?? '');
+      setGroups(canonical.groups ?? []);
+      setInsightPreset(canonical.insight_preset);
+      setResult(resolved.graph);
+      const layout = resolved.scene.layout;
+      setHiddenNodeIds(Array.isArray(layout.hidden_node_ids) ? layout.hidden_node_ids.filter((id): id is string => typeof id === 'string') : []);
+      setViewState({
+        positions: typeof layout.positions === 'object' && layout.positions ? layout.positions as GraphViewState['positions'] : {},
+        viewport: typeof layout.viewport === 'object' && layout.viewport ? layout.viewport as GraphViewState['viewport'] : undefined,
+        fixedNodeIds: Array.isArray(layout.fixed_node_ids) ? layout.fixed_node_ids.filter((id): id is string => typeof id === 'string') : [],
       });
+      setActiveScene(resolved.scene);
+      setUndoStack([]);
+      setRedoStack([]);
+      const url = new URL(window.location.href);
+      url.searchParams.set('graph_scene', resolved.scene.id);
+      window.history.replaceState({}, '', url);
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    } finally {
+      setScenesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (deepLinkLoadedRef.current) return;
+    deepLinkLoadedRef.current = true;
+    const sceneId = new URL(window.location.href).searchParams.get('graph_scene');
+    if (sceneId) void applyScene({ id: sceneId });
+  }, [applyScene]);
+
+  const copyScene = useCallback(async (scene: GraphScene) => {
+    try {
+      const copied = await vizApi.copyScene(scene.id);
+      setScenes((current) => [copied, ...current]);
+      setActiveScene(copied);
+      void message.success(tRef.current('graph_scene_saved'));
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    }
+  }, []);
+
+  const saveScene = useCallback(async () => {
+    const name = sceneName.trim() || `${mode === 'local' ? t('graph_mode_local') : t('graph_mode_global')} ${new Date().toLocaleDateString()}`;
+    setSceneSaving(true);
+    try {
+      const saved = await vizApi.createScene({
+        name,
+        visibility: sceneVisibility,
+        canonical_query: request,
+        layout: {
+          center_id: centerId,
+          selected_id: selectedId,
+          settings,
+          hidden_node_ids: hiddenNodeIds,
+          expanded_node_ids: result?.nodes.map((node) => node.id) ?? [],
+          positions: viewState.positions,
+          viewport: viewState.viewport,
+          fixed_node_ids: viewState.fixedNodeIds,
+        },
+      });
+      setScenes((current) => [saved, ...current]);
+      setActiveScene(saved);
+      setSceneName('');
       void message.success(t('graph_scene_saved'));
     } catch (caught) {
       setError(apiErrorMessage(caught, t('graph_load_failed')));
+    } finally {
+      setSceneSaving(false);
     }
-  }, [centerId, mode, request, selectedId, settings, t]);
+  }, [centerId, hiddenNodeIds, mode, request, result?.nodes, sceneName, sceneVisibility, selectedId, settings, t, viewState]);
+
+  const updateActiveScene = useCallback(async () => {
+    if (!activeScene?.editable) return;
+    setSceneSaving(true);
+    try {
+      const updated = await vizApi.updateScene(activeScene.id, {
+        name: activeScene.name,
+        visibility: activeScene.visibility,
+        canonical_query: request,
+        layout: {
+          center_id: centerId,
+          selected_id: selectedId,
+          settings,
+          hidden_node_ids: hiddenNodeIds,
+          expanded_node_ids: result?.nodes.map((node) => node.id) ?? [],
+          positions: viewState.positions,
+          viewport: viewState.viewport,
+          fixed_node_ids: viewState.fixedNodeIds,
+        },
+      }, activeScene.revision);
+      setActiveScene(updated);
+      setScenes((current) => current.map((scene) => scene.id === updated.id ? updated : scene));
+      void message.success(t('graph_scene_saved'));
+    } catch (caught) {
+      setError(apiErrorMessage(caught, t('graph_load_failed')));
+    } finally {
+      setSceneSaving(false);
+    }
+  }, [activeScene, centerId, hiddenNodeIds, request, result?.nodes, selectedId, settings, t, viewState]);
+
+  const changeSceneVisibility = useCallback(async (scene: GraphScene) => {
+    try {
+      const updated = await vizApi.updateScene(scene.id, {
+        visibility: scene.visibility === 'private' ? 'workspace' : 'private',
+      }, scene.revision);
+      setScenes((current) => current.map((item) => item.id === updated.id ? updated : item));
+      if (activeScene?.id === updated.id) setActiveScene(updated);
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    }
+  }, [activeScene?.id]);
+
+  const deleteScene = useCallback(async (scene: GraphScene) => {
+    try {
+      await vizApi.deleteScene(scene.id);
+      setScenes((current) => current.filter((item) => item.id !== scene.id));
+      if (activeScene?.id === scene.id) setActiveScene(null);
+    } catch (caught) {
+      setError(apiErrorMessage(caught, tRef.current('graph_load_failed')));
+    }
+  }, [activeScene?.id]);
 
   const relationOptions: Array<{ value: GraphEdgeKind; label: string }> = [
     { value: 'links_to', label: t('graph_edge_link') },
@@ -413,9 +715,11 @@ export function KnowledgeGraphPanel({
           </>
         )}
         <Space.Compact className="graph-toolbar-actions">
+          <Tooltip title={t('graph_undo')}><Button aria-label={t('graph_undo')} icon={<UndoOutlined />} disabled={!undoStack.length} onClick={undoInvestigation} /></Tooltip>
+          <Tooltip title={t('graph_redo')}><Button aria-label={t('graph_redo')} icon={<RedoOutlined />} disabled={!redoStack.length} onClick={redoInvestigation} /></Tooltip>
           <Tooltip title={t('graph_fit')}><Button aria-label={t('graph_fit')} icon={<AimOutlined />} onClick={() => setFitToken((value) => value + 1)} /></Tooltip>
           <Tooltip title={t('refresh')}><Button aria-label={t('refresh')} icon={<ReloadOutlined />} onClick={() => void load()} /></Tooltip>
-          {!compact && <Tooltip title={t('graph_save_scene')}><Button aria-label={t('graph_save_scene')} icon={<SaveOutlined />} onClick={() => void saveScene()} /></Tooltip>}
+          {!compact && <Tooltip title={t('graph_scenes')}><Button aria-label={t('graph_scenes')} icon={<SaveOutlined />} onClick={openScenes} /></Tooltip>}
           <Tooltip title={t('graph_settings')}><Button aria-label={t('graph_settings')} icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} /></Tooltip>
           <Tooltip title={t('graph_fullscreen')}><Button aria-label={t('graph_fullscreen')} icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={() => void toggleFullscreen()} /></Tooltip>
         </Space.Compact>
@@ -431,6 +735,37 @@ export function KnowledgeGraphPanel({
         <span>{t('graph_show_ghosts')}</span>
         {termCount > 0 && <Tag>{termCount} taxonomy</Tag>}
       </div>
+      {!compact && (
+        <div className="graph-insight-bar" aria-label={t('graph_insights')}>
+          <strong>{t('graph_insights')}</strong>
+          <Button size="small" type={!insightPreset ? 'primary' : 'default'} onClick={() => setInsightPreset(undefined)}>{t('graph_insight_all')}</Button>
+          <Button size="small" type={insightPreset === 'isolated' ? 'primary' : 'default'} onClick={() => setInsightPreset('isolated')}>{t('graph_insight_isolated')}</Button>
+          <Button size="small" type={insightPreset === 'unclassified' ? 'primary' : 'default'} onClick={() => setInsightPreset('unclassified')}>{t('graph_insight_unclassified')}</Button>
+          <Button size="small" type={insightPreset === 'stale' ? 'primary' : 'default'} onClick={() => setInsightPreset('stale')}>{t('graph_insight_stale')}</Button>
+          <Button size="small" type={insightPreset === 'missing_sources_or_approval' ? 'primary' : 'default'} onClick={() => setInsightPreset('missing_sources_or_approval')}>{t('graph_insight_missing')}</Button>
+        </div>
+      )}
+
+      {(pathStartId || pathResult) && (
+        <section className="graph-path-panel" aria-label={t('graph_paths')}>
+          <Space wrap>
+            <strong>{t('graph_paths')}</strong>
+            {pathStartId && <Tag color="blue">{result?.nodes.find((node) => node.id === pathStartId)?.label ?? pathStartId}</Tag>}
+            <Switch checked={pathIncludeInferred} onChange={setPathIncludeInferred} aria-label={t('graph_path_inferred')} />
+            <span>{t('graph_path_inferred')}</span>
+            <Button size="small" onClick={() => { setPathStartId(null); setPathResult(null); }}>{t('graph_path_clear')}</Button>
+          </Space>
+          {pathLoading ? <Spin size="small" /> : pathResult?.paths.length === 0 ? <Alert type="info" message={t('graph_path_none')} /> : (
+            <div className="graph-path-list">
+              {pathResult?.paths.map((path, index) => (
+                <Card size="small" key={`${index}-${path.nodes.map((node) => node.id).join('-')}`}>
+                  {path.nodes.map((node) => node.label).join(' → ')}
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {error && <Alert className="graph-error" type="error" showIcon message={error} closable onClose={() => setError(null)} />}
 
@@ -441,11 +776,13 @@ export function KnowledgeGraphPanel({
           ) : (
             <Suspense fallback={<Spin className="graph-render-loading" />}>
               <GraphRenderer
-                nodes={result?.nodes ?? []}
-                edges={result?.edges ?? []}
+                nodes={visibleResult?.nodes ?? []}
+                edges={visibleResult?.edges ?? []}
                 selectedId={selectedId}
                 fitToken={fitToken}
                 settings={settings}
+                initialViewState={viewState}
+                onViewStateChange={setViewState}
                 onSelectNode={(nodeId) => {
                   setSelectedId(nodeId);
                   if (nodeId) setInspectorOpen(true);
@@ -480,6 +817,10 @@ export function KnowledgeGraphPanel({
                 {selected.resource_id && <Button type="primary" block onClick={() => openNode(selected)}>{t('graph_open_document')}</Button>}
                 {selected.resource_id && <Button block icon={<CompressOutlined />} onClick={() => makeCenter(selected)}>{t('graph_set_center')}</Button>}
                 {selected.resource_id && <Button block loading={expanding} onClick={() => void expandNode(selected)}>{t('graph_expand_node')}</Button>}
+                <Button block onClick={() => setPathStartId(selected.id)}>{t('graph_path_start')}</Button>
+                {pathStartId && pathStartId !== selected.id && <Button block loading={pathLoading} onClick={() => void findPathsToSelected()}>{t('graph_path_find')}</Button>}
+                <Button block danger onClick={dismissSelected}>{t('graph_dismiss')}</Button>
+                <Button block onClick={keepOnlySelected}>{t('graph_keep_only')}</Button>
               </Space>
             </>
           ) : evidenceLoading ? <Spin /> : evidence ? (
@@ -497,8 +838,10 @@ export function KnowledgeGraphPanel({
                 <div className="graph-evidence-item" key={String(occurrence.ordinal ?? index)}>
                   {Array.isArray(occurrence.heading_path) && occurrence.heading_path.length > 0 && <Tag>{occurrence.heading_path.join(' / ')}</Tag>}
                   <span>{String(occurrence.anchor_text ?? '')}</span>
+                  {typeof occurrence.snippet === 'string' && <blockquote className="graph-evidence-snippet">{occurrence.snippet}</blockquote>}
                 </div>
               ))}
+              {typeof evidencePagination?.next_offset === 'number' && <Button loading={evidenceLoading} onClick={() => void loadMoreEvidence()}>{t('graph_evidence_more')}</Button>}
             </>
           ) : <span className="graph-muted">{t('graph_selected_none')}</span>}
         </aside>
@@ -506,8 +849,8 @@ export function KnowledgeGraphPanel({
 
       <footer className="graph-statusbar">
         <span>
-          {result ? `${result.meta.returned_nodes} / ${result.meta.total_documents ?? result.meta.total_nodes} ${t('graph_nodes')}` : `0 ${t('graph_nodes')}`}
-          {result ? ` · ${result.meta.returned_edges} / ${result.meta.total_edges} ${t('graph_edges')}` : ''}
+          {visibleResult ? `${visibleResult.meta.returned_nodes} / ${visibleResult.meta.total_documents ?? visibleResult.meta.total_nodes} ${t('graph_nodes')}` : `0 ${t('graph_nodes')}`}
+          {visibleResult ? ` · ${visibleResult.meta.returned_edges} / ${visibleResult.meta.total_edges} ${t('graph_edges')}` : ''}
         </span>
         {result?.meta.truncated && (
           <Space wrap>
@@ -524,10 +867,10 @@ export function KnowledgeGraphPanel({
         defaultActiveKey={['nodes']}
         items={[{
           key: 'nodes',
-          label: `${t('graph_list_view')} (${result?.nodes.length ?? 0})`,
+          label: `${t('graph_list_view')} (${visibleResult?.nodes.length ?? 0})`,
           children: (
             <div className="graph-node-list">
-              {(result?.nodes ?? []).map((node) => (
+              {(visibleResult?.nodes ?? []).map((node) => (
                 <Button
                   key={node.id}
                   type="text"
@@ -542,6 +885,46 @@ export function KnowledgeGraphPanel({
           ),
         }]}
       />
+
+      <Drawer
+        title={t('graph_scenes')}
+        open={scenesOpen}
+        onClose={() => setScenesOpen(false)}
+        width={compact ? 'min(92vw, 460px)' : 460}
+      >
+        <Space direction="vertical" className="graph-settings-stack">
+          <Input value={sceneName} onChange={(event) => setSceneName(event.target.value)} placeholder={t('graph_scene_name')} aria-label={t('graph_scene_name')} />
+          <Select
+            value={sceneVisibility}
+            onChange={setSceneVisibility}
+            aria-label={t('graph_scene_visibility')}
+            options={[
+              { value: 'private', label: t('graph_scene_private') },
+              { value: 'workspace', label: t('graph_scene_workspace') },
+            ]}
+          />
+          <Button type="primary" icon={<SaveOutlined />} loading={sceneSaving} onClick={() => void saveScene()}>{t('graph_save_scene')}</Button>
+          {activeScene?.editable && <Button loading={sceneSaving} onClick={() => void updateActiveScene()}>{t('graph_scene_update')}</Button>}
+          <Button icon={<ReloadOutlined />} loading={scenesLoading} onClick={() => void loadScenes()}>{t('refresh')}</Button>
+          {scenes.length === 0 && !scenesLoading ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> : scenes.map((scene) => (
+            <Card
+              key={scene.id}
+              size="small"
+              className={activeScene?.id === scene.id ? 'graph-scene-card is-active' : 'graph-scene-card'}
+              title={scene.name}
+              extra={<Tag color={scene.visibility === 'workspace' ? 'blue' : 'default'}>{scene.visibility}</Tag>}
+            >
+              <Space wrap>
+                <Button size="small" aria-label={`${t('graph_scene_open')} ${scene.name}`} onClick={() => void applyScene(scene)}>{t('graph_scene_open')}</Button>
+                <Button size="small" aria-label={`${t('graph_scene_copy')} ${scene.name}`} onClick={() => void copyScene(scene)}>{t('graph_scene_copy')}</Button>
+                {scene.editable && <Button size="small" onClick={() => void changeSceneVisibility(scene)}>{scene.visibility === 'private' ? t('graph_scene_publish') : t('graph_scene_unpublish')}</Button>}
+                {scene.editable && <Button size="small" danger aria-label={`${t('graph_scene_delete')} ${scene.name}`} onClick={() => void deleteScene(scene)}>{t('graph_scene_delete')}</Button>}
+              </Space>
+              <div className="graph-muted">v{scene.revision} · {new Date(scene.updated_at).toLocaleString()}</div>
+            </Card>
+          ))}
+        </Space>
+      </Drawer>
 
       <Drawer
         title={t('graph_settings')}

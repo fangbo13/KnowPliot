@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
-from django.db.models import Count
 from django.core import signing
+from django.db.models import Count, Q
+from django.utils import timezone
 
 from .freshness import compute_freshness, space_half_life_days
 from .models import (
@@ -22,6 +24,12 @@ from .models import (
 DEFAULT_NODE_LIMIT = 300
 DEFAULT_EDGE_LIMIT = 1500
 ALLOWED_EDGE_KINDS = {"links_to", "tagged_with", "similar_to"}
+ALLOWED_INSIGHT_PRESETS = {
+    "isolated",
+    "unclassified",
+    "stale",
+    "missing_sources_or_approval",
+}
 GLOBAL_OVERVIEW_THRESHOLD = 300
 GLOBAL_OVERVIEW_NODE_LIMIT = 150
 GLOBAL_OVERVIEW_EDGE_LIMIT = 600
@@ -107,6 +115,9 @@ def _normalize_query(payload: dict[str, Any], *, internal_raw: bool = False) -> 
                 f"groups[{index}] requires id, name, query, and color",
             )
         groups.append({"id": group_id, "name": name, "query": query, "color": color})
+    insight_preset = str(payload.get("insight_preset") or "").strip()
+    if insight_preset and insight_preset not in ALLOWED_INSIGHT_PRESETS:
+        raise GraphQueryError("invalid_insight_preset", "insight_preset is not supported")
     return {
         "mode": mode,
         "center_id": scope.get("center_id"),
@@ -119,6 +130,7 @@ def _normalize_query(payload: dict[str, Any], *, internal_raw: bool = False) -> 
         "query": str(payload.get("query") or "").strip(),
         "cursor": payload.get("cursor"),
         "groups": groups,
+        "insight_preset": insight_preset,
     }
 
 
@@ -258,10 +270,20 @@ def query_graph(*, space, payload: dict[str, Any], internal_raw: bool = False) -
         from .graph_dsl import parse_graph_query
 
         documents_qs = documents_qs.filter(parse_graph_query(options["query"]))
+    if options["insight_preset"] == "unclassified":
+        documents_qs = documents_qs.filter(taxonomy_tags__isnull=True)
+    elif options["insight_preset"] == "stale":
+        stale_before = timezone.now() - timedelta(days=365)
+        documents_qs = documents_qs.filter(Q(status="stale") | Q(updated_at__lt=stale_before))
+    elif options["insight_preset"] == "missing_sources_or_approval":
+        documents_qs = documents_qs.filter(
+            Q(outgoing_links__isnull=True) | Q(review_requests__decision="pending")
+        )
     if (
         options["mode"] == "global"
         and not options["query"]
         and not options["groups"]
+        and not options["insight_preset"]
         and not options["cursor"]
         and not internal_raw
         and documents_qs.count() > GLOBAL_OVERVIEW_THRESHOLD
@@ -431,6 +453,24 @@ def query_graph(*, space, payload: dict[str, Any], internal_raw: bool = False) -
                 }
             )
 
+    if options["insight_preset"] == "isolated":
+        explicit_links = DocumentLink.objects.filter(space=space).filter(
+            Q(source_id__in=document_ids) | Q(target_id__in=document_ids)
+        )
+        connected_document_ids = set(explicit_links.values_list("source_id", flat=True))
+        connected_document_ids.update(
+            target_id
+            for target_id in explicit_links.values_list("target_id", flat=True)
+            if target_id is not None
+        )
+        isolated_ids = {
+            graph_id_by_resource[document_id]
+            for document_id in document_ids
+            if document_id not in connected_document_ids
+        }
+        nodes = {node_id: node for node_id, node in nodes.items() if node_id in isolated_ids}
+        edges = []
+
     ordered_ids = list(nodes)
     center = None
     if options["mode"] == "local":
@@ -515,6 +555,7 @@ def query_graph(*, space, payload: dict[str, Any], internal_raw: bool = False) -
                 else {}
             ),
             "missing_node_ids": [],
+            "insight_preset": options["insight_preset"] or None,
         },
     }
 

@@ -14,6 +14,7 @@
 
 .graph-toolbar,
 .graph-relation-bar,
+.graph-insight-bar,
 .graph-statusbar {
   display: flex;
   align-items: center;
@@ -27,6 +28,9 @@
 .graph-center-select { min-width: 180px; max-width: 260px; }
 .graph-toolbar-actions { margin-inline-start: auto; }
 .graph-relation-bar { font-size: 12px; background: var(--color-bg-layout); }
+.graph-insight-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--graph-panel-border); font-size: 12px; }
+.graph-path-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--graph-panel-border); background: color-mix(in srgb, var(--color-primary-bg) 45%, var(--color-bg-container)); }
+.graph-path-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .graph-error { margin: 10px 12px 0; }
 
 .graph-main { position: relative; display: flex; flex: 1; min-height: 440px; overflow: hidden; }
@@ -70,7 +74,10 @@
 .graph-svg-fallback .is-selected .graph-svg-node { stroke: var(--color-primary); stroke-width: 4; }
 .graph-svg-fallback text { fill: var(--color-text); font-size: 10px; }
 .graph-evidence-item { display: flex; flex-direction: column; gap: 6px; margin-block: 10px; padding-block: 10px; border-top: 1px solid var(--graph-panel-border); }
+.graph-evidence-snippet { margin: 0; padding: 8px 10px; border-inline-start: 3px solid var(--color-primary); background: var(--color-fill-tertiary); color: var(--color-text-secondary); font-size: 12px; }
 .graph-evidence-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.graph-scene-card { width: 100%; }
+.graph-scene-card.is-active { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
 
 @media (max-width: 767px) {
   .knowledge-graph-workspace { min-height: calc(100dvh - 112px); border-radius: 0; }
